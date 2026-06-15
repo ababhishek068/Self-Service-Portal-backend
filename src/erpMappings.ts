@@ -15,6 +15,7 @@ export const requestServices = {
   leave: 'QyHRLeaveApplications',
   overtime: 'QyHRLeaveApplications',
   travel: 'QyTransportRequisition',
+  training: 'QyTrainingApplicationHeader',
 } as const
 
 export type PortalModuleKey = keyof typeof requestServices
@@ -34,6 +35,7 @@ const moduleLabels: Record<PortalModuleKey, string> = {
   leave: 'Leave Requisition',
   overtime: 'Overtime Request',
   travel: 'Travel Request',
+  training: 'Training Request',
 }
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -132,6 +134,8 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'Transport_Requisition_No',
     'DocumentNo',
     'Document_No',
+    'ApplicationNo',
+    'TicketNo',
   ])
   const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
   const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason'], moduleLabels[requestType])
