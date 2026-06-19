@@ -5,17 +5,19 @@ export const requestServices = {
   imprestSurrender: 'QyImprestSurrenderHeader',
   staffClaim: 'QyStaffClaimHeader',
   pettyCash: 'QyPaymentsHeader',
+  pettyCashReplenishment: 'PgInterBankTransfers',
   storeRequisition: 'QyStoreRequisitionHeader',
   purchaseRequisition: 'QyPurchaseHeader',
   fuelRequest: 'QyFuelMaintenanceRequests',
   transport: 'QyTransportRequisition',
   maintenance: 'QyFuelMaintenanceRequests',
   transferOrder: 'QyTransferOrderHeader',
-  gatePass: 'QyTransferOrderHeader',
+  gatePass: 'QyGatePass',
   leave: 'QyHRLeaveApplications',
   overtime: 'QyHRLeaveApplications',
   travel: 'QyTransportRequisition',
   training: 'QyTrainingApplicationHeader',
+  salaryAdvance: 'QyStaffAdvanceHeader',
 } as const
 
 export type PortalModuleKey = keyof typeof requestServices
@@ -25,6 +27,7 @@ const moduleLabels: Record<PortalModuleKey, string> = {
   imprestSurrender: 'Imprest Surrender',
   staffClaim: 'Staff Claims',
   pettyCash: 'Petty Cash',
+  pettyCashReplenishment: 'Petty Cash Replenishment',
   storeRequisition: 'Store Requisition',
   purchaseRequisition: 'Purchase Requisition',
   fuelRequest: 'Fuel Requisition',
@@ -36,6 +39,7 @@ const moduleLabels: Record<PortalModuleKey, string> = {
   overtime: 'Overtime Request',
   travel: 'Travel Request',
   training: 'Training Request',
+  salaryAdvance: 'Salary Advance',
 }
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -136,10 +140,12 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'Document_No',
     'ApplicationNo',
     'TicketNo',
+    'GatePassNo',
+    'InterBankTransferNo',
   ])
   const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
-  const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason'], moduleLabels[requestType])
-  const createdAt = text(row, ['CreatedAt', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
+  const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
+  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {
     id: `${requestType}-${requestNo || crypto.randomUUID()}`,
@@ -149,8 +155,8 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     status: statusFromBc(text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])),
     makerEmployeeNo,
     makerName: text(row, ['EmployeeName', 'StaffName', 'RequesterName'], makerEmployeeNo),
-    departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code']),
-    departmentName: text(row, ['DepartmentName', 'Department_Name']),
+    departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code', 'DistrictDepartmentCode']),
+    departmentName: text(row, ['DepartmentName', 'Department_Name', 'DistrictDepartmentName']),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
     amount: num(row, ['Amount', 'TotalAmount', 'NetAmount', 'Quantity'], 0),
     sourceDocument: {

@@ -1,13 +1,25 @@
 import { Router, type Request } from 'express'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth, type AuthUser } from './auth.js'
+import { resolveApprovalModuleFromTableId } from './approvalTableIds.js'
 import { mapItem, mapRequest, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
   createPortalModuleRequest,
+  deletePortalModuleLine,
   findFrontendModuleSpec,
+  gatePassLineBinding,
+  gatePassSourceFromQuery,
+  gatePassSourceFromRow,
+  GATE_PASS_SOURCE_SPECS,
   getPortalModuleDocument,
   listPortalModuleRows,
+  savePortalModuleLine,
+  setPortalModuleLines,
+  submitPortalModuleRequest,
+  updatePortalModuleHeader,
+  uploadPortalAttachment,
+  uploadPortalModuleAttachment,
 } from './staffModules.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
@@ -48,17 +60,169 @@ function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
 }
 
+interface LookupSpec {
+  service: string
+  valueKeys: string[]
+  labelKeys: string[]
+  filter?: string
+  meta?: Record<string, string[]>
+}
+
+const LOOKUP_SPECS: Record<string, LookupSpec> = {
+  'imprest-types': {
+    service: 'QyReceiptsPayments',
+    valueKeys: ['Code'],
+    labelKeys: ['Description', 'Code'],
+    filter: `Description ne '' and Type eq 'Imprest'`,
+  },
+  'travel-destinations': {
+    service: 'QyTravelDestinations',
+    valueKeys: ['DestinationCode', 'Code'],
+    labelKeys: ['DestinationName', 'Description', 'DestinationCode'],
+  },
+  'claim-types': {
+    service: 'QyReceiptsPayments',
+    valueKeys: ['Code'],
+    labelKeys: ['Description', 'Code'],
+    filter: `Description ne '' and Type eq 'Claim'`,
+    meta: { accountNo: ['GLAccount', 'GL_Account'] },
+  },
+  'petty-cash-types': {
+    service: 'QyReceiptsPayments',
+    valueKeys: ['Code'],
+    labelKeys: ['Description', 'Code'],
+    filter: `AccountType eq 'G/L Account' and Type eq 'Payment'`,
+  },
+  'gl-accounts': {
+    service: 'QyGlAccounts',
+    valueKeys: ['No'],
+    labelKeys: ['Name', 'No'],
+    filter: 'DirectPosting eq true',
+  },
+  locations: {
+    service: 'QyLocation',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+  },
+  'regular-locations': {
+    service: 'QyLocation',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+    filter: 'UseAsInTransit eq false',
+  },
+  'in-transit-locations': {
+    service: 'QyLocation',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+    filter: 'UseAsInTransit eq true',
+  },
+  items: {
+    service: 'QyItem',
+    valueKeys: ['No'],
+    labelKeys: ['Description', 'No'],
+  },
+  assets: {
+    service: 'QyFixedAssets',
+    valueKeys: ['No'],
+    labelKeys: ['Description', 'No'],
+  },
+  services: {
+    service: 'QyGlAccounts',
+    valueKeys: ['No'],
+    labelKeys: ['Name', 'No'],
+    filter: 'DirectPosting eq true',
+  },
+  'shipping-agents': {
+    service: 'QyShippingAgents',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+  },
+  'responsibility-centers': {
+    service: 'QyResponsibilityCenters',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+  },
+  employees: {
+    service: 'QyHREmployee',
+    valueKeys: ['No'],
+    labelKeys: ['FullName', 'Name', 'No'],
+    meta: { jobTitle: ['JobTitle', 'Job_Title'] },
+  },
+  vehicles: {
+    service: 'QyVehicleHeader',
+    valueKeys: ['RegistrationNo', 'Registration_No'],
+    labelKeys: ['Description', 'RegistrationNo', 'Registration_No'],
+  },
+  'fuel-cards': {
+    service: 'QyFuelCardSetups',
+    valueKeys: ['CardNo', 'Card_No'],
+    labelKeys: ['CardNo', 'Card_No'],
+  },
+  vendors: {
+    service: 'QyVendorsList',
+    valueKeys: ['No'],
+    labelKeys: ['Name', 'No'],
+  },
+  'training-courses': {
+    service: 'QyTrainingCourses',
+    valueKeys: ['CourseCode', 'Code'],
+    labelKeys: ['Description', 'CourseName', 'CourseCode'],
+  },
+  'payroll-posting-groups': {
+    service: 'QyPREmployeePostingGroups',
+    valueKeys: ['Code'],
+    labelKeys: ['Description', 'Code'],
+  },
+  'bank-accounts': {
+    service: 'PgBankAccounts',
+    valueKeys: ['No'],
+    labelKeys: ['Search_Name', 'Name', 'No'],
+  },
+  sectors: {
+    service: 'QyDimensionValues',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+    filter: `AuxiliaryIndex1 eq 'SECTOR'`,
+  },
+  divisions: {
+    service: 'QyDimensionValues',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+    filter: `AuxiliaryIndex1 eq 'DIV/BRANCH'`,
+  },
+  departments: {
+    service: 'QyDimensionValues',
+    valueKeys: ['Code'],
+    labelKeys: ['Name', 'Code'],
+    filter: `AuxiliaryIndex1 eq 'DEPART/DIST'`,
+  },
+  'posted-receipts': {
+    service: 'PgPostedReceipts',
+    valueKeys: ['No'],
+    labelKeys: ['ReceivedFrom', 'No'],
+  },
+}
+
+function lookupLabel(row: ODataRecord, spec: LookupSpec, value: string) {
+  const description = text(row, spec.labelKeys, value)
+  return description === value ? value : `${value} - ${description}`
+}
+
 const frontendModules = [
   'imprest',
   'imprestSurrender',
   'staffClaim',
   'pettyCash',
+  'pettyCashReplenishment',
   'storeRequisition',
   'purchaseRequisition',
   'fuelRequest',
   'transport',
   'maintenance',
+  'transferOrder',
   'training',
+  'salaryAdvance',
+  'gatePass',
   'leave',
 ] as const
 
@@ -76,15 +240,9 @@ function parseRequestId(id: string) {
 
 function approvalModule(row: ODataRecord): SupportedFrontendModule {
   const tableId = Number(row.TableID ?? row.TableId ?? 0)
-  const documentType = text(row, ['DocumentType', 'Document_Type']).toLowerCase()
-  if (tableId === 50532) return 'leave'
-  if (tableId === 52202786) return 'imprest'
-  if (tableId === 52202707) return 'imprestSurrender'
-  if (tableId === 52202966) return 'storeRequisition'
-  if (tableId === 52121800 || tableId === 38) return 'purchaseRequisition'
-  if (tableId === 52202717) return 'staffClaim'
-  if (tableId === 50887 || documentType.includes('petty cash')) return 'pettyCash'
-  if (documentType.includes('transport')) return 'transport'
+  const documentType = text(row, ['DocumentType', 'Document_Type'])
+  const resolved = resolveApprovalModuleFromTableId(tableId, documentType)
+  if (resolved && isSupportedModule(resolved)) return resolved
   return 'purchaseRequisition'
 }
 
@@ -114,10 +272,72 @@ function approvalQueueItem(row: ODataRecord) {
   }
 }
 
-async function mappedModuleRows(module: SupportedFrontendModule, authUser: AuthUser) {
+function mapStoreLine(row: ODataRecord, index: number) {
+  const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
+  const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
+  return {
+    id: lineNo,
+    lineNo,
+    type: text(row, ['type', 'Type']),
+    issuingStore: text(row, ['issuingStore', 'IssuingStore', 'Issuing_Store', 'LocationCode', 'Location']),
+    itemNo: text(row, ['itemNo', 'ItemNo', 'Item_No', 'No']),
+    description: text(row, ['description', 'Description']),
+    quantity: quantityRequested,
+    quantityRequested,
+    quantityIssued: number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued']),
+    quantityToReceive: number(row, ['quantityToReceive', 'QuantityToReceive', 'Quantity_to_Receive']),
+    quantityReceived: number(row, ['quantityReceived', 'QuantityReceived', 'Quantity_Received']),
+    reason: text(row, ['reason', 'Reason']),
+    unitOfMeasure: text(row, ['unitOfMeasure', 'UnitofMeasure', 'UnitOfMeasure', 'Unit_of_Measure']),
+  }
+}
+
+function mapTransferLine(row: ODataRecord, index: number) {
+  const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
+  return {
+    id: lineNo,
+    lineNo,
+    itemNo: text(row, ['itemNo', 'ItemNo', 'Item_No', 'No']),
+    description: text(row, ['description', 'Description']),
+    quantity: number(row, ['quantity', 'Quantity']),
+    unitOfMeasure: text(row, ['unitOfMeasure', 'UnitofMeasure', 'UnitOfMeasure', 'Unit_of_Measure']),
+    quantityShipped: number(row, ['quantityShipped', 'QuantityShipped', 'Quantity_Shipped']),
+    quantityReceived: number(row, ['quantityReceived', 'QuantityReceived', 'Quantity_Received']),
+    shipmentDate: text(row, ['shipmentDate', 'ShipmentDate', 'Shipment_Date']),
+    receiptDate: text(row, ['receiptDate', 'ReceiptDate', 'Receipt_Date']),
+  }
+}
+
+function mapModuleLines(
+  module: SupportedFrontendModule,
+  header: ODataRecord,
+  rows: ODataRecord[],
+) {
+  if (module === 'storeRequisition') {
+    return rows.map(mapStoreLine)
+  }
+  if (module === 'transferOrder') {
+    return rows.map(mapTransferLine)
+  }
+  if (module === 'gatePass') {
+    const source = gatePassSourceFromRow(header)
+    return source === 'storeIssue'
+      ? rows.map(mapStoreLine)
+      : rows.map(mapTransferLine)
+  }
+  return rows
+}
+
+async function mappedModuleRows(
+  module: SupportedFrontendModule,
+  authUser: AuthUser,
+  options: { gatePassSource?: ReturnType<typeof gatePassSourceFromQuery> } = {},
+) {
   const spec = findFrontendModuleSpec(module)
   if (!spec) throw portalError(`${module} is not implemented in the ESS Business Central codeunit`, 501)
-  const rows = await listPortalModuleRows(spec, authUser)
+  const rows = await listPortalModuleRows(spec, authUser, {
+    gatePassSource: options.gatePassSource,
+  })
   return rows.map((row) => mapRequest(row, module as PortalModuleKey))
 }
 
@@ -130,7 +350,20 @@ async function requestDetail(id: string, authUser: AuthUser) {
     })) as ODataRecord[] | null
     const row = Array.isArray(rows) ? rows[0] : undefined
     if (!row) throw portalError('Leave request not found', 404, 'REQUEST_NOT_FOUND')
-    return mapRequest(row, 'leave')
+    const mapped = mapRequest(row, 'leave')
+    const [approvers, attachments] = await Promise.all([
+      fetchOData('QyApprovalEntry', {
+        $filter: `DocumentNo eq '${odataString(no)}' and TableID eq 50532`,
+      }).catch(() => [] as ODataRecord[]),
+      fetchOData('QyDocumentAttachments', {
+        $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
+      }).catch(() => [] as ODataRecord[]),
+    ])
+    return {
+      ...mapped,
+      approvalSteps: mapApprovalSteps(approvers),
+      attachments: mapAttachments(attachments),
+    }
   }
   const spec = findFrontendModuleSpec(module)
   if (!spec) throw portalError(`${module} is not supported`, 501)
@@ -148,7 +381,80 @@ async function requestDetail(id: string, authUser: AuthUser) {
     }
   }
   if (!row) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
-  return mapRequest(row, module as PortalModuleKey)
+  const gatePassBinding =
+    module === 'gatePass'
+      ? gatePassLineBinding(row, no)
+      : null
+  const lineDocumentNo = gatePassBinding?.documentNo ?? no
+  const lineService = gatePassBinding?.lineService ?? spec.lineService
+  const lineHeaderField = gatePassBinding?.lineHeaderField ?? spec.lineHeaderField
+  const [lines, approvers, attachments] = await Promise.all([
+    lineService && lineHeaderField
+      ? fetchOData(lineService, {
+          $filter: `${lineHeaderField} eq '${odataString(lineDocumentNo)}'`,
+        }).catch(() => [] as ODataRecord[])
+      : Promise.resolve([] as ODataRecord[]),
+    fetchOData('QyApprovalEntry', {
+      $filter: `DocumentNo eq '${odataString(no)}' and TableID eq ${spec.headerTableId}`,
+    }).catch(() => [] as ODataRecord[]),
+    fetchOData('QyDocumentAttachments', {
+      $filter: `No eq '${odataString(no)}' and TableID eq ${spec.headerTableId}`,
+    }).catch(() => [] as ODataRecord[]),
+  ])
+  const mapped = mapRequest(row, module as PortalModuleKey)
+  return {
+    ...mapped,
+    payload: {
+      ...row,
+      ...(module === 'gatePass' && gatePassBinding
+        ? {
+            gatePassSource: gatePassBinding.source,
+            gatePassSourceLabel: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].label,
+            gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
+          }
+        : {}),
+      lines: mapModuleLines(module, row, Array.isArray(lines) ? lines : []),
+    },
+    approvalSteps: mapApprovalSteps(approvers),
+    attachments: mapAttachments(attachments),
+  }
+}
+
+function mapApprovalSteps(value: unknown) {
+  const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
+  return rows.map((row, index) => {
+    const status = text(row, ['Status'], 'Pending Approval')
+    return {
+      id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
+      actorEmployeeNo: text(row, ['ApproverID', 'SenderID']),
+      actorName: text(row, ['ApproverName', 'ApproverID']),
+      role: 'Checker',
+      status: status === 'Open' ? 'Pending Approval' : status,
+      timestamp: text(row, ['DateTimeSentforApproval', 'DueDate', 'Date']),
+      note: text(row, ['Comment', 'Comments']),
+    }
+  })
+}
+
+function mapAttachments(value: unknown) {
+  const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
+  return rows.map((row, index) => {
+    const baseName = text(row, ['FileName', 'Name'], `attachment-${index + 1}`)
+    const extension = text(row, ['FileExtension', 'Extension'])
+    const fileName =
+      extension && !baseName.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+        ? `${baseName}.${extension}`
+        : baseName
+    return {
+      id: text(row, ['ID', 'AttachmentID', 'EntryNo'], String(index + 1)),
+      fileName,
+      fileType: text(row, ['MimeType', 'ContentType'], 'application/octet-stream'),
+      size: number(row, ['FileSize', 'Size']),
+      description: text(row, ['Description'], baseName),
+      progress: 100,
+      uploadedAt: text(row, ['CreatedAt', 'AttachedDate', 'Date']),
+    }
+  })
 }
 
 function attendanceRow(row: ODataRecord, authUser: AuthUser) {
@@ -171,6 +477,34 @@ export function buildPortalApiRouter() {
   router.use(requireAuth)
 
   router.get(
+    '/lookups/:catalog',
+    safe(async (req, res) => {
+      const catalog = String(req.params.catalog)
+      const spec = LOOKUP_SPECS[catalog]
+      if (!spec) throw portalError(`Unsupported lookup catalog: ${catalog}`, 404)
+      const rows = await fetchOData(spec.service, {
+        ...(spec.filter ? { $filter: spec.filter } : {}),
+      })
+      res.json({
+        rows: (Array.isArray(rows) ? rows : [])
+          .map((row) => {
+            const value = text(row, spec.valueKeys)
+            if (!value) return null
+            const meta = Object.fromEntries(
+              Object.entries(spec.meta ?? {}).map(([key, keys]) => [key, text(row, keys)]),
+            )
+            return {
+              value,
+              label: lookupLabel(row, spec, value),
+              ...(Object.keys(meta).length ? { meta } : {}),
+            }
+          })
+          .filter(Boolean),
+      })
+    }),
+  )
+
+  router.get(
     '/requests',
     safe(async (req, res) => {
       const module = typeof req.query.module === 'string' ? req.query.module : ''
@@ -181,7 +515,13 @@ export function buildPortalApiRouter() {
           'UNSUPPORTED_MODULE',
         )
       }
-      res.json(await mappedModuleRows(module, user(req)))
+      res.json(
+        await mappedModuleRows(module, user(req), {
+          gatePassSource: module === 'gatePass'
+            ? gatePassSourceFromQuery(req.query.source)
+            : undefined,
+        }),
+      )
     }),
   )
 
@@ -221,6 +561,26 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  router.post(
+    '/requests/:id/submit',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module === 'leave') {
+        throw portalError('Leave requests are submitted when they are created', 422)
+      }
+      const spec = findFrontendModuleSpec(module)
+      if (!spec) throw portalError(`${module} is not supported`, 501)
+      await submitPortalModuleRequest(spec, user(req), no)
+      res.json(
+        await requestDetail(requestId, user(req)).catch(() => ({
+          id: requestId,
+          status: 'Pending Approval',
+        })),
+      )
+    }),
+  )
+
   router.get(
     '/requests/:id',
     safe(async (req, res) => {
@@ -252,6 +612,171 @@ export function buildPortalApiRouter() {
       code: 'DELETE_NOT_SUPPORTED',
     })
   })
+
+  // --- ESS multi-step flow: edit header, line CRUD, post-create attachments ---
+  // These mirror the `/api/staff/:module/...` SOAP routes but follow the React
+  // `/api/requests/:id/...` JSON contract used by MultiStepRequestPage.
+
+  function requireMutableModule(id: string) {
+    const { module, no } = parseRequestId(id)
+    if (module === 'leave') {
+      throw portalError('Leave requests cannot be edited line-by-line', 422)
+    }
+    const spec = findFrontendModuleSpec(module)
+    if (!spec) {
+      throw portalError(`${module} uses a dedicated Business Central endpoint`, 501)
+    }
+    return { module, no, spec }
+  }
+
+  router.patch(
+    '/requests/:id',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { no, spec } = requireMutableModule(requestId)
+      await updatePortalModuleHeader(spec, user(req), no, req.body ?? {})
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/lines',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { no, spec } = requireMutableModule(requestId)
+      await savePortalModuleLine(spec, user(req), no, { ...(req.body ?? {}), action: 'create' })
+      res.status(201).json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.put(
+    '/requests/:id/lines',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { no, spec } = requireMutableModule(requestId)
+      const lines = Array.isArray(req.body?.lines)
+        ? (req.body.lines as Record<string, unknown>[])
+        : []
+      await setPortalModuleLines(spec, user(req), no, lines)
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.patch(
+    '/requests/:id/lines/:lineId',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { no, spec } = requireMutableModule(requestId)
+      await savePortalModuleLine(spec, user(req), no, {
+        ...(req.body ?? {}),
+        action: 'edit',
+        lineNo: req.params.lineId,
+      })
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.delete(
+    '/requests/:id/lines/:lineId',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { no, spec } = requireMutableModule(requestId)
+      await deletePortalModuleLine(spec, user(req), no, String(req.params.lineId))
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.patch(
+    '/requests/:id/lines/:lineId/receive',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'storeRequisition') {
+        throw portalError('Line receiving is only supported for Store Requisition', 422)
+      }
+      const result = await callSoapMethod('ReceiveStoreLineItems', {
+        lineNo: req.params.lineId,
+        requisitionNo: no,
+        quantityToReceive: Number(req.body?.quantityToReceive ?? 0),
+        reason: String(req.body?.reason ?? ''),
+      })
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError('Business Central did not receive the store requisition line', 502)
+      }
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/post-receipt',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'storeRequisition') {
+        throw portalError('Posting receipts is only supported for Store Requisition', 422)
+      }
+      const result = await callSoapMethod('PostToReceiveStoreRequisition', {
+        requisitionNo: no,
+      })
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError('Business Central did not post the store requisition receipt', 502)
+      }
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/attachments',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const parsed = parseRequestId(requestId)
+      if (parsed.module === 'leave') {
+        await requestDetail(requestId, user(req))
+        await uploadPortalAttachment(50532, parsed.no, req.body ?? {})
+      } else {
+        const { no, spec } = requireMutableModule(requestId)
+        await uploadPortalModuleAttachment(spec, no, req.body ?? {})
+      }
+      res.status(201).json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.get(
+    '/requests/:id/attachments/:attachmentId/download',
+    safe(async (req, res) => {
+      const { module, no } = parseRequestId(String(req.params.id))
+      const spec = module === 'leave' ? undefined : findFrontendModuleSpec(module)
+      const tableID = module === 'leave' ? 50532 : spec?.headerTableId
+      if (!tableID) throw portalError('Attachment table is not configured', 501)
+      await requestDetail(String(req.params.id), user(req))
+      const result = await callSoapMethod('GetDocumentAttachment', {
+        docNo: no,
+        attachmentID: req.params.attachmentId,
+        tableID,
+      })
+      if (!result.returnValue) throw portalError('Attachment was not found', 404)
+      const fileName = String(req.query.fileName ?? 'attachment').replaceAll('"', '')
+      res.setHeader('Content-Type', String(req.query.fileType ?? 'application/octet-stream'))
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
+    }),
+  )
+
+  router.delete(
+    '/requests/:id/attachments/:attachmentId',
+    safe(async (req, res) => {
+      const { no } = parseRequestId(String(req.params.id))
+      await requestDetail(String(req.params.id), user(req))
+      const result = await callSoapMethod('DeleteDocumentAttachment', {
+        docNo: no,
+        docID: req.params.attachmentId,
+      })
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError('Business Central did not delete the attachment', 502)
+      }
+      res.status(204).send()
+    }),
+  )
 
   router.get(
     '/approvals',
@@ -482,6 +1007,36 @@ export function buildPortalApiRouter() {
   )
 
   router.get(
+    '/profile/attachments',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const rows = await fetchOData('QyDocumentAttachments', {
+        $filter:
+          `No eq '${odataString(authUser.employeeNo)}'` +
+          ' and TableID eq 50746',
+      }).catch(() => [] as ODataRecord[])
+      res.json({ rows: mapAttachments(rows) })
+    }),
+  )
+
+  router.get(
+    '/profile/attachments/:attachmentId/download',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const result = await callSoapMethod('GetDocumentAttachment', {
+        docNo: authUser.employeeNo,
+        attachmentID: req.params.attachmentId,
+        tableID: 50746,
+      })
+      if (!result.returnValue) throw portalError('Employee attachment was not found', 404)
+      const fileName = String(req.query.fileName ?? 'employee-attachment').replaceAll('"', '')
+      res.setHeader('Content-Type', String(req.query.fileType ?? 'application/octet-stream'))
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
+    }),
+  )
+
+  router.get(
     '/documents',
     safe(async (_req, res) => {
       const rows = (await fetchOData('PgHrDownloads')) as ODataRecord[] | null
@@ -527,9 +1082,10 @@ export function buildPortalApiRouter() {
           return {
             id: ticketNo,
             ticketNo,
-            vehicle: text(row, ['VehicleNo', 'RegistrationNo']),
-            driver: text(row, ['DriverName', 'Driver']),
-            date: text(row, ['Date', 'PostingDate']),
+            previousTicketNo: text(row, ['PreviousWTNo']),
+            gkNo: text(row, ['GKNo']),
+            type: text(row, ['Type']),
+            department: text(row, ['DepartmentName', 'Department']),
             status: text(row, ['Status'], 'Open'),
             employeeNo: text(row, ['EmployeeNo'], authUser.employeeNo),
           }
@@ -538,9 +1094,80 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  router.get('/performance', (_req, res) => {
-    res.json({ rows: [] })
-  })
+  router.get(
+    '/work-tickets/:ticketNo',
+    safe(async (req, res) => {
+      const ticketNo = String(req.params.ticketNo)
+      const [tickets, lines] = await Promise.all([
+        fetchOData('QyWorkTickets', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+          $top: 1,
+        }) as Promise<ODataRecord[] | null>,
+        fetchOData('QyWorkTicketLines', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+        }).catch(() => [] as ODataRecord[]),
+      ])
+      const row = Array.isArray(tickets) ? tickets[0] : undefined
+      if (!row) throw portalError('Work ticket was not found', 404)
+      res.json({
+        id: ticketNo,
+        ticketNo,
+        previousTicketNo: text(row, ['PreviousWTNo']),
+        gkNo: text(row, ['GKNo']),
+        type: text(row, ['Type']),
+        department: text(row, ['DepartmentName', 'Department']),
+        status: text(row, ['Status'], 'Open'),
+        lines: (Array.isArray(lines) ? lines : []).map((line, index) => ({
+          id: text(line, ['LineNo', 'Line_No', 'SystemId'], String(index + 1)),
+          lineNo: text(line, ['LineNo', 'Line_No'], String(index + 1)),
+          driverName: text(line, ['DriverName']),
+          departureFrom: text(line, ['DepartureFrom']),
+          destination: text(line, ['Destination']),
+          workDate: text(line, ['WorkDate']),
+          authorizingOfficerName: text(line, ['AuthorizingOfficerName']),
+        })),
+      })
+    }),
+  )
+
+  router.delete(
+    '/work-tickets/:ticketNo/lines/:lineNo',
+    safe(async (req, res) => {
+      const result = await callSoapMethod('DeleteWorkTicketLine', {
+        lineNo: req.params.lineNo,
+        ticketNo: req.params.ticketNo,
+      })
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError('Business Central did not delete the work-ticket line', 502)
+      }
+      res.status(204).send()
+    }),
+  )
+
+  router.get(
+    '/performance',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const rows = await fetchOData('PgHRAppraisalHeaderList', {
+        $filter:
+          `EmployeeNo eq '${odataString(authUser.employeeNo)}'` +
+          ` or Supervisor eq '${odataString(authUser.employeeNo)}'`,
+      }).catch(() => [] as ODataRecord[])
+      res.json({
+        rows: (Array.isArray(rows) ? rows : []).map((row) => ({
+          id: text(row, ['Appraisal_No', 'AppraisalNo', 'No', 'SystemId']),
+          employeeNo: text(row, ['EmployeeNo', 'Employee_No']),
+          employeeName: text(row, ['EmployeeName', 'Employee_Name', 'FullName']),
+          period: text(row, ['AppraisalPeriod', 'Appraisal_Period', 'Period']),
+          supervisorEmployeeNo: text(row, ['Supervisor', 'SupervisorNo', 'Supervisor_No']),
+          supervisorName: text(row, ['SupervisorName', 'Supervisor_Name']),
+          departmentCode: text(row, ['DepartmentCode', 'Department_Code', 'ShortcutDimension2Code']),
+          departmentName: text(row, ['DepartmentName', 'Department_Name']),
+          status: text(row, ['Status']),
+        })),
+      })
+    }),
+  )
 
   router.get(
     '/items',
@@ -557,6 +1184,62 @@ export function buildPortalApiRouter() {
     })
   })
 
+  router.get(
+    '/payroll/periods',
+    safe(async (_req, res) => {
+      const rows = await fetchOData('QyPayrollPeriods', {
+        $filter: 'Closed eq true',
+      }).catch(() => [] as ODataRecord[])
+      const periods = new Map<string, { year: number; month: string }>()
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const year = number(row, ['PeriodYear', 'Year'])
+        const month = text(row, ['PeriodMonth', 'Month', 'PeriodName'])
+        if (year && month) periods.set(`${year}-${month}`, { year, month })
+      }
+      res.json({ rows: [...periods.values()] })
+    }),
+  )
+
+  router.get(
+    '/payroll/payslip/pdf',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const year = String(req.query.year ?? '')
+      const month = String(req.query.month ?? '')
+      if (!year || !month) throw portalError('Payroll year and month are required', 422)
+      const fileName = `${authUser.employeeNo.replaceAll('/', '_')}_ps.pdf`
+      const result = await callSoapMethod('GeneratePayslip', {
+        employeeNo: authUser.employeeNo,
+        year,
+        month,
+        filenameFromApp: fileName,
+      })
+      if (!result.returnValue) throw portalError('Business Central did not generate the payslip', 502)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
+    }),
+  )
+
+  router.get(
+    '/leave/statement',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const leaveType = String(req.query.leaveType ?? '')
+      if (!leaveType) throw portalError('Leave type is required', 422)
+      const fileName = `${authUser.employeeNo.replaceAll('/', '_')}_leave.pdf`
+      const result = await callSoapMethod('GenerateLeaveStatement', {
+        employeeNo: authUser.employeeNo,
+        leaveType,
+        filenameFromApp: fileName,
+      })
+      if (!result.returnValue) throw portalError('Business Central did not generate the leave statement', 502)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
+    }),
+  )
+
   router.get('/payroll/master-roll', (_req, res) => {
     res.status(501).json({
       message: 'ESS exposes the master roll as PDF. The React JSON master-roll screen needs a BC payroll-line mapping.',
@@ -564,11 +1247,178 @@ export function buildPortalApiRouter() {
     })
   })
 
-  router.get('/hod/team-requests', (_req, res) => res.json({ rows: [] }))
-  router.get('/hod/staff-on-leave', (_req, res) => res.json({ rows: [] }))
-  router.get('/reports/store-usage', (_req, res) => res.json([]))
-  router.get('/reports/leave-balance', (_req, res) => res.json([]))
-  router.get('/reports/gate-pass-log', (_req, res) => res.json([]))
+  router.get(
+    '/payroll/master-roll/pdf',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      if (!authUser.CEO) throw portalError('CEO access required', 403)
+      const year = String(req.query.year ?? '')
+      const month = String(req.query.month ?? '')
+      const postingGroup = String(req.query.postingGroup ?? '')
+      if (!year || !month) throw portalError('Payroll year and month are required', 422)
+      const fileName = `${year}-${month}_masterroll.pdf`
+      const result = await callSoapMethod('FnPayrollMasterRollReport', {
+        year,
+        month,
+        postingGroup,
+        filenameFromApp: fileName,
+      })
+      if (!result.returnValue) throw portalError('Business Central did not generate the master roll', 502)
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
+    }),
+  )
+
+  router.get(
+    '/hod/team-requests',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      if (!authUser.HOD) throw portalError('HOD access required', 403)
+      const rows = await fetchOData('QyHREmployee', {
+        $filter:
+          `No ne '${odataString(authUser.employeeNo)}'` +
+          ` and Status eq 'Active'` +
+          ` and GlobalDimension2Code eq '${odataString(authUser.department)}'`,
+      }).catch(() => [] as ODataRecord[])
+      res.json({
+        rows: (Array.isArray(rows) ? rows : []).map((row) => {
+          const employeeNo = text(row, ['No', 'EmployeeNo'])
+          return {
+            id: employeeNo,
+            employee: [
+              text(row, ['FirstName']),
+              text(row, ['MiddleName']),
+              text(row, ['LastName']),
+            ].filter(Boolean).join(' '),
+            employeeNo,
+            requestType: text(row, ['JobTitle', 'Job_Title'], 'Employee'),
+            requestNo: employeeNo,
+            title: text(row, ['DepartmentName', 'Department_Name'], authUser.departmentName),
+            date: text(row, ['EmploymentDate', 'DateOfJoin']),
+            status: text(row, ['Status'], 'Active'),
+          }
+        }),
+      })
+    }),
+  )
+  router.get(
+    '/hod/staff-on-leave',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      if (!authUser.HOD) throw portalError('HOD access required', 403)
+      const rows = await fetchOData('QyHRLeaveApplications', {
+        $filter:
+          `DepartmentCode eq '${odataString(authUser.department)}'` +
+          ` and Status eq 'Posted'`,
+      }).catch(() => [] as ODataRecord[])
+      const today = new Date().toISOString().slice(0, 10)
+      res.json({
+        rows: (Array.isArray(rows) ? rows : [])
+          .filter((row) => text(row, ['End_Date', 'EndDate']) >= today)
+          .map((row) => ({
+            id: text(row, ['ApplicationCode']),
+            employee: text(row, ['EmployeeName', 'StaffName']),
+            employeeNo: text(row, ['EmployeeNo']),
+            leaveType: text(row, ['LeaveType', 'Leave_Type']),
+            from: text(row, ['StartDate', 'Start_Date']),
+            to: text(row, ['EndDate', 'End_Date']),
+            status: text(row, ['Status'], 'Posted'),
+          })),
+      })
+    }),
+  )
+  router.get(
+    '/reports/store-usage',
+    safe(async (_req, res) => {
+      const rows = await fetchOData('QyStoreRequisitionLines').catch(() => [] as ODataRecord[])
+      res.json((Array.isArray(rows) ? rows : []).map((row) => ({
+        itemCode: text(row, ['No', 'ItemNo']),
+        description: text(row, ['Description']),
+        issuedQty: number(row, ['QuantityIssued', 'Quantity', 'QtyIssued']),
+        department: text(row, ['Department', 'DepartmentName']),
+        month: text(row, ['PostingDate', 'Date']),
+      })))
+    }),
+  )
+  router.get(
+    '/reports/leave-balance',
+    safe(async (_req, res) => {
+      const [employees, leaveTypes, ledgerRows] = await Promise.all([
+        fetchOData('QyHREmployee', {
+          $filter: `Status eq 'Active'`,
+        }).catch(() => [] as ODataRecord[]),
+        fetchOData('QyHRLeaveType').catch(() => [] as ODataRecord[]),
+        fetchOData('QyHRLeaveLedger').catch(() => [] as ODataRecord[]),
+      ])
+
+      const leaveTypeList = (Array.isArray(leaveTypes) ? leaveTypes : [])
+        .map((row) => ({
+          code: text(row, ['Code']),
+          label: text(row, ['Description', 'Code']),
+          days: number(row, ['Days', 'NoofDays']),
+        }))
+        .filter((row) => row.code)
+
+      const ledgerByEmployeeAndType = new Map<string, { additions: number; deductions: number }>()
+      for (const row of Array.isArray(ledgerRows) ? ledgerRows : []) {
+        const employeeNo = text(row, ['EmployeeNo', 'Employee_No'])
+        const leaveType = text(row, ['LeaveType', 'Leave_Type'])
+        if (!employeeNo || !leaveType) continue
+        const key = `${employeeNo}::${leaveType}`
+        const totals = ledgerByEmployeeAndType.get(key) ?? { additions: 0, deductions: 0 }
+        const days = number(row, ['NoofDays', 'No_of_Days'])
+        if (days < 0) totals.deductions += Math.abs(days)
+        else totals.additions += days
+        ledgerByEmployeeAndType.set(key, totals)
+      }
+
+      res.json(
+        (Array.isArray(employees) ? employees : []).map((employee) => {
+          const employeeNo = text(employee, ['No', 'EmployeeNo'])
+          const firstName = text(employee, ['FirstName'])
+          const middleName = text(employee, ['MiddleName'])
+          const lastName = text(employee, ['LastName'])
+          const fullName = text(employee, ['FullName', 'Name'], [firstName, middleName, lastName].filter(Boolean).join(' '))
+          return {
+            employeeNo,
+            name: fullName,
+            department: text(employee, ['Department', 'DepartmentName', 'GlobalDimension2Code', 'ShortcutDimension2Code']),
+            leaveTypes: leaveTypeList.map((leaveType) => {
+              const totals = ledgerByEmployeeAndType.get(`${employeeNo}::${leaveType.code}`) ?? {
+                additions: 0,
+                deductions: 0,
+              }
+              const rawBalance =
+                leaveType.code === '0001'
+                  ? totals.additions - totals.deductions
+                  : leaveType.days - (totals.deductions - totals.additions)
+              return {
+                code: leaveType.code,
+                label: leaveType.label,
+                balance: Math.max(0, Math.trunc(rawBalance)),
+                used: Math.max(0, Math.trunc(totals.deductions - totals.additions)),
+              }
+            }),
+          }
+        }),
+      )
+    }),
+  )
+  router.get(
+    '/reports/gate-pass-log',
+    safe(async (_req, res) => {
+      const rows = await fetchOData('QyGatePass').catch(() => [] as ODataRecord[])
+      res.json((Array.isArray(rows) ? rows : []).map((row) => ({
+        gatePassNo: text(row, ['GatePassNo']),
+        type: text(row, ['Linkto', 'LinkTo', 'Link_To'], 'Store Issue'),
+        assetTag: text(row, ['ItemNo', 'AssetTagNumber']),
+        destination: text(row, ['ToLocation']),
+        returnDate: text(row, ['ReturnDate'], '-'),
+        status: text(row, ['Status']),
+      })))
+    }),
+  )
 
   return router
 }

@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth } from './auth.js'
+import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -50,19 +51,24 @@ function soapTruthy(value: string | null | undefined) {
  * Staff models (see `App\Models\*::tableDesc()`), and is used by the count /
  * detail endpoints to fan out across the right BC entity.
  */
-const APPROVAL_TABLE_IDS = {
-  leave: 50532,
-  imprest: 52202786,
-  imprestSurr: 52202707,
-  store: 52202966,
-  purchase: 52121800,
-  claim: 52202717,
-  paymentVoucher: 50000,
-  pettyCash: 50887,
-  order: 38,
-} as const
+const APPROVAL_COUNT_KEYS = {
+  leave: 'leave',
+  imprest: 'imprest',
+  imprestSurr: 'imprestSurrender',
+  store: 'storeRequisition',
+  purchase: 'purchaseRequisition',
+  claim: 'staffClaim',
+  paymentVoucher: 'paymentVoucher',
+  pettyCash: 'pettyCash',
+  pettyCashReplenishment: 'pettyCashReplenishment',
+  fuel: 'fuel',
+  gatePass: 'gatePass',
+  transferOrder: 'transferOrder',
+  salaryAdvance: 'salaryAdvance',
+  order: 'purchaseOrder',
+} as const satisfies Record<string, ApprovalTableKey>
 
-type ApprovalCountKey = keyof typeof APPROVAL_TABLE_IDS
+type ApprovalCountKey = keyof typeof APPROVAL_COUNT_KEYS
 
 const COUNT_KEY_LABELS: Record<ApprovalCountKey, string> = {
   leave: 'totalLeave',
@@ -73,6 +79,11 @@ const COUNT_KEY_LABELS: Record<ApprovalCountKey, string> = {
   claim: 'totalClaim',
   paymentVoucher: 'totalPv',
   pettyCash: 'totalPc',
+  pettyCashReplenishment: 'totalPcReplenishment',
+  fuel: 'totalFuel',
+  gatePass: 'totalGatePass',
+  transferOrder: 'totalTransferOrder',
+  salaryAdvance: 'totalSalaryAdvance',
   order: 'totalOrder',
 }
 
@@ -191,15 +202,15 @@ export function buildStaffRouter() {
 
       const requestedKeys: ApprovalCountKey[] =
         type === 'all'
-          ? (Object.keys(APPROVAL_TABLE_IDS) as ApprovalCountKey[])
-          : Object.keys(APPROVAL_TABLE_IDS).includes(type as ApprovalCountKey)
+          ? (Object.keys(APPROVAL_COUNT_KEYS) as ApprovalCountKey[])
+          : Object.keys(APPROVAL_COUNT_KEYS).includes(type as ApprovalCountKey)
             ? [type as ApprovalCountKey]
             : []
 
       const counts = await Promise.all(
         requestedKeys.map((key) =>
           fetchODataCount('QyApprovalEntry', {
-            $filter: baseFilter(`TableID eq ${APPROVAL_TABLE_IDS[key]}`),
+            $filter: baseFilter(approvalTableFilter(APPROVAL_COUNT_KEYS[key])),
           }),
         ),
       )
@@ -429,7 +440,7 @@ export function buildStaffRouter() {
         fetchOData('QyApprovalEntry', {
           $filter: `DocumentNo eq '${odataString(no)}'`,
         }),
-        fetchOData('QyAttachments', {
+        fetchOData('QyDocumentAttachments', {
           $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
         }).catch(() => []),
       ])
@@ -619,6 +630,26 @@ export function buildStaffRouter() {
         return true
       })
       res.json({ rows: unique })
+    }),
+  )
+
+  router.post(
+    '/leave/approval',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const body = z.object({ no: z.string().min(1) }).parse(req.body)
+      const result = await callSoapMethod('RequestLeaveApproval', {
+        requisitionNo: body.no,
+        employeeNo: user.employeeNo,
+        tableID: 50532,
+      })
+      const ok = soapTruthy(result.returnValue)
+      res.json({
+        ok,
+        message: ok
+          ? 'Leave application sent for approval successfully'
+          : 'Leave application could not be sent for approval.',
+      })
     }),
   )
 

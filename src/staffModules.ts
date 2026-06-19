@@ -18,6 +18,9 @@ interface SoapResult {
   raw: string
 }
 
+const MAX_ATTACHMENT_BYTES = 10_000_000
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpeg', 'jpg', 'png'])
+
 type ParamBuilder = (input: { req: Request; user: AuthUser; no: string }) =>
   | Record<string, unknown>
   | Promise<Record<string, unknown>>
@@ -36,9 +39,18 @@ export interface ModuleSpec {
   /** Business Central header table ID (used for attachment & approval lookups). */
   headerTableId: number
   /** OData field used to filter the list by current user (e.g. `EmployeeNo`). */
-  ownerField: 'EmployeeNo' | 'UserID' | 'AssignedUserID' | 'Requested_By' | 'RequesterID' | 'Employee_No'
+  ownerField:
+    | 'EmployeeNo'
+    | 'UserID'
+    | 'AssignedUserID'
+    | 'Requested_By'
+    | 'RequesterID'
+    | 'Employee_No'
+    | 'CustomerNo'
   /** Which session field feeds `ownerField` — defaults match Laravel. */
-  ownerSource: 'employeeNo' | 'userID'
+  ownerSource: 'employeeNo' | 'userID' | 'imprestNo'
+  /** ESS intentionally lists these rows without an employee filter. */
+  unscopedList?: boolean
   /** Primary key field on the header row (defaults to `No`). */
   headerKey?: string
   /** Optional extra clause appended to the list filter (e.g. doc-type filter). */
@@ -98,6 +110,124 @@ function authUser(req: Request) {
   const user = req.session.authUser
   if (!user) throw Object.assign(new Error('Unauthenticated'), { status: 401 })
   return user
+}
+
+function numericCode(
+  value: unknown,
+  labels: Record<string, number>,
+  fallback = 0,
+) {
+  const raw = String(value ?? '').trim()
+  if (/^\d+$/.test(raw)) return Number(raw)
+  return labels[raw.toLowerCase()] ?? fallback
+}
+
+function fieldText(row: ODataRecord, keys: string[], fallback = '') {
+  for (const key of keys) {
+    const value = row[key]
+    if (value !== undefined && value !== null && String(value) !== '') return String(value)
+  }
+  return fallback
+}
+
+export type GatePassSourceKey = 'storeIssue' | 'transferOrder' | 'assetTransfer'
+
+export const GATE_PASS_SOURCE_SPECS: Record<
+  GatePassSourceKey,
+  {
+    label: string
+    linkTo: string
+    lineService: string
+    lineHeaderField: string
+    scopeToEmployee: boolean
+  }
+> = {
+  storeIssue: {
+    label: 'Gate Pass Store Requisitions',
+    linkTo: 'Store Issue',
+    lineService: 'QyStoreRequisitionLines',
+    lineHeaderField: 'RequistionNo',
+    scopeToEmployee: true,
+  },
+  transferOrder: {
+    label: 'Transfer Order Requisitions',
+    linkTo: 'Transfer Order',
+    lineService: 'QyTransferShipmentLine',
+    lineHeaderField: 'DocumentNo',
+    scopeToEmployee: false,
+  },
+  assetTransfer: {
+    label: 'Asset Transfer Requisitions',
+    linkTo: 'Asset Transfer',
+    lineService: 'QyTransferShipmentLine',
+    lineHeaderField: 'DocumentNo',
+    scopeToEmployee: false,
+  },
+}
+
+function normalizedGatePassSource(value: unknown): GatePassSourceKey {
+  const raw = String(value ?? '').trim().toLowerCase()
+  const compact = raw.replace(/[^a-z]/g, '')
+  if (compact === 'transferorder' || compact === 'transferorders') return 'transferOrder'
+  if (compact === 'assettransfer' || compact === 'assettransfers') return 'assetTransfer'
+  return 'storeIssue'
+}
+
+export function gatePassSourceFromQuery(value: unknown): GatePassSourceKey {
+  return normalizedGatePassSource(value)
+}
+
+export function gatePassSourceFromRow(row: ODataRecord): GatePassSourceKey {
+  return normalizedGatePassSource(fieldText(row, ['Linkto', 'LinkTo', 'Link_To']))
+}
+
+export function gatePassListFilterParts(source: GatePassSourceKey, user: AuthUser) {
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  const filters = [`Linkto eq '${odataString(sourceSpec.linkTo)}'`]
+  if (sourceSpec.scopeToEmployee) {
+    filters.unshift(`EmployeeNo eq '${odataString(user.employeeNo)}'`)
+  }
+  return filters
+}
+
+export function gatePassLineBinding(row: ODataRecord, fallbackNo: string) {
+  const source = gatePassSourceFromRow(row)
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  return {
+    source,
+    lineService: sourceSpec.lineService,
+    lineHeaderField: sourceSpec.lineHeaderField,
+    documentNo: fieldText(row, ['TransferNo', 'Transfer_No'], fallbackNo),
+  }
+}
+
+function storeLineTypeCode(value: unknown) {
+  return numericCode(value, { item: 1, asset: 2 })
+}
+
+function purchaseLineTypeCode(value: unknown) {
+  return numericCode(value, { service: 1, item: 2, asset: 4 })
+}
+
+function transportRequestTypeCode(value: unknown) {
+  return numericCode(value, { city: 0, 'field trip': 1, field: 1 })
+}
+
+function hospitalCategoryCode(value: unknown) {
+  return numericCode(value, { government: 1, private: 2, online: 3 })
+}
+
+export function passengerTypeCode(value: unknown) {
+  const raw = String(value ?? '').trim()
+  const compact = raw.toLowerCase()
+  if (compact === 'internal' || compact === 'staff') return 'Staff'
+  if (compact === 'external') return 'External'
+  return raw
+}
+
+function claimTypeCode(value: unknown) {
+  const raw = String(value ?? '').trim()
+  return raw.toLowerCase().includes('medical') ? 'MEDICAL' : raw
 }
 
 /* -------------------------------------------------------------------------- */
@@ -247,15 +377,15 @@ const staffClaim: ModuleSpec = {
       action: req.body?.action ?? 'create',
       amount: Number(req.body?.amount ?? req.body?.grossAmount ?? 0),
       reqNo: no,
-      claimType: req.body?.claimType ?? '',
+      claimType: claimTypeCode(req.body?.claimType),
       accountNo: req.body?.accountNo ?? '',
       medicalAmount: Number(
         req.body?.medicalAmount ??
-          (req.body?.claimType === 'Medical' ? req.body?.grossAmount : 0) ??
+          (claimTypeCode(req.body?.claimType) === 'MEDICAL' ? req.body?.grossAmount : 0) ??
           0,
       ),
       claimReceiptNo: req.body?.claimReceiptNo ?? '',
-      hospitalCategory: req.body?.hospitalCategory ?? 0,
+      hospitalCategory: hospitalCategoryCode(req.body?.hospitalCategory),
       expenditureDescription:
         req.body?.expenditureDescription ?? req.body?.description ?? '',
       lineNo: Number(req.body?.lineNo ?? 0),
@@ -381,7 +511,7 @@ const interBankTransfer: ModuleSpec = {
 const storeRequisition: ModuleSpec = {
   module: 'store-requisition',
   headerService: 'QyStoreRequisitionHeader',
-  headerTableId: 52121800,
+  headerTableId: 50575,
   ownerField: 'UserID',
   ownerSource: 'userID',
   lineService: 'QyStoreRequisitionLines',
@@ -409,9 +539,12 @@ const storeRequisition: ModuleSpec = {
       action: req.body?.action ?? 'create',
       reqNo: no,
       lineNo: Number(req.body?.lineNo ?? 0),
-      type: req.body?.type ?? '',
+      type: storeLineTypeCode(req.body?.type),
       itemNo: req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '',
-      quantity: Number(req.body?.quantity ?? 0),
+      quantity:
+        storeLineTypeCode(req.body?.type) === 1
+          ? Number(req.body?.quantity ?? 0)
+          : 0,
       location: req.body?.issuingStore ?? req.body?.location ?? '',
     }),
     deleteLine: ({ req, no }) => ({
@@ -421,11 +554,12 @@ const storeRequisition: ModuleSpec = {
     submit: ({ user, no }) => ({
       reqNo: no,
       employeeNo: user.employeeNo,
-      tableID: 52121800,
+      tableID: 50575,
     }),
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
+      tableID: 50575,
     }),
   },
 }
@@ -475,7 +609,7 @@ const purchaseRequisition: ModuleSpec = {
       itemNo: req.body?.itemNo ?? req.body?.itemCode ?? '',
       quantity: Number(req.body?.quantity ?? 0),
       location: req.body?.whereNeeded ?? req.body?.location ?? '',
-      type: req.body?.type ?? '',
+      type: purchaseLineTypeCode(req.body?.type),
       procurementPlan: req.body?.procurementPlan ?? '',
       reasonForRequest:
         req.body?.reason ??
@@ -525,7 +659,9 @@ const transport: ModuleSpec = {
     saveHeader: ({ req, user, no }) => ({
       action: no ? 'edit' : 'create',
       reqNo: no,
-      requestType: req.body?.requestType ?? req.body?.transportType ?? '',
+      requestType: transportRequestTypeCode(
+        req.body?.requestType ?? req.body?.transportType,
+      ),
       employeeNo: user.employeeNo,
       purpose: req.body?.purpose ?? '',
       responsibilityCenter: req.body?.responsibilityCenter ?? '',
@@ -543,22 +679,22 @@ const transport: ModuleSpec = {
     }),
     saveLine: ({ req, no }) => ({
       myAction: req.body?.action ?? 'create',
-      passengerType: req.body?.passengerType ?? '',
+      passengerType: passengerTypeCode(req.body?.passengerType),
       employeeNo:
         req.body?.employeeNo ??
-        (req.body?.passengerType === 'Internal' ? req.body?.name : '') ??
+        (passengerTypeCode(req.body?.passengerType) === 'Staff' ? req.body?.name : '') ??
         '',
       transportNo: no,
       externalPassName:
         req.body?.externalPassName ??
-        (req.body?.passengerType === 'External' ? req.body?.name : '') ??
+        (passengerTypeCode(req.body?.passengerType) === 'External' ? req.body?.name : '') ??
         '',
       externalPassOrganization: req.body?.externalPassOrganization ?? '',
       recId: req.body?.recId ?? '',
     }),
     deleteLine: ({ req }) => ({
       myAction: 'delete',
-      passengerType: req.body?.passengerType ?? '',
+      passengerType: passengerTypeCode(req.body?.passengerType),
       employeeNo: '',
       transportNo: '',
       externalPassName: '',
@@ -586,6 +722,13 @@ const transport: ModuleSpec = {
  * `App\Http\Controllers\Staff\FuelMaintenanceController`.
  * SOAP: FnFuelRequisitionHeader / FnFuelRequisitionApprovalAction
  */
+/** Map the ESS fuel request-type label/number to the BC code (0 = vehicle, 3 = card). */
+function fuelTypeCode(value: unknown) {
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && String(value).trim() !== '') return numeric
+  return String(value ?? '').toLowerCase().includes('card') ? 3 : 0
+}
+
 const fuelMaintenanceBase = {
   headerService: 'QyFuelMaintenanceRequests',
   headerTableId: 50865,
@@ -600,17 +743,17 @@ const fuelMaintenanceBase = {
   params: {
     saveHeader: ({ req, user, no }) => ({
       myAction: no ? 'edit' : 'create',
-      recId: no,
+      recId: req.body?.recId ?? no,
       staffNo: user.employeeNo,
       purpose: req.body?.purpose ?? req.body?.issueDescription ?? '',
       quantity: Number(req.body?.quantity ?? req.body?.liters ?? 0),
-      requestType: Number(req.body?.requestType ?? 0),
+      requestType: fuelTypeCode(req.body?.requestType),
       cardNo: req.body?.cardNo ?? '',
       vehicleNo: req.body?.vehicleNo ?? req.body?.faTagNumber ?? '',
       fuelDealer: req.body?.fuelDealer ?? '',
       price: Number(req.body?.price ?? 0),
     }),
-    submit: ({ no }: { no: string }) => ({ docNo: no, action: 'approve' }),
+    submit: ({ no }: { no: string }) => ({ docNo: no, action: 'request' }),
     cancel: ({ no }: { no: string }) => ({ docNo: no, action: 'cancel' }),
   } satisfies ModuleSpec['params'],
 }
@@ -727,12 +870,72 @@ const training: ModuleSpec = {
   },
 }
 
-const STUB_MODULES: Array<{ module: string; reason: string }> = [
-  {
-    module: 'gate-pass',
-    reason:
-      'Gate Pass currently has no dedicated ESS controller. Use /api/staff/transfer-order or /api/bc/soap/<method> directly until the BC codeunit is ready.',
+/**
+ * Salary Advance — `App\Http\Controllers\SalaryAdvanceController`.
+ */
+const salaryAdvance: ModuleSpec = {
+  module: 'salary-advance',
+  headerService: 'QyStaffAdvanceHeader',
+  headerTableId: 50880,
+  ownerField: 'CustomerNo',
+  ownerSource: 'imprestNo',
+  lineService: 'QyStaffAdvanceLines',
+  lineHeaderField: 'No',
+  soap: {
+    saveHeader: 'FnSalaryAdvanceHeader',
+    submit: 'FnSalaryAdvanceApprovalAction',
+    cancel: 'FnSalaryAdvanceApprovalAction',
   },
+  params: {
+    saveHeader: ({ req, user, no }) => ({
+      myAction: no ? 'edit' : 'create',
+      recId: req.body?.recId ?? no,
+      staffNo: user.employeeNo,
+      purpose: req.body?.purpose ?? req.body?.reason ?? '',
+      percentageSalary: Number(req.body?.percentageSalary ?? 0),
+    }),
+    submit: ({ no }) => ({ docNo: no, action: 'request' }),
+    cancel: ({ no }) => ({ docNo: no, action: 'cancel' }),
+  },
+}
+
+/**
+ * Gate Pass documents are created by BC from Store Issue, Transfer Order, or
+ * Asset Transfer source documents. The portal lists them and controls
+ * request/cancel approval.
+ */
+const gatePass: ModuleSpec = {
+  module: 'gate-pass',
+  headerService: 'QyGatePass',
+  headerTableId: 50296,
+  ownerField: 'EmployeeNo',
+  ownerSource: 'employeeNo',
+  unscopedList: true,
+  extraListFilter: `Linkto eq 'Store Issue'`,
+  headerKey: 'GatePassNo',
+  lineService: 'QyStoreRequisitionLines',
+  lineHeaderField: 'RequistionNo',
+  soap: {
+    submit: 'RequestGatePassApproval',
+    cancel: 'CancelGatePassApproval',
+  },
+  params: {
+    submit: ({ req, user, no }) => ({
+      gatePassNo: no,
+      transferNo: req.body?.transferNo ?? '',
+      tableID: 50296,
+      employeeNo: user.employeeNo,
+    }),
+    cancel: ({ req, user, no }) => ({
+      gatePassNo: no,
+      transferNo: req.body?.transferNo ?? '',
+      tableID: 50296,
+      employeeNo: user.employeeNo,
+    }),
+  },
+}
+
+const STUB_MODULES: Array<{ module: string; reason: string }> = [
   {
     module: 'overtime',
     reason:
@@ -757,11 +960,16 @@ function buildModuleRouter(spec: ModuleSpec): Router {
     '/',
     safe(async (req, res) => {
       const user = authUser(req)
-      const ownerValue = spec.ownerSource === 'employeeNo' ? user.employeeNo : user.userID
-      const filterParts = [`${spec.ownerField} eq '${odataString(ownerValue)}'`]
-      if (spec.extraListFilter) filterParts.push(spec.extraListFilter)
+      const currentOwner = ownerValue(spec, user)
+      const filterParts =
+        spec.module === 'gate-pass'
+          ? gatePassListFilterParts(gatePassSourceFromQuery(req.query.source), user)
+          : spec.unscopedList
+            ? []
+            : [`${spec.ownerField} eq '${odataString(currentOwner)}'`]
+      if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
       const rows = await fetchOData(spec.headerService, {
-        $filter: filterParts.join(' and '),
+        ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
       })
       res.json({ rows: Array.isArray(rows) ? rows : [] })
     }),
@@ -772,10 +980,14 @@ function buildModuleRouter(spec: ModuleSpec): Router {
     safe(async (req, res) => {
       const user = authUser(req)
       const no = String(req.params.no ?? '')
-      const ownerValue = spec.ownerSource === 'employeeNo' ? user.employeeNo : user.userID
+      const currentOwner = ownerValue(spec, user)
 
       const headerRows = (await fetchOData(spec.headerService, {
-        $filter: `${headerKey} eq '${odataString(no)}' and ${spec.ownerField} eq '${odataString(ownerValue)}'`,
+        $filter:
+          `${headerKey} eq '${odataString(no)}'` +
+          (spec.unscopedList
+            ? ''
+            : ` and ${spec.ownerField} eq '${odataString(currentOwner)}'`),
         $top: 1,
       })) as ODataRecord[] | null
       const requisition = Array.isArray(headerRows) && headerRows.length > 0 ? headerRows[0]! : null
@@ -784,10 +996,17 @@ function buildModuleRouter(spec: ModuleSpec): Router {
         return
       }
 
+      const gatePassBinding =
+        spec.module === 'gate-pass'
+          ? gatePassLineBinding(requisition, no)
+          : null
+      const lineDocumentNo = gatePassBinding?.documentNo ?? no
+      const lineService = gatePassBinding?.lineService ?? spec.lineService
+      const lineHeaderField = gatePassBinding?.lineHeaderField ?? spec.lineHeaderField
       const linesPromise =
-        spec.lineService && spec.lineHeaderField
-          ? fetchOData(spec.lineService, {
-              $filter: `${spec.lineHeaderField} eq '${odataString(no)}'`,
+        lineService && lineHeaderField
+          ? fetchOData(lineService, {
+              $filter: `${lineHeaderField} eq '${odataString(lineDocumentNo)}'`,
             }).catch(() => [] as ODataRecord[])
           : Promise.resolve([] as ODataRecord[])
 
@@ -921,6 +1140,8 @@ export const MODULE_SPECS: ModuleSpec[] = [
   transferOrder,
   workTickets,
   training,
+  salaryAdvance,
+  gatePass,
 ]
 
 export function findModuleSpec(module: string) {
@@ -932,12 +1153,16 @@ const FRONTEND_MODULE_ALIASES: Record<string, string> = {
   imprestSurrender: 'imprest-surrender',
   staffClaim: 'claim',
   pettyCash: 'petty-cash',
+  pettyCashReplenishment: 'inter-bank-transfer',
   storeRequisition: 'store-requisition',
   purchaseRequisition: 'purchase-requisition',
   fuelRequest: 'fuel',
   transport: 'transport',
   maintenance: 'maintenance',
+  transferOrder: 'transfer-order',
   training: 'training',
+  salaryAdvance: 'salary-advance',
+  gatePass: 'gate-pass',
 }
 
 export function findFrontendModuleSpec(module: string) {
@@ -946,20 +1171,29 @@ export function findFrontendModuleSpec(module: string) {
 }
 
 function ownerValue(spec: ModuleSpec, user: AuthUser) {
-  return spec.ownerSource === 'employeeNo' ? user.employeeNo : user.userID
+  if (spec.ownerSource === 'employeeNo') return user.employeeNo
+  if (spec.ownerSource === 'imprestNo') return user.imprestNo ?? ''
+  return user.userID
 }
 
 function requestWithBody(body: Record<string, unknown>, params: Record<string, string> = {}) {
   return { body, params } as unknown as Request
 }
 
-export async function listPortalModuleRows(spec: ModuleSpec, user: AuthUser) {
-  const filterParts = [
-    `${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`,
-  ]
-  if (spec.extraListFilter) filterParts.push(spec.extraListFilter)
+export async function listPortalModuleRows(
+  spec: ModuleSpec,
+  user: AuthUser,
+  options: { gatePassSource?: GatePassSourceKey } = {},
+) {
+  const filterParts =
+    spec.module === 'gate-pass'
+      ? gatePassListFilterParts(options.gatePassSource ?? 'storeIssue', user)
+      : spec.unscopedList
+        ? []
+        : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
+  if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
   const rows = await fetchOData(spec.headerService, {
-    $filter: filterParts.join(' and '),
+    ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
   })
   return Array.isArray(rows) ? rows : []
 }
@@ -972,6 +1206,7 @@ export async function getPortalModuleDocument(
 ) {
   const headerKey = spec.headerKey ?? 'No'
   const ownerFilter = enforceOwner
+    && !spec.unscopedList
     ? ` and ${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`
     : ''
   const rows = (await fetchOData(spec.headerService, {
@@ -981,16 +1216,38 @@ export async function getPortalModuleDocument(
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
 }
 
+function lineHasContent(line: Record<string, unknown>) {
+  return Object.entries(line).some(([key, value]) => {
+    if (['action', 'lineNo', 'id', 'recId'].includes(key)) return false
+    const raw = String(value ?? '').trim()
+    return raw !== '' && raw !== '0'
+  })
+}
+
 function portalLineBodies(spec: ModuleSpec, body: Record<string, unknown>) {
-  if (spec.module === 'imprest-surrender' || spec.module === 'claim' || spec.module === 'petty-cash') {
-    return [body]
-  }
   if (spec.module === 'transport') {
-    return Array.isArray(body.passengers)
+    const passengers = Array.isArray(body.passengers)
       ? (body.passengers as Record<string, unknown>[])
       : []
+    return passengers.filter(lineHasContent)
   }
-  return Array.isArray(body.lines) ? (body.lines as Record<string, unknown>[]) : []
+  const lines = Array.isArray(body.lines) ? (body.lines as Record<string, unknown>[]) : []
+  return lines.filter(lineHasContent)
+}
+
+function attachmentBodies(body: Record<string, unknown>) {
+  return Array.isArray(body.attachments)
+    ? (body.attachments as Record<string, unknown>[])
+    : []
+}
+
+function attachmentFileName(attachment: Record<string, unknown>) {
+  const originalName = String(attachment.fileName ?? 'attachment')
+  const extension = originalName.includes('.') ? originalName.split('.').pop() : ''
+  const description = String(attachment.description ?? originalName.replace(/\.[^.]+$/, ''))
+  return `${description}${extension ? `.${extension}` : ''}`
+    .replaceAll(' ', '-')
+    .replaceAll('/', '_')
 }
 
 export async function createPortalModuleRequest(
@@ -1006,7 +1263,7 @@ export async function createPortalModuleRequest(
 
   const headerBody =
     spec.module === 'fuel'
-      ? { ...body, requestType: 0 }
+      ? { ...body, requestType: fuelTypeCode(body.requestType ?? 'Vehicle fuel') }
       : spec.module === 'maintenance'
         ? { ...body, requestType: 1 }
         : body
@@ -1048,6 +1305,37 @@ export async function createPortalModuleRequest(
     }
   }
 
+  for (const attachment of attachmentBodies(body)) {
+    const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
+    if (!contentBase64) continue
+    const fileName = String(attachment.fileName ?? '')
+    const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
+    if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+      throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
+        status: 422,
+      })
+    }
+    if (Buffer.from(contentBase64, 'base64').byteLength > MAX_ATTACHMENT_BYTES) {
+      throw Object.assign(new Error(`${fileName || 'Attachment'} exceeds the 10 MB limit`), {
+        status: 422,
+      })
+    }
+    const uploadResult = await callSoapMethod('UploadDocumentAttachment', {
+      docNo: no,
+      docNo2: no,
+      description: String(attachment.description ?? attachment.fileName ?? 'Attachment'),
+      tableID: spec.headerTableId,
+      file: contentBase64,
+      fileName: attachmentFileName(attachment),
+    })
+    if (!ok(uploadResult)) {
+      throw Object.assign(
+        new Error(`Business Central created ${no}, but an attachment upload failed`),
+        { status: 502, documentNo: no },
+      )
+    }
+  }
+
   if (body.submit !== false && spec.soap.submit && spec.params?.submit) {
     const submitParams = await spec.params.submit({
       req: requestWithBody(body),
@@ -1076,8 +1364,13 @@ export async function cancelPortalModuleRequest(
       status: 501,
     })
   }
+  const document = spec.module === 'gate-pass'
+    ? await getPortalModuleDocument(spec, user, no, false)
+    : null
   const params = await spec.params.cancel({
-    req: requestWithBody({}),
+    req: requestWithBody({
+      transferNo: document?.TransferNo ?? document?.Transfer_No ?? '',
+    }),
     user,
     no,
   })
@@ -1085,6 +1378,184 @@ export async function cancelPortalModuleRequest(
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not cancel ${no}`), { status: 502 })
   }
+}
+
+export async function submitPortalModuleRequest(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+) {
+  if (!spec.soap.submit || !spec.params?.submit) {
+    throw Object.assign(new Error(`${spec.module} submission is not supported`), {
+      status: 501,
+    })
+  }
+  const document = spec.module === 'gate-pass'
+    ? await getPortalModuleDocument(spec, user, no, false)
+    : null
+  const params = await spec.params.submit({
+    req: requestWithBody({
+      transferNo: document?.TransferNo ?? document?.Transfer_No ?? '',
+    }),
+    user,
+    no,
+  })
+  const result = await callSoapMethod(spec.soap.submit, params)
+  if (!ok(result)) {
+    throw Object.assign(new Error(`Business Central did not submit ${no}`), { status: 502 })
+  }
+}
+
+/**
+ * Update the header of an existing document (ESS "edit" flow). Mirrors the
+ * `POST /:no/edit` branch of `buildModuleRouter` but callable from the React
+ * `/api/requests/:id` JSON contract.
+ */
+export async function updatePortalModuleHeader(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  body: Record<string, unknown>,
+) {
+  if (!spec.soap.saveHeader || !spec.params?.saveHeader) {
+    throw Object.assign(new Error(`${spec.module} header editing is not supported`), {
+      status: 501,
+    })
+  }
+  let methodName = spec.soap.saveHeader
+  if (spec.module === 'inter-bank-transfer') {
+    methodName = 'FnUpdateInterBankTransfer'
+  }
+  let editBody = body
+  if (spec.module === 'fuel' || spec.module === 'salary-advance') {
+    const document = await getPortalModuleDocument(spec, user, no)
+    const recId = document?.SystemId ?? document?.SystemID
+    if (!recId) {
+      throw Object.assign(new Error(`Business Central SystemId was not found for ${no}`), {
+        status: 502,
+      })
+    }
+    editBody = { ...body, recId }
+  }
+  const params = await spec.params.saveHeader({
+    req: requestWithBody(editBody),
+    user,
+    no,
+  })
+  const result = await callSoapMethod(methodName, params)
+  if (!ok(result)) {
+    throw Object.assign(new Error(`Business Central did not update ${no}`), { status: 502 })
+  }
+}
+
+/**
+ * Create or edit a single line on an existing document. `body.action`
+ * (`create`/`edit`) drives the BC behaviour; defaults to create.
+ */
+export async function savePortalModuleLine(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  body: Record<string, unknown>,
+) {
+  if (!spec.soap.saveLine || !spec.params?.saveLine) {
+    throw Object.assign(new Error(`${spec.module} does not support line editing`), {
+      status: 501,
+    })
+  }
+  const params = await spec.params.saveLine({ req: requestWithBody(body), user, no })
+  const result = await callSoapMethod(spec.soap.saveLine, params)
+  if (!ok(result)) {
+    throw Object.assign(new Error(`Business Central did not save the ${spec.module} line`), {
+      status: 502,
+    })
+  }
+  return result.returnValue
+}
+
+/** Replace all lines: delete existing ones, then create the supplied set. */
+export async function setPortalModuleLines(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  lines: Record<string, unknown>[],
+) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const incoming = lines[index] ?? {}
+    await savePortalModuleLine(spec, user, no, {
+      ...incoming,
+      action: incoming.action ?? (incoming.lineNo ? 'edit' : 'create'),
+      lineNo: Number(incoming.lineNo ?? (index + 1) * 10000),
+    })
+  }
+}
+
+export async function deletePortalModuleLine(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  lineNo: string,
+) {
+  if (!spec.soap.deleteLine || !spec.params?.deleteLine) {
+    throw Object.assign(new Error(`${spec.module} does not support line deletion`), {
+      status: 501,
+    })
+  }
+  const params = await spec.params.deleteLine({
+    req: requestWithBody({}, { lineNo }),
+    user,
+    no,
+  })
+  const result = await callSoapMethod(spec.soap.deleteLine, params)
+  if (!ok(result)) {
+    throw Object.assign(new Error(`Business Central did not delete line ${lineNo}`), {
+      status: 502,
+    })
+  }
+}
+
+export async function uploadPortalAttachment(
+  tableID: number,
+  no: string,
+  attachment: Record<string, unknown>,
+) {
+  const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
+  if (!contentBase64) {
+    throw Object.assign(new Error('Attachment content is required'), { status: 422 })
+  }
+  const fileName = String(attachment.fileName ?? '')
+  const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
+  if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+    throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
+      status: 422,
+    })
+  }
+  if (Buffer.from(contentBase64, 'base64').byteLength > MAX_ATTACHMENT_BYTES) {
+    throw Object.assign(new Error(`${fileName || 'Attachment'} exceeds the 10 MB limit`), {
+      status: 422,
+    })
+  }
+  const result = await callSoapMethod('UploadDocumentAttachment', {
+    docNo: no,
+    docNo2: no,
+    description: String(attachment.description ?? attachment.fileName ?? 'Attachment'),
+    tableID,
+    file: contentBase64,
+    fileName: attachmentFileName(attachment),
+  })
+  if (!ok(result)) {
+    throw Object.assign(new Error('Business Central did not store the attachment'), {
+      status: 502,
+    })
+  }
+}
+
+export async function uploadPortalModuleAttachment(
+  spec: ModuleSpec,
+  no: string,
+  attachment: Record<string, unknown>,
+) {
+  return uploadPortalAttachment(spec.headerTableId, no, attachment)
 }
 
 export function buildModulesRouter(): Router {

@@ -183,6 +183,15 @@ async function isHeadOfDepartment(employeeNo: string) {
   return Array.isArray(rows) && rows.length > 0
 }
 
+async function hasApprovalEntries(userID: string) {
+  if (!userID) return false
+  const rows = (await fetchOData('QyApprovalEntry', {
+    $filter: `ApproverID eq '${odataString(userID)}'`,
+    $top: 1,
+  }).catch(() => [])) as Array<Record<string, unknown>>
+  return Array.isArray(rows) && rows.length > 0
+}
+
 async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Promise<AuthUser> {
   const employeeNo = String(employee.No ?? '')
   const displayName = [employee.FirstName, employee.MiddleName, employee.LastName]
@@ -198,12 +207,14 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const department = employee.GlobalDimension1Code ?? ''
   const accountNumber = employee.CustomerNo ?? ''
   const gender = employee.Gender ?? ''
+  const userID = String(userSetup.UserID ?? '')
+  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || await hasApprovalEntries(userID)
 
   return {
     employeeNo,
     name: employee.FirstName ?? employeeNo,
     displayName: displayName || employeeNo,
-    userID: String(userSetup.UserID ?? ''),
+    userID,
     roles,
     role: isCEO ? 'ceo' : isHOD ? 'hod' : 'staff',
     email: employee.EMail ?? employee.Email ?? '',
@@ -228,7 +239,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     imprestNo: accountNumber,
     HOD: isHOD,
     CEO: isCEO,
-    canApprove: isHOD || isCEO || Boolean(userSetup.ApproverID),
+    canApprove,
     isNotified: false,
   }
 }

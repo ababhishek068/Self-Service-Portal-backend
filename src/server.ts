@@ -27,7 +27,8 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json({ limit: '10mb' }))
+// A 10 MB ESS attachment is about 13.4 MB after base64 encoding.
+app.use(express.json({ limit: '32mb' }))
 app.use(apiRequestLogger)
 
 app.use(
@@ -62,7 +63,7 @@ app.get('/api/config', (_req, res) => {
 // Mounted under /api so the SPA's `essClient` configuration works as-is.
 app.use('/api', buildAuthRouter())
 // Per-module request routers (imprest, claim, store-requisition, …) are
-// mounted first so their stubs (overtime/travel/gate-pass) can reply 501
+// mounted first so their stubs (overtime/travel) can reply 501
 // without going through the global `requireAuth` middleware that
 // `buildStaffRouter()` installs.
 app.use('/api/staff', buildModulesRouter())
