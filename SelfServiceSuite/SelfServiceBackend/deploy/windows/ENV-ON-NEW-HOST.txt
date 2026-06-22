@@ -1,0 +1,55 @@
+SELF SERVICE BACKEND — .env ON A NEW WINDOWS HOST
+=================================================
+
+Pick the block that matches YOUR Business Central client.
+Only edit SelfServiceBackend\.env — do not paste PHP/Laravel config here.
+
+ALWAYS SET ON EVERY NEW HOST
+----------------------------
+  CORS_ORIGIN=http://YOUR-PORTAL-HOST-IP:4000
+
+Also in SelfServicePortal\server\.env:
+  CORS_ORIGINS=http://YOUR-PORTAL-HOST-IP:4000
+
+DELETE from .env if present (invalid — copied from Laravel app.php):
+  cuStaffPortal => ...
+  odataBaseUrl => ...
+  soapPageBaseUrl => ...
+
+================================================================================
+OPTION A — ABH UAT (abh-erp-ml) — Technology Associates / ABH
+================================================================================
+  Test-NetConnection abh-erp-ml -Port 7047
+  Test-NetConnection abh-erp-ml -Port 7048
+
+  BC_ODATA_BASE_URL=http://abh-erp-ml:7048/BC240/ODataV4/Company('ABH%20UAT%20LIVE')/
+  BC_SOAP_CODEUNIT_URL=http://abh-erp-ml:7047/BC240/WS/ABH%20UAT%20LIVE/Codeunit/CuStaffPortal
+  BC_SOAP_PAGE_BASE_URL=http://abh-erp-ml:7047/BC240/ODataV4/Company('ABH%20UAT%20LIVE')/
+  BC_SOAP_NAMESPACE=urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal
+
+  BC_AUTH_MODE=Basic   (typical for ABH — confirm with BC admin)
+  BC_NAV_USER=...
+  BC_NAV_PASSWORD=...
+
+  Template: deploy\windows\host.env.abh-uat.example
+
+  NOTE: OData is 7048, SOAP is 7047. Do not put OData on 7047.
+
+================================================================================
+OPTION B — HIJRA UAT (erp-app-uat or 192.168.224.37)
+================================================================================
+  Test-NetConnection erp-app-uat -Port 2447
+  Test-NetConnection erp-app-uat -Port 2448
+  (or use IP 192.168.224.37 if hostname does not resolve)
+
+  BC_ODATA_BASE_URL=http://192.168.224.37:2448/BC240/ODataV4/Company('HIJRA%20BANK')/
+  BC_SOAP_CODEUNIT_URL=http://192.168.224.37:2447/BC240/WS/HIJRA%20BANK/Codeunit/CuStaffPortal
+  BC_SOAP_PAGE_BASE_URL=http://192.168.224.37:2447/BC240/ODataV4/Company('HIJRA%20BANK')/
+
+  BC_AUTH_MODE=ntlm   (typical for Hijra — confirm with BC admin)
+
+  Template: deploy\windows\host.env.hijra-uat-ip.example
+
+Restart after editing:
+  SelfServicePortal\deploy\windows\stop-suite.ps1
+  SelfServicePortal\deploy\windows\start-suite.bat

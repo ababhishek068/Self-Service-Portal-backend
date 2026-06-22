@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0..\.."
 
 if not exist ".env" (
-  echo ERROR: .env is missing in %CD%
+  echo ERROR: .env is missing in the SelfServiceBackend folder.
   pause
   exit /b 1
 )

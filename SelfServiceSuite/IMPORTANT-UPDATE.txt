@@ -1,0 +1,49 @@
+SELF SERVICE SUITE - FUNCTIONAL AND UX FIXES
+=============================================
+
+2026-06-21 ESS WORKFLOW PARITY UPDATE
+-------------------------------------
+- restored Edit and Request Approval actions on open/draft requests
+- restored New Line, line edit, and line delete actions where ESS supports them
+- normalized Business Central line fields and line IDs for every request table
+- restored Transport staff/external passenger loading and deletion
+- restored Petty Cash line deletion
+- restricted detail pages to their configured business fields
+- ordered approval history by Business Central sequence number
+- restored Imprest Surrender source details after selecting a posted imprest
+- removed raw Business Central/system fields from request and approval detail screens
+
+Do not merge this package into the existing SelfServiceSuite directory.
+
+1. Stop the current services:
+   powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+
+2. Rename the existing directory:
+   C:\TA\SelfServiceSuite -> C:\TA\SelfServiceSuite-backup
+
+3. Extract this ZIP directly under C:\TA so the result is exactly:
+   C:\TA\SelfServiceSuite
+
+   Avoid folder names containing parentheses, such as "SelfServiceSuite (2)".
+
+4. Start both APIs and the portal with:
+   C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
+
+5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
+
+This update includes:
+- concise Business Central validation messages instead of raw SOAP XML
+- corrected Boolean SOAP values for leave and purchase requisitions
+- document-number resolution for transport requisitions and transfer orders
+- live training, account, dimension, item, and asset lookup corrections
+- approval queue categories, counts, and improved document detail handling
+- dependent item/asset dropdowns and line validation before approval
+- attendance state feedback and modern PDF download progress
+- corrected navigation active states, card alignment, responsive tables, animations,
+  and a dashboard-only Powered By card
+- a launcher that is safe when the extraction path contains parentheses
+
+Business Central administrator actions are still required when BC reports that:
+- no related approval workflow is configured for a document type
+- a number series is missing or contains an invalid blank-number record
+- the selected master-data record does not exist in Business Central
