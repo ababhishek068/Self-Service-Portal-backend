@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowLeft, CheckCircle2, Download, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Download, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   type FieldValues,
@@ -21,11 +21,11 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { DataTable, type DataTableColumn } from './DataTable'
-import { FileUpload, UploadProgressBar } from './FileUpload'
+import { FileUpload } from './FileUpload'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
-import type { FieldConfig } from './RequestFormPage'
+import type { DetailFieldConfig, FieldConfig } from './RequestFormPage'
 import {
   addRequestLine,
   cancelModuleRequest,
@@ -44,14 +44,6 @@ import {
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import {
-  canCancelRequestStatus,
-  canUploadAttachmentStatus,
-  effectiveRequestStatus,
-  isMutableRequestStatus,
-  moduleSupportsAttachments,
-  showsApprovalHistory,
-} from '@/utils/validators'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
@@ -77,13 +69,12 @@ export interface MultiStepLineConfig {
   /** Inline-editable cell fields for backend-generated lines (keyed by line property). */
   editableFields?: FieldConfig[]
   emptyText?: string
-  /** Sync dependent fields when watched values change (e.g. claim type -> GL account). */
-  onValuesChange?: (values: FieldValues, setValue: (name: string, value: unknown) => void) => void
 }
 
 export interface MultiStepRequestConfig {
   title: string
   description?: string
+  businessRules?: string[]
   module: EndpointConfig
   queryKey: readonly unknown[]
   listRequests: () => Promise<PortalRequest[]>
@@ -98,6 +89,11 @@ export interface MultiStepRequestConfig {
   line?: MultiStepLineConfig
   newButtonLabel?: string
   headerLabel?: string
+  initialMode?: 'list' | 'create'
+  /** Curated fields shown on the detail screen. Undefined values are hidden. */
+  detailFields?: DetailFieldConfig[]
+  /** Statuses from which Business Central allows cancellation. */
+  cancelStatuses?: PortalRequest['status'][]
 }
 
 function pathValue(source: unknown, path: string) {
@@ -105,6 +101,26 @@ function pathValue(source: unknown, path: string) {
     if (!current || typeof current !== 'object') return undefined
     return (current as Record<string, unknown>)[part]
   }, source)
+}
+
+function firstPathValue(source: unknown, paths: string[]) {
+  for (const path of paths) {
+    const value = pathValue(source, path)
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value
+  }
+  return undefined
+}
+
+function detailValue(value: unknown, format: DetailFieldConfig['format'] = 'text') {
+  if (format === 'status') return <StatusBadge status={String(value ?? '-')} />
+  if (format === 'date') return formatDate(value === undefined ? undefined : String(value))
+  if (format === 'currency') return formatCurrency(Number(value ?? 0))
+  if (format === 'percentage') return `${Number(value ?? 0)}%`
+  if (format === 'returned') {
+    const returned = value === true || ['true', 'yes', '1'].includes(String(value ?? '').toLowerCase())
+    return returned ? 'Returned' : 'Not Returned'
+  }
+  return String(value ?? '-')
 }
 
 function normalizedFieldName(value: string) {
@@ -127,7 +143,6 @@ function initialFieldValue(source: Record<string, unknown>, field: FieldConfig, 
 
 function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedValues: unknown = {}) {
   return function renderField(field: FieldConfig) {
-    if (field.visibleWhen && !field.visibleWhen(watchedValues as FieldValues)) return null
     const name = prefix ? `${prefix}.${field.name}` : field.name
     const inputId = name.replaceAll('.', '-')
     const error = form.formState.errors?.[field.name]
@@ -267,11 +282,6 @@ function AddLineForm({
   const watchedValues = useWatch({ control: form.control })
   const render = fieldRenderer(form, '', watchedValues)
   const toast = useToast()
-
-  useEffect(() => {
-    line.onValuesChange?.(watchedValues as FieldValues, (name, value) => form.setValue(name, value))
-  }, [form, line, watchedValues])
-
   const mutation = useMutation({
     mutationFn: (values: FieldValues) => {
       const payload = line.buildLinePayload ? line.buildLinePayload(values) : values
@@ -399,7 +409,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
-  const [mode, setMode] = useState<'list' | 'create'>('list')
+  const [mode, setMode] = useState<'list' | 'create'>(config.initialMode ?? 'list')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [actionId, setActionId] = useState<string | null>(null)
   const [editingHeader, setEditingHeader] = useState(false)
@@ -407,12 +417,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const [showLineForm, setShowLineForm] = useState(false)
   const [attachmentDesc, setAttachmentDesc] = useState('')
   const [pendingFiles, setPendingFiles] = useState<Attachment[]>([])
-  const [uploadProgress, setUploadProgress] = useState<{
-    fileName: string
-    percent: number
-    index: number
-    total: number
-  } | null>(null)
   const [receiveLine, setReceiveLine] = useState<Record<string, unknown> | null>(null)
   const [receiveQuantity, setReceiveQuantity] = useState('')
   const [receiveReason, setReceiveReason] = useState('')
@@ -426,9 +430,21 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: config.queryKey })
+    if (['storeRequisition', 'transferOrder'].includes(config.module.module)) {
+      await queryClient.invalidateQueries({ queryKey: ['facility', 'gate-pass'] })
+    }
     await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     await queryClient.invalidateQueries({ queryKey: ['approvals'] })
     if (selectedId) await detailQuery.refetch()
+  }
+
+  const headerCreated = (request: PortalRequest) => {
+    void queryClient.invalidateQueries({ queryKey: config.queryKey })
+    if (['storeRequisition', 'transferOrder'].includes(config.module.module)) {
+      void queryClient.invalidateQueries({ queryKey: ['facility', 'gate-pass'] })
+    }
+    setMode('list')
+    setSelectedId(request.id)
   }
 
   const runAction = async (
@@ -450,83 +466,28 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   const selected = detailQuery.data
-  const selectedStatus = selected ? effectiveRequestStatus(selected) : ''
-  const editable = selected ? isMutableRequestStatus(selectedStatus) : false
-  const attachmentsEnabled = moduleSupportsAttachments(config.module.module)
+  const editable = selected ? selected.status === 'Draft' : false
+  const cancelStatuses = config.cancelStatuses ?? ['Pending Approval']
   const canReceiveStoreLines = selected?.status === 'Posted' && config.module.module === 'storeRequisition'
 
   const uploadAttachments = async () => {
     if (!selected || pendingFiles.length === 0) return
-    const uploadable = pendingFiles.filter((file) => file.status === 'ready' || (!file.status && file.contentBase64))
-    if (uploadable.length === 0) {
-      toast.warning('Wait for the selected files to finish loading before uploading.', 'Files not ready')
-      return
-    }
     setActionId('upload')
     try {
-      for (let index = 0; index < uploadable.length; index += 1) {
-        const file = uploadable[index]!
-        setPendingFiles((current) =>
-          current.map((entry) =>
-            entry.id === file.id ? { ...entry, status: 'uploading', progress: 0 } : entry,
-          ),
-        )
-        setUploadProgress({
+      for (const file of pendingFiles) {
+        await uploadRequestAttachment(selected.id, {
           fileName: file.fileName,
-          percent: 0,
-          index: index + 1,
-          total: uploadable.length,
+          fileType: file.fileType,
+          size: file.size,
+          contentBase64: file.contentBase64,
+          description: attachmentDesc || file.description || file.fileName,
         })
-        await uploadRequestAttachment(
-          selected.id,
-          {
-            fileName: file.fileName,
-            fileType: file.fileType,
-            size: file.size,
-            contentBase64: file.contentBase64,
-            description: attachmentDesc || file.description || file.fileName,
-          },
-          {
-            onProgress: (percent) => {
-              setUploadProgress({
-                fileName: file.fileName,
-                percent,
-                index: index + 1,
-                total: uploadable.length,
-              })
-              setPendingFiles((current) =>
-                current.map((entry) =>
-                  entry.id === file.id ? { ...entry, progress: percent } : entry,
-                ),
-              )
-            },
-          },
-        )
-        setPendingFiles((current) =>
-          current.map((entry) =>
-            entry.id === file.id ? { ...entry, status: 'uploaded', progress: 100 } : entry,
-          ),
-        )
       }
-      await refresh()
       setPendingFiles([])
       setAttachmentDesc('')
-      setUploadProgress(null)
-      toast.success(
-        uploadable.length === 1
-          ? 'Attachment uploaded successfully.'
-          : `${uploadable.length} attachments uploaded successfully.`,
-        'Upload complete',
-      )
+      await refresh()
+      toast.success('Attachment uploaded')
     } catch (err: unknown) {
-      setPendingFiles((current) =>
-        current.map((entry) =>
-          entry.status === 'uploading'
-            ? { ...entry, status: 'error', errorMessage: 'Upload failed', progress: 0 }
-            : entry,
-        ),
-      )
-      setUploadProgress(null)
       toast.error(err instanceof Error ? err.message : 'Attachment upload failed', 'Upload failed')
     } finally {
       setActionId(null)
@@ -581,6 +542,10 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   if (selectedId) {
     const payload = selected?.payload ?? {}
     const lines = Array.isArray(payload.lines) ? (payload.lines as Record<string, unknown>[]) : []
+    const detailSource = { request: selected, payload }
+    const detailFields = (config.detailFields ?? [])
+      .map((field) => ({ field, value: firstPathValue(detailSource, field.paths) }))
+      .filter(({ value }) => value !== undefined)
     const headerFields = config.headerFields
       .map((field) => ({
         field,
@@ -613,7 +578,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               </Button>
               {selected ? (
                 <div className="flex flex-wrap gap-2">
-                  {editable ? (
+                  {selected.status === 'Draft' ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -623,7 +588,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       Edit
                     </Button>
                   ) : null}
-                  {editable ? (
+                  {selected.status === 'Draft' ? (
                     <Button
                       type="button"
                       variant="gradient"
@@ -652,7 +617,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       Request Approval
                     </Button>
                   ) : null}
-                  {canCancelRequestStatus(selectedStatus) ? (
+                  {cancelStatuses.includes(selected.status) ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -701,16 +666,25 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
             {selected ? (
               <>
-                <RequestProgress status={selectedStatus} hasLines={lines.length > 0} requiresLines={Boolean(config.line)} />
+                <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={Boolean(config.line)} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div><p className="text-xs text-slate-500">Request No.</p><p className="font-semibold">{selected.requestNo}</p></div>
-                    <div><p className="text-xs text-slate-500">Status</p><StatusBadge status={selectedStatus} /></div>
-                    <div><p className="text-xs text-slate-500">Created</p><p className="font-semibold">{formatDate(selected.createdAt)}</p></div>
+                    {detailFields.length ? detailFields.map(({ field, value }) => (
+                      <div key={field.label}>
+                        <p className="text-xs text-slate-500">{field.label}</p>
+                        <div className="font-semibold">{detailValue(value, field.format)}</div>
+                      </div>
+                    )) : (
+                      <>
+                        <div><p className="text-xs text-slate-500">Request No.</p><p className="font-semibold">{selected.requestNo}</p></div>
+                        <div><p className="text-xs text-slate-500">Status</p><StatusBadge status={selected.status} /></div>
+                        <div><p className="text-xs text-slate-500">Created</p><p className="font-semibold">{formatDate(selected.createdAt)}</p></div>
+                      </>
+                    )}
                   </div>
                 </section>
 
-                {headerFields.length ? (
+                {!detailFields.length && headerFields.length ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Request Information</h3>
                     <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -727,41 +701,20 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 ) : null}
 
                 {/* Attachments */}
-                {attachmentsEnabled ? (
                 <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">
-                    Attachments
-                    {selected.attachments.length ? ` (${selected.attachments.length})` : ''}
-                  </h3>
-                  {canUploadAttachmentStatus(selectedStatus) ? (
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
+                  {['Draft', 'Pending Approval'].includes(selected.status) ? (
                     <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="attachment-desc">Attachment Description / Name</Label>
                         <Input id="attachment-desc" value={attachmentDesc} onChange={(event) => setAttachmentDesc(event.target.value)} placeholder="e.g. Receipt" />
                       </div>
                       <FileUpload files={pendingFiles} onChange={setPendingFiles} />
-                      {uploadProgress ? (
-                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
-                          <p className="mb-2 text-xs font-medium text-blue-900">
-                            Uploading file {uploadProgress.index} of {uploadProgress.total}
-                          </p>
-                          <UploadProgressBar
-                            label={uploadProgress.fileName}
-                            percent={uploadProgress.percent}
-                            tone="blue"
-                          />
-                        </div>
-                      ) : null}
                       <p className="text-xs text-slate-500">
-                        Selected files appear above with a progress bar. Click Upload attachments to save them to Business Central.
+                        Selected files are uploaded to Business Central only after you click Upload attachments.
                       </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={actionId === 'upload' || pendingFiles.length === 0}
-                        onClick={() => void uploadAttachments()}
-                      >
-                        {actionId === 'upload' ? 'Uploading…' : 'Upload attachments'}
+                      <Button type="button" size="sm" disabled={actionId === 'upload' || pendingFiles.length === 0} onClick={() => void uploadAttachments()}>
+                        {actionId === 'upload' ? 'Uploading...' : 'Upload attachments'}
                       </Button>
                     </div>
                   ) : null}
@@ -769,19 +722,16 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     <div className="divide-y divide-slate-100 border-y border-slate-200">
                       {selected.attachments.map((attachment) => (
                         <div key={attachment.id} className="flex items-center justify-between gap-3 py-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">{attachment.description || attachment.fileName}</p>
-                              <p className="text-xs text-slate-500">{attachment.fileName}</p>
-                            </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{attachment.description || attachment.fileName}</p>
+                            <p className="text-xs text-slate-500">{attachment.fileName}</p>
                           </div>
                           <div className="flex gap-2">
                             <Button type="button" variant="outline" size="sm" disabled={actionId === attachment.id} onClick={() => void runAction(attachment.id, () => downloadRequestAttachment(selected.id, attachment), 'Download failed')}>
                               <Download className="h-4 w-4" />
                               View/Download
                             </Button>
-                            {canUploadAttachmentStatus(selectedStatus) ? (
+                            {['Draft', 'Pending Approval'].includes(selected.status) ? (
                               <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={actionId === attachment.id} onClick={() => void runAction(attachment.id, () => deleteRequestAttachment(selected.id, attachment.id), 'Delete failed')}>
                                 Delete
                               </Button>
@@ -790,13 +740,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                         </div>
                       ))}
                     </div>
-                  ) : (
-                    <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm italic text-slate-500">
-                      No attachments uploaded yet.
-                    </p>
-                  )}
+                  ) : <p className="text-sm italic text-slate-500">*** No attachments ***</p>}
                 </section>
-                ) : null}
 
                 {/* Lines */}
                 {config.line ? (
@@ -931,12 +876,10 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   </section>
                 ) : null}
 
-                {showsApprovalHistory(selectedStatus) ? (
-                  <section className="border-t border-slate-200 pt-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={selected.approvalSteps} />
-                  </section>
-                ) : null}
+                <section className="border-t border-slate-200 pt-4">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                  <ApprovalHistory steps={selected.approvalSteps} />
+                </section>
               </>
             ) : null}
           </div>
@@ -946,7 +889,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   if (mode === 'create') {
-    return <HeaderForm config={config} onCreated={(request) => { setMode('list'); setSelectedId(request.id) }} onCancel={() => setMode('list')} />
+    return <HeaderForm config={config} onCreated={headerCreated} onCancel={() => setMode('list')} />
   }
 
   const columns: DataTableColumn<PortalRequest>[] = [
@@ -968,8 +911,12 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
   return (
     <PageWrapper title={config.title} actions={<PortalNewButton label={config.newButtonLabel ?? 'New Request'} onClick={() => setMode('create')} />}>
-      {config.description ? (
-        <p className="mb-4 text-sm text-slate-600">{config.description}</p>
+      {config.businessRules?.length ? (
+        <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <ul className="list-inside list-disc space-y-0.5 text-blue-800">
+            {config.businessRules.map((rule) => <li key={rule}>{rule}</li>)}
+          </ul>
+        </div>
       ) : null}
       {requestsQuery.isLoading ? (
         <Skeleton className="h-48 w-full" />

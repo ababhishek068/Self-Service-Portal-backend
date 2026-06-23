@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { format, isValid, parse, parseISO } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
-import { FileUpload, UploadProgressBar } from '@/components/shared/FileUpload'
+import { FileUpload } from '@/components/shared/FileUpload'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
@@ -47,28 +47,13 @@ const halfDayOptions = [
 
 type HalfDayValue = (typeof halfDayOptions)[number]['value']
 
-function formatPretty(value: string): string {
-  if (!value) return ''
-  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim())
-  if (isoMatch) {
-    const date = parseISO(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`)
-    if (isValid(date)) return format(date, 'd MMM yyyy')
+function formatPretty(iso: string): string {
+  if (!iso) return ''
+  try {
+    return format(parseISO(iso), 'd MMM yyyy')
+  } catch {
+    return iso
   }
-  const candidates = [
-    () => parse(value, 'M/d/yyyy', new Date()),
-    () => parse(value, 'M/d/yy', new Date()),
-    () => parse(value, 'MM/dd/yyyy', new Date()),
-    () => parseISO(value),
-  ]
-  for (const toDate of candidates) {
-    try {
-      const date = toDate()
-      if (isValid(date)) return format(date, 'd MMM yyyy')
-    } catch {
-      // try next parser
-    }
-  }
-  return value
 }
 
 function filterLeaveTypesByGender(types: LeaveType[], gender: string): LeaveType[] {
@@ -97,12 +82,6 @@ export function LeaveRequest() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
-  const [uploadProgress, setUploadProgress] = useState<{
-    fileName: string
-    percent: number
-    index: number
-    total: number
-  } | null>(null)
   const [detailAction, setDetailAction] = useState<string | null>(null)
   const detailQuery = useQuery({
     queryKey: ['hr', 'leave-detail', selectedRequestId],
@@ -190,8 +169,8 @@ export function LeaveRequest() {
     const starting = isHourly ? startDateTime : startDate
     if (!duration || !starting || !leaveType) return
 
-    if (balance !== null && duration > balance) {
-      setError(`The maximum number of days you can apply for is ${balance}`)
+    if (entitlement !== null && duration > entitlement) {
+      setError(`The maximum number of days you can apply for is ${entitlement}`)
       return
     }
     if (isHourly && duration > 4) {
@@ -204,44 +183,23 @@ export function LeaveRequest() {
     setDatesLoading(true)
     getLeaveDates(leaveType, duration, dateOnly, halfDay)
       .then((res) => {
-        if (res.message && !res.endDate) {
-          setError(res.message)
-          return
-        }
         if (res.isWeekend) {
           setError('Leave start date cannot be on a weekend')
           if (isHourly) setStartDateTime('')
           else setStartDate('')
           return
         }
-        if (!res.endDate) {
-          setError('Business Central did not return leave dates. Check start date and applied days.')
-          return
-        }
         setEndDate(res.endDate)
         setReturnDate(res.returnDate)
       })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Could not calculate leave dates from Business Central.')
-      })
       .finally(() => setDatesLoading(false))
-  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, balance])
+  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, entitlement])
 
   useEffect(() => {
     if (halfDay === '1' || halfDay === '2') {
       setAppliedDays('0.5')
     }
   }, [halfDay])
-
-  const selectedLeaveType = types.find((type) => type.code === leaveType)
-  const allowsHalfDay = selectedLeaveType?.isAnnual ?? false
-
-  useEffect(() => {
-    if (!allowsHalfDay && halfDay !== '0') {
-      setHalfDay('0')
-      setAppliedDays('')
-    }
-  }, [allowsHalfDay, halfDay])
 
   const resetForm = () => {
     setLeaveType('')
@@ -271,16 +229,8 @@ export function LeaveRequest() {
     event.preventDefault()
     const submittedStartDate = isHourly ? startDateTime.slice(0, 10) : startDate
     const submittedDays = isHourly ? Number(appliedHours || 0) : Number(appliedDays || 0)
-    if (!leaveType || !reason.trim() || !reliever || !submittedStartDate || !submittedDays) {
-      setError('Please complete all required fields (leave type, days, start date, reliever, and reason).')
-      return
-    }
-    if (!endDate) {
-      setError(
-        datesLoading
-          ? 'Leave dates are still being calculated. Wait a moment and try again.'
-          : 'End date and return date are missing. Change the start date or applied days so Business Central can calculate them.',
-      )
+    if (!leaveType || !reason.trim() || !endDate || !submittedStartDate || !submittedDays) {
+      setError('Please complete all required fields.')
       return
     }
     if (leaveType === 'SICK' && creationAttachments.length === 0) {
@@ -293,10 +243,6 @@ export function LeaveRequest() {
     }
     if (balance !== null && submittedDays > balance) {
       setError(`Insufficient leave balance. Available: ${balance} day(s).`)
-      return
-    }
-    if (!allowsHalfDay && halfDay !== '0') {
-      setError('Half-day leave is only allowed for annual leave. Choose Annual Leave or set half day to Normal.')
       return
     }
     const confirmed = await confirm({
@@ -369,75 +315,21 @@ export function LeaveRequest() {
   const uploadAttachments = async () => {
     const selected = detailQuery.data
     if (!selected || pendingAttachments.length === 0) return
-    const uploadable = pendingAttachments.filter((file) => file.status === 'ready' || (!file.status && file.contentBase64))
-    if (uploadable.length === 0) {
-      toast.warning('Wait for the selected files to finish loading before uploading.', 'Files not ready')
-      return
-    }
     setDetailAction('upload')
     try {
-      for (let index = 0; index < uploadable.length; index += 1) {
-        const file = uploadable[index]!
-        setPendingAttachments((current) =>
-          current.map((entry) =>
-            entry.id === file.id ? { ...entry, status: 'uploading', progress: 0 } : entry,
-          ),
-        )
-        setUploadProgress({
+      for (const file of pendingAttachments) {
+        await uploadRequestAttachment(selected.id, {
           fileName: file.fileName,
-          percent: 0,
-          index: index + 1,
-          total: uploadable.length,
+          fileType: file.fileType,
+          size: file.size,
+          contentBase64: file.contentBase64,
+          description: file.description || file.fileName,
         })
-        await uploadRequestAttachment(
-          selected.id,
-          {
-            fileName: file.fileName,
-            fileType: file.fileType,
-            size: file.size,
-            contentBase64: file.contentBase64,
-            description: file.description || file.fileName,
-          },
-          {
-            onProgress: (percent) => {
-              setUploadProgress({
-                fileName: file.fileName,
-                percent,
-                index: index + 1,
-                total: uploadable.length,
-              })
-              setPendingAttachments((current) =>
-                current.map((entry) =>
-                  entry.id === file.id ? { ...entry, progress: percent } : entry,
-                ),
-              )
-            },
-          },
-        )
-        setPendingAttachments((current) =>
-          current.map((entry) =>
-            entry.id === file.id ? { ...entry, status: 'uploaded', progress: 100 } : entry,
-          ),
-        )
       }
       setPendingAttachments([])
-      setUploadProgress(null)
       await refreshLeave()
-      toast.success(
-        uploadable.length === 1
-          ? 'Attachment uploaded successfully.'
-          : `${uploadable.length} attachments uploaded successfully.`,
-        'Upload complete',
-      )
+      toast.success('Leave attachment uploaded')
     } catch (err: unknown) {
-      setPendingAttachments((current) =>
-        current.map((entry) =>
-          entry.status === 'uploading'
-            ? { ...entry, status: 'error', errorMessage: 'Upload failed', progress: 0 }
-            : entry,
-        ),
-      )
-      setUploadProgress(null)
       toast.error(err instanceof Error ? err.message : 'Attachment upload failed', 'Upload failed')
     } finally {
       setDetailAction(null)
@@ -619,13 +511,8 @@ export function LeaveRequest() {
                     id="halfDay"
                     value={halfDay}
                     onChange={(e) => setHalfDay(e.target.value as HalfDayValue)}
-                    options={halfDayOptions
-                      .filter((option) => allowsHalfDay || option.value === '0')
-                      .map((option) => ({ value: option.value, label: option.label }))}
+                    options={halfDayOptions.map((o) => ({ value: o.value, label: o.label }))}
                   />
-                  {!allowsHalfDay ? (
-                    <p className="text-xs text-slate-500">Half-day is only available for Annual Leave.</p>
-                  ) : null}
                 </div>
 
                 {!isHourly ? (
@@ -652,6 +539,12 @@ export function LeaveRequest() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+                <div className="space-y-1.5">
+                  <Label>Applied Days</Label>
+                  <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                    {appliedDays || appliedHours || DASH}
+                  </p>
+                </div>
                 <div className="space-y-1.5">
                   <Label>End Date</Label>
                   <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
@@ -691,11 +584,7 @@ export function LeaveRequest() {
                   <p className="font-bold">
                     Leave Attachments{leaveType === 'SICK' ? ' (Required)' : ' (Optional)'}
                   </p>
-                  <FileUpload
-                    files={creationAttachments}
-                    onChange={setCreationAttachments}
-                    readyHint={`${creationAttachments.length} file${creationAttachments.length === 1 ? '' : 's'} ready — will upload when you create the draft.`}
-                  />
+                  <FileUpload files={creationAttachments} onChange={setCreationAttachments} />
                   <p>Maximum 3 MB per file for leave creation.</p>
                 </div>
               </div>
@@ -805,32 +694,17 @@ export function LeaveRequest() {
                 </dl>
 
                 <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">
-                    Attachments
-                    {selected.attachments.length ? ` (${selected.attachments.length})` : ''}
-                  </h3>
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
                   {selectedIsMutable ? (
                     <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
                       <FileUpload files={pendingAttachments} onChange={setPendingAttachments} />
-                      {uploadProgress ? (
-                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
-                          <p className="mb-2 text-xs font-medium text-blue-900">
-                            Uploading file {uploadProgress.index} of {uploadProgress.total}
-                          </p>
-                          <UploadProgressBar
-                            label={uploadProgress.fileName}
-                            percent={uploadProgress.percent}
-                            tone="blue"
-                          />
-                        </div>
-                      ) : null}
                       <Button
                         type="button"
                         size="sm"
                         disabled={detailAction === 'upload' || pendingAttachments.length === 0}
                         onClick={() => void uploadAttachments()}
                       >
-                        {detailAction === 'upload' ? 'Uploading…' : 'Upload attachments'}
+                        {detailAction === 'upload' ? 'Uploading…' : 'Upload'}
                       </Button>
                     </div>
                   ) : null}
@@ -871,9 +745,7 @@ export function LeaveRequest() {
                       ))}
                     </div>
                   ) : (
-                    <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm italic text-slate-500">
-                      No attachments uploaded yet.
-                    </p>
+                    <p className="text-sm italic text-slate-500">No attachments.</p>
                   )}
                 </section>
 

@@ -27,6 +27,11 @@ export function DocumentRequisition() {
         { name: 'documentType', label: 'Document type', type: 'select', options: documentTypeOptions },
         { name: 'purpose', label: 'Purpose', type: 'textarea', placeholder: 'State the purpose for this document request' },
       ]}
+      businessRules={[
+        'Purpose must clearly state why the letter is required.',
+        'Request routes to HR for processing and approval.',
+        'Processed documents are available for download once approved.',
+      ]}
     />
   )
 }

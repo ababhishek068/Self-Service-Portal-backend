@@ -3,7 +3,6 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { claimTypeOptions, hospitalCategoryOptions } from '@/data/essOptions'
 import { staffClaimHeaderSchema, staffClaimLineSchema } from '@/schemas/requestSchemas'
-import { isMedicalClaimType, stripNonMedicalClaimFields } from '@/utils/claimHelpers'
 import { formatCurrency } from '@/utils/formatters'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 
@@ -18,7 +17,7 @@ export function StaffClaim() {
     <MultiStepRequestPage
       title="Staff Claim"
       headerLabel="New Claim Request"
-      description="Create a claim header, then add claim lines (claim type, GL account, expenditure) before requesting approval."
+      description="Create a claim header, then add claim lines (claim type, GL account, hospital category, expenditure) before requesting approval."
       module={module}
       queryKey={['finance', 'staff-claim']}
       listRequests={() => listModuleRequests(module)}
@@ -29,6 +28,17 @@ export function StaffClaim() {
       headerFields={[
         { name: 'claimDate', label: 'Claim Date', type: 'date', valuePaths: ['ClaimDate', 'Claim_Date', 'Date'] },
         { name: 'purpose', label: 'Claim Purpose', type: 'textarea', valuePaths: ['Purpose', 'ClaimDescription', 'Claim_Description'] },
+      ]}
+      detailFields={[
+        { label: 'Claim No.', paths: ['request.requestNo'] },
+        { label: 'Claim Date', paths: ['payload.ClaimDate', 'payload.Claim_Date'], format: 'date' },
+        { label: 'Purpose', paths: ['payload.ClaimDescription', 'payload.Claim_Description', 'payload.Purpose'] },
+        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
+        { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
+        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
+        { label: 'Total Net Amount', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
         label: 'Claim Lines',
@@ -48,51 +58,14 @@ export function StaffClaim() {
         fields: [
           { name: 'claimType', label: 'Claim Type', type: 'select', options: claimTypes.options },
           { name: 'accountNo', label: 'Account No.', type: 'select', options: glAccounts.options },
-          {
-            name: 'accountName',
-            label: 'Account Name',
-            type: 'text',
-            readOnly: true,
-            visibleWhen: (values) => Boolean(values.accountNo),
-          },
-          {
-            name: 'hospitalCategory',
-            label: 'Hospital Category',
-            type: 'select',
-            options: hospitalCategoryOptions,
-            visibleWhen: (values) => isMedicalClaimType(values.claimType),
-          },
-          {
-            name: 'medicalAmount',
-            label: 'Medical Amount',
-            type: 'number',
-            visibleWhen: (values) => isMedicalClaimType(values.claimType),
-          },
+          { name: 'accountName', label: 'Account Name', type: 'text' },
+          { name: 'hospitalCategory', label: 'Hospital Category', type: 'select', options: hospitalCategoryOptions },
+          { name: 'medicalAmount', label: 'Medical Amount', type: 'number' },
           { name: 'amount', label: 'Amount', type: 'number' },
           { name: 'claimReceiptNo', label: 'Claim Receipt No.', type: 'text' },
           { name: 'expenditureDate', label: 'Expenditure Date', type: 'date' },
           { name: 'expenditureDescription', label: 'Expenditure Description', type: 'textarea' },
         ],
-        buildLinePayload: (values) => stripNonMedicalClaimFields(values as Record<string, unknown>),
-        onValuesChange: (values, setValue) => {
-          const claimType = String(values.claimType ?? '')
-          if (claimType) {
-            const match = claimTypes.options.find((option) => option.value === claimType)
-            const linkedAccount = match?.meta?.accountNo
-            if (linkedAccount) setValue('accountNo', String(linkedAccount))
-          }
-          if (!isMedicalClaimType(values.claimType)) {
-            setValue('hospitalCategory', '')
-            setValue('medicalAmount', 0)
-          }
-          const accountNo = String(values.accountNo ?? '')
-          if (accountNo) {
-            const account = glAccounts.options.find((option) => option.value === accountNo)
-            if (account) setValue('accountName', account.label)
-          } else {
-            setValue('accountName', '')
-          }
-        },
         columns: [
           { key: 'claimType', header: 'Claim Type' },
           { key: 'accountNo', header: 'Account No' },
@@ -105,7 +78,13 @@ export function StaffClaim() {
           { key: 'expenditureDescription', header: 'Expenditure Description' },
         ],
         emptyText: '*** No Claim Lines Found ***',
+        canEdit: false,
       }}
+      businessRules={[
+        'Create the claim header first, then add one or more claim lines.',
+        'Medical claims use a hospital category and medical amount.',
+        'Attach supporting receipts, then request approval.',
+      ]}
     />
   )
 }

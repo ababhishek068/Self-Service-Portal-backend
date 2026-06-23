@@ -1,7 +1,7 @@
 import { formatISO } from 'date-fns'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
-import { purchaseLineTypeLabel, purchaseLineTypeOptions } from '@/data/essOptions'
+import { purchaseLineTypeOptions } from '@/data/essOptions'
 import { purchaseHeaderSchema, purchaseLineSchema } from '@/schemas/requestSchemas'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 
@@ -34,12 +34,15 @@ export function PurchaseRequisition() {
       })}
       headerFields={[
         { name: 'dateNeeded', label: 'Needed By Date', type: 'date', valuePaths: ['Needed_By_Date', 'OrderDate', 'Order_Date'] },
-        { name: 'description', label: 'Posting Description', type: 'textarea', valuePaths: ['Posting_Description', 'PostingDescription'] },
-        { name: 'requestedReceiptDate', label: 'Requested Receipt Date', type: 'date', valuePaths: ['RequestedReceiptDate', 'Requested_Receipt_Date'] },
-        { name: 'responsibilityCenter', label: 'Responsibility Center', type: 'text', valuePaths: ['ResponsibilityCenter', 'Responsibility_Center'] },
-        { name: 'department', label: 'Department', type: 'text', valuePaths: ['ShortcutDimension1Code', 'GlobalDimension1Code'] },
-        { name: 'orderDate', label: 'Order Date', type: 'date', valuePaths: ['OrderDate', 'Order_Date'] },
-        { name: 'documentDate', label: 'Document Date', type: 'date', valuePaths: ['DocumentDate', 'Document_Date'] },
+        { name: 'description', label: 'Description', type: 'textarea', valuePaths: ['Posting_Description', 'PostingDescription'] },
+      ]}
+      detailFields={[
+        { label: 'Requisition No.', paths: ['request.requestNo'] },
+        { label: 'Needed By Date', paths: ['payload.Needed_By_Date', 'payload.OrderDate', 'payload.Order_Date'], format: 'date' },
+        { label: 'Description', paths: ['payload.Posting_Description', 'payload.PostingDescription'] },
+        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
         label: 'Purchase Lines',
@@ -48,51 +51,26 @@ export function PurchaseRequisition() {
         defaultValues: { itemNo: '', location: '', reasonForRequest: '', quantity: 1, type: '2' },
         buildLinePayload: (values) => ({
           ...values,
-          type: values.type,
           whereNeeded: values.location,
-          location: values.location,
           reason: values.reasonForRequest,
         }),
         fields: [
-          {
-            name: 'type',
-            label: 'Type',
-            type: 'select',
-            options: purchaseLineTypeOptions,
-            valuePaths: ['typeCode', 'Type', 'type'],
-            valueMap: { service: '1', item: '2', asset: '4' },
-          },
+          { name: 'type', label: 'Type', type: 'select', options: purchaseLineTypeOptions },
           {
             name: 'itemNo',
             label: 'Item / Service No.',
             type: 'select',
-            valuePaths: ['No', 'itemNo', 'ItemNo', 'Item_No'],
             optionsByField: {
               field: 'type',
               options: { '1': services.options, '2': items.options, '4': assets.options },
             },
           },
-          {
-            name: 'location',
-            label: 'Location',
-            type: 'select',
-            options: locations.options,
-            valuePaths: ['Location_Code', 'LocationCode', 'location'],
-          },
-          { name: 'quantity', label: 'Quantity', type: 'number', valuePaths: ['Quantity', 'quantity'] },
-          {
-            name: 'reasonForRequest',
-            label: 'Reason for Request',
-            type: 'textarea',
-            valuePaths: ['RequestSummary', 'Reason_for_Request', 'ReasonForRequest', 'reasonForRequest'],
-          },
+          { name: 'location', label: 'Location (optional)', type: 'select', options: locations.options },
+          { name: 'quantity', label: 'Quantity', type: 'number' },
+          { name: 'reasonForRequest', label: 'Reason for Request', type: 'textarea' },
         ],
         columns: [
-          {
-            key: 'type',
-            header: 'Type',
-            format: (value) => purchaseLineTypeLabel(value),
-          },
+          { key: 'type', header: 'Type' },
           { key: 'itemNo', header: 'No.' },
           { key: 'description', header: 'Description' },
           { key: 'reasonForRequest', header: 'Purpose' },
@@ -101,7 +79,13 @@ export function PurchaseRequisition() {
           { key: 'location', header: 'Location' },
         ],
         emptyText: '*** No Purchase Lines Found ***',
+        canEdit: false,
       }}
+      businessRules={[
+        'Create the header with needed-by date and description.',
+        'Each line requires a type, number, quantity and purpose; location is optional.',
+        'Attach specifications, then request approval.',
+      ]}
     />
   )
 }

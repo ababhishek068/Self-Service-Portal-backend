@@ -7,12 +7,9 @@ export function extractApplicationReason(
 
   const keys = [
     'reason',
-    'Reason',
     'description',
-    'Description',
     'justification',
     'purpose',
-    'Purpose',
     'issueDescription',
     'comments',
     'notes',

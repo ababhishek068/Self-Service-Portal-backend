@@ -38,6 +38,10 @@ export function TrainingRequest() {
         },
         { name: 'comments', label: 'Comments', type: 'textarea', valuePaths: ['Purpose', 'Comments'] },
       ]}
+      businessRules={[
+        'The request is created as a draft first.',
+        'Review the saved request, then send it for approval.',
+      ]}
     />
   )
 }

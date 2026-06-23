@@ -116,6 +116,18 @@ export function ImprestSurrender() {
           </div>
         )
       }}
+      detailFields={[
+        { label: 'Surrender No.', paths: ['request.requestNo'] },
+        { label: 'Imprest No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No'] },
+        { label: 'Purpose', paths: ['payload.Purpose', 'request.title'] },
+        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
+        { label: 'Employee Grade', paths: ['payload.EmployeeGrade', 'payload.JobGrade'] },
+        { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
+        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
+        { label: 'Imprest Amount', paths: ['payload.TotalNetAmount', 'payload.Amount', 'request.amount'], format: 'currency' },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
+      ]}
       line={{
         label: 'Imprest Surrender Lines',
         schema: imprestSurrenderHeaderSchema,
@@ -138,6 +150,10 @@ export function ImprestSurrender() {
         ],
         emptyText: '*** No surrender lines ***',
       }}
+      businessRules={[
+        'Surrender lines are generated from the selected imprest.',
+        'Enter the actual spent and cash receipt details, then Save before requesting approval.',
+      ]}
     />
   )
 }

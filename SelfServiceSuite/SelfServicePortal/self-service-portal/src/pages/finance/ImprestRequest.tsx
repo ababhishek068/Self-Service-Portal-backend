@@ -35,9 +35,22 @@ export function ImprestRequest() {
         { name: 'travelDate', label: 'Travel Date', type: 'date', valuePaths: ['TravelDate', 'Travel_Date', 'Date'] },
         { name: 'returnDate', label: 'Return Date', type: 'date', valuePaths: ['ReturnDate', 'Return_Date', 'Date'] },
       ]}
+      detailFields={[
+        { label: 'Request No.', paths: ['request.requestNo'] },
+        { label: 'Date Required', paths: ['payload.DateRequired', 'payload.Date_Required'], format: 'date' },
+        { label: 'Purpose', paths: ['payload.Purpose', 'payload.purpose'] },
+        { label: 'Travel Date', paths: ['payload.TravelDate', 'payload.Travel_Date'], format: 'date' },
+        { label: 'Return Date', paths: ['payload.ReturnDate', 'payload.Return_Date'], format: 'date' },
+        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
+        { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
+        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
+        { label: 'Total Net Amount', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
+      ]}
       line={{
         label: 'Imprest Lines',
-        addLabel: 'New Line',
+        addLabel: 'Add Imprest Line',
         schema: imprestLineHeaderSchema,
         defaultValues: {
           advanceType: '',
@@ -62,7 +75,13 @@ export function ImprestRequest() {
           { key: 'noOfDays', header: 'No of Days' },
         ],
         emptyText: '*** No Imprest Lines Found ***',
+        canEdit: false,
       }}
+      businessRules={[
+        'Create the imprest header first, then add one or more advance lines.',
+        'Each line captures advance type, destination, duty area, days and amount.',
+        'Attach supporting documents, then request approval.',
+      ]}
     />
   )
 }

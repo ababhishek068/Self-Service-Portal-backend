@@ -17,6 +17,6 @@ const variants: Record<string, 'green' | 'red' | 'yellow' | 'gray' | 'blue' | 'o
   New: 'red',
 }
 
-export function StatusBadge({ status, className }: { status: BadgeStatus | string; className?: string }) {
-  return <Badge variant={variants[status] ?? 'gray'} className={className}>{status}</Badge>
+export function StatusBadge({ status }: { status: BadgeStatus | string }) {
+  return <Badge variant={variants[status] ?? 'gray'}>{status}</Badge>
 }

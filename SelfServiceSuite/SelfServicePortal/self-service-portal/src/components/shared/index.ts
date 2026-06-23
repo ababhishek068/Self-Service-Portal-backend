@@ -1,7 +1,7 @@
 export { ApprovalTimeline } from './ApprovalTimeline'
 export { ConfirmDialog } from './ConfirmDialog'
 export { DataTable } from './DataTable'
-export { FileUpload, UploadProgressBar } from './FileUpload'
+export { FileUpload } from './FileUpload'
 export { PortalFormCard } from './PortalFormCard'
 export { PortalNewButton } from './PortalNewButton'
 export { RequestFormPage } from './RequestFormPage'

@@ -56,18 +56,6 @@ export const purchaseLineTypeOptions = [
   { label: 'Asset', value: '4' },
 ]
 
-export function purchaseLineTypeLabel(value: unknown) {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  if (/^\d+$/.test(raw)) {
-    return purchaseLineTypeOptions.find((option) => option.value === raw)?.label ?? raw
-  }
-  const normalized = raw.toLowerCase()
-  return (
-    purchaseLineTypeOptions.find((option) => option.label.toLowerCase() === normalized)?.label ?? raw
-  )
-}
-
 /** Transport request types: 0 = City, 1 = Field Trip. */
 export const transportRequestTypeOptions = [
   { label: 'City', value: '0' },

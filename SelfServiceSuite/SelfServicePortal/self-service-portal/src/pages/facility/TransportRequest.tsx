@@ -46,6 +46,17 @@ export function TransportRequest() {
         { name: 'noOfPassengers', label: 'No. of Passengers', type: 'number', valuePaths: ['No_Of_Passangers', 'NoOfPassengers'] },
         { name: 'purpose', label: 'Purpose of the Trip', type: 'textarea', valuePaths: ['Purpose_of_Trip', 'PurposeOfTrip', 'Purpose'] },
       ]}
+      detailFields={[
+        { label: 'Requisition No.', paths: ['request.requestNo'] },
+        { label: 'Request Type', paths: ['payload.RequestType', 'payload.Request_Type'] },
+        { label: 'Destination', paths: ['payload.Destination'] },
+        { label: 'Date of Trip', paths: ['payload.Date_of_Trip', 'payload.DateOfTrip'], format: 'date' },
+        { label: 'Responsibility Center', paths: ['payload.Responsibility_Center', 'payload.ResponsibilityCenter', 'request.responsibleCenter'] },
+        { label: 'No. of Days', paths: ['payload.No_of_Days_Requested', 'payload.NoOfDays'] },
+        { label: 'No. of Passengers', paths: ['payload.No_Of_Passangers', 'payload.NoOfPassengers'] },
+        { label: 'Purpose', paths: ['payload.Purpose_of_Trip', 'payload.PurposeOfTrip', 'payload.Purpose'] },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
+      ]}
       line={{
         label: 'Passengers',
         addLabel: 'Add Passenger',
@@ -66,6 +77,11 @@ export function TransportRequest() {
         ],
         emptyText: '*** No Passengers Found ***',
       }}
+      businessRules={[
+        'Trip date cannot be in the past.',
+        'Add internal staff or external passengers after creating the header.',
+        'Request approval once passengers are captured.',
+      ]}
     />
   )
 }

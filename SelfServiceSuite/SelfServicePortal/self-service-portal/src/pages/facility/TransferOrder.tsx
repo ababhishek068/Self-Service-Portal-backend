@@ -1,4 +1,5 @@
 import { formatISO } from 'date-fns'
+import { useSearchParams } from 'react-router-dom'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { transferOrderHeaderSchema, transferOrderLineSchema } from '@/schemas/requestSchemas'
@@ -8,6 +9,7 @@ const today = formatISO(new Date(), { representation: 'date' })
 const module = { module: 'transferOrder', entity: 'selfServiceTransferOrders' } as const
 
 export function TransferOrder() {
+  const [searchParams] = useSearchParams()
   const locations = useLookupOptions('regular-locations')
   const inTransitLocations = useLookupOptions('in-transit-locations')
   const shippingAgents = useLookupOptions('shipping-agents')
@@ -22,6 +24,7 @@ export function TransferOrder() {
       queryKey={['facility', 'transfer-order']}
       listRequests={() => listModuleRequests(module)}
       newButtonLabel="New Request"
+      initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={transferOrderHeaderSchema}
       headerDefaults={{
         from: '',
@@ -44,6 +47,16 @@ export function TransferOrder() {
         { name: 'truckNo', label: 'Truck No.', type: 'select', options: shippingAgents.options, valuePaths: ['ShippingAgentCode', 'Shipping_Agent_Code'] },
         { name: 'postingDate', label: 'Posting Date', type: 'date', valuePaths: ['PostingDate', 'Posting_Date'] },
         { name: 'driverName', label: 'Driver Name', type: 'text', valuePaths: ['TransfertoAddress', 'TransferToAddress'] },
+      ]}
+      detailFields={[
+        { label: 'Transfer No.', paths: ['request.requestNo'] },
+        { label: 'From', paths: ['payload.TransferfromCode', 'payload.TransferFromCode'] },
+        { label: 'To', paths: ['payload.TransfertoCode', 'payload.TransferToCode'] },
+        { label: 'In Transit Code', paths: ['payload.InTransitCode', 'payload.In_Transit_Code'] },
+        { label: 'Posting Date', paths: ['payload.PostingDate', 'payload.Posting_Date'], format: 'date' },
+        { label: 'Truck No.', paths: ['payload.ShippingAgentCode', 'payload.Shipping_Agent_Code'] },
+        { label: 'Driver Name', paths: ['payload.TransfertoAddress', 'payload.TransferToAddress'] },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
         label: 'Requisition Lines',
@@ -68,6 +81,11 @@ export function TransferOrder() {
         ],
         emptyText: '*** No Transfer Lines Found ***',
       }}
+      businessRules={[
+        'Locations and items must exist in Business Central.',
+        'Create the header first, then add transfer lines.',
+        'Request approval once all lines are captured.',
+      ]}
     />
   )
 }

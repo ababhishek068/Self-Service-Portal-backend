@@ -1,5 +1,4 @@
 import { Check, FileCheck2, ListPlus, Send } from 'lucide-react'
-import { isMutableRequestStatus } from '@/utils/validators'
 
 interface RequestProgressProps {
   status: string
@@ -8,7 +7,7 @@ interface RequestProgressProps {
 }
 
 export function RequestProgress({ status, hasLines = false, requiresLines = false }: RequestProgressProps) {
-  const approvalStarted = !isMutableRequestStatus(status)
+  const approvalStarted = status !== 'Draft'
   const detailReady = !requiresLines || hasLines
   const steps = [
     { label: 'Draft created', note: 'Header saved in Business Central', done: true, active: false, icon: FileCheck2 },

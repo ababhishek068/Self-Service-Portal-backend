@@ -1,4 +1,5 @@
 import { formatISO } from 'date-fns'
+import { useSearchParams } from 'react-router-dom'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { storeLineTypeOptions } from '@/data/essOptions'
@@ -9,6 +10,7 @@ const today = formatISO(new Date(), { representation: 'date' })
 const module = { module: 'storeRequisition', entity: 'selfServiceStoreRequisitions' } as const
 
 export function StoreRequisition() {
+  const [searchParams] = useSearchParams()
   const locations = useLookupOptions('locations')
   const items = useLookupOptions('items')
   const assets = useLookupOptions('assets')
@@ -22,6 +24,7 @@ export function StoreRequisition() {
       queryKey={['facility', 'store-requisition']}
       listRequests={() => listModuleRequests(module)}
       newButtonLabel="New Request"
+      initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={storeHeaderSchema}
       headerDefaults={{ dateRequired: today, description: '' }}
       buildHeaderPayload={(values) => ({
@@ -33,6 +36,13 @@ export function StoreRequisition() {
       headerFields={[
         { name: 'dateRequired', label: 'Date Required', type: 'date', valuePaths: ['RequiredDate', 'Required_Date', 'RequestDate'] },
         { name: 'description', label: 'Request Description', type: 'textarea', valuePaths: ['RequestDescription', 'Request_Description'] },
+      ]}
+      detailFields={[
+        { label: 'Requisition No.', paths: ['request.requestNo'] },
+        { label: 'Date Required', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
+        { label: 'Description', paths: ['payload.RequestDescription', 'payload.Request_Description'] },
+        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
         label: 'Requisition Lines',
@@ -71,7 +81,13 @@ export function StoreRequisition() {
           { key: 'reason', header: 'Reason' },
         ],
         emptyText: '*** No Store Lines Found ***',
+        canEdit: false,
       }}
+      businessRules={[
+        'Create the header first, then add item or asset lines.',
+        'Each line specifies type, issuing store, item number and quantity.',
+        'Attach supporting documents, then request approval.',
+      ]}
     />
   )
 }

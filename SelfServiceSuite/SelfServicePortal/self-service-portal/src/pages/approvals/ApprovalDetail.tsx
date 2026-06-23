@@ -17,49 +17,6 @@ import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import { isMakerAllowedToApprove } from '@/utils/validators'
 import { downloadRequestAttachment } from '@/api/endpoints/requestEndpoint'
 
-function payloadText(payload: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = payload[key]
-    if (value !== undefined && value !== null && String(value).trim() !== '') return String(value)
-  }
-  return ''
-}
-
-function DetailField({ label, value }: { label: string; value: string }) {
-  if (!value) return null
-  return (
-    <div className="rounded-md bg-slate-50 p-3">
-      <p className="text-xs uppercase text-slate-500">{label}</p>
-      <p className="font-medium text-slate-900">{value}</p>
-    </div>
-  )
-}
-
-function LeaveApprovalHeader({ payload }: { payload: Record<string, unknown> }) {
-  const daysApplied = payloadText(payload, ['DaysApplied', 'Days_Applied'])
-  return (
-    <div className="space-y-4 border-t border-slate-200 pt-4">
-      <p className="text-sm font-semibold text-slate-900">Leave header</p>
-      <div className="grid gap-4 md:grid-cols-3">
-        <DetailField label="Leave No" value={payloadText(payload, ['ApplicationCode', 'Application_Code'])} />
-        <DetailField label="Employee No" value={payloadText(payload, ['EmployeeNo', 'Employee_No'])} />
-        <DetailField label="Leave Type" value={payloadText(payload, ['LeaveType', 'Leave_Type'])} />
-        <DetailField label="Applied Duration" value={daysApplied ? `${daysApplied} Days` : ''} />
-        <DetailField label="Starting Date" value={payloadText(payload, ['StartDate', 'Start_Date'])} />
-        <DetailField label="End Date" value={payloadText(payload, ['EndDate', 'End_Date'])} />
-        <DetailField label="Return Date" value={payloadText(payload, ['ReturnDate', 'Return_Date'])} />
-        <DetailField label="Application Date" value={payloadText(payload, ['ApplicationDate', 'Application_Date'])} />
-        <DetailField label="Reliever No" value={payloadText(payload, ['Reliever', 'RelieverNo', 'Reliever_No'])} />
-        <DetailField label="Reliever Name" value={payloadText(payload, ['RelieverName', 'Reliever_Name'])} />
-        <DetailField label="Leave Purpose" value={payloadText(payload, ['reason', 'Reasonforleave', 'Reason_for_leave', 'Reason', 'Purpose'])} />
-        <DetailField label="Date Sent for Approval" value={payloadText(payload, ['DateTimeSentforApproval', 'Date_Time_Sent_for_Approval'])} />
-        <DetailField label="Due Date" value={payloadText(payload, ['DueDate', 'dueDate', 'Due_Date'])} />
-        <DetailField label="Last Modified Date" value={payloadText(payload, ['LastDateTimeModified', 'Last_Date_Time_Modified'])} />
-        <DetailField label="Last User To Modify" value={payloadText(payload, ['LastModifiedByUserID', 'Last_Modified_By_User_ID'])} />
-      </div>
-    </div>
-  )
-}
 const hiddenLineFields = new Set([
   'id',
   'recid',
@@ -199,10 +156,6 @@ export function ApprovalDetail() {
                   <p className="font-medium text-slate-900">{formatDateTime(request.submittedAt)}</p>
                 </div>
               </div>
-
-              {request.requestType === 'leave' ? (
-                <LeaveApprovalHeader payload={payload as Record<string, unknown>} />
-              ) : null}
 
               {applicationReason ? (
                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3">

@@ -56,8 +56,6 @@ export interface Employee extends BusinessCentralEntity {
   canApprove?: boolean
 }
 
-export type AttachmentStatus = 'reading' | 'ready' | 'uploading' | 'uploaded' | 'error'
-
 export interface Attachment {
   id: string
   fileName: string
@@ -67,8 +65,6 @@ export interface Attachment {
   uploadedAt: string
   description?: string
   contentBase64?: string
-  status?: AttachmentStatus
-  errorMessage?: string
 }
 
 export interface ApprovalStep {

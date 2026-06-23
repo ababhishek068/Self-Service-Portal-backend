@@ -22,29 +22,19 @@ import { Select, type SelectOption } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { DataTable, type DataTableColumn } from './DataTable'
-import { FileUpload, UploadProgressBar } from './FileUpload'
+import { FileUpload } from './FileUpload'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
 import {
   cancelModuleRequest,
-  deleteRequestAttachment,
   downloadRequestAttachment,
   getModuleRequest,
   submitModuleRequest,
   updateRequestHeader,
-  uploadRequestAttachment,
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import {
-  canCancelRequestStatus,
-  canUploadAttachmentStatus,
-  effectiveRequestStatus,
-  isMutableRequestStatus,
-  moduleSupportsAttachments,
-  showsApprovalHistory,
-} from '@/utils/validators'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 type BasicFieldType = 'text' | 'number' | 'date' | 'textarea' | 'select' | 'checkbox' | 'files'
@@ -64,8 +54,6 @@ export interface FieldConfig {
   valuePaths?: string[]
   /** Maps Business Central option captions back to the form's option values. */
   valueMap?: Record<string, string>
-  /** Hide the field unless this returns true (ESS conditional forms). */
-  visibleWhen?: (values: FieldValues) => boolean
 }
 
 export interface LineItemsConfig {
@@ -93,6 +81,7 @@ interface RequestFormPageProps {
   queryKey: readonly unknown[]
   listRequests: () => Promise<PortalRequest[]>
   createRequest: (values: Record<string, unknown>) => Promise<unknown>
+  businessRules?: string[]
   source?: string
   listOnly?: boolean
   newButtonLabel?: string
@@ -103,6 +92,11 @@ interface RequestFormPageProps {
   detailLineColumns?: DetailFieldConfig[]
   detailLineLabel?: string
   hideDetailAttachments?: boolean
+  listActions?: ReactNode
+  listColumns?: DataTableColumn<PortalRequest>[]
+  emptyListText?: string
+  cancelStatuses?: PortalRequest['status'][]
+  refetchOnMount?: boolean | 'always'
 }
 
 function firstPathValue(source: unknown, paths: string[]) {
@@ -119,9 +113,8 @@ function renderDetailValue(value: unknown, format: DetailFieldConfig['format'] =
   if (format === 'currency') return formatCurrency(Number(value ?? 0))
   if (format === 'percentage') return `${Number(value ?? 0)}%`
   if (format === 'returned') {
-    if (value === true || value === 'true' || value === 1 || value === '1') return 'Returned'
-    if (value === false || value === 'false' || value === 0 || value === '0') return 'Not Returned'
-    return String(value ?? '-')
+    const returned = value === true || ['true', 'yes', '1'].includes(String(value ?? '').toLowerCase())
+    return returned ? 'Returned' : 'Not Returned'
   }
   return String(value ?? '-')
 }
@@ -212,6 +205,7 @@ export function RequestFormPage({
   queryKey,
   listRequests,
   createRequest,
+  businessRules,
   listOnly = false,
   newButtonLabel = 'New Request',
   moduleConfig,
@@ -220,6 +214,11 @@ export function RequestFormPage({
   detailLineColumns,
   detailLineLabel = 'Lines',
   hideDetailAttachments = false,
+  listActions,
+  listColumns,
+  emptyListText,
+  cancelStatuses = ['Pending Approval'],
+  refetchOnMount,
 }: RequestFormPageProps) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -228,14 +227,7 @@ export function RequestFormPage({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null)
   const [actionId, setActionId] = useState<string | null>(null)
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
-  const [uploadProgress, setUploadProgress] = useState<{
-    fileName: string
-    percent: number
-    index: number
-    total: number
-  } | null>(null)
-  const requestsQuery = useQuery({ queryKey, queryFn: listRequests })
+  const requestsQuery = useQuery({ queryKey, queryFn: listRequests, refetchOnMount })
   const detailQuery = useQuery({
     queryKey: [...queryKey, 'detail', selectedId],
     queryFn: () => getModuleRequest(moduleConfig!, selectedId!),
@@ -301,83 +293,6 @@ export function RequestFormPage({
       setActionId(null)
     }
   }
-
-  const uploadAttachments = async (requestId: string) => {
-    if (pendingAttachments.length === 0) return
-    const uploadable = pendingAttachments.filter(
-      (file) => file.status === 'ready' || (!file.status && file.contentBase64),
-    )
-    if (uploadable.length === 0) {
-      toast.warning('Wait for the selected files to finish loading before uploading.', 'Files not ready')
-      return
-    }
-    setActionId('upload')
-    try {
-      for (let index = 0; index < uploadable.length; index += 1) {
-        const file = uploadable[index]!
-        setUploadProgress({
-          fileName: file.fileName,
-          percent: 0,
-          index: index + 1,
-          total: uploadable.length,
-        })
-        await uploadRequestAttachment(
-          requestId,
-          {
-            fileName: file.fileName,
-            fileType: file.fileType,
-            size: file.size,
-            contentBase64: file.contentBase64,
-            description: file.description || file.fileName,
-          },
-          {
-            onProgress: (percent) => {
-              setUploadProgress({
-                fileName: file.fileName,
-                percent,
-                index: index + 1,
-                total: uploadable.length,
-              })
-            },
-          },
-        )
-      }
-      setPendingAttachments([])
-      setUploadProgress(null)
-      await detailQuery.refetch()
-      toast.success(
-        uploadable.length === 1
-          ? 'Attachment uploaded successfully.'
-          : `${uploadable.length} attachments uploaded successfully.`,
-        'Upload complete',
-      )
-    } catch (err: unknown) {
-      setUploadProgress(null)
-      toast.error(err instanceof Error ? err.message : 'Attachment upload failed', 'Upload failed')
-    } finally {
-      setActionId(null)
-    }
-  }
-
-  const removeAttachment = async (requestId: string, attachmentId: string) => {
-    const yes = await confirm({
-      title: 'Delete attachment',
-      message: 'Delete this attachment from the request?',
-      confirmLabel: 'Delete',
-      tone: 'danger',
-    })
-    if (!yes) return
-    setActionId(attachmentId)
-    try {
-      await deleteRequestAttachment(requestId, attachmentId)
-      await detailQuery.refetch()
-      toast.success('Attachment deleted')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Attachment deletion failed', 'Delete failed')
-    } finally {
-      setActionId(null)
-    }
-  }
   const form = useForm<FieldValues>({
     resolver: zodResolver(schema) as Resolver<FieldValues>,
     defaultValues,
@@ -420,9 +335,6 @@ export function RequestFormPage({
     })()
 
   const renderField = (field: FieldConfig) => {
-    if (field.visibleWhen && !field.visibleWhen(watchedValues as FieldValues)) {
-      return <div key={field.name} className="hidden" aria-hidden="true" />
-    }
     const error = errorFor(field.name)
     const inputId = field.name.replaceAll('.', '-')
     const options = field.optionsByField
@@ -473,12 +385,15 @@ export function RequestFormPage({
     )
   }
 
-  const columns: DataTableColumn<PortalRequest>[] = [
+  const defaultColumns: DataTableColumn<PortalRequest>[] = [
     { id: 'requestNo', header: 'No.', cell: (row) => row.requestNo },
     { id: 'date', header: 'Date', cell: (row) => formatDate(row.createdAt) },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
     { id: 'title', header: 'Description', cell: (row) => row.title },
     { id: 'amount', header: 'Amount', cell: (row) => formatCurrency(row.amount) },
+  ]
+  const columns: DataTableColumn<PortalRequest>[] = [
+    ...(listColumns ?? defaultColumns),
     ...(moduleConfig
       ? [
           {
@@ -490,15 +405,12 @@ export function RequestFormPage({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setPendingAttachments([])
-                    setSelectedId(row.id)
-                  }}
+                  onClick={() => setSelectedId(row.id)}
                 >
                   <Eye className="h-4 w-4" />
                   View
                 </Button>
-                {canCancelRequestStatus(row.status) ? (
+                {cancelStatuses.includes(row.status) ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -518,9 +430,6 @@ export function RequestFormPage({
   ]
 
   const selected = detailQuery.data
-  const selectedStatus = selected ? effectiveRequestStatus(selected) : ''
-  const selectedEditable = selected ? isMutableRequestStatus(selectedStatus) : false
-  const attachmentsEnabled = moduleConfig ? moduleSupportsAttachments(moduleConfig.module) : false
   if (selectedId && moduleConfig) {
     const payload = selected?.payload ?? {}
     const lines = Array.isArray(payload.lines)
@@ -539,16 +448,13 @@ export function RequestFormPage({
         <PortalFormCard title={`${title} Details`}>
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
-              <Button type="button" variant="outline" onClick={() => {
-                setSelectedId(null)
-                setPendingAttachments([])
-              }}>
+              <Button type="button" variant="outline" onClick={() => setSelectedId(null)}>
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Button>
               {selected ? (
                 <div className="flex flex-wrap gap-2">
-                  {selectedEditable && !listOnly && fields.length > 0 ? (
+                  {selected.status === 'Draft' && !listOnly && fields.length > 0 ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -564,7 +470,6 @@ export function RequestFormPage({
                         form.reset(nextValues)
                         setEditingRequestId(selected.id)
                         setSelectedId(null)
-                        setPendingAttachments([])
                         setShowForm(true)
                       }}
                     >
@@ -572,7 +477,7 @@ export function RequestFormPage({
                       Edit
                     </Button>
                   ) : null}
-                  {selectedEditable ? (
+                  {selected.status === 'Draft' ? (
                     <Button
                       type="button"
                       disabled={actionId === selected.id}
@@ -582,7 +487,7 @@ export function RequestFormPage({
                       Request Approval
                     </Button>
                   ) : null}
-                  {canCancelRequestStatus(selectedStatus) ? (
+                  {cancelStatuses.includes(selected.status) ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -604,7 +509,7 @@ export function RequestFormPage({
             ) : null}
             {selected ? (
               <>
-                <RequestProgress status={selectedStatus} hasLines={lines.length > 0} requiresLines={false} />
+                <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {detailFields ? detailFields.map((field) => (
@@ -664,86 +569,36 @@ export function RequestFormPage({
                   </section>
                 ) : null}
 
-                {!hideDetailAttachments && attachmentsEnabled ? (
-                  <section className="border-t border-slate-200 pt-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">
-                      Attachments
-                      {selected.attachments.length ? ` (${selected.attachments.length})` : ''}
-                    </h3>
-                    {canUploadAttachmentStatus(selectedStatus) ? (
-                      <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
-                        <FileUpload files={pendingAttachments} onChange={setPendingAttachments} />
-                        {uploadProgress ? (
-                          <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
-                            <p className="mb-2 text-xs font-medium text-blue-900">
-                              Uploading file {uploadProgress.index} of {uploadProgress.total}
-                            </p>
-                            <UploadProgressBar
-                              label={uploadProgress.fileName}
-                              percent={uploadProgress.percent}
-                              tone="blue"
-                            />
+                {!hideDetailAttachments ? <section className="border-t border-slate-200 pt-4">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
+                  {selected.attachments.length ? (
+                    <div className="divide-y divide-slate-100 border-y border-slate-200">
+                      {selected.attachments.map((attachment) => (
+                        <div key={attachment.id} className="flex items-center justify-between gap-3 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{attachment.fileName}</p>
+                            <p className="text-xs text-slate-500">{attachment.description || attachment.fileType}</p>
                           </div>
-                        ) : null}
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={actionId === 'upload' || pendingAttachments.length === 0}
-                          onClick={() => void uploadAttachments(selected.id)}
-                        >
-                          {actionId === 'upload' ? 'Uploading…' : 'Upload attachments'}
-                        </Button>
-                      </div>
-                    ) : null}
-                    {selected.attachments.length ? (
-                      <div className="divide-y divide-slate-100 border-y border-slate-200">
-                        {selected.attachments.map((attachment) => (
-                          <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">{attachment.fileName}</p>
-                              <p className="text-xs text-slate-500">{attachment.description || attachment.fileType}</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                disabled={actionId === attachment.id}
-                                onClick={() => void handleDownload(selected.id, attachment)}
-                              >
-                                <Download className="h-4 w-4" />
-                                Download
-                              </Button>
-                              {canUploadAttachmentStatus(selectedStatus) ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-600"
-                                  disabled={actionId === attachment.id}
-                                  onClick={() => void removeAttachment(selected.id, attachment.id)}
-                                >
-                                  Delete
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm italic text-slate-500">
-                        No attachments uploaded yet.
-                      </p>
-                    )}
-                  </section>
-                ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={actionId === attachment.id}
+                            onClick={() => void handleDownload(selected.id, attachment)}
+                          >
+                            <Download className="h-4 w-4" />
+                            Download
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-sm italic text-slate-500">No attachments.</p>}
+                </section> : null}
 
-                {showsApprovalHistory(selectedStatus) ? (
-                  <section className="border-t border-slate-200 pt-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={selected.approvalSteps} />
-                  </section>
-                ) : null}
+                <section className="border-t border-slate-200 pt-4">
+                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                  <ApprovalHistory steps={selected.approvalSteps} />
+                </section>
               </>
             ) : null}
           </div>
@@ -767,6 +622,16 @@ export function RequestFormPage({
               )}
             </div>
             {description ? <p className="text-sm text-slate-600">{description}</p> : null}
+            {businessRules?.length ? (
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                <p className="font-semibold">Business rules</p>
+                <ul className="mt-1 list-inside list-disc space-y-0.5 text-blue-800">
+                  {businessRules.map((rule) => (
+                    <li key={rule}>{rule}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {mutation.error ? (
               <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4" />
@@ -842,11 +707,11 @@ export function RequestFormPage({
   return (
     <PageWrapper
       title={title}
-      actions={listOnly ? undefined : <PortalNewButton label={newButtonLabel} onClick={() => {
-        setEditingRequestId(null)
-        form.reset(defaultValues)
-        setShowForm(true)
-      }} />}
+      actions={listActions ?? (listOnly ? undefined : <PortalNewButton label={newButtonLabel} onClick={() => {
+          setEditingRequestId(null)
+          form.reset(defaultValues)
+          setShowForm(true)
+        }} />)}
     >
       {listContent}
       {requestsQuery.isLoading ? (
@@ -856,7 +721,13 @@ export function RequestFormPage({
           Could not load requests. Check the selected backend and apply pending database migrations.
         </div>
       ) : (
-        <DataTable rows={requestsQuery.data ?? []} columns={columns} getRowId={(row) => row.id} compact />
+        <DataTable
+          rows={requestsQuery.data ?? []}
+          columns={columns}
+          getRowId={(row) => row.id}
+          compact
+          emptyTitle={emptyListText}
+        />
       )}
     </PageWrapper>
   )

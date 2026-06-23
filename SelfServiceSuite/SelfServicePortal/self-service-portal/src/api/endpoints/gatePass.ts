@@ -5,20 +5,28 @@ const gatePassConfig = { module: 'gatePass', entity: 'selfServiceGatePasses' } a
 
 export type GatePassSource = 'storeIssue' | 'transferOrder' | 'assetTransfer'
 
-export const gatePassSources: Array<{ value: GatePassSource; label: string; description: string }> = [
+export const gatePassSources: Array<{
+  value: GatePassSource
+  label: string
+  singularLabel: string
+  description: string
+}> = [
   {
     value: 'storeIssue',
-    label: 'Gate Pass Store Requisitions',
+    label: 'Store Requisitions',
+    singularLabel: 'Store Requisition',
     description: 'Gate passes generated from Store Issue documents.',
   },
   {
     value: 'transferOrder',
-    label: 'Gate Pass Transfer Orders',
+    label: 'Transfer Orders',
+    singularLabel: 'Transfer Order',
     description: 'Gate passes generated from posted Transfer Orders.',
   },
   {
     value: 'assetTransfer',
-    label: 'Gate Pass Asset Transfers',
+    label: 'Asset Transfers',
+    singularLabel: 'Asset Transfer',
     description: 'Gate passes generated from Asset Transfer documents.',
   },
 ]

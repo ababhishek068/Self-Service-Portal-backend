@@ -17,6 +17,11 @@ export function SalaryAdvance() {
         { name: 'purpose', label: 'Purpose', type: 'textarea', placeholder: 'State the purpose of the advance', valuePaths: ['Purpose'] },
         { name: 'percentageSalary', label: 'Percentage of salary', type: 'number', valuePaths: ['PercentageofSalary', 'lines.0.PercentageofSalary', 'lines.0.PercentageOfSalary'] },
       ]}
+      businessRules={[
+        'The percentage cannot exceed 100 percent of salary.',
+        'Advance routes through payroll approval workflow.',
+        'Repayment terms are calculated in Business Central.',
+      ]}
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
         { label: 'Requested Date', paths: ['payload.Date', 'payload.RequestedDate', 'request.createdAt'], format: 'date' },

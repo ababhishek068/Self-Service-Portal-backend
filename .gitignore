@@ -4,3 +4,6 @@ public
 .env
 *.log
 .DS_Store
+*.zip
+**/src-legacy-flat/
+

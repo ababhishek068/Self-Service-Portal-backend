@@ -7,7 +7,6 @@ export interface LeaveType {
   description: string
   days: number
   isHourly: boolean
-  isAnnual: boolean
 }
 
 export interface LeaveBalance {
@@ -24,14 +23,13 @@ export async function getLeaveBalance(typeCode: string): Promise<LeaveBalance> {
 export async function fetchLeaveTypes(): Promise<LeaveType[]> {
   requireAuthApiUrl()
   const { rows } = await authGet<{
-    rows: Array<{ Code: string; Description: string; Days: number; Hourly?: boolean; Annual?: boolean }>
+    rows: Array<{ Code: string; Description: string; Days: number; Hourly?: boolean }>
   }>('/api/leave/types')
   return rows.map((row) => ({
     code: row.Code,
     description: row.Description,
     days: row.Days,
     isHourly: Boolean(row.Hourly),
-    isAnnual: Boolean(row.Annual),
   }))
 }
 
@@ -50,7 +48,6 @@ export interface LeaveDates {
   endDate: string
   returnDate: string
   isWeekend: boolean
-  message?: string
 }
 
 export async function getLeaveDates(

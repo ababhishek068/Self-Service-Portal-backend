@@ -1,6 +1,27 @@
 SELF SERVICE SUITE - FUNCTIONAL AND UX FIXES
 =============================================
 
+2026-06-23 STATUS-REPORT COMPLETION UPDATE
+------------------------------------------
+- fixed cancellation visibility so only requests actually pending approval can be cancelled
+- kept draft requests editable and approval-ready without exposing unsupported line-edit actions
+- corrected Purchase line columns and made location optional where the request type does not need it
+- added Petty Cash transaction names and corrected request-line presentation
+- blocked backdated Store requisitions for all store line types
+- added concise, module-specific detail views for Finance and Facility requests
+- added Maintenance Request to Facilities and enabled Vehicle Transfer navigation
+- added fixed-asset and vehicle-service maintenance request types, item/quantity fields,
+  odometer validation, and the 5,000 km vehicle-service rule
+- separated Fuel and Maintenance records and approval routing on their shared BC table
+- expanded dashboard recent activity to include all active request modules
+- preserved the leave Boolean fix, decimal half-day calculation, approval sequence ordering,
+  pending-approval detail loading, forgot-password flow, and Gate Pass source separation
+
+Business Central setup still controls approval execution and ERP-only outputs. If a module
+returns "workflow is not configured", the matching BC workflow must be enabled. ERP-generated
+Purchase/Store reports, payroll approval roles, Work Ticket booking creation, and procurement
+budget submission require published BC codeunit operations and cannot be created by the portal.
+
 2026-06-21 ESS WORKFLOW PARITY UPDATE
 -------------------------------------
 - restored Edit and Request Approval actions on open/draft requests
@@ -12,6 +33,9 @@ SELF SERVICE SUITE - FUNCTIONAL AND UX FIXES
 - ordered approval history by Business Central sequence number
 - restored Imprest Surrender source details after selecting a posted imprest
 - removed raw Business Central/system fields from request and approval detail screens
+- replaced staff self-registration with the ESS email-token forgot-password flow
+- restored Gate Pass New Request entry points for Store, Transfer Order, and Asset Transfer
+- refreshed and separated Gate Pass records by the Business Central Linkto source after source creation
 
 Do not merge this package into the existing SelfServiceSuite directory.
 

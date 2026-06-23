@@ -83,23 +83,9 @@ export async function postStoreRequestReceipt(id: string) {
   return authPost<PortalRequest>(`/api/requests/${encodeURIComponent(id)}/post-receipt`, {})
 }
 
-export async function uploadRequestAttachment(
-  id: string,
-  attachment: Record<string, unknown>,
-  options?: { onProgress?: (percent: number) => void },
-) {
+export async function uploadRequestAttachment(id: string, attachment: Record<string, unknown>) {
   requireAuthApiUrl()
-  const response = await authHttp.post<PortalRequest>(
-    `/api/requests/${encodeURIComponent(id)}/attachments`,
-    attachment,
-    {
-      onUploadProgress: (event) => {
-        if (!options?.onProgress || !event.total) return
-        options.onProgress(Math.min(100, Math.round((event.loaded * 100) / event.total)))
-      },
-    },
-  )
-  return response.data
+  return authPost<PortalRequest>(`/api/requests/${encodeURIComponent(id)}/attachments`, attachment)
 }
 
 export async function deleteRequestAttachment(id: string, attachmentId: string) {

@@ -13,8 +13,7 @@ export const formatNumber = (value: number) =>
 export const formatDate = (value?: string) => {
   if (!value) return '-'
   const parsed = parseISO(value)
-  if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() < 1900) return '-'
-  return format(parsed, 'dd MMM yyyy')
+  return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'dd MMM yyyy')
 }
 
 export const formatDateTime = (value?: string) => {

@@ -11,7 +11,15 @@ export const listTransferOrders = () => listModuleRequests(transferConfig)
 export const createMaintenanceRequest = (payload: MaintenanceRequestForm) =>
   createModuleRequest(maintenanceConfig, {
     ...payload,
-    title: `${payload.priority} maintenance ${payload.faTagNumber}`,
+    vehicleNo: payload.requestType === '2' ? payload.vehicleNo : payload.faTagNumber,
+    purpose: [
+      payload.issueDescription,
+      `Item: ${payload.item}`,
+      `Priority: ${payload.priority}`,
+      `Location: ${payload.location}`,
+      payload.requestType === '2' ? `Odometer: ${payload.odometer} km` : '',
+    ].filter(Boolean).join(' | '),
+    title: `${payload.priority} maintenance ${payload.vehicleNo || payload.faTagNumber || payload.item}`,
     amount: 0,
   })
 

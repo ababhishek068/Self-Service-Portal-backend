@@ -22,7 +22,7 @@ export function PettyCashReplenishment() {
   return (
     <RequestFormPage
       title="Petty Cash Replenishment"
-      description="Request replenishment of the departmental petty cash float. Enter paying and receiving bank accounts with matching amounts, then submit for approval."
+      description="Request replenishment of the departmental petty cash float."
       schema={pettyCashReplenishmentSchema}
       queryKey={['finance', 'petty-cash-replenishment']}
       listRequests={listPettyCashReplenishments}
@@ -51,6 +51,11 @@ export function PettyCashReplenishment() {
         { name: 'receivingAmount', label: 'Receiving amount', type: 'number', valuePaths: ['ReceivingAmount', 'Receiving_Amount'] },
         { name: 'remarks', label: 'Remarks', type: 'textarea', valuePaths: ['Remarks'] },
         { name: 'attachments', label: 'Supporting documents', type: 'files' },
+      ]}
+      businessRules={[
+        'This follows the ESS Inter-Bank Transfer workflow.',
+        'Source and receiving account amounts are submitted to Business Central.',
+        'Approval workflow is controlled by ERP.',
       ]}
     />
   )

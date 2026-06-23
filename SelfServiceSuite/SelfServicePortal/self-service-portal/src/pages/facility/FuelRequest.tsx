@@ -43,6 +43,21 @@ export function FuelRequest() {
         { name: 'price', label: 'Fuel Price per Litre', type: 'number', valuePaths: ['Price'] },
         { name: 'purpose', label: 'Purpose', type: 'textarea', valuePaths: ['Purpose'] },
       ]}
+      detailFields={[
+        { label: 'Requisition No.', paths: ['request.requestNo'] },
+        { label: 'Request Type', paths: ['payload.RequestType', 'payload.Request_Type'] },
+        { label: 'Fuel Card No.', paths: ['payload.CardNo', 'payload.Card_No'] },
+        { label: 'Vehicle No.', paths: ['payload.VehicleNo', 'payload.Vehicle_No'] },
+        { label: 'Fuel Dealer', paths: ['payload.FuelDealer', 'payload.Fuel_Dealer'] },
+        { label: 'Quantity (Litres)', paths: ['payload.Quantity'] },
+        { label: 'Price per Litre', paths: ['payload.Price'], format: 'currency' },
+        { label: 'Purpose', paths: ['payload.Purpose'] },
+        { label: 'Status', paths: ['request.status'], format: 'status' },
+      ]}
+      businessRules={[
+        'Vehicle fuel requires a vehicle registration number; a recharge card requires a card number.',
+        'Capture the dealer, quantity and price per litre, then request approval.',
+      ]}
     />
   )
 }
