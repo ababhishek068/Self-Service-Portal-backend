@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { handleUnderConstructionClick } from '@/hooks/useNavigation'
 import { gatePassSources, listGatePasses, type GatePassSource } from '@/api/endpoints/gatePass'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
@@ -8,10 +9,9 @@ import { gatePassSchema } from '@/schemas/requestSchemas'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatDate } from '@/utils/formatters'
 
-const creationRoutes: Record<GatePassSource, string> = {
+const creationRoutes: Record<Exclude<GatePassSource, 'assetTransfer'>, string> = {
   storeIssue: '/facility/store-requisition?new=1&fromGatePass=storeIssue',
   transferOrder: '/facility/transfer-order?new=1&fromGatePass=transferOrder',
-  assetTransfer: '/facility/vehicle-transfer?new=1&fromGatePass=assetTransfer',
 }
 
 function payloadValue(row: PortalRequest, keys: string[], fallback = '-') {
@@ -80,7 +80,13 @@ export function GatePass({ source }: { source: GatePassSource }) {
       listActions={(
         <PortalNewButton
           label={`New ${activeSource.singularLabel}`}
-          onClick={() => navigate(creationRoutes[source])}
+          onClick={() => {
+            if (source === 'assetTransfer') {
+              handleUnderConstructionClick({ preventDefault: () => {} })
+              return
+            }
+            navigate(creationRoutes[source])
+          }}
         />
       )}
       listColumns={listColumns}
@@ -105,10 +111,6 @@ export function GatePass({ source }: { source: GatePassSource }) {
       detailLineLabel="Gate Pass Lines"
       detailLineColumns={lineColumns}
       hideDetailAttachments
-      businessRules={[
-        `Create a ${activeSource.singularLabel.toLowerCase()} source request; Business Central generates the Gate Pass in this section.`,
-        'Open gate passes can be sent for approval from the detail screen.',
-      ]}
     />
   )
 }

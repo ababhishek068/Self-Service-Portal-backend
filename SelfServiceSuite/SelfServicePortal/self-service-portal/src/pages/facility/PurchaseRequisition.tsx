@@ -81,11 +81,6 @@ export function PurchaseRequisition() {
         emptyText: '*** No Purchase Lines Found ***',
         canEdit: false,
       }}
-      businessRules={[
-        'Create the header with needed-by date and description.',
-        'Each line requires a type, number, quantity and purpose; location is optional.',
-        'Attach specifications, then request approval.',
-      ]}
     />
   )
 }

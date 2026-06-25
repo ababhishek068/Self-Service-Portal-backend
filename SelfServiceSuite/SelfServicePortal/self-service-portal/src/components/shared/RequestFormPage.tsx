@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowLeft, Download, Eye, Pencil, Plus, Save, Send, Trash2 } from 'lucide-react'
-import { useState, type ReactElement, type ReactNode } from 'react'
+import { AlertCircle, ArrowLeft, Eye, Pencil, Plus, Save, Send, Trash2 } from 'lucide-react'
+import { useState, type ReactElement, type ReactNode, useEffect } from 'react'
 import {
   Controller,
   type FieldValues,
@@ -23,18 +23,25 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { DataTable, type DataTableColumn } from './DataTable'
 import { FileUpload } from './FileUpload'
+import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
 import {
   cancelModuleRequest,
-  downloadRequestAttachment,
   getModuleRequest,
   submitModuleRequest,
   updateRequestHeader,
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
+import {
+  canDeleteRequestItems,
+  canRequestApproval,
+  canUploadRequestAttachments,
+  isEditableRequestStatus,
+  PORTAL_ATTACHMENT_MODULES,
+} from '@/utils/requestStatus'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 type BasicFieldType = 'text' | 'number' | 'date' | 'textarea' | 'select' | 'checkbox' | 'files'
@@ -50,6 +57,9 @@ export interface FieldConfig {
     options: Record<string, SelectOption[]>
   }
   readOnly?: boolean
+  readOnlyWhen?: (values: FieldValues) => boolean
+  /** Hide the field unless this returns true (ESS conditional line fields). */
+  visibleWhen?: (values: FieldValues) => boolean
   /** Business Central payload paths used to prefill the edit form. */
   valuePaths?: string[]
   /** Maps Business Central option captions back to the form's option values. */
@@ -81,7 +91,6 @@ interface RequestFormPageProps {
   queryKey: readonly unknown[]
   listRequests: () => Promise<PortalRequest[]>
   createRequest: (values: Record<string, unknown>) => Promise<unknown>
-  businessRules?: string[]
   source?: string
   listOnly?: boolean
   newButtonLabel?: string
@@ -97,6 +106,7 @@ interface RequestFormPageProps {
   emptyListText?: string
   cancelStatuses?: PortalRequest['status'][]
   refetchOnMount?: boolean | 'always'
+  onValuesChange?: (values: FieldValues, form: UseFormReturn<FieldValues>) => void | Promise<void>
 }
 
 function firstPathValue(source: unknown, paths: string[]) {
@@ -205,7 +215,6 @@ export function RequestFormPage({
   queryKey,
   listRequests,
   createRequest,
-  businessRules,
   listOnly = false,
   newButtonLabel = 'New Request',
   moduleConfig,
@@ -219,6 +228,7 @@ export function RequestFormPage({
   emptyListText,
   cancelStatuses = ['Pending Approval'],
   refetchOnMount,
+  onValuesChange,
 }: RequestFormPageProps) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -283,22 +293,17 @@ export function RequestFormPage({
     }
   }
 
-  const handleDownload = async (requestId: string, attachment: Attachment) => {
-    setActionId(attachment.id)
-    try {
-      await downloadRequestAttachment(requestId, attachment)
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Attachment download failed', 'Download failed')
-    } finally {
-      setActionId(null)
-    }
-  }
   const form = useForm<FieldValues>({
     resolver: zodResolver(schema) as Resolver<FieldValues>,
     defaultValues,
     mode: 'onBlur',
   })
-  const watchedValues = useWatch({ control: form.control })
+  const watchedValues = useWatch({ control: form.control }) as FieldValues
+
+  useEffect(() => {
+    if (!onValuesChange) return
+    void onValuesChange(watchedValues, form)
+  }, [watchedValues, form, onValuesChange])
 
   const mutation = useMutation({
     mutationFn: (values: Record<string, unknown>) =>
@@ -335,24 +340,28 @@ export function RequestFormPage({
     })()
 
   const renderField = (field: FieldConfig) => {
+    if (field.visibleWhen && !field.visibleWhen(watchedValues)) {
+      return <></>
+    }
     const error = errorFor(field.name)
     const inputId = field.name.replaceAll('.', '-')
     const options = field.optionsByField
       ? field.optionsByField.options[String(getPathValue(watchedValues, field.optionsByField.field) ?? '')] ?? []
       : field.options ?? []
+    const readOnly = field.readOnly || Boolean(field.readOnlyWhen?.(watchedValues))
 
     return (
       <div key={field.name} className={field.type === 'checkbox' ? 'flex items-center gap-2' : 'space-y-1.5'}>
         {field.type !== 'checkbox' ? <Label htmlFor={inputId}>{field.label}</Label> : null}
         {field.type === 'textarea' ? (
-          <Textarea id={inputId} placeholder={field.placeholder} readOnly={field.readOnly} {...form.register(field.name)} />
+          <Textarea id={inputId} placeholder={field.placeholder} readOnly={readOnly} {...form.register(field.name)} />
         ) : null}
         {field.type === 'select' ? (
           <Select
             id={inputId}
             placeholder={field.placeholder ?? 'Select'}
             options={options}
-            disabled={field.readOnly}
+            disabled={readOnly}
             {...form.register(field.name)}
           />
         ) : null}
@@ -361,8 +370,21 @@ export function RequestFormPage({
             id={inputId}
             type={field.type}
             placeholder={field.placeholder}
-            readOnly={field.readOnly}
-            {...form.register(field.name)}
+            readOnly={readOnly}
+            min={field.type === 'number' ? 0 : undefined}
+            step={field.type === 'number' ? 'any' : undefined}
+            {...form.register(
+              field.name,
+              field.type === 'number'
+                ? {
+                    setValueAs: (value) => {
+                      if (value === '' || value === null || value === undefined) return ''
+                      const parsed = Number(value)
+                      return Number.isFinite(parsed) ? parsed : ''
+                    },
+                  }
+                : undefined,
+            )}
           />
         ) : null}
         {field.type === 'checkbox' ? (
@@ -443,6 +465,13 @@ export function RequestFormPage({
       }))
       .filter(({ value }) => value !== null && value !== undefined && value !== '')
     const detailSource = { request: selected, payload }
+    const supportsAttachments =
+      !hideDetailAttachments &&
+      Boolean(
+        moduleConfig &&
+          (PORTAL_ATTACHMENT_MODULES.has(moduleConfig.module) ||
+            fields.some((field) => field.type === 'files')),
+      )
     return (
       <PageWrapper title={`${title} Details`} showPageHeading={false}>
         <PortalFormCard title={`${title} Details`}>
@@ -454,7 +483,7 @@ export function RequestFormPage({
               </Button>
               {selected ? (
                 <div className="flex flex-wrap gap-2">
-                  {selected.status === 'Draft' && !listOnly && fields.length > 0 ? (
+                  {isEditableRequestStatus(selected.status) && !listOnly && fields.length > 0 ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -477,7 +506,7 @@ export function RequestFormPage({
                       Edit
                     </Button>
                   ) : null}
-                  {selected.status === 'Draft' ? (
+                  {canRequestApproval(moduleConfig?.module, selected.payload) ? (
                     <Button
                       type="button"
                       disabled={actionId === selected.id}
@@ -569,31 +598,19 @@ export function RequestFormPage({
                   </section>
                 ) : null}
 
-                {!hideDetailAttachments ? <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
-                  {selected.attachments.length ? (
-                    <div className="divide-y divide-slate-100 border-y border-slate-200">
-                      {selected.attachments.map((attachment) => (
-                        <div key={attachment.id} className="flex items-center justify-between gap-3 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{attachment.fileName}</p>
-                            <p className="text-xs text-slate-500">{attachment.description || attachment.fileType}</p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={actionId === attachment.id}
-                            onClick={() => void handleDownload(selected.id, attachment)}
-                          >
-                            <Download className="h-4 w-4" />
-                            Download
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-sm italic text-slate-500">No attachments.</p>}
-                </section> : null}
+                {supportsAttachments && selected ? (
+                  <RequestAttachments
+                    requestId={selected.id}
+                    attachments={selected.attachments}
+                    canUpload={canUploadRequestAttachments(selected.status)}
+                    canDelete={canDeleteRequestItems(selected.status)}
+                    onUpdated={(request) => {
+                      queryClient.setQueryData([...queryKey, 'detail', selected.id], request)
+                      void refreshLists()
+                      void detailQuery.refetch()
+                    }}
+                  />
+                ) : null}
 
                 <section className="border-t border-slate-200 pt-4">
                   <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
@@ -622,16 +639,6 @@ export function RequestFormPage({
               )}
             </div>
             {description ? <p className="text-sm text-slate-600">{description}</p> : null}
-            {businessRules?.length ? (
-              <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                <p className="font-semibold">Business rules</p>
-                <ul className="mt-1 list-inside list-disc space-y-0.5 text-blue-800">
-                  {businessRules.map((rule) => (
-                    <li key={rule}>{rule}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
             {mutation.error ? (
               <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4" />

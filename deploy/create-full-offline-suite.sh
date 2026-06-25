@@ -8,7 +8,7 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-UAT-${STAMP}-remove-ess-notes-full-offline.zip"
+ZIP_NAME="SelfServiceSuite-UAT-${STAMP}-client-full-offline.zip"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
 
@@ -71,53 +71,18 @@ cat > "$STAGING/SelfServiceSuite/IMPORTANT-UPDATE.txt" <<'EOF'
 SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
 ================================================
 
-2026-06-21 REMOVE ESS REFERENCES FROM UI
---------------------------------------
-- removed "Business rules" panels from all request forms
-- form descriptions now carry the user-facing guidance
-- backend error messages no longer mention ESS
+Release date: 2026-06-25
+See RELEASE-NOTES-2026-06-25.txt for per-module guidance and testing notes.
 
-2026-06-21 LEAVE SUBMIT + DATE DISPLAY FIX
------------------------------------------
-- leave: LeaveApplication sends false/true for isHalfDayLeave (BC rejects numeric 0)
-- leave: end/return dates normalize BC short years (6/22/26 -> 2026-06-22)
-- leave: form layout fixed (end date, return date, reliever aligned in one row)
-
-2026-06-21 APPROVALS PAGE ALIGNMENT
------------------------------------
-- pending approvals: consistent filter chips, card grid, badge/button alignment
-
-2026-06-21 UAT MODULE FIXES (CLAIM, ATTACHMENTS, TRANSPORT)
----------------------------------------------------------
-- staff claim: always send hospitalCategory (0 for non-medical) like ESS
-- attachments: hidden on modules ESS does not support (store, purchase, fuel, gate pass, transfer order, transport)
-- transport: trip date sent as yyyy-mm-dd to Business Central
-
-2026-06-21 LEAVE HALF-DAY + ANNUAL VALIDATION
---------------------------------------------
-- leave: half-day only allowed for annual leave (matches BC validation)
-- leave: LeaveApplication sends 0/1/2 half-day option like ESS
-
-2026-06-21 LEAVE SOAP DATE FORMAT FIX
--------------------------------------
-- leave: GetLeaveDates and LeaveApplication now send yyyy-mm-dd (BC rejects M/D/YYYY on UAT)
-
-2026-06-21 TRANSPORT APPROVAL HISTORY FIX
------------------------------------------
-- transport: approval history loads by document number (ESS parity) when TableID filter misses rows
-- all modules: approval history section hidden until Pending Approval / Approved / Rejected
-
-2026-06-21 LEAVE DATES + IMPREST FIXES
-------------------------------------
-- leave: end/return dates now use available balance (not entitlement) like ESS
-- leave: BC date formats (M/D/YYYY) display correctly
-- imprest: New Line button for Open/Pending status (ESS parity)
-- imprest: approval history after request approval (ESS parity)
-
-This ZIP matches the previous full-offline layout:
-- .env files included for UAT host 10.30.4.23
-- Windows production node_modules included
-- latest dist/public builds included
+SUMMARY
+-------
+- Pending Approval status and Cancel on list/detail
+- Finance attachments: upload on Draft/Open only
+- Imprest lines: auto-calculated amount with manual entry fallback
+- Staff claims: medical amount and hospital category auto-fill
+- Petty cash replenishment detail fields (accounts and amounts)
+- Transfer order status correct after request approval
+- Vehicle Transfer: coming soon (disabled)
 
 INSTALL / UPDATE ON CLIENT HOST
 -------------------------------
@@ -130,16 +95,18 @@ INSTALL / UPDATE ON CLIENT HOST
 3. Extract this ZIP to C:\TA so the folder is exactly:
    C:\TA\SelfServiceSuite
 
-4. Start all services (use this script, NOT SelfServiceBackend\deploy\deploy):
+4. Start all services:
    C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
 
 5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
 
 If .env is ever missing, copy the template for YOUR client:
    ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
-   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat-ip.example
+   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
    See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt
 EOF
+
+cp "$ROOT/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt" "$STAGING/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt"
 
 echo "==> Creating zip: $OUTPUT"
 rm -f "$OUTPUT"

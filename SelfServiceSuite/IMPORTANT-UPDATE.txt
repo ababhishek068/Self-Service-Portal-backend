@@ -1,73 +1,36 @@
-SELF SERVICE SUITE - FUNCTIONAL AND UX FIXES
-=============================================
+SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
+================================================
 
-2026-06-23 STATUS-REPORT COMPLETION UPDATE
-------------------------------------------
-- fixed cancellation visibility so only requests actually pending approval can be cancelled
-- kept draft requests editable and approval-ready without exposing unsupported line-edit actions
-- corrected Purchase line columns and made location optional where the request type does not need it
-- added Petty Cash transaction names and corrected request-line presentation
-- blocked backdated Store requisitions for all store line types
-- added concise, module-specific detail views for Finance and Facility requests
-- added Maintenance Request to Facilities and enabled Vehicle Transfer navigation
-- added fixed-asset and vehicle-service maintenance request types, item/quantity fields,
-  odometer validation, and the 5,000 km vehicle-service rule
-- separated Fuel and Maintenance records and approval routing on their shared BC table
-- expanded dashboard recent activity to include all active request modules
-- preserved the leave Boolean fix, decimal half-day calculation, approval sequence ordering,
-  pending-approval detail loading, forgot-password flow, and Gate Pass source separation
+Release date: 2026-06-25
+See RELEASE-NOTES-2026-06-25.txt for per-module guidance and testing notes.
 
-Business Central setup still controls approval execution and ERP-only outputs. If a module
-returns "workflow is not configured", the matching BC workflow must be enabled. ERP-generated
-Purchase/Store reports, payroll approval roles, Work Ticket booking creation, and procurement
-budget submission require published BC codeunit operations and cannot be created by the portal.
+SUMMARY
+-------
+- Pending Approval status and Cancel on list/detail
+- Finance attachments: upload on Draft/Open only
+- Imprest lines: auto-calculated amount with manual entry fallback
+- Staff claims: medical amount and hospital category auto-fill
+- Petty cash replenishment detail fields (accounts and amounts)
+- Transfer order status correct after request approval
+- Vehicle Transfer: coming soon (disabled)
 
-2026-06-21 ESS WORKFLOW PARITY UPDATE
--------------------------------------
-- restored Edit and Request Approval actions on open/draft requests
-- restored New Line, line edit, and line delete actions where ESS supports them
-- normalized Business Central line fields and line IDs for every request table
-- restored Transport staff/external passenger loading and deletion
-- restored Petty Cash line deletion
-- restricted detail pages to their configured business fields
-- ordered approval history by Business Central sequence number
-- restored Imprest Surrender source details after selecting a posted imprest
-- removed raw Business Central/system fields from request and approval detail screens
-- replaced staff self-registration with the ESS email-token forgot-password flow
-- restored Gate Pass New Request entry points for Store, Transfer Order, and Asset Transfer
-- refreshed and separated Gate Pass records by the Business Central Linkto source after source creation
-
-Do not merge this package into the existing SelfServiceSuite directory.
-
-1. Stop the current services:
+INSTALL / UPDATE ON CLIENT HOST
+-------------------------------
+1. Stop services:
    powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
 
-2. Rename the existing directory:
+2. Backup existing folder:
    C:\TA\SelfServiceSuite -> C:\TA\SelfServiceSuite-backup
 
-3. Extract this ZIP directly under C:\TA so the result is exactly:
+3. Extract this ZIP to C:\TA so the folder is exactly:
    C:\TA\SelfServiceSuite
 
-   Avoid folder names containing parentheses, such as "SelfServiceSuite (2)".
-
-4. Start both APIs and the portal with:
+4. Start all services:
    C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
 
 5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
 
-This update includes:
-- concise Business Central validation messages instead of raw SOAP XML
-- corrected Boolean SOAP values for leave and purchase requisitions
-- document-number resolution for transport requisitions and transfer orders
-- live training, account, dimension, item, and asset lookup corrections
-- approval queue categories, counts, and improved document detail handling
-- dependent item/asset dropdowns and line validation before approval
-- attendance state feedback and modern PDF download progress
-- corrected navigation active states, card alignment, responsive tables, animations,
-  and a dashboard-only Powered By card
-- a launcher that is safe when the extraction path contains parentheses
-
-Business Central administrator actions are still required when BC reports that:
-- no related approval workflow is configured for a document type
-- a number series is missing or contains an invalid blank-number record
-- the selected master-data record does not exist in Business Central
+If .env is ever missing, copy the template for YOUR client:
+   ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
+   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
+   See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt

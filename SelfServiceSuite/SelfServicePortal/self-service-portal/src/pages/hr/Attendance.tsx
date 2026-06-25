@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import type { AttendanceRow } from '@/api/endpoints/attendance'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useToast } from '@/components/feedback/ToastProvider'
+import { formatAttendanceClock, isRecordedAttendanceTime } from '@/utils/formatters'
 
 export function Attendance() {
   const { isHOD } = usePermissions()
@@ -37,10 +38,8 @@ export function Attendance() {
   const now = new Date()
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const todayRecord = rows.find((row) => row.date.slice(0, 10) === todayKey)
-  const signedInToday = Boolean(todayRecord?.timeIn)
-  const signedOutToday = Boolean(todayRecord?.timeOut)
-
-  const formatClock = (value: string) => value ? value.replace(/\.\d+$/, '') : '—'
+  const signedInToday = isRecordedAttendanceTime(todayRecord?.timeIn)
+  const signedOutToday = isRecordedAttendanceTime(todayRecord?.timeOut)
 
   const captureLocation = (): Promise<string> =>
     new Promise((resolve) => {
@@ -95,8 +94,8 @@ export function Attendance() {
   const columns: DataTableColumn<AttendanceRow>[] = [
     { id: 'date', header: 'Date', cell: (row) => row.date },
     { id: 'staff', header: 'Staff Name', cell: (row) => row.staffName },
-    { id: 'in', header: 'Time In', cell: (row) => formatClock(row.timeIn) },
-    { id: 'out', header: 'Time Out', cell: (row) => formatClock(row.timeOut) },
+    { id: 'in', header: 'Time In', cell: (row) => formatAttendanceClock(row.timeIn) },
+    { id: 'out', header: 'Time Out', cell: (row) => formatAttendanceClock(row.timeOut) },
     { id: 'hours', header: 'Hours Worked', cell: (row) => row.hoursWorked ? Number(row.hoursWorked).toFixed(2) : '—' },
     { id: 'location', header: 'Coordinates', cell: (row) => row.location || '—' },
     { id: 'comments', header: 'Comments', cell: (row) => row.comments },
@@ -117,11 +116,19 @@ export function Attendance() {
             {attendanceAction === 'in'
               ? (fetchingLocation ? 'Getting location…' : 'Signing in…')
               : signedInToday
-                ? `Signed in ${formatClock(todayRecord?.timeIn ?? '')}`
+                ? `Signed in ${formatAttendanceClock(todayRecord?.timeIn)}`
                 : 'Sign-in Today'}
           </Button>
-          <Button type="button" variant="action" className="rounded-full px-5" disabled={attendanceAction !== null || !signedInToday || signedOutToday} onClick={() => setConfirmSignOut(true)}>
-            {signedOutToday ? `Signed out ${formatClock(todayRecord?.timeOut ?? '')}` : 'Sign-out Today'}
+          <Button
+            type="button"
+            variant="action"
+            className="rounded-full px-5"
+            disabled={attendanceAction !== null || !signedInToday || signedOutToday}
+            onClick={() => setConfirmSignOut(true)}
+          >
+            {signedOutToday
+              ? `Signed out ${formatAttendanceClock(todayRecord?.timeOut)}`
+              : 'Sign-out Today'}
           </Button>
         </div>
       }
@@ -143,7 +150,14 @@ export function Attendance() {
       {isHOD ? (
         <div className="mt-6">
           <h3 className="mb-2 text-sm font-semibold text-[var(--portal-navy)]">HOD — Staff Attendees Today</h3>
-          <DataTable rows={hodTeamRows} columns={columns} getRowId={(row) => row.id} compact />
+          <p className="mb-3 text-sm text-slate-600">Department attendance for today.</p>
+          <DataTable
+            rows={hodTeamRows}
+            columns={columns}
+            getRowId={(row) => row.id}
+            compact
+            emptyTitle="No department attendance records for today."
+          />
         </div>
       ) : null}
 

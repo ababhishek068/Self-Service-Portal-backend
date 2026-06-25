@@ -4,13 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/app/server.ts",
-    "start": "node dist/app/server.js",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
     "build": "tsc",
     "build:portal": "npm --prefix ../SelfServicePortal/self-service-portal run build:onprem && node scripts/copy-portal.mjs",
     "build:all": "npm run build && npm run build:portal",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/domain/approval/tableIds.test.js"
+    "test": "npm run build && node --test dist/approvalTableIds.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

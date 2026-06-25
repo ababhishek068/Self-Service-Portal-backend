@@ -4,6 +4,7 @@ import { format, parseISO } from 'date-fns'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
 import { FileUpload } from '@/components/shared/FileUpload'
+import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
@@ -29,13 +30,12 @@ import {
   type LeaveType,
 } from '@/api/endpoints/leave'
 import {
-  deleteRequestAttachment,
-  downloadRequestAttachment,
   getModuleRequest,
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
 import type { Attachment } from '@/types/erp.types'
+import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
 
 const DASH = '—'
 
@@ -80,7 +80,6 @@ export function LeaveRequest() {
   const confirm = useConfirm()
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
   const [detailAction, setDetailAction] = useState<string | null>(null)
   const detailQuery = useQuery({
@@ -310,52 +309,6 @@ export function LeaveRequest() {
     await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
     await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     if (selectedRequestId) await detailQuery.refetch()
-  }
-
-  const uploadAttachments = async () => {
-    const selected = detailQuery.data
-    if (!selected || pendingAttachments.length === 0) return
-    setDetailAction('upload')
-    try {
-      for (const file of pendingAttachments) {
-        await uploadRequestAttachment(selected.id, {
-          fileName: file.fileName,
-          fileType: file.fileType,
-          size: file.size,
-          contentBase64: file.contentBase64,
-          description: file.description || file.fileName,
-        })
-      }
-      setPendingAttachments([])
-      await refreshLeave()
-      toast.success('Leave attachment uploaded')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Attachment upload failed', 'Upload failed')
-    } finally {
-      setDetailAction(null)
-    }
-  }
-
-  const removeAttachment = async (attachmentId: string) => {
-    const selected = detailQuery.data
-    if (!selected) return
-    const confirmed = await confirm({
-      title: 'Delete attachment',
-      message: 'Delete this attachment from the leave application?',
-      confirmLabel: 'Delete',
-      tone: 'danger',
-    })
-    if (!confirmed) return
-    setDetailAction(attachmentId)
-    try {
-      await deleteRequestAttachment(selected.id, attachmentId)
-      await refreshLeave()
-      toast.success('Attachment deleted')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Attachment deletion failed', 'Delete failed')
-    } finally {
-      setDetailAction(null)
-    }
   }
 
   const cancelSelectedLeave = async () => {
@@ -613,7 +566,6 @@ export function LeaveRequest() {
           selectedRowId={selected?.requestNo}
           onRowClick={(row) => {
             setSelectedRequestId(`leave-${row.ApplicationCode}`)
-            setPendingAttachments([])
           }}
           compact
           emptyTitle="No leave applications yet."
@@ -630,7 +582,6 @@ export function LeaveRequest() {
               size="sm"
               onClick={() => {
                 setSelectedRequestId(null)
-                setPendingAttachments([])
               }}
             >
               Close
@@ -693,61 +644,16 @@ export function LeaveRequest() {
                   </div>
                 </dl>
 
-                <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
-                  {selectedIsMutable ? (
-                    <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
-                      <FileUpload files={pendingAttachments} onChange={setPendingAttachments} />
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={detailAction === 'upload' || pendingAttachments.length === 0}
-                        onClick={() => void uploadAttachments()}
-                      >
-                        {detailAction === 'upload' ? 'Uploading…' : 'Upload'}
-                      </Button>
-                    </div>
-                  ) : null}
-                  {selected.attachments.length ? (
-                    <div className="divide-y divide-slate-100 border-y border-slate-200">
-                      {selected.attachments.map((attachment) => (
-                        <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">
-                              {attachment.description || attachment.fileName}
-                            </p>
-                            <p className="text-xs text-slate-500">{attachment.fileName}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={detailAction === attachment.id}
-                              onClick={() => void downloadRequestAttachment(selected.id, attachment)}
-                            >
-                              Download
-                            </Button>
-                            {selectedIsMutable ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-600"
-                                disabled={detailAction === attachment.id}
-                                onClick={() => void removeAttachment(attachment.id)}
-                              >
-                                Delete
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm italic text-slate-500">No attachments.</p>
-                  )}
-                </section>
+                <RequestAttachments
+                  requestId={selected.id}
+                  attachments={selected.attachments}
+                  canUpload={canUploadRequestAttachments(selected.status)}
+                  canDelete={canDeleteRequestItems(selected.status)}
+                  onUpdated={(request) => {
+                    queryClient.setQueryData(['hr', 'leave-list', 'detail', selected.id], request)
+                    void refreshLeave()
+                  }}
+                />
 
                 {selectedIsMutable ? (
                   <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">

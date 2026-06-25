@@ -23,3 +23,18 @@ export const formatDateTime = (value?: string) => {
 }
 
 export const percent = (value: number) => `${Math.round(value)}%`
+
+/** BC OData often returns 00:00:00 when a clock time has not been recorded yet. */
+export function isRecordedAttendanceTime(value?: string | null) {
+  if (!value || !String(value).trim()) return false
+  const normalized = String(value).trim().replace(/\.\d+$/, '')
+  if (!normalized || normalized === '—') return false
+  const parts = normalized.split(':').map((part) => Number(part))
+  if (parts.length >= 2 && parts.every((part) => Number.isFinite(part) && part === 0)) return false
+  return true
+}
+
+export function formatAttendanceClock(value?: string | null) {
+  if (!isRecordedAttendanceTime(value)) return '—'
+  return String(value).replace(/\.\d+$/, '')
+}

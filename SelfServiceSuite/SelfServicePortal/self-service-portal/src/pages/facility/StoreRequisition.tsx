@@ -83,11 +83,6 @@ export function StoreRequisition() {
         emptyText: '*** No Store Lines Found ***',
         canEdit: false,
       }}
-      businessRules={[
-        'Create the header first, then add item or asset lines.',
-        'Each line specifies type, issuing store, item number and quantity.',
-        'Attach supporting documents, then request approval.',
-      ]}
     />
   )
 }

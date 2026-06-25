@@ -16,12 +16,12 @@ export function Performance() {
   const query = useQuery({ queryKey: ['hr', 'performance'], queryFn: listPerformanceReviews })
 
   return (
-    <PageWrapper title="Performance List">
+    <PageWrapper title="Competency List">
       <DataTable
         rows={query.data ?? []}
         columns={columns}
         getRowId={(row) => row.id}
-        emptyTitle={query.isLoading ? 'Loading performance reviews...' : 'No performance reviews found'}
+        emptyTitle={query.isLoading ? 'Loading competency records...' : 'No competency records found'}
       />
     </PageWrapper>
   )

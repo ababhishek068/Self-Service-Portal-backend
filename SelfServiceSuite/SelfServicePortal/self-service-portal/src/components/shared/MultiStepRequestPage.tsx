@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowLeft, Download, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   type FieldValues,
@@ -21,7 +21,7 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { DataTable, type DataTableColumn } from './DataTable'
-import { FileUpload } from './FileUpload'
+import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
@@ -30,9 +30,7 @@ import {
   addRequestLine,
   cancelModuleRequest,
   createModuleRequest,
-  deleteRequestAttachment,
   deleteRequestLine,
-  downloadRequestAttachment,
   getModuleRequest,
   postStoreRequestReceipt,
   receiveStoreRequestLine,
@@ -40,11 +38,11 @@ import {
   submitModuleRequest,
   updateRequestHeader,
   updateRequestLine,
-  uploadRequestAttachment,
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import type { Attachment, PortalRequest } from '@/types/erp.types'
+import { canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES } from '@/utils/requestStatus'
+import type { PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
   key: string
@@ -68,13 +66,18 @@ export interface MultiStepLineConfig {
   canEdit?: boolean
   /** Inline-editable cell fields for backend-generated lines (keyed by line property). */
   editableFields?: FieldConfig[]
+  /** React to line field changes (ESS auto-calculations). */
+  onValuesChange?: (
+    values: FieldValues,
+    form: UseFormReturn<FieldValues>,
+    requestId: string,
+  ) => void | Promise<void>
   emptyText?: string
 }
 
 export interface MultiStepRequestConfig {
   title: string
   description?: string
-  businessRules?: string[]
   module: EndpointConfig
   queryKey: readonly unknown[]
   listRequests: () => Promise<PortalRequest[]>
@@ -94,6 +97,8 @@ export interface MultiStepRequestConfig {
   detailFields?: DetailFieldConfig[]
   /** Statuses from which Business Central allows cancellation. */
   cancelStatuses?: PortalRequest['status'][]
+  /** When false, hides BC document attachments (fuel, store, etc.). Defaults from module key. */
+  supportsAttachments?: boolean
 }
 
 function pathValue(source: unknown, path: string) {
@@ -141,8 +146,9 @@ function initialFieldValue(source: Record<string, unknown>, field: FieldConfig, 
   return key ? mapped(source[key]) : fallback
 }
 
-function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedValues: unknown = {}) {
+function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedValues: FieldValues = {}) {
   return function renderField(field: FieldConfig) {
+    if (field.visibleWhen && !field.visibleWhen(watchedValues)) return null
     const name = prefix ? `${prefix}.${field.name}` : field.name
     const inputId = name.replaceAll('.', '-')
     const error = form.formState.errors?.[field.name]
@@ -150,17 +156,37 @@ function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedVal
     const options = field.optionsByField
       ? field.optionsByField.options[String(pathValue(watchedValues, field.optionsByField.field) ?? '')] ?? []
       : field.options ?? []
+    const readOnly = field.readOnly || Boolean(field.readOnlyWhen?.(watchedValues))
     return (
       <div key={name} className={field.type === 'checkbox' ? 'flex items-center gap-2' : 'space-y-1.5'}>
         {field.type !== 'checkbox' ? <Label htmlFor={inputId}>{field.label}</Label> : null}
         {field.type === 'textarea' ? (
-          <Textarea id={inputId} placeholder={field.placeholder} readOnly={field.readOnly} {...form.register(name)} />
+          <Textarea id={inputId} placeholder={field.placeholder} readOnly={readOnly} {...form.register(name)} />
         ) : null}
         {field.type === 'select' ? (
-          <Select id={inputId} placeholder={field.placeholder ?? 'Select'} options={options} disabled={field.readOnly} {...form.register(name)} />
+          <Select id={inputId} placeholder={field.placeholder ?? 'Select'} options={options} disabled={readOnly} {...form.register(name)} />
         ) : null}
         {['text', 'number', 'date'].includes(field.type) ? (
-          <Input id={inputId} type={field.type} placeholder={field.placeholder} readOnly={field.readOnly} {...form.register(name)} />
+          <Input
+            id={inputId}
+            type={field.type}
+            placeholder={field.placeholder}
+            readOnly={readOnly}
+            min={field.type === 'number' ? 0 : undefined}
+            step={field.type === 'number' ? 'any' : undefined}
+            {...form.register(
+              name,
+              field.type === 'number'
+                ? {
+                    setValueAs: (value) => {
+                      if (value === '' || value === null || value === undefined) return ''
+                      const parsed = Number(value)
+                      return Number.isFinite(parsed) ? parsed : ''
+                    },
+                  }
+                : undefined,
+            )}
+          />
         ) : null}
         {field.type === 'checkbox' ? (
           <>
@@ -277,11 +303,17 @@ function AddLineForm({
   const form = useForm<FieldValues>({
     resolver: zodResolver(line.schema) as Resolver<FieldValues>,
     defaultValues: initialValues,
-    mode: 'onBlur',
+    mode: 'onSubmit',
+    reValidateMode: 'onSubmit',
   })
-  const watchedValues = useWatch({ control: form.control })
+  const watchedValues = useWatch({ control: form.control }) as FieldValues
   const render = fieldRenderer(form, '', watchedValues)
   const toast = useToast()
+  const onValuesChange = line.onValuesChange
+  useEffect(() => {
+    if (!onValuesChange) return
+    void onValuesChange(watchedValues, form, requestId)
+  }, [watchedValues, form, onValuesChange, requestId])
   const mutation = useMutation({
     mutationFn: (values: FieldValues) => {
       const payload = line.buildLinePayload ? line.buildLinePayload(values) : values
@@ -415,8 +447,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const [editingHeader, setEditingHeader] = useState(false)
   const [editingLine, setEditingLine] = useState<Record<string, unknown> | null>(null)
   const [showLineForm, setShowLineForm] = useState(false)
-  const [attachmentDesc, setAttachmentDesc] = useState('')
-  const [pendingFiles, setPendingFiles] = useState<Attachment[]>([])
   const [receiveLine, setReceiveLine] = useState<Record<string, unknown> | null>(null)
   const [receiveQuantity, setReceiveQuantity] = useState('')
   const [receiveReason, setReceiveReason] = useState('')
@@ -466,33 +496,14 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   const selected = detailQuery.data
-  const editable = selected ? selected.status === 'Draft' : false
+  const editable = selected ? isEditableRequestStatus(selected.status) : false
+  const submittable = selected
+    ? canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
+    : false
   const cancelStatuses = config.cancelStatuses ?? ['Pending Approval']
+  const supportsAttachments =
+    config.supportsAttachments ?? PORTAL_ATTACHMENT_MODULES.has(config.module.module)
   const canReceiveStoreLines = selected?.status === 'Posted' && config.module.module === 'storeRequisition'
-
-  const uploadAttachments = async () => {
-    if (!selected || pendingFiles.length === 0) return
-    setActionId('upload')
-    try {
-      for (const file of pendingFiles) {
-        await uploadRequestAttachment(selected.id, {
-          fileName: file.fileName,
-          fileType: file.fileType,
-          size: file.size,
-          contentBase64: file.contentBase64,
-          description: attachmentDesc || file.description || file.fileName,
-        })
-      }
-      setPendingFiles([])
-      setAttachmentDesc('')
-      await refresh()
-      toast.success('Attachment uploaded')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Attachment upload failed', 'Upload failed')
-    } finally {
-      setActionId(null)
-    }
-  }
 
   const beginReceiveLine = (line: Record<string, unknown>) => {
     setReceiveLine(line)
@@ -578,7 +589,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               </Button>
               {selected ? (
                 <div className="flex flex-wrap gap-2">
-                  {selected.status === 'Draft' ? (
+                  {editable ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -588,7 +599,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       Edit
                     </Button>
                   ) : null}
-                  {selected.status === 'Draft' ? (
+                  {submittable ? (
                     <Button
                       type="button"
                       variant="gradient"
@@ -700,48 +711,18 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   </section>
                 ) : null}
 
-                {/* Attachments */}
-                <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
-                  {['Draft', 'Pending Approval'].includes(selected.status) ? (
-                    <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="attachment-desc">Attachment Description / Name</Label>
-                        <Input id="attachment-desc" value={attachmentDesc} onChange={(event) => setAttachmentDesc(event.target.value)} placeholder="e.g. Receipt" />
-                      </div>
-                      <FileUpload files={pendingFiles} onChange={setPendingFiles} />
-                      <p className="text-xs text-slate-500">
-                        Selected files are uploaded to Business Central only after you click Upload attachments.
-                      </p>
-                      <Button type="button" size="sm" disabled={actionId === 'upload' || pendingFiles.length === 0} onClick={() => void uploadAttachments()}>
-                        {actionId === 'upload' ? 'Uploading...' : 'Upload attachments'}
-                      </Button>
-                    </div>
-                  ) : null}
-                  {selected.attachments.length ? (
-                    <div className="divide-y divide-slate-100 border-y border-slate-200">
-                      {selected.attachments.map((attachment) => (
-                        <div key={attachment.id} className="flex items-center justify-between gap-3 py-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{attachment.description || attachment.fileName}</p>
-                            <p className="text-xs text-slate-500">{attachment.fileName}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button type="button" variant="outline" size="sm" disabled={actionId === attachment.id} onClick={() => void runAction(attachment.id, () => downloadRequestAttachment(selected.id, attachment), 'Download failed')}>
-                              <Download className="h-4 w-4" />
-                              View/Download
-                            </Button>
-                            {['Draft', 'Pending Approval'].includes(selected.status) ? (
-                              <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={actionId === attachment.id} onClick={() => void runAction(attachment.id, () => deleteRequestAttachment(selected.id, attachment.id), 'Delete failed')}>
-                                Delete
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-sm italic text-slate-500">*** No attachments ***</p>}
-                </section>
+                {supportsAttachments && selected ? (
+                  <RequestAttachments
+                    requestId={selected.id}
+                    attachments={selected.attachments}
+                    canUpload={canUploadRequestAttachments(selected.status)}
+                    canDelete={canDeleteRequestItems(selected.status)}
+                    onUpdated={(request) => {
+                      queryClient.setQueryData([...config.queryKey, 'detail', selected.id], request)
+                      void refresh()
+                    }}
+                  />
+                ) : null}
 
                 {/* Lines */}
                 {config.line ? (
@@ -902,22 +883,46 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
       id: 'actions',
       header: 'Actions',
       cell: (row) => (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedId(row.id)}>
-          View
-        </Button>
+        <div className="flex flex-wrap gap-1">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedId(row.id)}>
+            View
+          </Button>
+          {cancelStatuses.includes(row.status) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-amber-700"
+              disabled={actionId === row.id}
+              onClick={() =>
+                void confirm({
+                  title: 'Cancel request',
+                  message: 'Are you sure you want to cancel this request?',
+                  confirmLabel: 'Cancel Request',
+                  cancelLabel: 'Keep',
+                  tone: 'danger',
+                }).then((yes) => {
+                  if (yes) {
+                    void runAction(
+                      row.id,
+                      () => cancelModuleRequest(config.module, row.id),
+                      'Cancel failed',
+                      'Request cancelled',
+                    )
+                  }
+                })
+              }
+            >
+              Cancel
+            </Button>
+          ) : null}
+        </div>
       ),
     },
   ]
 
   return (
     <PageWrapper title={config.title} actions={<PortalNewButton label={config.newButtonLabel ?? 'New Request'} onClick={() => setMode('create')} />}>
-      {config.businessRules?.length ? (
-        <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          <ul className="list-inside list-disc space-y-0.5 text-blue-800">
-            {config.businessRules.map((rule) => <li key={rule}>{rule}</li>)}
-          </ul>
-        </div>
-      ) : null}
       {requestsQuery.isLoading ? (
         <Skeleton className="h-48 w-full" />
       ) : requestsQuery.isError ? (

@@ -49,15 +49,15 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: approverRoles,
   },
   {
-    label: 'Staff on leave',
-    href: '/hod/staff-on-leave',
-    description: 'See who in your department is currently on leave.',
+    label: 'Department staff',
+    href: '/hod/department-staff',
+    description: 'View active employees in your department.',
     roles: ['hod'],
   },
   {
-    label: 'Team requests',
-    href: '/hod/team-requests',
-    description: 'Monitor requests submitted by your department.',
+    label: 'Staff on leave',
+    href: '/hod/staff-on-leave',
+    description: 'See who in your department is currently on leave.',
     roles: ['hod'],
   },
   {

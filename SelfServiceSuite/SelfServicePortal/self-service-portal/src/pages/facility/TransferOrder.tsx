@@ -81,11 +81,6 @@ export function TransferOrder() {
         ],
         emptyText: '*** No Transfer Lines Found ***',
       }}
-      businessRules={[
-        'Locations and items must exist in Business Central.',
-        'Create the header first, then add transfer lines.',
-        'Request approval once all lines are captured.',
-      ]}
     />
   )
 }

@@ -1,3 +1,5 @@
+export { RequestAttachments } from './RequestAttachments'
+export { AttachmentPanel } from './AttachmentPanel'
 export { ApprovalTimeline } from './ApprovalTimeline'
 export { ConfirmDialog } from './ConfirmDialog'
 export { DataTable } from './DataTable'

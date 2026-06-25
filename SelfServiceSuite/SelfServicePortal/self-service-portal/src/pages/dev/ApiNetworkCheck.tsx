@@ -5,7 +5,7 @@ import { listApprovals } from '@/api/endpoints/approvals'
 import { listAttendanceRecords } from '@/api/endpoints/attendance'
 import { listPolicyDocuments } from '@/api/endpoints/documents'
 import { getDashboardSummary, getGatePassLogReport, getLeaveBalanceReport, getStoreUsageReport, listItemMaster } from '@/api/endpoints/employee'
-import { listHodStaffOnLeave, listHodTeamRequests } from '@/api/endpoints/hod'
+import { listHodDepartmentStaff, listHodStaffOnLeave } from '@/api/endpoints/hod'
 import { fetchLeaveTypes, fetchRelievers, getLeaveBalance, listLeaveRequests } from '@/api/endpoints/leave'
 import { getPayslip } from '@/api/endpoints/payroll'
 import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
@@ -75,7 +75,7 @@ export function ApiNetworkCheck() {
       () => runCheck('Profile details', 'GET', '/api/profile/details', getEmployeeProfileDetails),
       () => runCheck('Payslip', 'GET', '/api/payroll/payslip?year=2026&month=March', () => getPayslip('2026', 'March')),
       () => runCheck('Documents', 'GET', '/api/documents', listPolicyDocuments),
-      () => runCheck('Performance', 'GET', '/api/performance', listPerformanceReviews),
+      () => runCheck('Competency', 'GET', '/api/performance', listPerformanceReviews),
       () => runCheck('Work tickets', 'GET', '/api/work-tickets', listWorkTickets),
       () => runCheck('Item master', 'GET', '/api/items', listItemMaster),
       () => runCheck('Leave balance report', 'GET', '/api/reports/leave-balance', getLeaveBalanceReport),
@@ -93,8 +93,8 @@ export function ApiNetworkCheck() {
         runCheck(
           'HOD team requests',
           'GET',
-          '/api/hod/team-requests',
-          listHodTeamRequests,
+          '/api/hod/department-staff',
+          listHodDepartmentStaff,
           !isHOD,
         ),
       () =>

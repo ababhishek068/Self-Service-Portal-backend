@@ -1,105 +1,159 @@
-import { FileUp, Paperclip, X } from 'lucide-react'
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { FileUp, Paperclip } from 'lucide-react'
+import { useCallback, useRef, useState } from 'react'
 import type { Attachment } from '@/types/erp.types'
+import { cn } from '@/lib/utils'
+import { AttachmentFileCard, formatFileSize } from './attachmentUi'
 
 interface FileUploadProps {
   files: Attachment[]
   onChange: (files: Attachment[]) => void
 }
 
+const ALLOWED = new Set(['pdf', 'doc', 'docx', 'jpeg', 'jpg', 'png'])
+
 export function FileUpload({ files, onChange }: FileUploadProps) {
   const [error, setError] = useState('')
+  const [isDragging, setIsDragging] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const addFiles = async (fileList: FileList | null) => {
-    if (!fileList) return
-    setError('')
-    const selected = Array.from(fileList)
-    const allowed = new Set(['pdf', 'doc', 'docx', 'jpeg', 'jpg', 'png'])
-    const invalid = selected.find((file) => !allowed.has(file.name.split('.').pop()?.toLowerCase() ?? ''))
-    if (invalid) {
-      setError(`${invalid.name} is not an allowed file type.`)
-      return
-    }
-    const oversized = selected.find((file) => file.size > 10_000_000)
-    if (oversized) {
-      setError(`${oversized.name} exceeds the 10 MB limit.`)
-      return
-    }
-    const totalSize = [...files, ...selected].reduce(
-      (total, file) => total + file.size,
-      0,
-    )
-    if (totalSize > 20_000_000) {
-      setError('Combined attachments cannot exceed 20 MB.')
-      return
-    }
-    const uploaded = await Promise.all(
-      selected.map(
-        (file) =>
-          new Promise<Attachment>((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onerror = () => reject(new Error(`Could not read ${file.name}`))
-            reader.onload = () =>
-              resolve({
-                id: crypto.randomUUID(),
-                fileName: file.name,
-                fileType: file.type || 'application/octet-stream',
-                size: file.size,
-                progress: 100,
-                uploadedAt: new Date().toISOString(),
-                description: file.name.replace(/\.[^.]+$/, ''),
-                contentBase64: String(reader.result ?? '').split(',')[1] ?? '',
-              })
-            reader.readAsDataURL(file)
-          }),
-      ),
-    ).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : 'Could not read the selected files.')
-      return []
-    })
-    onChange([...files, ...uploaded])
-  }
+  const addFiles = useCallback(
+    async (fileList: FileList | null) => {
+      if (!fileList) return
+      setError('')
+      const selected = Array.from(fileList)
+      const invalid = selected.find((file) => !ALLOWED.has(file.name.split('.').pop()?.toLowerCase() ?? ''))
+      if (invalid) {
+        setError(`${invalid.name} is not an allowed file type.`)
+        return
+      }
+      const oversized = selected.find((file) => file.size > 10_000_000)
+      if (oversized) {
+        setError(`${oversized.name} exceeds the 10 MB limit.`)
+        return
+      }
+      const totalSize = [...files, ...selected].reduce((total, file) => total + file.size, 0)
+      if (totalSize > 20_000_000) {
+        setError('Combined attachments cannot exceed 20 MB.')
+        return
+      }
+      const uploaded = await Promise.all(
+        selected.map(
+          (file) =>
+            new Promise<Attachment>((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onerror = () => reject(new Error(`Could not read ${file.name}`))
+              reader.onload = () =>
+                resolve({
+                  id: crypto.randomUUID(),
+                  fileName: file.name,
+                  fileType: file.type || 'application/octet-stream',
+                  size: file.size,
+                  progress: 100,
+                  uploadedAt: new Date().toISOString(),
+                  description: file.name.replace(/\.[^.]+$/, ''),
+                  contentBase64: String(reader.result ?? '').split(',')[1] ?? '',
+                })
+              reader.readAsDataURL(file)
+            }),
+        ),
+      ).catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : 'Could not read the selected files.')
+        return []
+      })
+      if (uploaded.length) onChange([...files, ...uploaded])
+    },
+    [files, onChange],
+  )
 
   const removeFile = (id: string) => onChange(files.filter((file) => file.id !== id))
 
   return (
-    <div className="space-y-3">
-      <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-emerald-500 hover:bg-emerald-50">
-        <FileUp className="h-6 w-6 text-emerald-700" />
-        <span className="mt-2 text-sm font-medium text-slate-800">Upload supporting files</span>
-        <span className="text-xs text-slate-500">PDF, DOC, DOCX, JPG or PNG. Maximum 10 MB each.</span>
+    <section className="space-y-3">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-[var(--portal-navy)]">Attachments</p>
+        {files.length > 0 ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+            <Paperclip className="h-3 w-3" />
+            {files.length}
+          </span>
+        ) : null}
+      </div>
+
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            inputRef.current?.click()
+          }
+        }}
+        onDragEnter={(event) => {
+          event.preventDefault()
+          setIsDragging(true)
+        }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setIsDragging(true)
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault()
+          setIsDragging(false)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          setIsDragging(false)
+          void addFiles(event.dataTransfer.files)
+        }}
+        onClick={() => inputRef.current?.click()}
+        className={cn(
+          'cursor-pointer overflow-hidden rounded-xl border-2 border-dashed bg-gradient-to-br from-slate-50 to-white px-4 py-8 text-center shadow-inner transition-all duration-200',
+          isDragging
+            ? 'border-emerald-500 bg-emerald-50/80'
+            : 'border-slate-300 hover:border-emerald-400/70 hover:bg-emerald-50/30',
+        )}
+      >
         <input
+          ref={inputRef}
           className="sr-only"
           type="file"
           multiple
           accept=".pdf,.doc,.docx,.jpeg,.jpg,.png"
           onChange={(event) => void addFiles(event.target.files)}
         />
-      </label>
+        <FileUp className="mx-auto h-8 w-8 text-emerald-700" />
+        <p className="mt-2 text-sm font-medium text-slate-800">Drop files here or click to browse</p>
+        <p className="mt-1 text-xs text-slate-500">PDF, DOC, DOCX, JPG or PNG · Max 10 MB each · 20 MB total</p>
+      </div>
+
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {files.length > 0 ? (
-        <div className="space-y-2">
-          {files.map((file) => (
-            <div key={file.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Paperclip className="h-4 w-4 shrink-0 text-slate-500" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">{file.fileName}</p>
-                  <p className="text-xs text-slate-500">{(file.size / 1024).toFixed(1)} KB</p>
-                  <div className="mt-1 h-1.5 w-36 overflow-hidden rounded-full bg-slate-100">
-                    <span className="block h-full bg-emerald-600" style={{ width: `${file.progress}%` }} />
-                  </div>
-                </div>
-              </div>
-              <Button type="button" variant="ghost" size="icon" aria-label="Remove file" onClick={() => removeFile(file.id)}>
-                <X className="h-4 w-4" />
-              </Button>
+        <div className="portal-attachment-grid grid gap-3 sm:grid-cols-2">
+          {files.map((file, index) => (
+            <div
+              key={file.id}
+              className="portal-attachment-enter"
+              style={{ animationDelay: `${index * 60}ms` }}
+            >
+              <AttachmentFileCard
+                title={file.description || file.fileName}
+                subtitle={file.fileName}
+                meta={formatFileSize(file.size)}
+                state="pending"
+                onRemove={() => removeFile(file.id)}
+              />
             </div>
           ))}
         </div>
-      ) : null}
-    </div>
+      ) : (
+        <div className="portal-attachment-empty flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-8 text-center">
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-slate-200">
+            <Paperclip className="h-4 w-4 text-slate-400" />
+          </div>
+          <p className="text-sm text-slate-500">Files will be uploaded when you submit the request</p>
+        </div>
+      )}
+    </section>
   )
 }

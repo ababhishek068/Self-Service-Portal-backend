@@ -1,30 +1,28 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
-import { listHodTeamRequests, type HodTeamRequestRow } from '@/api/endpoints/hod'
+import { listHodDepartmentStaff, type HodDepartmentStaffRow } from '@/api/endpoints/hod'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
-import { StatusBadge } from '@/components/shared/StatusBadge'
 import { Input } from '@/components/ui/input'
 
-const columns: DataTableColumn<HodTeamRequestRow>[] = [
-  { id: 'employee', header: 'Employee', cell: (row) => row.employee },
-  { id: 'employeeNo', header: 'Employee No.', cell: (row) => row.employeeNo },
-  { id: 'type', header: 'Job Title', cell: (row) => row.requestType },
-  { id: 'date', header: 'Employment Date', cell: (row) => row.date },
-  { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
+const columns: DataTableColumn<HodDepartmentStaffRow>[] = [
+  { id: 'employeeNo', header: 'Staff No.', cell: (row) => row.employeeNo },
+  { id: 'employee', header: 'Name', cell: (row) => row.employee },
 ]
 
 export function HodTeamRequests() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
-  const query = useQuery({ queryKey: ['hod', 'team-requests'], queryFn: listHodTeamRequests })
+  const query = useQuery({ queryKey: ['hod', 'department-staff'], queryFn: listHodDepartmentStaff })
 
   const filteredRows = useMemo(() => {
     const rows = query.data ?? []
     const term = search.trim().toLowerCase()
     if (!term) return rows
     return rows.filter((row) =>
-      [row.employee, row.requestType, row.date, row.status].some((value) =>
+      [row.employee, row.employeeNo, row.jobTitle].some((value) =>
         String(value).toLowerCase().includes(term),
       ),
     )
@@ -47,7 +45,8 @@ export function HodTeamRequests() {
         rows={filteredRows}
         columns={columns}
         getRowId={(row) => row.id}
-        emptyTitle={query.isLoading ? 'Loading department staff...' : 'No department staff found'}
+        onRowClick={(row) => navigate(`/hod/employee/${encodeURIComponent(row.employeeNo)}`)}
+        emptyTitle={query.isLoading ? 'Loading department staff...' : '*** No staff found ***'}
       />
     </PageWrapper>
   )

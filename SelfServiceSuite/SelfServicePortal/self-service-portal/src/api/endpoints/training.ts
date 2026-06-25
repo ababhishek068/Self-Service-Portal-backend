@@ -8,7 +8,6 @@ export const listTrainingRequests = () => listModuleRequests(config)
 export const createTrainingRequest = (payload: TrainingNeedsForm) =>
   createModuleRequest(config, {
     ...payload,
-    submit: true,
     title: payload.trainingTitle,
     amount: payload.estimatedCost ?? 0,
   })

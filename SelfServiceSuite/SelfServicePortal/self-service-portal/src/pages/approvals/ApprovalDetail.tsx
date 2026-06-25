@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Check, Download, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
+import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { PageWrapper } from '@/components/layout/PageWrapper'
@@ -15,7 +16,6 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { extractApplicationReason } from '@/utils/applicationReason'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import { isMakerAllowedToApprove } from '@/utils/validators'
-import { downloadRequestAttachment } from '@/api/endpoints/requestEndpoint'
 
 const hiddenLineFields = new Set([
   'id',
@@ -208,30 +208,13 @@ export function ApprovalDetail() {
                 </div>
               ) : null}
 
-              <div className="border-t border-slate-200 pt-4">
-                <p className="mb-2 text-sm font-semibold text-slate-900">Attachments</p>
-                {request.attachments.length ? (
-                  <div className="divide-y divide-slate-100 border-y border-slate-200">
-                    {request.attachments.map((attachment) => (
-                      <div key={attachment.id} className="flex items-center justify-between gap-3 py-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{attachment.fileName}</p>
-                          <p className="text-xs text-slate-500">{attachment.description || attachment.fileType}</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void downloadRequestAttachment(request.id, attachment)}
-                        >
-                          <Download className="h-4 w-4" />
-                          Download
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p className="text-sm italic text-slate-500">No attachments.</p>}
-              </div>
+              <RequestAttachments
+                requestId={request.id}
+                attachments={request.attachments}
+                canUpload={false}
+                canDelete={false}
+                onUpdated={() => {}}
+              />
 
               {isReadOnly ? (
                 <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">

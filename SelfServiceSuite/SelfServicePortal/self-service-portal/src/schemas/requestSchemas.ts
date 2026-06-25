@@ -126,8 +126,9 @@ export const staffClaimLineSchema = z.object({
   hospitalCategory: optionalText,
   medicalAmount: z.coerce.number().min(0).default(0),
   amount: moneyField,
+  amountToRefund: z.coerce.number().min(0).optional().default(0),
   claimReceiptNo: optionalText,
-  expenditureDate: dateField,
+  expenditureDate: workingDateField,
   expenditureDescription: z.string().min(3, 'Expenditure description is required'),
 })
 
@@ -377,7 +378,7 @@ export const transportRequestSchema = z
   })
 
 export const salaryAdvanceSchema = z.object({
-  purpose: z.string().min(8, 'Purpose is required'),
+  purpose: z.string().min(1, 'Purpose is required'),
   percentageSalary: z.coerce.number().positive('Percentage is required').max(100, 'Maximum is 100%'),
 })
 

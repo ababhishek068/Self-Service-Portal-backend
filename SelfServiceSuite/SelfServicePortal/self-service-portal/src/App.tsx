@@ -39,6 +39,7 @@ import { PettyCash } from '@/pages/finance/PettyCash'
 import { PettyCashReplenishment } from '@/pages/finance/PettyCashReplenishment'
 import { StaffClaim } from '@/pages/finance/StaffClaim'
 import { HodTeamRequests } from '@/pages/hod/HodTeamRequests'
+import { HodEmployeeDetail } from '@/pages/hod/HodEmployeeDetail'
 import { StaffOnLeave } from '@/pages/hod/StaffOnLeave'
 import { Attendance } from '@/pages/hr/Attendance'
 import { DocumentRequisition } from '@/pages/hr/DocumentRequisition'
@@ -124,7 +125,9 @@ export default function App() {
         <Route path="approvals/rejected" element={<RejectedDocuments />} />
         <Route path="approvals/:id" element={<ApprovalDetail />} />
         <Route path="ceo/master-roll" element={<RoleRoute roles={['ceo']}><MasterRoll /></RoleRoute>} />
-        <Route path="hod/team-requests" element={<RoleRoute roles={['hod']}><HodTeamRequests /></RoleRoute>} />
+        <Route path="hod/team-requests" element={<Navigate to="/hod/department-staff" replace />} />
+        <Route path="hod/department-staff" element={<RoleRoute roles={['hod']}><HodTeamRequests /></RoleRoute>} />
+        <Route path="hod/employee/:employeeNo" element={<RoleRoute roles={['hod']}><HodEmployeeDetail /></RoleRoute>} />
         <Route path="hod/staff-on-leave" element={<RoleRoute roles={['hod']}><StaffOnLeave /></RoleRoute>} />
         <Route path="downloads/documents" element={<Documents />} />
         <Route path="profile" element={<Profile />} />

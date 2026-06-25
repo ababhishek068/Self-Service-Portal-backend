@@ -77,11 +77,6 @@ export function TransportRequest() {
         ],
         emptyText: '*** No Passengers Found ***',
       }}
-      businessRules={[
-        'Trip date cannot be in the past.',
-        'Add internal staff or external passengers after creating the header.',
-        'Request approval once passengers are captured.',
-      ]}
     />
   )
 }

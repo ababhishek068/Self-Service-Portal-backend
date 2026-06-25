@@ -54,10 +54,6 @@ export function FuelRequest() {
         { label: 'Purpose', paths: ['payload.Purpose'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
-      businessRules={[
-        'Vehicle fuel requires a vehicle registration number; a recharge card requires a card number.',
-        'Capture the dealer, quantity and price per litre, then request approval.',
-      ]}
     />
   )
 }

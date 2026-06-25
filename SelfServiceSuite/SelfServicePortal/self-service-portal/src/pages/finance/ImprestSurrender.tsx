@@ -150,10 +150,6 @@ export function ImprestSurrender() {
         ],
         emptyText: '*** No surrender lines ***',
       }}
-      businessRules={[
-        'Surrender lines are generated from the selected imprest.',
-        'Enter the actual spent and cash receipt details, then Save before requesting approval.',
-      ]}
     />
   )
 }

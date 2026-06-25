@@ -1,5 +1,7 @@
 import { formatISO } from 'date-fns'
+import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
+import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestTypeOptions } from '@/data/essOptions'
 import { imprestHeaderSchema, imprestLineHeaderSchema } from '@/schemas/requestSchemas'
@@ -8,6 +10,38 @@ import { useLookupOptions } from '@/hooks/useLookupOptions'
 
 const today = formatISO(new Date(), { representation: 'date' })
 const module = { module: 'imprest', entity: 'selfServiceImprestRequests' } as const
+
+function documentNoFromRequestId(requestId: string) {
+  const separator = requestId.indexOf('-')
+  return separator >= 0 ? requestId.slice(separator + 1) : requestId
+}
+
+let imprestAmountRequest = 0
+
+async function applyImprestLineAmount(
+  values: FieldValues,
+  form: UseFormReturn<FieldValues>,
+  requestId: string,
+) {
+  const advanceType = String(values.advanceType ?? '').trim()
+  const destination = String(values.destination ?? '').trim()
+  const noOfDays = Number(values.noOfDays ?? 0)
+  if (!advanceType || !destination || !noOfDays) return
+
+  const requestKey = ++imprestAmountRequest
+  try {
+    const amount = await fetchImprestLineAmount({
+      headerNo: documentNoFromRequestId(requestId),
+      noOfDays,
+      advanceType,
+      destinationCode: destination,
+    })
+    if (requestKey !== imprestAmountRequest) return
+    if (amount > 0) form.setValue('amount', amount, { shouldValidate: true })
+  } catch {
+    // Allow manual correction if BC calculation is unavailable.
+  }
+}
 
 export function ImprestRequest() {
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
@@ -57,14 +91,20 @@ export function ImprestRequest() {
           destination: '',
           dutyArea: '',
           noOfDays: 1,
-          amount: 0,
+          amount: '',
         },
+        onValuesChange: (values, form, requestId) => applyImprestLineAmount(values, form, requestId),
         fields: [
           { name: 'advanceType', label: 'Advance Type', type: 'select', options: imprestTypes.options },
           { name: 'destination', label: 'Travel Destination', type: 'select', options: destinations.options },
           { name: 'dutyArea', label: 'Duty Area', type: 'text' },
           { name: 'noOfDays', label: 'No. of Days', type: 'number' },
-          { name: 'amount', label: 'Amount', type: 'number' },
+          {
+            name: 'amount',
+            label: 'Amount',
+            type: 'number',
+            placeholder: 'Auto-calculated from type, destination and days — or enter manually',
+          },
         ],
         columns: [
           { key: 'advanceType', header: 'Advance Type' },
@@ -77,11 +117,6 @@ export function ImprestRequest() {
         emptyText: '*** No Imprest Lines Found ***',
         canEdit: false,
       }}
-      businessRules={[
-        'Create the imprest header first, then add one or more advance lines.',
-        'Each line captures advance type, destination, duty area, days and amount.',
-        'Attach supporting documents, then request approval.',
-      ]}
     />
   )
 }

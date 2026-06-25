@@ -55,10 +55,6 @@ export function PettyCash() {
         emptyText: '*** No Petty Cash Lines Found ***',
         canEdit: false,
       }}
-      businessRules={[
-        'Create the requisition header, then add one line per expense type.',
-        'The total amount is the sum of the requisition lines.',
-      ]}
     />
   )
 }

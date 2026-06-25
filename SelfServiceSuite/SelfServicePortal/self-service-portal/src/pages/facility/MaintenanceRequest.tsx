@@ -66,20 +66,16 @@ export function MaintenanceRequest() {
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
         { label: 'Request Date', paths: ['payload.RequestDate', 'payload.Request_Date', 'payload.Date'], format: 'date' },
-        { label: 'FA Tag / Vehicle No.', paths: ['payload.VehicleNo', 'payload.Vehicle_No', 'payload.FATagNumber'] },
-        { label: 'Item / Service', paths: ['payload.Item', 'payload.ItemNo', 'payload.Description'] },
+        { label: 'Maintenance Type', paths: ['payload.DocumentType', 'payload.Document_Type', 'payload.RequestType'] },
+        { label: 'FA Tag / Vehicle No.', paths: ['payload.VehicleRegNo', 'payload.Vehicle_Reg_No', 'payload.VehicleNo', 'payload.Vehicle_No', 'payload.FATagNumber'] },
+        { label: 'Item / Service', paths: ['payload.Item', 'payload.ItemNo', 'payload.Item_No'] },
         { label: 'Quantity', paths: ['payload.Quantity'] },
         { label: 'Location', paths: ['payload.Location'] },
         { label: 'Priority', paths: ['payload.Priority'] },
-        { label: 'Current Odometer', paths: ['payload.Odometer', 'payload.CurrentOdometer'] },
+        { label: 'Current Odometer', paths: ['payload.Odometer', 'payload.CurrentOdometer', 'payload.Current_Odometer'] },
         { label: 'Next Maintenance KM', paths: ['payload.NextMaintenanceKM', 'payload.Next_Maintenance_KM'] },
-        { label: 'Issue Description', paths: ['payload.Purpose', 'payload.IssueDescription'] },
+        { label: 'Issue Description', paths: ['payload.Purpose', 'payload.IssueDescription', 'payload.Description'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
-      ]}
-      businessRules={[
-        'Fixed-asset maintenance requires an FA tag; vehicle service requires a vehicle and current odometer.',
-        'Vehicle service requests are accepted only after 5,000 km from the previous service reading.',
-        'Priority, location, item, quantity and problem description are included in the request.',
       ]}
     />
   )
