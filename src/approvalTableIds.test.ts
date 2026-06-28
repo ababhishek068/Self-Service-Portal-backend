@@ -24,6 +24,7 @@ import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js
 import {
   employeeResetToken,
   employeeResetTokenIsExpired,
+  employeeResetTokenMatches,
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
@@ -461,5 +462,20 @@ describe('forgot-password token state', () => {
     assert.equal(employeeResetTokenIsExpired({ PortalResetTokenExpired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'Yes' } as never), true)
+  })
+
+  it('accepts a matching token from either reset-token field family', () => {
+    assert.equal(
+      employeeResetTokenMatches({ ResetToken: '39084', PortalResetToken: '23234' } as never, '39084'),
+      true,
+    )
+    assert.equal(
+      employeeResetTokenMatches({ ResetToken: '39084', PortalResetToken: '23234' } as never, '23234'),
+      true,
+    )
+    assert.equal(
+      employeeResetTokenMatches({ Reset_Token: '39084', Portal_Reset_Token: '23234' } as never, '11111'),
+      false,
+    )
   })
 })

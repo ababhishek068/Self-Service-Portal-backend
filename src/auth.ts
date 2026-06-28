@@ -184,25 +184,30 @@ function firstEmployeeField(employee: BcEmployee, names: string[]) {
 }
 
 export function employeeResetToken(employee: BcEmployee) {
-  return String(
-    firstEmployeeField(employee, [
-      'ResetToken',
-      'Reset_Token',
-      'Password_Reset_Token',
-      'PasswordResetToken',
-      'ResetPasswordToken',
-      'PasswordToken',
-      'Password_Token',
-      'PasswordResetCode',
-      'ResetCode',
-      'Reset_Code',
-      'PortalResetToken',
-      'Portal_Reset_Token',
-      'PortalPasswordToken',
-      'Portal_Password_Token',
-      'password_token',
-    ]),
-  ).trim()
+  return employeeResetTokens(employee)[0] ?? ''
+}
+
+const EMPLOYEE_RESET_TOKEN_FIELDS = [
+  'ResetToken',
+  'Reset_Token',
+  'Password_Reset_Token',
+  'PasswordResetToken',
+  'ResetPasswordToken',
+  'PasswordToken',
+  'Password_Token',
+  'PasswordResetCode',
+  'ResetCode',
+  'Reset_Code',
+  'PortalResetToken',
+  'Portal_Reset_Token',
+  'PortalPasswordToken',
+  'Portal_Password_Token',
+  'password_token',
+]
+
+export function employeeResetTokens(employee: BcEmployee) {
+  const row = employee as BcEmployee & Record<string, unknown>
+  return EMPLOYEE_RESET_TOKEN_FIELDS.map((name) => String(row[name] ?? '').trim()).filter(Boolean)
 }
 
 export function employeeResetTokenIsExpired(employee: BcEmployee) {
@@ -222,6 +227,12 @@ export function employeeResetTokenIsExpired(employee: BcEmployee) {
       'Portal_Password_Token_Expired',
     ]),
   )
+}
+
+export function employeeResetTokenMatches(employee: BcEmployee, resetToken: string) {
+  const token = resetToken.trim()
+  if (!token || employeeResetTokenIsExpired(employee)) return false
+  return employeeResetTokens(employee).includes(token)
 }
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
@@ -516,8 +527,7 @@ export function buildAuthRouter() {
         })
         return
       }
-      const storedToken = employeeResetToken(employee)
-      if (storedToken !== resetToken || employeeResetTokenIsExpired(employee)) {
+      if (!employeeResetTokenMatches(employee, resetToken)) {
         res.status(422).json({
           message: 'Reset token is wrong or has expired. Kindly use the last token sent to your email.',
         })
