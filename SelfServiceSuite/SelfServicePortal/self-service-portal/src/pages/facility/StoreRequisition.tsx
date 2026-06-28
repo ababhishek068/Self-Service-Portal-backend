@@ -53,6 +53,7 @@ export function StoreRequisition() {
           ...values,
           location: values.issuingStore,
           item: values.itemNo,
+          quantity: values.type === '2' ? 0 : values.quantity,
         }),
         fields: [
           { name: 'type', label: 'Type', type: 'select', options: storeLineTypeOptions },
@@ -67,7 +68,12 @@ export function StoreRequisition() {
             },
           },
           { name: 'description', label: 'Description', type: 'text' },
-          { name: 'quantity', label: 'Quantity Requested', type: 'number' },
+          {
+            name: 'quantity',
+            label: 'Quantity Requested',
+            type: 'number',
+            visibleWhen: (values) => String(values.type ?? '1') === '1',
+          },
         ],
         columns: [
           { key: 'type', header: 'Type' },

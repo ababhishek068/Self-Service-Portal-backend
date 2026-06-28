@@ -8,6 +8,15 @@ export function isPendingApprovalStatus(status: string | undefined) {
   return status === 'Pending Approval'
 }
 
+/** ESS show blades only include approvers after approval has been requested. */
+export function shouldShowApprovalHistory(status: string | undefined) {
+  return (
+    status === 'Pending Approval' ||
+    status === 'Approved' ||
+    status === 'Rejected'
+  )
+}
+
 /** Lines and attachments can be deleted only before approval submission. */
 export function canDeleteRequestItems(status: string | undefined) {
   return isEditableRequestStatus(status)

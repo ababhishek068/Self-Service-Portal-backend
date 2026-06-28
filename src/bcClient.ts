@@ -131,7 +131,16 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
       })
       statusCode = response.statusCode
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw new Error(`Business Central OData ${response.statusCode}: ${response.body}`)
+        const err = new Error(`Business Central OData ${response.statusCode}: ${response.body}`)
+        if (response.statusCode === 401) {
+          Object.assign(err, {
+            status: 502,
+            code: 'BC_AUTH_FAILED',
+            message:
+              'Business Central rejected the service account (401). Check BC_NAV_USER, BC_NAV_PASSWORD, and BC_AUTH_MODE (HIJRA UAT often needs ntlm).',
+          })
+        }
+        throw err
       }
       const data = response.body ? JSON.parse(response.body) : null
       completeBcCall(call, response.statusCode, responseBytes(response.body))
@@ -148,7 +157,16 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
     statusCode = response.status
     const text = await response.text()
     if (!response.ok) {
-      throw new Error(`Business Central OData ${response.status}: ${text}`)
+      const err = new Error(`Business Central OData ${response.status}: ${text}`)
+      if (response.status === 401) {
+        Object.assign(err, {
+          status: 502,
+          code: 'BC_AUTH_FAILED',
+          message:
+            'Business Central rejected the service account (401). Check BC_NAV_USER, BC_NAV_PASSWORD, and BC_AUTH_MODE (HIJRA UAT often needs ntlm).',
+        })
+      }
+      throw err
     }
     const data = text ? JSON.parse(text) : null
     completeBcCall(call, response.status, responseBytes(text))

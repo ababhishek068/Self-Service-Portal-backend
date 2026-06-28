@@ -15,12 +15,18 @@ import {
   gatePassSourceFromRow,
   isMedicalClaimType,
   passengerTypeCode,
+  approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
 import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
-import { resetTokenIsExpired, type AuthUser } from './auth.js'
+import {
+  employeeResetToken,
+  employeeResetTokenIsExpired,
+  resetTokenIsExpired,
+  type AuthUser,
+} from './auth.js'
 import { documentStatusFromBc, mapRequest } from './erpMappings.js'
 import {
   bcDocumentStatus,
@@ -227,6 +233,17 @@ describe('staffClaim saveLine params', () => {
   })
 })
 
+describe('approvalDocumentNoCandidates', () => {
+  it('includes transfer-order gate pass and padded document numbers', () => {
+    const spec = findFrontendModuleSpec('transferOrder')
+    assert.ok(spec)
+    assert.deepEqual(
+      approvalDocumentNoCandidates(spec, { No: '1055', GatePassNo: 'GP-100' }, '1055'),
+      ['1055', 'GP-100', '0000001055'],
+    )
+  })
+})
+
 describe('mapApprovalSteps', () => {
   it('returns Business Central approval entries in sequence order', () => {
     const steps = mapApprovalSteps([
@@ -236,6 +253,19 @@ describe('mapApprovalSteps', () => {
 
     assert.deepEqual(steps.map((step) => step.actorEmployeeNo), ['FIRST', 'SECOND'])
     assert.deepEqual(steps.map((step) => step.sequenceNo), [1, 2])
+  })
+
+  it('maps pending placeholder rows for submitted transfer orders', () => {
+    const steps = mapApprovalSteps([
+      {
+        Status: 'Pending Approval',
+        SequenceNo: 1,
+        ApproverName: 'Awaiting approver assignment',
+        Comment: 'Submitted for approval in Business Central',
+      },
+    ])
+    assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
+    assert.equal(steps[0]?.status, 'Pending Approval')
   })
 })
 
@@ -417,5 +447,19 @@ describe('forgot-password token state', () => {
     assert.equal(resetTokenIsExpired(0), false)
     assert.equal(resetTokenIsExpired(true), true)
     assert.equal(resetTokenIsExpired('1'), true)
+  })
+
+  it('reads reset token aliases exposed by different BC employee pages', () => {
+    assert.equal(employeeResetToken({ PasswordResetToken: 39084 } as never), '39084')
+    assert.equal(employeeResetToken({ Password_Token: '77889' } as never), '77889')
+    assert.equal(employeeResetToken({ Reset_Code: '12345' } as never), '12345')
+    assert.equal(employeeResetToken({ PortalResetToken: 23234 } as never), '23234')
+    assert.equal(employeeResetToken({ Portal_Reset_Token: '23234' } as never), '23234')
+  })
+
+  it('reads reset-token expiry aliases exposed by different BC employee pages', () => {
+    assert.equal(employeeResetTokenIsExpired({ PortalResetTokenExpired: 'No' } as never), false)
+    assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'No' } as never), false)
+    assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'Yes' } as never), true)
   })
 })

@@ -1,0 +1,24 @@
+{
+  "name": "self-service-portal",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "npm --prefix self-service-portal run dev",
+    "build": "npm --prefix self-service-portal run build",
+    "lint": "npm --prefix self-service-portal run lint",
+    "preview": "npm --prefix self-service-portal run preview",
+    "build:all": "npm --prefix db run generate && npm --prefix server run build && npm --prefix ../SelfServiceBackend run build:all",
+    "server:install": "npm --prefix server install",
+    "server:seed": "npm --prefix server run seed",
+    "server:dev": "npm --prefix server run dev",
+    "server:build": "npm --prefix server run build",
+    "server:start": "npm --prefix server start",
+    "db:install": "npm --prefix db install",
+    "db:migrate": "npm --prefix db run migrate",
+    "db:deploy": "npm --prefix db run migrate:deploy",
+    "db:seed": "npm --prefix db run seed",
+    "db:reset-leave": "npm --prefix db run reset:leave",
+    "db:studio": "npm --prefix db run studio",
+    "db:create-user": "npm --prefix db run create-user --"
+  }
+}

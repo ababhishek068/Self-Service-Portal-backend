@@ -173,12 +173,36 @@ export const storeHeaderSchema = z.object({
   description: z.string().min(3, 'Request description is required'),
 })
 
-export const storeLineSchema = z.object({
-  type: z.string().min(1, 'Type is required'),
-  issuingStore: z.string().min(1, 'Issuing store is required'),
-  itemNo: z.string().min(1, 'Item number is required'),
-  description: optionalText,
-  quantity: quantityField,
+export const storeLineSchema = z
+  .object({
+    type: z.string().min(1, 'Type is required'),
+    issuingStore: z.string().min(1, 'Issuing store is required'),
+    itemNo: z.string().min(1, 'Item or asset number is required'),
+    description: optionalText,
+    quantity: quantityField,
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === '1' && Number(data.quantity) <= 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Quantity is required for item lines',
+        path: ['quantity'],
+      })
+    }
+  })
+
+export const workTicketHeaderSchema = z.object({
+  previousTicketNo: z.string().default(''),
+  gkNo: z.string().min(1, 'GK No. is required'),
+  type: z.string().default(''),
+})
+
+export const workTicketLineSchema = z.object({
+  driverName: z.string().min(1, 'Driver name is required'),
+  departureFrom: z.string().min(1, 'Departure from is required'),
+  destination: z.string().min(1, 'Destination is required'),
+  workDate: dateField,
+  authorizingOfficer: z.string().min(1, 'Authorizing officer is required'),
 })
 
 export const transportHeaderSchema = z.object({
@@ -548,6 +572,8 @@ export type PettyCashReplenishmentForm = z.infer<typeof pettyCashReplenishmentSc
 export type StoreRequisitionForm = z.infer<typeof storeRequisitionSchema>
 export type PurchaseRequisitionForm = z.infer<typeof purchaseRequisitionSchema>
 export type FuelRequestForm = z.infer<typeof fuelRequestSchema>
+export type WorkTicketHeaderForm = z.infer<typeof workTicketHeaderSchema>
+export type WorkTicketLineForm = z.infer<typeof workTicketLineSchema>
 export type TransportRequestForm = z.infer<typeof transportRequestSchema>
 export type MaintenanceRequestForm = z.infer<typeof maintenanceRequestSchema>
 export type TransferOrderForm = z.infer<typeof transferOrderSchema>

@@ -1,0 +1,42 @@
+SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
+================================================
+
+Release date: 2026-06-25
+See RELEASE-NOTES-2026-06-25.txt for per-module guidance and testing notes.
+
+SUMMARY
+-------
+- Pending Approval status and Cancel on list/detail
+- Finance attachments: upload on Draft/Open only
+- Imprest lines: auto-calculated amount with manual entry fallback
+- Staff claims: medical amount and hospital category auto-fill
+- Petty cash replenishment detail fields (accounts and amounts)
+- Transfer order status correct after request approval
+- Gate Pass Asset Transfer create opens transfer flow (not Coming Soon)
+- Attendance MAC: run client helper on each employee PC (see below)
+
+ATTENDANCE MAC (each employee PC)
+---------------------------------
+Run once on every PC that signs attendance (see deploy\windows\CLIENT-MAC-HELPER.txt):
+  SelfServiceBackend\deploy\windows\install-client-mac-helper.bat
+
+INSTALL / UPDATE ON CLIENT HOST
+-------------------------------
+1. Stop services:
+   powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+
+2. Backup existing folder:
+   C:\TA\SelfServiceSuite -> C:\TA\SelfServiceSuite-backup
+
+3. Extract this ZIP to C:\TA so the folder is exactly:
+   C:\TA\SelfServiceSuite
+
+4. Start all services:
+   C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
+
+5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
+
+If .env is ever missing, copy the template for YOUR client:
+   ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
+   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
+   See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt

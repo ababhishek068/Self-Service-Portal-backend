@@ -10,6 +10,8 @@ const module = { module: 'transferOrder', entity: 'selfServiceTransferOrders' } 
 
 export function TransferOrder() {
   const [searchParams] = useSearchParams()
+  const fromGatePass = searchParams.get('fromGatePass')
+  const isAssetTransfer = fromGatePass === 'assetTransfer'
   const locations = useLookupOptions('regular-locations')
   const inTransitLocations = useLookupOptions('in-transit-locations')
   const shippingAgents = useLookupOptions('shipping-agents')
@@ -17,9 +19,13 @@ export function TransferOrder() {
 
   return (
     <MultiStepRequestPage
-      title="Transfer Order"
-      headerLabel="New Transfer Order (Header)"
-      description="Create the transfer order header, then add item lines before requesting approval."
+      title={isAssetTransfer ? 'Asset Transfer' : 'Transfer Order'}
+      headerLabel={isAssetTransfer ? 'New Asset Transfer (Header)' : 'New Transfer Order (Header)'}
+      description={
+        isAssetTransfer
+          ? 'Create the asset transfer header, then add lines before requesting approval. BC will generate the gate pass after posting.'
+          : 'Create the transfer order header, then add item lines before requesting approval.'
+      }
       module={module}
       queryKey={['facility', 'transfer-order']}
       listRequests={() => listModuleRequests(module)}
@@ -38,7 +44,9 @@ export function TransferOrder() {
         ...values,
         fromCode: values.from,
         toCode: values.to,
-        title: `Transfer ${values.from || ''} → ${values.to || ''}`,
+        title: isAssetTransfer
+          ? `Asset Transfer ${values.from || ''} → ${values.to || ''}`
+          : `Transfer ${values.from || ''} → ${values.to || ''}`,
       })}
       headerFields={[
         { name: 'from', label: 'From', type: 'select', options: locations.options, valuePaths: ['TransferfromCode', 'TransferFromCode'] },

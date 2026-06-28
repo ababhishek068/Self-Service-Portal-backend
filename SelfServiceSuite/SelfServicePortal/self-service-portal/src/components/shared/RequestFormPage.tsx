@@ -41,6 +41,7 @@ import {
   canUploadRequestAttachments,
   isEditableRequestStatus,
   PORTAL_ATTACHMENT_MODULES,
+  shouldShowApprovalHistory,
 } from '@/utils/requestStatus'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
@@ -612,10 +613,12 @@ export function RequestFormPage({
                   />
                 ) : null}
 
-                <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                  <ApprovalHistory steps={selected.approvalSteps} />
-                </section>
+                {shouldShowApprovalHistory(selected.status) ? (
+                  <section className="border-t border-slate-200 pt-4">
+                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                    <ApprovalHistory steps={selected.approvalSteps} />
+                  </section>
+                ) : null}
               </>
             ) : null}
           </div>

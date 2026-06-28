@@ -28,11 +28,13 @@ fi
 npm --prefix "$FRONTEND" run build:onprem
 
 echo "==> Syncing latest builds into SelfServiceSuite..."
-rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy"
-mkdir -p "$BC/dist" "$BC/public" "$BC/logs"
+rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy" "$BC/src"
+mkdir -p "$BC/dist" "$BC/public" "$BC/src" "$BC/logs"
 cp -R "$ROOT/dist/." "$BC/dist/"
 cp -R "$FRONTEND/dist/." "$BC/public/"
-cp -R "$ROOT/src" "$BC/src"
+rsync -a \
+  --exclude '*.tmp' \
+  "$ROOT/src/" "$BC/src/"
 cp "$ROOT/package.json" "$BC/package.json"
 cp "$ROOT/package-lock.json" "$BC/package-lock.json"
 
@@ -60,6 +62,13 @@ cp "$BC/.env" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
 cp "$BC/.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env.example"
 cp "$BC/deploy/windows/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
 cp "$BC/deploy/windows/start-self-service.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/start-self-service.bat"
+cp "$ROOT/deploy/windows/client-mac-helper.ps1" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/client-mac-helper.ps1"
+cp "$ROOT/deploy/windows/start-client-mac-helper.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/start-client-mac-helper.bat"
+cp "$ROOT/deploy/windows/install-client-mac-helper.ps1" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/install-client-mac-helper.ps1"
+cp "$ROOT/deploy/windows/install-client-mac-helper.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/install-client-mac-helper.bat"
+cp "$ROOT/deploy/windows/install-client-mac-helper-user.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/install-client-mac-helper-user.bat"
+cp "$ROOT/deploy/windows/uninstall-client-mac-helper.ps1" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/uninstall-client-mac-helper.ps1"
+cp "$ROOT/deploy/windows/CLIENT-MAC-HELPER.txt" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/CLIENT-MAC-HELPER.txt"
 cp "$PORTAL/db/.env" "$STAGING/SelfServiceSuite/SelfServicePortal/db/.env"
 cp "$PORTAL/server/.env" "$STAGING/SelfServiceSuite/SelfServicePortal/server/.env"
 
@@ -67,22 +76,33 @@ mkdir -p \
   "$STAGING/SelfServiceSuite/SelfServiceBackend/logs" \
   "$STAGING/SelfServiceSuite/SelfServicePortal/server/logs"
 
-cat > "$STAGING/SelfServiceSuite/IMPORTANT-UPDATE.txt" <<'EOF'
+cat > "$STAGING/SelfServiceSuite/IMPORTANT-UPDATE.txt" <<EOF
 SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
 ================================================
 
-Release date: 2026-06-25
-See RELEASE-NOTES-2026-06-25.txt for per-module guidance and testing notes.
+Release date: ${STAMP}
 
-SUMMARY
--------
-- Pending Approval status and Cancel on list/detail
-- Finance attachments: upload on Draft/Open only
-- Imprest lines: auto-calculated amount with manual entry fallback
-- Staff claims: medical amount and hospital category auto-fill
-- Petty cash replenishment detail fields (accounts and amounts)
-- Transfer order status correct after request approval
-- Vehicle Transfer: coming soon (disabled)
+SUMMARY (${STAMP})
+------------------
+- Fuel request list: fixed BC OData 500 error
+- Store requisition: asset lines clear wrong item when type changes
+- Transfer orders: approval history lookup (doc no, gate pass, record ID) + pending placeholder
+- Work tickets: New ticket + add line on open tickets
+- Pending Approval status, Cancel on list/detail (all modules)
+- Finance attachments, imprest lines, staff claim medical, petty cash replenishment fields
+- HOD staff list, on-leave, attendance pages
+- Attendance MAC: run client helper on each employee PC (see below)
+
+BC ADMIN STILL REQUIRED (not portal bugs)
+-----------------------------------------
+- Transport: TR number series must exist in BC
+- Fuel/maintenance: approval workflow must be configured in BC (table 50865)
+- Transfer order full approver chain: only if BC creates QyApprovalEntry rows
+
+ATTENDANCE MAC (each employee PC)
+---------------------------------
+Run once on every PC that signs attendance (see deploy\windows\CLIENT-MAC-HELPER.txt):
+  SelfServiceBackend\deploy\windows\install-client-mac-helper.bat
 
 INSTALL / UPDATE ON CLIENT HOST
 -------------------------------
@@ -106,7 +126,11 @@ If .env is ever missing, copy the template for YOUR client:
    See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt
 EOF
 
-cp "$ROOT/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt" "$STAGING/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt"
+if [[ -f "$ROOT/SelfServiceSuite/RELEASE-NOTES-${STAMP}.txt" ]]; then
+  cp "$ROOT/SelfServiceSuite/RELEASE-NOTES-${STAMP}.txt" "$STAGING/SelfServiceSuite/RELEASE-NOTES-${STAMP}.txt"
+elif [[ -f "$ROOT/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt" ]]; then
+  cp "$ROOT/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt" "$STAGING/SelfServiceSuite/RELEASE-NOTES-2026-06-25.txt"
+fi
 
 echo "==> Creating zip: $OUTPUT"
 rm -f "$OUTPUT"

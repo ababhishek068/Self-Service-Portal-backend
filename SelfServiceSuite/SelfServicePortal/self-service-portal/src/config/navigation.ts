@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import type { PortalRole } from '@/config/roles'
 import {
+  ArrowRightLeft,
   BadgeCheck,
   Banknote,
   BarChart3,
@@ -18,6 +19,7 @@ import {
   Home,
   KeyRound,
   Landmark,
+  LogOut,
   PackageCheck,
   Plane,
   ReceiptText,
@@ -65,6 +67,18 @@ export const navigationMenu: NavItem[] = [
         label: 'Document Requisition',
         path: '/hr/document-requisition',
         icon: FileText,
+        underConstruction: true,
+      },
+      {
+        label: 'Employee Resignation',
+        path: '/hr/employee-resignation',
+        icon: LogOut,
+        underConstruction: true,
+      },
+      {
+        label: 'Employee Transfer',
+        path: '/hr/employee-transfer',
+        icon: ArrowRightLeft,
         underConstruction: true,
       },
     ],

@@ -1,5 +1,6 @@
 import { authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
+import { collectAttendanceMacHints } from '@/utils/clientMac'
 
 export interface AttendanceRow {
   id: string
@@ -9,6 +10,8 @@ export interface AttendanceRow {
   timeIn: string
   timeOut: string
   hoursWorked: string
+  macAddress: string
+  /** @deprecated Use macAddress */
   location: string
   comments: string
   highlight?: boolean
@@ -26,15 +29,14 @@ export async function listTeamAttendanceRecords(): Promise<AttendanceRow[]> {
   return rows
 }
 
-export async function signInAttendance(location: string): Promise<AttendanceRow> {
+export async function signInAttendance(): Promise<AttendanceRow> {
   requireAuthApiUrl()
-  return authPost<AttendanceRow>('/api/attendance/sign-in', {
-    location,
-    comments: location === 'Location denied' ? 'Signed in without coordinates' : 'Signed in',
-  })
+  const hints = await collectAttendanceMacHints()
+  return authPost<AttendanceRow>('/api/attendance/sign-in', hints)
 }
 
-export async function signOutAttendance(location: string): Promise<AttendanceRow> {
+export async function signOutAttendance(): Promise<AttendanceRow> {
   requireAuthApiUrl()
-  return authPost<AttendanceRow>('/api/attendance/sign-out', { location })
+  const hints = await collectAttendanceMacHints()
+  return authPost<AttendanceRow>('/api/attendance/sign-out', hints)
 }

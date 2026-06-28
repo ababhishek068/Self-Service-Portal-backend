@@ -12,15 +12,14 @@ import { Button } from '@/components/ui/button'
 import type { AttendanceRow } from '@/api/endpoints/attendance'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useToast } from '@/components/feedback/ToastProvider'
-import { formatAttendanceClock, isRecordedAttendanceTime } from '@/utils/formatters'
+import { formatAttendanceClock, formatAttendanceMac, isRecordedAttendanceTime } from '@/utils/formatters'
 
 export function Attendance() {
   const { isHOD } = usePermissions()
   const queryClient = useQueryClient()
   const [confirmSignOut, setConfirmSignOut] = useState(false)
-  const [locationStatus, setLocationStatus] = useState<string>('')
-  const [fetchingLocation, setFetchingLocation] = useState(false)
-  const [attendanceAction, setAttendanceAction] = useState<'in' | 'out' | null>(null)
+  const [lastMacAddress, setLastMacAddress] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const toast = useToast()
 
   const attendanceQuery = useQuery({
@@ -41,53 +40,32 @@ export function Attendance() {
   const signedInToday = isRecordedAttendanceTime(todayRecord?.timeIn)
   const signedOutToday = isRecordedAttendanceTime(todayRecord?.timeOut)
 
-  const captureLocation = (): Promise<string> =>
-    new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        resolve('Location unavailable')
-        return
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(`${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`),
-        () => resolve('Location denied'),
-        { enableHighAccuracy: true, timeout: 8000 },
-      )
-    })
-
   const signIn = async () => {
-    setAttendanceAction('in')
+    setSubmitting(true)
     try {
-      setFetchingLocation(true)
-      const location = await captureLocation()
-      setFetchingLocation(false)
-      setLocationStatus(location)
-      const result = await signInAttendance(location)
+      const result = await signInAttendance()
+      setLastMacAddress(result.macAddress || result.location || '')
       await queryClient.invalidateQueries({ queryKey: ['attendance'] })
       toast.success(result.comments || 'Attendance recorded successfully.', 'Signed in')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Attendance sign-in failed.', 'Sign-in failed')
     } finally {
-      setFetchingLocation(false)
-      setAttendanceAction(null)
+      setSubmitting(false)
     }
   }
 
   const signOut = async () => {
-    setAttendanceAction('out')
+    setSubmitting(true)
     try {
-      setFetchingLocation(true)
-      const location = await captureLocation()
-      setFetchingLocation(false)
-      setLocationStatus(location)
-      const result = await signOutAttendance(location)
+      const result = await signOutAttendance()
+      setLastMacAddress(result.macAddress || result.location || '')
       await queryClient.invalidateQueries({ queryKey: ['attendance'] })
       toast.success(result.comments || 'Attendance sign-out recorded.', 'Signed out')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Attendance sign-out failed.', 'Sign-out failed')
     } finally {
-      setFetchingLocation(false)
+      setSubmitting(false)
       setConfirmSignOut(false)
-      setAttendanceAction(null)
     }
   }
 
@@ -97,7 +75,11 @@ export function Attendance() {
     { id: 'in', header: 'Time In', cell: (row) => formatAttendanceClock(row.timeIn) },
     { id: 'out', header: 'Time Out', cell: (row) => formatAttendanceClock(row.timeOut) },
     { id: 'hours', header: 'Hours Worked', cell: (row) => row.hoursWorked ? Number(row.hoursWorked).toFixed(2) : '—' },
-    { id: 'location', header: 'Coordinates', cell: (row) => row.location || '—' },
+    {
+      id: 'mac',
+      header: 'MAC Address',
+      cell: (row) => formatAttendanceMac(row.macAddress || row.location),
+    },
     { id: 'comments', header: 'Comments', cell: (row) => row.comments },
   ]
 
@@ -110,11 +92,11 @@ export function Attendance() {
             type="button"
             variant="success"
             className="rounded-full px-5"
-            onClick={signIn}
-            disabled={fetchingLocation || attendanceAction !== null || signedInToday}
+            onClick={() => void signIn()}
+            disabled={submitting || signedInToday}
           >
-            {attendanceAction === 'in'
-              ? (fetchingLocation ? 'Getting location…' : 'Signing in…')
+            {submitting && !signedOutToday && !confirmSignOut
+              ? 'Signing in…'
               : signedInToday
                 ? `Signed in ${formatAttendanceClock(todayRecord?.timeIn)}`
                 : 'Sign-in Today'}
@@ -123,7 +105,7 @@ export function Attendance() {
             type="button"
             variant="action"
             className="rounded-full px-5"
-            disabled={attendanceAction !== null || !signedInToday || signedOutToday}
+            disabled={submitting || !signedInToday || signedOutToday}
             onClick={() => setConfirmSignOut(true)}
           >
             {signedOutToday
@@ -133,9 +115,9 @@ export function Attendance() {
         </div>
       }
     >
-      {locationStatus ? (
+      {lastMacAddress ? (
         <p className="mb-3 text-sm text-slate-600">
-          Last sign-in coordinates: <span className="font-medium">{locationStatus}</span>
+          MAC address: <span className="font-medium">{formatAttendanceMac(lastMacAddress)}</span>
         </p>
       ) : null}
 
@@ -169,8 +151,8 @@ export function Attendance() {
               <Button type="button" variant="outline" onClick={() => setConfirmSignOut(false)}>
                 Cancel
               </Button>
-              <Button type="button" variant="action" disabled={attendanceAction === 'out'} onClick={() => void signOut()}>
-                {attendanceAction === 'out' ? (fetchingLocation ? 'Getting location…' : 'Signing out…') : 'Sign out'}
+              <Button type="button" variant="action" disabled={submitting} onClick={() => void signOut()}>
+                {submitting ? 'Signing out…' : 'Sign out'}
               </Button>
             </div>
           </div>

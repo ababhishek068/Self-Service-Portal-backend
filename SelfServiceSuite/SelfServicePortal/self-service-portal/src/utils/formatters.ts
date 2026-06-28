@@ -38,3 +38,10 @@ export function formatAttendanceClock(value?: string | null) {
   if (!isRecordedAttendanceTime(value)) return '—'
   return String(value).replace(/\.\d+$/, '')
 }
+
+export function formatAttendanceMac(value?: string | null) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.toLowerCase() === 'mac unavailable') return '—'
+  if (/latitude/i.test(raw) && /longitude/i.test(raw)) return '—'
+  return raw.replace(/^MAC:\s*/i, '')
+}

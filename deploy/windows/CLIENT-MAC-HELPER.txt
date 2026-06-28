@@ -1,0 +1,46 @@
+ATTENDANCE MAC HELPER - INSTALL ON EACH EMPLOYEE PC
+===================================================
+
+Why
+---
+Browsers cannot read a PC MAC address directly. This small helper runs on
+each employee computer and lets the Self Service Portal read the MAC for
+attendance sign-in / sign-out.
+
+One-time install (IT recommended)
+---------------------------------
+On each employee PC, run as Administrator:
+
+  C:\TA\SelfServiceSuite\SelfServiceBackend\deploy\windows\install-client-mac-helper.bat
+
+This will:
+1. Create a Windows scheduled task that starts at boot
+2. Start the helper immediately in the background
+3. Serve the PC MAC at http://127.0.0.1:47211/mac
+
+Current-user only install (no admin)
+------------------------------------
+If admin rights are not available:
+
+  C:\TA\SelfServiceSuite\SelfServiceBackend\deploy\windows\install-client-mac-helper-user.bat
+
+This adds a Startup shortcut for the signed-in user only.
+
+Verify
+------
+1. Open http://127.0.0.1:47211/mac in the browser on that PC
+2. You should see JSON like: {"mac":"AA:BB:CC:DD:EE:FF"}
+3. Sign in on Attendance in the portal
+
+Log file
+--------
+%ProgramData%\SelfServiceSuite\logs\client-mac-helper.log
+
+Uninstall
+---------
+powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServiceBackend\deploy\windows\uninstall-client-mac-helper.ps1
+
+GPO / bulk deploy
+-----------------
+Point a GPO computer startup script to:
+  install-client-mac-helper.bat

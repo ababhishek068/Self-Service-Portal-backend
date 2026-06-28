@@ -163,6 +163,67 @@ interface BcUserSetup {
   ApproverID?: string
 }
 
+/** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
+function normalizeStaffNo(staffNo: string) {
+  return staffNo.trim().replace(/__/g, '/')
+}
+
+function employeeIsActive(employee: BcEmployee) {
+  return employee.Status === 'Active' || employee.Password === 'Password@123'
+}
+
+function firstEmployeeField(employee: BcEmployee, names: string[]) {
+  const row = employee as BcEmployee & Record<string, unknown>
+  for (const name of names) {
+    const value = row[name]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value
+    }
+  }
+  return ''
+}
+
+export function employeeResetToken(employee: BcEmployee) {
+  return String(
+    firstEmployeeField(employee, [
+      'ResetToken',
+      'Reset_Token',
+      'Password_Reset_Token',
+      'PasswordResetToken',
+      'ResetPasswordToken',
+      'PasswordToken',
+      'Password_Token',
+      'PasswordResetCode',
+      'ResetCode',
+      'Reset_Code',
+      'PortalResetToken',
+      'Portal_Reset_Token',
+      'PortalPasswordToken',
+      'Portal_Password_Token',
+      'password_token',
+    ]),
+  ).trim()
+}
+
+export function employeeResetTokenIsExpired(employee: BcEmployee) {
+  return resetTokenIsExpired(
+    firstEmployeeField(employee, [
+      'TokenExpired',
+      'Token_Expired',
+      'ResetTokenExpired',
+      'Reset_Token_Expired',
+      'Password_Reset_Token_Expired',
+      'PasswordResetTokenExpired',
+      'PasswordTokenExpired',
+      'Password_Token_Expired',
+      'PortalResetTokenExpired',
+      'Portal_Reset_Token_Expired',
+      'PortalPasswordTokenExpired',
+      'Portal_Password_Token_Expired',
+    ]),
+  )
+}
+
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
   const rows = (await fetchOData('QyHREmployee', {
     $filter: `No eq '${odataString(staffNo)}'`,
@@ -375,7 +436,7 @@ export function buildAuthRouter() {
 
   router.post('/auth/forgot-password', async (req, res, next) => {
     try {
-      const staffNo = typeof req.body?.staffNo === 'string' ? req.body.staffNo.trim() : ''
+      const staffNo = normalizeStaffNo(typeof req.body?.staffNo === 'string' ? req.body.staffNo : '')
       if (!staffNo) {
         res.status(422).json({ message: 'Staff No. is required' })
         return
@@ -424,7 +485,7 @@ export function buildAuthRouter() {
 
   router.post('/auth/reset-password', async (req, res, next) => {
     try {
-      const staffNo = typeof req.body?.staffNo === 'string' ? req.body.staffNo.trim() : ''
+      const staffNo = normalizeStaffNo(typeof req.body?.staffNo === 'string' ? req.body.staffNo : '')
       const resetToken = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : ''
       const password = typeof req.body?.password === 'string' ? req.body.password : ''
       const passwordConfirmation =
@@ -444,14 +505,19 @@ export function buildAuthRouter() {
       }
 
       const employee = await fetchEmployee(staffNo)
-      if (!employee || String(employee.Status ?? '').toLowerCase() !== 'active') {
+      if (!employee) {
         res.status(404).json({ message: 'Invalid Staff No.' })
         return
       }
-      if (
-        String(employee.ResetToken ?? '').trim() !== resetToken ||
-        resetTokenIsExpired(employee.TokenExpired)
-      ) {
+      if (!employeeIsActive(employee)) {
+        res.status(403).json({
+          message:
+            'Your account is currently blocked or inactive. Please contact the IT team for help.',
+        })
+        return
+      }
+      const storedToken = employeeResetToken(employee)
+      if (storedToken !== resetToken || employeeResetTokenIsExpired(employee)) {
         res.status(422).json({
           message: 'Reset token is wrong or has expired. Kindly use the last token sent to your email.',
         })

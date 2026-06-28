@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, ArrowLeft, Pencil, Plus, Send, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   type FieldValues,
   type Resolver,
@@ -41,7 +41,7 @@ import {
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import { canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES } from '@/utils/requestStatus'
+import { canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
@@ -310,6 +310,22 @@ function AddLineForm({
   const render = fieldRenderer(form, '', watchedValues)
   const toast = useToast()
   const onValuesChange = line.onValuesChange
+  const parentFieldValuesRef = useRef<Record<string, string>>({})
+  useEffect(() => {
+    for (const field of line.fields) {
+      if (!field.optionsByField) continue
+      const parentField = field.optionsByField.field
+      const parentValue = String(pathValue(watchedValues, parentField) ?? '')
+      const previous = parentFieldValuesRef.current[parentField]
+      if (previous !== undefined && previous !== parentValue) {
+        form.setValue(field.name, '', { shouldValidate: false })
+        if (field.name === 'itemNo') {
+          form.setValue('description', '', { shouldValidate: false })
+        }
+      }
+      parentFieldValuesRef.current[parentField] = parentValue
+    }
+  }, [watchedValues, line.fields, form])
   useEffect(() => {
     if (!onValuesChange) return
     void onValuesChange(watchedValues, form, requestId)
@@ -857,10 +873,12 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   </section>
                 ) : null}
 
-                <section className="border-t border-slate-200 pt-4">
-                  <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                  <ApprovalHistory steps={selected.approvalSteps} />
-                </section>
+                {shouldShowApprovalHistory(selected.status) ? (
+                  <section className="border-t border-slate-200 pt-4">
+                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                    <ApprovalHistory steps={selected.approvalSteps} />
+                  </section>
+                ) : null}
               </>
             ) : null}
           </div>

@@ -14,6 +14,8 @@ const variants: Record<string, 'green' | 'red' | 'yellow' | 'gray' | 'blue' | 'o
   'Pending Approval': 'blue',
   Pending: 'red',
   Open: 'blue',
+  Submitted: 'gray',
+  Created: 'gray',
   New: 'red',
 }
 

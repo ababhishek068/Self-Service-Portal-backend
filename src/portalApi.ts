@@ -1,4 +1,14 @@
 import { Router, type Request } from 'express'
+import {
+  macFromAttendanceLocation,
+  normalizeMacAddress,
+  persistEmployeeMac,
+  persistedEmployeeMac,
+  persistDeviceMac,
+  persistedDeviceMac,
+  resolveAttendanceIdentifier,
+  resolveAttendanceMacAddress,
+} from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth, type AuthUser } from './auth.js'
 import {
@@ -14,6 +24,7 @@ import {
   createPortalModuleRequest,
   deletePortalModuleLine,
   findFrontendModuleSpec,
+  findModuleSpec,
   gatePassLineBinding,
   gatePassSourceFromQuery,
   gatePassSourceFromRow,
@@ -786,7 +797,7 @@ async function requestDetail(
   const gatePassBinding = module === 'gatePass' ? gatePassLineBinding(row, no) : null
   const [lines, approvers, attachments] = await Promise.all([
     listPortalModuleLines(spec, row, no),
-    fetchPortalApprovalEntries(spec, no),
+    fetchPortalApprovalEntries(spec, no, row),
     spec.headerTableId > 0
       ? fetchDocumentAttachments(attachmentDocNo, spec.headerTableId).catch(() => [] as ODataRecord[])
       : Promise.resolve([] as ODataRecord[]),
@@ -805,22 +816,76 @@ async function requestDetail(
         : {}),
       lines: mapModuleLines(module, row, Array.isArray(lines) ? lines : []),
     },
-    approvalSteps: mapApprovalSteps(approvers),
+    approvalSteps: resolveRequestApprovalSteps(approvers, row, mapped.status),
     attachments: mapAttachments(attachments),
   }
+}
+
+function fallbackApprovalStepsFromHeader(row: ODataRecord, mappedStatus: string) {
+  if (!['Pending Approval', 'Approved', 'Rejected'].includes(mappedStatus)) return []
+
+  const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo', 'CurrentApproverID'])
+  const approverName = text(row, ['ApproverName'], approverId)
+  if (approverId || approverName) {
+    return mapApprovalSteps([
+      {
+        ApproverID: approverId,
+        ApproverName: approverName,
+        Status: mappedStatus,
+        SequenceNo: 1,
+      },
+    ])
+  }
+
+  if (mappedStatus === 'Pending Approval') {
+    return mapApprovalSteps([
+      {
+        Status: 'Pending Approval',
+        SequenceNo: 1,
+        ApproverName: 'Awaiting approver assignment',
+        Comment: 'Submitted for approval in Business Central',
+      },
+    ])
+  }
+
+  return []
+}
+
+function resolveRequestApprovalSteps(
+  approvers: ODataRecord[],
+  row: ODataRecord,
+  mappedStatus: string,
+) {
+  if (
+    mappedStatus !== 'Pending Approval' &&
+    mappedStatus !== 'Approved' &&
+    mappedStatus !== 'Rejected'
+  ) {
+    return []
+  }
+  const steps = mapApprovalSteps(approvers)
+  return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
 }
 
 export function mapApprovalSteps(value: unknown) {
   const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
   return rows
     .map((row, index) => {
-      const status = text(row, ['Status'], 'Pending Approval')
+      const rawStatus = text(row, ['Status'], 'Pending Approval')
+      const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo'])
+      const senderId = text(row, ['SenderID', 'UserID'])
+      const status =
+        rawStatus === 'Open'
+          ? 'Pending Approval'
+          : rawStatus === 'Created'
+            ? 'Submitted'
+            : rawStatus
       return {
         id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
-        actorEmployeeNo: text(row, ['ApproverID', 'SenderID']),
-        actorName: text(row, ['ApproverName', 'ApproverID']),
-        role: 'Checker',
-        status: status === 'Open' ? 'Pending Approval' : status,
+        actorEmployeeNo: approverId || senderId,
+        actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
+        role: approverId ? 'Checker' : 'Requester',
+        status,
         timestamp: text(row, ['DateTimeSentforApproval', 'DueDate', 'Date']),
         note: text(row, ['Comment', 'Comments']),
         sequenceNo: number(row, ['SequenceNo', 'Sequence_No'], index + 1),
@@ -930,9 +995,96 @@ async function activeLeaveForEmployee(employeeNo: string) {
   return null
 }
 
+const attendanceMacCache = new Map<string, string>()
+
+function attendanceMacCacheKey(employeeNo: string, date: string) {
+  return `${employeeNo}:${date.slice(0, 10)}`
+}
+
+function rememberAttendanceMac(employeeNo: string, date: string, macAddress: string) {
+  const mac = normalizeMacAddress(macAddress)
+  if (!mac || !employeeNo || !date) return
+  attendanceMacCache.set(attendanceMacCacheKey(employeeNo, date), mac)
+}
+
+function cachedAttendanceMac(employeeNo: string, date: string) {
+  return attendanceMacCache.get(attendanceMacCacheKey(employeeNo, date)) ?? ''
+}
+
+function attendanceMacValue(row: ODataRecord) {
+  const directMac = normalizeMacAddress(
+    text(row, [
+      'MacAddress',
+      'MAC_Address',
+      'MACAddress',
+      'ComputerMAC',
+      'PCMACAddress',
+      'PC_MAC_Address',
+      'Computer_MAC',
+    ]),
+  )
+  if (directMac) return directMac
+
+  for (const key of [
+    'LocationCoordinates',
+    'Location',
+    'CheckinLocation',
+    'CheckInLocation',
+    'Check_In_Location',
+    'SigninLocation',
+    'SignInLocation',
+    'Sign_In_Location',
+    'CheckoutLocation',
+    'CheckOutLocation',
+    'SignoutLocation',
+    'Coordinates',
+  ]) {
+    const mac = macFromAttendanceLocation(text(row, [key]))
+    if (mac) return mac
+  }
+  return ''
+}
+
+async function employeeRegisteredMac(employeeNo: string) {
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `No eq '${odataString(employeeNo)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[]
+  const row = Array.isArray(rows) ? rows[0] : null
+  if (!row) return ''
+  return attendanceMacValue(row)
+}
+
+async function resolveAttendanceMacForAction(
+  req: Request,
+  authUser: AuthUser,
+  body: Record<string, unknown> = {},
+) {
+  const clientIps = Array.isArray(body.clientIps)
+    ? body.clientIps.map((value) => String(value))
+    : []
+  const deviceId = String(body.deviceId ?? '')
+  const resolved = await resolveAttendanceMacAddress(req, {
+    bodyMac: String(body.macAddress ?? ''),
+    clientIps,
+    employeeNo: authUser.employeeNo,
+  })
+  if (resolved) return resolved
+  const fromDevice = persistedDeviceMac(deviceId)
+  if (fromDevice) return fromDevice
+  const fromEmployee = await employeeRegisteredMac(authUser.employeeNo)
+  if (fromEmployee) return fromEmployee
+  return resolveAttendanceIdentifier({ deviceId })
+}
+
 function attendanceRow(row: ODataRecord, authUser: AuthUser) {
   const date = text(row, ['Date', 'AttendanceDate', 'PostingDate'])
   const today = new Date().toISOString().slice(0, 10)
+  const employeeNo = text(row, ['StaffNo', 'EmployeeNo'], authUser.employeeNo)
+  const macAddress =
+    attendanceMacValue(row) ||
+    cachedAttendanceMac(employeeNo, date) ||
+    persistedEmployeeMac(employeeNo)
   return {
     id: text(row, ['EntryNo', 'Entry_No', 'SystemId'], `${authUser.employeeNo}-${date}`),
     date,
@@ -941,7 +1093,8 @@ function attendanceRow(row: ODataRecord, authUser: AuthUser) {
     timeIn: attendanceClockValue(row, ['TimeIn', 'CheckInTime', 'SignInTime']),
     timeOut: attendanceClockValue(row, ['Timeout', 'TimeOut', 'CheckOutTime', 'SignOutTime']),
     hoursWorked: text(row, ['HoursWorked', 'Hours']),
-    location: text(row, ['LocationCoordinates', 'Location', 'CheckinLocation', 'Coordinates']),
+    macAddress,
+    location: macAddress,
     comments: [
       text(row, ['SigninComments', 'SignInComments']),
       text(row, ['SignoutComments', 'SignOutComments']),
@@ -1546,11 +1699,19 @@ export function buildPortalApiRouter() {
   const attendanceAction = (type: 'checkin' | 'checkout') =>
     safe(async (req, res) => {
       const authUser = user(req)
+      const today = new Date().toISOString().slice(0, 10)
+      const macAddress = await resolveAttendanceMacForAction(req, authUser, req.body ?? {})
+      const deviceId = String(req.body?.deviceId ?? '')
+      if (macAddress) {
+        rememberAttendanceMac(authUser.employeeNo, today, macAddress)
+        persistEmployeeMac(authUser.employeeNo, macAddress)
+        if (deviceId) persistDeviceMac(deviceId, macAddress)
+      }
       const result = await callSoapMethod('FnCheckinCheckout', {
         employeeNo: authUser.employeeNo,
         myUserID: authUser.userID,
         type,
-        location: String(req.body?.location ?? ''),
+        location: macAddress ? `MAC: ${macAddress}` : '',
       })
       const message = String(result.returnValue ?? '').trim()
       if (!message || message.toLowerCase() === 'false') {
@@ -1558,13 +1719,14 @@ export function buildPortalApiRouter() {
       }
       res.json({
         id: `${authUser.employeeNo}-${Date.now()}`,
-        date: new Date().toISOString().slice(0, 10),
+        date: today,
         staffName: authUser.displayName,
         employeeNo: authUser.employeeNo,
         timeIn: type === 'checkin' ? new Date().toISOString() : '',
         timeOut: type === 'checkout' ? new Date().toISOString() : '',
         hoursWorked: '',
-        location: String(req.body?.location ?? ''),
+        macAddress,
+        location: macAddress,
         comments: String(result.returnValue),
       })
     })
@@ -1697,6 +1859,43 @@ export function buildPortalApiRouter() {
       res.setHeader('Content-Type', 'application/pdf')
       res.setHeader('Content-Disposition', `attachment; filename="${req.params.id}.pdf"`)
       res.send(bytes)
+    }),
+  )
+
+  router.post(
+    '/work-tickets',
+    safe(async (req, res) => {
+      const spec = findModuleSpec('work-tickets')
+      if (!spec) throw portalError('Work tickets are not configured', 501)
+      const ticketNo = await createPortalModuleRequest(spec, user(req), req.body ?? {})
+      const [tickets] = await Promise.all([
+        fetchOData('QyWorkTickets', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+          $top: 1,
+        }) as Promise<ODataRecord[] | null>,
+      ])
+      const row = Array.isArray(tickets) ? tickets[0] : undefined
+      res.status(201).json({
+        id: ticketNo,
+        ticketNo,
+        previousTicketNo: text(row ?? {}, ['PreviousWTNo']),
+        gkNo: text(row ?? {}, ['GKNo']),
+        type: text(row ?? {}, ['Type']),
+        department: text(row ?? {}, ['DepartmentName', 'Department']),
+        status: text(row ?? {}, ['Status'], 'Open'),
+        lines: [],
+      })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/lines',
+    safe(async (req, res) => {
+      const spec = findModuleSpec('work-tickets')
+      if (!spec) throw portalError('Work tickets are not configured', 501)
+      const ticketNo = String(req.params.ticketNo)
+      await savePortalModuleLine(spec, user(req), ticketNo, req.body ?? {})
+      res.status(201).json({ ok: true })
     }),
   )
 

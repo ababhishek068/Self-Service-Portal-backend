@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom'
-import { handleUnderConstructionClick } from '@/hooks/useNavigation'
 import { gatePassSources, listGatePasses, type GatePassSource } from '@/api/endpoints/gatePass'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
@@ -9,9 +8,10 @@ import { gatePassSchema } from '@/schemas/requestSchemas'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatDate } from '@/utils/formatters'
 
-const creationRoutes: Record<Exclude<GatePassSource, 'assetTransfer'>, string> = {
+const creationRoutes: Record<GatePassSource, string> = {
   storeIssue: '/facility/store-requisition?new=1&fromGatePass=storeIssue',
   transferOrder: '/facility/transfer-order?new=1&fromGatePass=transferOrder',
+  assetTransfer: '/facility/transfer-order?new=1&fromGatePass=assetTransfer',
 }
 
 function payloadValue(row: PortalRequest, keys: string[], fallback = '-') {
@@ -80,13 +80,7 @@ export function GatePass({ source }: { source: GatePassSource }) {
       listActions={(
         <PortalNewButton
           label={`New ${activeSource.singularLabel}`}
-          onClick={() => {
-            if (source === 'assetTransfer') {
-              handleUnderConstructionClick({ preventDefault: () => {} })
-              return
-            }
-            navigate(creationRoutes[source])
-          }}
+          onClick={() => navigate(creationRoutes[source])}
         />
       )}
       listColumns={listColumns}

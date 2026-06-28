@@ -43,6 +43,7 @@ import { HodEmployeeDetail } from '@/pages/hod/HodEmployeeDetail'
 import { StaffOnLeave } from '@/pages/hod/StaffOnLeave'
 import { Attendance } from '@/pages/hr/Attendance'
 import { DocumentRequisition } from '@/pages/hr/DocumentRequisition'
+import { HrComingSoon } from '@/pages/hr/HrComingSoon'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
 import { LeaveStatement } from '@/pages/hr/LeaveStatement'
 import { OvertimeRequest } from '@/pages/hr/OvertimeRequest'
@@ -118,6 +119,24 @@ export default function App() {
         <Route path="hr/payslip" element={<Payslip />} />
         <Route path="hr/salary-advance" element={<SalaryAdvance />} />
         <Route path="hr/document-requisition" element={<DocumentRequisition />} />
+        <Route
+          path="hr/employee-resignation"
+          element={(
+            <HrComingSoon
+              title="Employee Resignation"
+              description="Submit and track resignation requests through approval."
+            />
+          )}
+        />
+        <Route
+          path="hr/employee-transfer"
+          element={(
+            <HrComingSoon
+              title="Employee Transfer"
+              description="Request internal department or location transfers."
+            />
+          )}
+        />
         <Route path="hr/overtime-request" element={<OvertimeRequest />} />
         <Route path="hr/travel-request" element={<TravelRequest />} />
         <Route path="approvals" element={<PendingApprovals />} />
