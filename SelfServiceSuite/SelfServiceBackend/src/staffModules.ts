@@ -2,11 +2,13 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import {
   callSoapMethod,
+  createSoapPageRecord,
   fetchOData,
   odataString,
   postOData,
   type ODataRecord,
 } from './bcClient.js'
+import { config } from './config.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
@@ -270,10 +272,35 @@ function normalizeBcTime(value: unknown) {
 }
 
 function gatePassDocumentNo(row: ODataRecord) {
-  return fieldText(row, ['GatePassNo', 'Gate_Pass_No'])
+  return fieldText(row, ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_'])
 }
 
-async function createGatePassViaOData(
+function gatePassODataInsertUnsupported(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /MethodNotImplemented|does not support insert|Entity does not support insert/i.test(message)
+}
+
+function gatePassSoapPagePayload(
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+) {
+  return cleanODataPayload({
+    Gate_Pass_No: body.gatePassNo ?? body.gatePassNumber,
+    Link_to: sourceSpec.linkTo,
+    Transfer_No: sourceDocumentNo,
+    Date_Out: body.dateOut ?? body.issueDate,
+    Time_Out: normalizeBcTime(body.timeOut),
+    Description: body.description ?? body.reason,
+    Comment: body.comment,
+    From_Location: body.fromLocation ?? body.from,
+    To_Location: body.toLocation ?? body.to ?? body.destination,
+    Employee_No: user.employeeNo,
+  })
+}
+
+async function createGatePassViaBusinessCentral(
   spec: ModuleSpec,
   user: AuthUser,
   body: Record<string, unknown>,
@@ -311,7 +338,24 @@ async function createGatePassViaOData(
     EmployeeNo: user.employeeNo,
   })
 
-  const created = await postOData(spec.headerService, payload)
+  let created: ODataRecord | null = null
+  try {
+    created = await postOData(spec.headerService, payload)
+  } catch (error) {
+    if (!gatePassODataInsertUnsupported(error)) throw error
+    created = await createSoapPageRecord(
+      config.BC_GATE_PASS_PAGE_SERVICE,
+      gatePassSoapPagePayload(sourceSpec, user, body, sourceDocumentNo),
+    ).catch((soapError) => {
+      const message = soapError instanceof Error ? soapError.message : String(soapError ?? '')
+      throw Object.assign(
+        new Error(
+          `Business Central QyGatePass is read-only for creation, and SOAP page ${config.BC_GATE_PASS_PAGE_SERVICE} could not create the gate pass: ${message}`,
+        ),
+        { status: 502, code: 'BC_GATE_PASS_CREATE_FAILED' },
+      )
+    })
+  }
   let no = created ? gatePassDocumentNo(created) : ''
   for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
@@ -339,6 +383,17 @@ function storeLineTypeCode(value: unknown) {
 
 function purchaseLineTypeCode(value: unknown) {
   return numericCode(value, { service: 1, item: 2, asset: 4 })
+}
+
+function userDepartmentCode(user: AuthUser, body: Record<string, unknown>) {
+  return String(
+    body.departmentCode ??
+      body.requestingDepartment ??
+      body.requestingDepartmentCode ??
+      body.department ??
+      user.department ??
+      '',
+  ).trim()
 }
 
 function transportRequestTypeCode(value: unknown) {
@@ -744,6 +799,15 @@ const purchaseRequisition: ModuleSpec = {
         '',
       pricesIncludingVAT: false,
       myUserId: user.userID,
+      department: userDepartmentCode(user, req.body),
+      requestingDepartment: userDepartmentCode(user, req.body),
+      requestingDepartmentCode: userDepartmentCode(user, req.body),
+      shortcutDimension2Code: userDepartmentCode(user, req.body),
+      responsibilityCenter:
+        req.body?.responsibilityCenter ??
+        req.body?.responsibleCenter ??
+        user.responsibleCenter ??
+        '',
       orderDate:
         req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
     }),
@@ -1766,7 +1830,7 @@ export async function createPortalModuleRequest(
   body: Record<string, unknown>,
 ) {
   if (spec.module === 'gate-pass') {
-    const no = await createGatePassViaOData(spec, user, body)
+    const no = await createGatePassViaBusinessCentral(spec, user, body)
     if (body.submit === true && spec.soap.submit && spec.params?.submit) {
       const submitParams = await spec.params.submit({
         req: requestWithBody(body),

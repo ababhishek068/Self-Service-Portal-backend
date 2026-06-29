@@ -24,7 +24,8 @@ OPTION A — ABH UAT (abh-erp-ml) — Technology Associates / ABH
 
   BC_ODATA_BASE_URL=http://abh-erp-ml:7048/BC240/ODataV4/Company('ABH%20UAT%20LIVE')/
   BC_SOAP_CODEUNIT_URL=http://abh-erp-ml:7047/BC240/WS/ABH%20UAT%20LIVE/Codeunit/CuStaffPortal
-  BC_SOAP_PAGE_BASE_URL=http://abh-erp-ml:7047/BC240/ODataV4/Company('ABH%20UAT%20LIVE')/
+  BC_SOAP_PAGE_BASE_URL=http://abh-erp-ml:7047/BC240/WS/ABH%20UAT%20LIVE/Page/
+  BC_GATE_PASS_PAGE_SERVICE=Gate_Pass_Card
   BC_SOAP_NAMESPACE=urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal
 
   BC_AUTH_MODE=Basic   (typical for ABH — confirm with BC admin)
@@ -44,7 +45,8 @@ OPTION B — HIJRA UAT (erp-app-uat or 192.168.224.37)
 
   BC_ODATA_BASE_URL=http://192.168.224.37:2448/BC240/ODataV4/Company('HIJRA%20BANK')/
   BC_SOAP_CODEUNIT_URL=http://192.168.224.37:2447/BC240/WS/HIJRA%20BANK/Codeunit/CuStaffPortal
-  BC_SOAP_PAGE_BASE_URL=http://192.168.224.37:2447/BC240/ODataV4/Company('HIJRA%20BANK')/
+  BC_SOAP_PAGE_BASE_URL=http://192.168.224.37:2447/BC240/WS/HIJRA%20BANK/Page/
+  BC_GATE_PASS_PAGE_SERVICE=Gate_Pass_Card
 
   BC_AUTH_MODE=ntlm   (typical for Hijra — confirm with BC admin)
 

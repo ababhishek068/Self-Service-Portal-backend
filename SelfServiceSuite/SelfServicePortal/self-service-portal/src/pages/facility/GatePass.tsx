@@ -20,8 +20,46 @@ function payloadValue(row: PortalRequest, keys: string[], fallback = '-') {
   return fallback
 }
 
+const testDefaults: Record<
+  GatePassSource,
+  {
+    sourceDocumentNo: string
+    timeOut: string
+    fromLocation: string
+    toLocation: string
+    description: string
+    comment: string
+  }
+> = {
+  storeIssue: {
+    sourceDocumentNo: '1175',
+    timeOut: '12:00',
+    fromLocation: 'BLUE',
+    toLocation: 'BRANCH OFFICE',
+    description: 'Test store issue gate pass',
+    comment: 'Testing',
+  },
+  transferOrder: {
+    sourceDocumentNo: '108008',
+    timeOut: '12:00',
+    fromLocation: 'GREEN',
+    toLocation: 'RED',
+    description: 'Test transfer order gate pass',
+    comment: 'Testing',
+  },
+  assetTransfer: {
+    sourceDocumentNo: '12',
+    timeOut: '12:00',
+    fromLocation: 'BLUE',
+    toLocation: 'YELLOW',
+    description: 'Test asset transfer gate pass',
+    comment: 'Testing',
+  },
+}
+
 export function GatePass({ source }: { source: GatePassSource }) {
   const activeSource = gatePassSources.find((item) => item.value === source) ?? gatePassSources[0]
+  const defaults = testDefaults[source]
   const sourceDocumentLabel =
     source === 'storeIssue'
       ? 'Store Issue No.'
@@ -70,13 +108,13 @@ export function GatePass({ source }: { source: GatePassSource }) {
       createRequest={(values) => createGatePass({ ...values, gatePassSource: source })}
       source="Facility requirements workbook"
       defaultValues={{
-        sourceDocumentNo: '',
+        sourceDocumentNo: defaults.sourceDocumentNo,
         dateOut: todayInputValue(),
-        timeOut: '',
-        fromLocation: '',
-        toLocation: '',
-        description: '',
-        comment: '',
+        timeOut: defaults.timeOut,
+        fromLocation: defaults.fromLocation,
+        toLocation: defaults.toLocation,
+        description: defaults.description,
+        comment: defaults.comment,
       }}
       fields={[
         {

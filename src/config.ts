@@ -23,7 +23,8 @@ const envSchema = z.object({
     .string()
     .url()
     .optional()
-    .default("http://erp-app-uat:2447/BC240/ODataV4/Company('HIJRA%20BANK')/"),
+    .default('http://erp-app-uat:2447/BC240/WS/HIJRA%20BANK/Page/'),
+  BC_GATE_PASS_PAGE_SERVICE: z.string().optional().default('Gate_Pass_Card'),
   BC_SOAP_NAMESPACE: z.string().default('urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal'),
   BC_AUTH_MODE: z.enum(['none', 'basic', 'ntlm']).default('ntlm'),
   BC_DOMAIN: z.string().optional().default(''),
@@ -72,6 +73,7 @@ export function publicConfig() {
     soapCodeunitUrl: config.BC_SOAP_CODEUNIT_URL,
     soapPageBaseUrl: config.BC_SOAP_PAGE_BASE_URL,
     soapNamespace: config.BC_SOAP_NAMESPACE,
+    gatePassPageService: config.BC_GATE_PASS_PAGE_SERVICE,
     authMode: config.BC_AUTH_MODE,
   }
 }

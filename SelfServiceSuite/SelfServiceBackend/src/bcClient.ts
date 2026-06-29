@@ -75,6 +75,15 @@ function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value : `${value}/`
 }
 
+function soapPageBaseUrl() {
+  const configured = config.BC_SOAP_PAGE_BASE_URL.trim()
+  if (/\/Page\/?$/i.test(configured)) return normalizeBaseUrl(configured)
+
+  const codeunitUrl = new URL(config.BC_SOAP_CODEUNIT_URL)
+  codeunitUrl.pathname = codeunitUrl.pathname.replace(/\/Codeunit\/[^/]+$/i, '/Page/')
+  return normalizeBaseUrl(codeunitUrl.toString())
+}
+
 function logTarget(value: URL | string) {
   const url = value instanceof URL ? value : new URL(value)
   return `${url.origin}${url.pathname}`
@@ -287,6 +296,21 @@ function soapEnvelope(methodName: string, params: Record<string, unknown>) {
 </soap:Envelope>`
 }
 
+function soapPageEnvelope(namespace: string, methodName: string, recordTag: string, fields: Record<string, unknown>) {
+  const body = Object.entries(fields)
+    .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
+    .join('')
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <${methodName} xmlns="${namespace}">
+      <${recordTag}>${body}</${recordTag}>
+    </${methodName}>
+  </soap:Body>
+</soap:Envelope>`
+}
+
 function parseSoapReturnValue(xml: string) {
   const match = xml.match(/<return_value>([\s\S]*?)<\/return_value>/)
   if (!match) return null
@@ -305,6 +329,30 @@ function decodeXml(value: string) {
     .replaceAll('&quot;', '"')
     .replaceAll('&apos;', "'")
     .replaceAll('&amp;', '&')
+}
+
+function xmlTagName(value: string) {
+  const cleaned = value.replace(/[^A-Za-z0-9_.-]/g, '_')
+  return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function parseSoapPageRecord(xml: string, recordTag: string) {
+  const tag = escapeRegex(recordTag)
+  const recordMatch =
+    xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i')) ??
+    xml.match(new RegExp(`<[^:>]+:${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/[^:>]+:${tag}>`, 'i'))
+  const block = recordMatch?.[1] ?? ''
+  const record: ODataRecord = {}
+  for (const match of block.matchAll(/<([A-Za-z_][\w.-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g)) {
+    const [, key, value] = match
+    if (!key || value.includes('<')) continue
+    record[key] = decodeXml(value.trim())
+  }
+  return record
 }
 
 export function soapFaultMessage(xml: string) {
@@ -395,6 +443,65 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
       returnValue: parseSoapReturnValue(xml),
       raw: xml,
     }
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
+}
+
+export async function createSoapPageRecord(serviceName: string, fields: Record<string, unknown>) {
+  const recordTag = xmlTagName(serviceName)
+  const pageNamespace = `urn:microsoft-dynamics-schemas/page/${serviceName.toLowerCase()}`
+  const body = soapPageEnvelope(pageNamespace, 'Create', recordTag, fields)
+  const pageUrl = new URL(serviceName, soapPageBaseUrl()).toString()
+  const headers = {
+    Accept: 'text/xml',
+    'Content-Type': 'text/xml; charset=utf-8',
+    SOAPAction: `${pageNamespace}:Create`,
+  }
+
+  const call = startBcCall({
+    protocol: 'SOAP',
+    method: 'POST',
+    operation: `${serviceName}.Create`,
+    target: logTarget(pageUrl),
+    metadata: `fieldKeys=${Object.keys(fields).sort().join(',') || '-'}`,
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'POST',
+        url: pageUrl,
+        headers,
+        body,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw soapFaultError(response.statusCode, response.body)
+      }
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return parseSoapPageRecord(response.body, recordTag)
+    }
+
+    const response = await fetch(pageUrl, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        ...authHeaders(),
+      },
+      body,
+    })
+
+    statusCode = response.status
+    const xml = await response.text()
+    if (!response.ok) {
+      throw soapFaultError(response.status, xml)
+    }
+
+    completeBcCall(call, response.status, responseBytes(xml))
+    return parseSoapPageRecord(xml, recordTag)
   } catch (error) {
     failBcCall(call, error, statusCode)
     throw error
