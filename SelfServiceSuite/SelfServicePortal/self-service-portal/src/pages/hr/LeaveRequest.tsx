@@ -34,6 +34,7 @@ import {
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
+import { env } from '@/config/env'
 import type { Attachment } from '@/types/erp.types'
 import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
 
@@ -126,7 +127,8 @@ export function LeaveRequest() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const showSecondary = leaveType !== '' && balance !== null && !pendingDuplicate && !balanceLoading
+  const duplicatePendingBlocked = env.BLOCK_DUPLICATE_PENDING_LEAVE && pendingDuplicate
+  const showSecondary = leaveType !== '' && balance !== null && !duplicatePendingBlocked && !balanceLoading
   const canSubmit = showSecondary && balance > 0
 
   useEffect(() => {
@@ -151,7 +153,7 @@ export function LeaveRequest() {
         setBalance(res.balance)
         setIsHourly(res.isHourly)
         setPendingDuplicate(res.pendingCount > 0)
-        if (res.pendingCount > 0) {
+        if (env.BLOCK_DUPLICATE_PENDING_LEAVE && res.pendingCount > 0) {
           setError(
             'You cannot apply a new leave while there is another one of the same type that is pending approval.',
           )

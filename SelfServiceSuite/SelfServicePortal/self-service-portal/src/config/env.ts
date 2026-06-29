@@ -26,6 +26,8 @@ export const env = {
   ERP_COMPANY_ID: read('VITE_ERP_COMPANY_ID'),
 
   APP_NAME: read('VITE_APP_NAME', 'Self Service Portal'),
+  BLOCK_DUPLICATE_PENDING_LEAVE:
+    read('VITE_BLOCK_DUPLICATE_PENDING_LEAVE', 'false').toLowerCase() === 'true',
 } as const
 
 export type Env = typeof env

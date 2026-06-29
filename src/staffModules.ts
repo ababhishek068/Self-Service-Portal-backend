@@ -4,6 +4,7 @@ import {
   callSoapMethod,
   fetchOData,
   odataString,
+  postOData,
   type ODataRecord,
 } from './bcClient.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
@@ -248,6 +249,88 @@ export function gatePassLineBinding(row: ODataRecord, fallbackNo: string) {
     lineHeaderField: sourceSpec.lineHeaderField,
     documentNo: fieldText(row, ['TransferNo', 'Transfer_No'], fallbackNo),
   }
+}
+
+function cleanODataPayload(payload: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => {
+      if (value === undefined || value === null) return false
+      if (typeof value === 'string' && value.trim() === '') return false
+      return true
+    }),
+  )
+}
+
+function normalizeBcTime(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  if (/^\d{2}:\d{2}:\d{2}$/.test(raw)) return raw
+  if (/^\d{2}:\d{2}$/.test(raw)) return `${raw}:00`
+  return raw
+}
+
+function gatePassDocumentNo(row: ODataRecord) {
+  return fieldText(row, ['GatePassNo', 'Gate_Pass_No'])
+}
+
+async function createGatePassViaOData(
+  spec: ModuleSpec,
+  user: AuthUser,
+  body: Record<string, unknown>,
+) {
+  const source = gatePassSourceFromQuery(
+    body.gatePassSource ?? body.source ?? body.linkTo ?? body.Linkto,
+  )
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  const sourceDocumentNo = fieldText(body, [
+    'sourceDocumentNo',
+    'transferNo',
+    'TransferNo',
+    'Transfer_No',
+  ])
+  if (!sourceDocumentNo) {
+    throw Object.assign(new Error(`${sourceSpec.linkTo} document number is required`), {
+      status: 422,
+    })
+  }
+
+  const beforeRows = await listPortalModuleRows(spec, user, { gatePassSource: source }).catch(
+    () => [] as ODataRecord[],
+  )
+  const beforeNumbers = new Set(beforeRows.map(gatePassDocumentNo).filter(Boolean))
+  const payload = cleanODataPayload({
+    GatePassNo: body.gatePassNo ?? body.gatePassNumber,
+    Linkto: sourceSpec.linkTo,
+    TransferNo: sourceDocumentNo,
+    DateOut: body.dateOut ?? body.issueDate,
+    TimeOut: normalizeBcTime(body.timeOut),
+    Description: body.description ?? body.reason,
+    Comment: body.comment,
+    FromLocation: body.fromLocation ?? body.from,
+    ToLocation: body.toLocation ?? body.to ?? body.destination,
+    EmployeeNo: user.employeeNo,
+  })
+
+  const created = await postOData(spec.headerService, payload)
+  let no = created ? gatePassDocumentNo(created) : ''
+  for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
+    const rows = await listPortalModuleRows(spec, user, { gatePassSource: source })
+    const row = rows.find((candidate) => {
+      const candidateNo = gatePassDocumentNo(candidate)
+      if (!candidateNo || beforeNumbers.has(candidateNo)) return false
+      const transferNo = fieldText(candidate, ['TransferNo', 'Transfer_No'])
+      return !transferNo || transferNo === sourceDocumentNo
+    })
+    no = row ? gatePassDocumentNo(row) : ''
+  }
+  if (!no) {
+    throw Object.assign(
+      new Error('Business Central created the gate pass but did not return Gate Pass No.'),
+      { status: 502 },
+    )
+  }
+  return no
 }
 
 function storeLineTypeCode(value: unknown) {
@@ -1682,6 +1765,25 @@ export async function createPortalModuleRequest(
   user: AuthUser,
   body: Record<string, unknown>,
 ) {
+  if (spec.module === 'gate-pass') {
+    const no = await createGatePassViaOData(spec, user, body)
+    if (body.submit === true && spec.soap.submit && spec.params?.submit) {
+      const submitParams = await spec.params.submit({
+        req: requestWithBody(body),
+        user,
+        no,
+      })
+      const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
+      if (!soapActionOk(spec, submitResult)) {
+        throw Object.assign(
+          new Error(`Business Central created ${no}, but approval submission failed`),
+          { status: 502, documentNo: no },
+        )
+      }
+    }
+    return no
+  }
+
   if (!spec.soap.saveHeader || !spec.params?.saveHeader) {
     throw Object.assign(new Error(`${spec.module} creation is not supported by Business Central`), {
       status: 501,

@@ -1,5 +1,4 @@
 import { createModuleRequest, listModuleRequests } from './requestEndpoint'
-import type { GatePassForm } from '@/schemas/requestSchemas'
 
 const gatePassConfig = { module: 'gatePass', entity: 'selfServiceGatePasses' } as const
 
@@ -34,9 +33,11 @@ export const gatePassSources: Array<{
 export const listGatePasses = (source: GatePassSource = 'storeIssue') =>
   listModuleRequests(gatePassConfig, { source })
 
-export const createGatePass = (payload: GatePassForm) =>
+export const createGatePass = (
+  payload: Record<string, unknown> & { gatePassSource: GatePassSource; submit?: boolean },
+) =>
   createModuleRequest(gatePassConfig, {
     ...payload,
-    title: `${payload.gatePassType} gate pass`,
+    title: `${payload.gatePassSource} gate pass`,
     amount: 0,
   })
