@@ -183,6 +183,70 @@ export async function fetchOData(serviceName: string, query: Record<string, unkn
   return data
 }
 
+export async function postOData(serviceName: string, payload: Record<string, unknown>) {
+  const base = normalizeBaseUrl(config.BC_ODATA_BASE_URL)
+  const url = new URL(serviceName, base)
+  const body = JSON.stringify(payload)
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }
+
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'POST',
+    operation: serviceName,
+    target: logTarget(url),
+    metadata: `bodyKeys=${Object.keys(payload).sort().join(',') || '-'}`,
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'POST',
+        url: url.toString(),
+        headers,
+        body,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Object.assign(
+          new Error(`Business Central OData ${response.statusCode}: ${response.body}`),
+          { status: response.statusCode === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+        )
+      }
+      const data = response.body ? JSON.parse(response.body) : null
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return data as ODataRecord | null
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        ...authHeaders(),
+      },
+      body,
+    })
+
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(`Business Central OData ${response.status}: ${text}`),
+        { status: response.status === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+      )
+    }
+    const data = text ? JSON.parse(text) : null
+    completeBcCall(call, response.status, responseBytes(text))
+    return data as ODataRecord | null
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
+}
+
 /**
  * Returns the count of rows that would be produced by `query` against
  * `serviceName`. Equivalent to Laravel's `->count()` over the OData client.

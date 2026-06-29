@@ -1,6 +1,4 @@
-import { useNavigate } from 'react-router-dom'
-import { gatePassSources, listGatePasses, type GatePassSource } from '@/api/endpoints/gatePass'
-import { PortalNewButton } from '@/components/shared/PortalNewButton'
+import { createGatePass, gatePassSources, listGatePasses, type GatePassSource } from '@/api/endpoints/gatePass'
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import type { DataTableColumn } from '@/components/shared/DataTable'
@@ -8,10 +6,10 @@ import { gatePassSchema } from '@/schemas/requestSchemas'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatDate } from '@/utils/formatters'
 
-const creationRoutes: Record<GatePassSource, string> = {
-  storeIssue: '/facility/store-requisition?new=1&fromGatePass=storeIssue',
-  transferOrder: '/facility/transfer-order?new=1&fromGatePass=transferOrder',
-  assetTransfer: '/facility/transfer-order?new=1&fromGatePass=assetTransfer',
+function todayInputValue() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60_000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
 }
 
 function payloadValue(row: PortalRequest, keys: string[], fallback = '-') {
@@ -23,8 +21,13 @@ function payloadValue(row: PortalRequest, keys: string[], fallback = '-') {
 }
 
 export function GatePass({ source }: { source: GatePassSource }) {
-  const navigate = useNavigate()
   const activeSource = gatePassSources.find((item) => item.value === source) ?? gatePassSources[0]
+  const sourceDocumentLabel =
+    source === 'storeIssue'
+      ? 'Store Issue No.'
+      : source === 'assetTransfer'
+        ? 'Asset Transfer No.'
+        : 'Transfer No.'
   const listColumns: DataTableColumn<PortalRequest>[] = [
     { id: 'number', header: 'No.', cell: (row) => row.requestNo },
     {
@@ -64,25 +67,32 @@ export function GatePass({ source }: { source: GatePassSource }) {
       schema={gatePassSchema}
       queryKey={['facility', 'gate-pass', source]}
       listRequests={() => listGatePasses(source)}
-      createRequest={async () => undefined}
+      createRequest={(values) => createGatePass({ ...values, gatePassSource: source })}
       source="Facility requirements workbook"
       defaultValues={{
-        gatePassType: 'Returnable',
-        assetTagNumber: '',
-        destination: '',
-        issueDate: '',
-        returnDate: '',
-        reason: '',
-        attachments: [],
+        sourceDocumentNo: '',
+        dateOut: todayInputValue(),
+        timeOut: '',
+        fromLocation: '',
+        toLocation: '',
+        description: '',
+        comment: '',
       }}
-      fields={[]}
-      listOnly
-      listActions={(
-        <PortalNewButton
-          label={`New ${activeSource.singularLabel}`}
-          onClick={() => navigate(creationRoutes[source])}
-        />
-      )}
+      fields={[
+        {
+          name: 'sourceDocumentNo',
+          label: sourceDocumentLabel,
+          type: 'text',
+          placeholder: `Enter ${sourceDocumentLabel.toLowerCase()}`,
+        },
+        { name: 'dateOut', label: 'Date Out', type: 'date' },
+        { name: 'timeOut', label: 'Time Out', type: 'text', placeholder: 'HH:MM' },
+        { name: 'fromLocation', label: 'From Location', type: 'text' },
+        { name: 'toLocation', label: 'To Location', type: 'text' },
+        { name: 'description', label: 'Description', type: 'textarea' },
+        { name: 'comment', label: 'Comment', type: 'textarea' },
+      ]}
+      newButtonLabel={`New ${activeSource.singularLabel}`}
       listColumns={listColumns}
       emptyListText={`*** No ${activeSource.label} Found ***`}
       refetchOnMount="always"

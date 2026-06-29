@@ -472,18 +472,13 @@ export const transferOrderSchema = z
 
 export const gatePassSchema = z
   .object({
-    gatePassType: z.enum(['Returnable', 'Non-Returnable']),
-    assetTagNumber: optionalText,
-    destination: z.string().min(2, 'Destination is required'),
-    issueDate: dateField,
-    returnDate: optionalText,
-    reason: z.string().min(8, 'Reason is required'),
-    attachments: z.array(attachmentSchema).default([]),
-  })
-  .superRefine((data, ctx) => {
-    if (data.gatePassType === 'Returnable' && !data.returnDate) {
-      ctx.addIssue({ code: 'custom', path: ['returnDate'], message: 'Return date is required for returnable gate pass' })
-    }
+    sourceDocumentNo: z.string().min(1, 'Source document number is required'),
+    dateOut: dateField,
+    timeOut: optionalText,
+    fromLocation: optionalText,
+    toLocation: optionalText,
+    description: optionalText,
+    comment: optionalText,
   })
 
 export const vehicleTransferSchema = z.object({

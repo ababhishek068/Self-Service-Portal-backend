@@ -188,6 +188,7 @@ export function employeeResetToken(employee: BcEmployee) {
 }
 
 const EMPLOYEE_RESET_TOKEN_FIELDS = [
+  'Reset Token',
   'ResetToken',
   'Reset_Token',
   'Password_Reset_Token',
@@ -198,6 +199,7 @@ const EMPLOYEE_RESET_TOKEN_FIELDS = [
   'PasswordResetCode',
   'ResetCode',
   'Reset_Code',
+  'Portal Reset Token',
   'PortalResetToken',
   'Portal_Reset_Token',
   'PortalPasswordToken',
@@ -214,6 +216,8 @@ export function employeeResetTokenIsExpired(employee: BcEmployee) {
   return resetTokenIsExpired(
     firstEmployeeField(employee, [
       'TokenExpired',
+      'Token Expired',
+      'Token Expired?',
       'Token_Expired',
       'ResetTokenExpired',
       'Reset_Token_Expired',
@@ -221,6 +225,8 @@ export function employeeResetTokenIsExpired(employee: BcEmployee) {
       'PasswordResetTokenExpired',
       'PasswordTokenExpired',
       'Password_Token_Expired',
+      'Portal Reset Token Expired',
+      'Portal Reset Token Expired?',
       'PortalResetTokenExpired',
       'Portal_Reset_Token_Expired',
       'PortalPasswordTokenExpired',
