@@ -1,0 +1,333 @@
+import express, { type Request, type Response, type NextFunction } from 'express'
+import cors from 'cors'
+import session from 'express-session'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { z } from 'zod'
+import { callSoapMethod, fetchOData } from './bcClient.js'
+import { config, publicConfig } from './config.js'
+import { mapDepartment, mapEmployee, mapItem, mapRequest, requestServices, type PortalModuleKey } from './erpMappings.js'
+import { buildAuthRouter, csrfGuard, hydrateBearerAuth, requireAuth } from './auth.js'
+import { buildStaffRouter } from './staff.js'
+import { buildModulesRouter } from './staffModules.js'
+import { buildPortalApiRouter } from './portalApi.js'
+import { apiRequestLogger, currentRequestId, integrationLogPath } from './requestLogger.js'
+
+const app = express()
+const portalStaticDir = resolve(config.PORTAL_STATIC_DIR)
+const portalIndex = resolve(portalStaticDir, 'index.html')
+
+app.set('trust proxy', 1)
+
+// CORS — allow credentials (session cookie) on the configured origin so the
+// React Self-Service Portal can call /api/login, /api/me and /api/staff/*.
+app.use(
+  cors({
+    origin: config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN,
+    credentials: true,
+  }),
+)
+// A 10 MB ESS attachment is about 13.4 MB after base64 encoding.
+app.use(express.json({ limit: '32mb' }))
+app.use(apiRequestLogger)
+
+app.use(
+  session({
+    name: 'connect.sid',
+    secret: config.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: config.SESSION_COOKIE_SAMESITE,
+      secure: config.SESSION_COOKIE_SECURE,
+      maxAge: 1000 * 60 * 60 * 8, // 8 hours
+    },
+  }),
+)
+
+// Bearer tokens are used by the React app. Session + CSRF remains supported
+// for the legacy ESS-compatible client.
+app.use('/api', hydrateBearerAuth)
+app.use('/api', csrfGuard)
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, service: 'self-service-erp-backend', time: new Date().toISOString() })
+})
+
+app.get('/api/config', (_req, res) => {
+  res.json(publicConfig())
+})
+
+// Auth + staff routes consumed by the React Self-Service Portal.
+// Mounted under /api so the SPA's `essClient` configuration works as-is.
+app.use('/api', buildAuthRouter())
+// Per-module request routers (imprest, claim, store-requisition, …) are
+// mounted first so their stubs (overtime/travel) can reply 501
+// without going through the global `requireAuth` middleware that
+// `buildStaffRouter()` installs.
+app.use('/api/staff', buildModulesRouter())
+app.use('/api/staff', buildStaffRouter())
+// JWT/JSON contract used by the current React application.
+app.use('/api', buildPortalApiRouter())
+// Direct aliases for ESS-compatible routes such as /api/leave/*.
+app.use('/api', buildStaffRouter())
+
+// Raw BC proxy routes are diagnostic/admin surfaces and must never be public.
+app.use('/api/bc', requireAuth)
+app.use('/api/erp', requireAuth)
+
+app.get('/api/bc/odata/:serviceName', async (req, res, next) => {
+  try {
+    const data = await fetchOData(req.params.serviceName, req.query)
+    res.json(data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/bc/soap/:methodName', async (req, res, next) => {
+  try {
+    const body = z.object({ params: z.record(z.string(), z.unknown()).default({}) }).parse(req.body)
+    const data = await callSoapMethod(req.params.methodName, body.params)
+    res.json(data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/employees', async (req, res, next) => {
+  try {
+    const rows = await fetchOData('QyHREmployee', { $top: req.query.limit ?? 100 })
+    res.json(Array.isArray(rows) ? rows.map(mapEmployee) : rows)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/items', async (req, res, next) => {
+  try {
+    const rows = await fetchOData('QyItem', { $top: req.query.limit ?? 100 })
+    res.json(Array.isArray(rows) ? rows.map(mapItem) : rows)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/departments', async (req, res, next) => {
+  try {
+    const rows = await fetchOData('QyDimensionValues', {
+      $top: req.query.limit ?? 100,
+      $filter: req.query.filter ?? "Dimension_Code eq 'DEPARTMENTS'",
+    })
+    res.json(Array.isArray(rows) ? rows.map(mapDepartment) : rows)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/approvals', async (req, res, next) => {
+  try {
+    const rows = await fetchOData('QyApprovalEntry', { $top: req.query.limit ?? 100 })
+    res.json(rows)
+  } catch (error) {
+    next(error)
+  }
+})
+
+async function listMappedRequests(module?: PortalModuleKey, limit: unknown = 50) {
+  if (module) {
+    const rows = await fetchOData(requestServices[module], { $top: limit })
+    return Array.isArray(rows) ? rows.map((row) => mapRequest(row, module)) : []
+  }
+
+  const entries = Object.entries(requestServices) as [PortalModuleKey, string][]
+  const allRows = await Promise.all(
+    entries.map(async ([key, service]) => {
+      const rows = await fetchOData(service, { $top: limit })
+      return Array.isArray(rows) ? rows.map((row) => mapRequest(row, key)) : []
+    }),
+  )
+  return allRows.flat()
+}
+
+app.get('/api/erp/dashboard', async (_req, res, next) => {
+  try {
+    const [requests, employees, items] = await Promise.all([
+      listMappedRequests(undefined, 25),
+      fetchOData('QyHREmployee', { $top: 500 }),
+      fetchOData('QyItem', { $top: 500 }),
+    ])
+
+    const requestsByStatus = requests.reduce<Record<string, number>>((acc, request) => {
+      acc[request.status] = (acc[request.status] ?? 0) + 1
+      return acc
+    }, {})
+    const requestsByModule = requests.reduce<Record<string, number>>((acc, request) => {
+      acc[request.requestType] = (acc[request.requestType] ?? 0) + 1
+      return acc
+    }, {})
+
+    res.json({
+      totalRequests: requests.length,
+      pendingApprovals: requests.filter((request) => request.status === 'Pending Approval').length,
+      approvedToday: requests.filter((request) => request.status === 'Approved').length,
+      postedThisMonth: requests.filter((request) => request.status === 'Posted').length,
+      activeEmployees: Array.isArray(employees) ? employees.length : 0,
+      lowStockItems: Array.isArray(items) ? items.map(mapItem).filter((item) => item.stock < 50 && !item.isFixedAsset).length : 0,
+      requestsByStatus,
+      requestsByModule: Object.entries(requestsByModule).map(([module, count]) => ({ module, count })),
+      recentActivity: requests
+        .toSorted((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+        .slice(0, 8),
+      syncHealth: [
+        { label: 'Node API', status: 'ok', detail: 'Connected to the Self Service ERP backend' },
+        { label: 'Business Central OData', status: 'ok', detail: 'Connected to the configured OData service' },
+        { label: 'Business Central SOAP', status: 'ok', detail: 'Connected to the CuStaffPortal codeunit' },
+      ],
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/requests', async (req, res, next) => {
+  try {
+    const module = typeof req.query.module === 'string' ? req.query.module : ''
+    const limit = req.query.limit ?? 50
+    const status = typeof req.query.status === 'string' ? req.query.status : ''
+    const departmentCode = typeof req.query.departmentCode === 'string' ? req.query.departmentCode : ''
+    const search = typeof req.query.search === 'string' ? req.query.search.toLowerCase() : ''
+
+    const applyFilters = (rows: Awaited<ReturnType<typeof listMappedRequests>>) =>
+      rows.filter((row) => {
+        if (status && row.status !== status) return false
+        if (departmentCode && row.departmentCode !== departmentCode) return false
+        if (search) {
+          const haystack = [row.requestNo, row.title, row.makerName, row.makerEmployeeNo].join(' ').toLowerCase()
+          if (!haystack.includes(search)) return false
+        }
+        return true
+      })
+
+    if (module) {
+      if (!(module in requestServices)) {
+        res.status(400).json({ error: `Unsupported module: ${module}` })
+        return
+      }
+      res.json(applyFilters(await listMappedRequests(module as PortalModuleKey, limit)))
+      return
+    }
+
+    res.json(applyFilters(await listMappedRequests(undefined, limit)))
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/erp/requests/:id', async (req, res, next) => {
+  try {
+    const entries = Object.keys(requestServices) as PortalModuleKey[]
+    const module = entries.find((key) => req.params.id.startsWith(`${key}-`))
+    if (!module) {
+      res.status(400).json({ error: `Unsupported request id: ${req.params.id}` })
+      return
+    }
+
+    const rows = await listMappedRequests(module, 100)
+    const request = rows.find((row) => row.id === req.params.id)
+    if (!request) {
+      res.status(404).json({ error: 'Request not found' })
+      return
+    }
+
+    res.json(request)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/erp/approvals/document', async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        entryNo: z.union([z.string(), z.number()]),
+        docNo: z.string(),
+        userID: z.string(),
+        isApprove: z.boolean(),
+        comments: z.string().optional().default(''),
+      })
+      .parse(req.body)
+
+    const data = await callSoapMethod('DocumentApproval', body)
+    res.json(data)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ message: 'API endpoint not found', code: 'API_NOT_FOUND' })
+})
+
+if (existsSync(portalIndex)) {
+  app.use(
+    express.static(portalStaticDir, {
+      setHeaders: (res, path) => {
+        if (path.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+        }
+      },
+    }),
+  )
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      next()
+      return
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.sendFile(portalIndex)
+  })
+}
+
+app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const message = error instanceof Error ? error.message : 'Unknown server error'
+  let responseMessage = message
+  let status =
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    Number.isInteger(Number(error.status))
+      ? Number(error.status)
+      : 500
+  let code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String(error.code)
+      : undefined
+  if (
+    status === 500 &&
+    /(Could not resolve host|Failed to connect|Connection timed out|Could not connect)/i.test(message)
+  ) {
+    status = 503
+    code = 'BC_UNREACHABLE'
+    responseMessage =
+      'Business Central is unreachable. Connect to the office network or VPN, then verify the configured BC host and ports.'
+  }
+  console.error(
+    `[api-error] requestId=${currentRequestId()} method=${req.method} path="${req.path}"`,
+    error,
+  )
+  res
+    .status(status)
+    .json({ error: responseMessage, message: responseMessage, ...(code ? { code } : {}) })
+})
+
+app.listen(config.PORT, config.HOST, () => {
+  console.log(`Self Service ERP backend listening on http://${config.HOST}:${config.PORT}`)
+  console.log(
+    existsSync(portalIndex)
+      ? `React portal is served from ${portalStaticDir}`
+      : `React portal build not found at ${portalStaticDir}`,
+  )
+  console.log(`BC integration logs are written to ${integrationLogPath}`)
+})

@@ -168,6 +168,34 @@ function normalizeStaffNo(staffNo: string) {
   return staffNo.trim().replace(/__/g, '/')
 }
 
+const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000
+const passwordResetTokenCache = new Map<string, { token: string; expiresAt: number }>()
+
+export function cachePasswordResetToken(staffNo: string, token: string, now = Date.now()) {
+  const normalizedStaffNo = normalizeStaffNo(staffNo)
+  const normalizedToken = token.trim()
+  if (!normalizedStaffNo || !normalizedToken) return
+  passwordResetTokenCache.set(normalizedStaffNo, {
+    token: normalizedToken,
+    expiresAt: now + PASSWORD_RESET_TOKEN_TTL_MS,
+  })
+}
+
+export function cachedPasswordResetTokenMatches(staffNo: string, token: string, now = Date.now()) {
+  const normalizedStaffNo = normalizeStaffNo(staffNo)
+  const cached = passwordResetTokenCache.get(normalizedStaffNo)
+  if (!cached) return false
+  if (cached.expiresAt < now) {
+    passwordResetTokenCache.delete(normalizedStaffNo)
+    return false
+  }
+  return cached.token === token.trim()
+}
+
+export function clearCachedPasswordResetToken(staffNo: string) {
+  passwordResetTokenCache.delete(normalizeStaffNo(staffNo))
+}
+
 function employeeIsActive(employee: BcEmployee) {
   return employee.Status === 'Active' || employee.Password === 'Password@123'
 }
@@ -207,32 +235,67 @@ const EMPLOYEE_RESET_TOKEN_FIELDS = [
   'password_token',
 ]
 
+function normalizedEmployeeFieldName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isResetTokenFieldName(name: string) {
+  const normalized = normalizedEmployeeFieldName(name)
+  return (
+    normalized.includes('reset') &&
+    normalized.includes('token') &&
+    !normalized.includes('expired')
+  )
+}
+
+function isResetTokenExpiryFieldName(name: string) {
+  const normalized = normalizedEmployeeFieldName(name)
+  return (
+    normalized.includes('expired') &&
+    (normalized.includes('token') || normalized.includes('reset'))
+  )
+}
+
 export function employeeResetTokens(employee: BcEmployee) {
   const row = employee as BcEmployee & Record<string, unknown>
-  return EMPLOYEE_RESET_TOKEN_FIELDS.map((name) => String(row[name] ?? '').trim()).filter(Boolean)
+  const tokens = EMPLOYEE_RESET_TOKEN_FIELDS.map((name) => String(row[name] ?? '').trim()).filter(Boolean)
+  for (const [name, value] of Object.entries(row)) {
+    if (!isResetTokenFieldName(name)) continue
+    const token = String(value ?? '').trim()
+    if (token && !tokens.includes(token)) tokens.push(token)
+  }
+  return tokens
 }
 
 export function employeeResetTokenIsExpired(employee: BcEmployee) {
-  return resetTokenIsExpired(
-    firstEmployeeField(employee, [
-      'TokenExpired',
-      'Token Expired',
-      'Token Expired?',
-      'Token_Expired',
-      'ResetTokenExpired',
-      'Reset_Token_Expired',
-      'Password_Reset_Token_Expired',
-      'PasswordResetTokenExpired',
-      'PasswordTokenExpired',
-      'Password_Token_Expired',
-      'Portal Reset Token Expired',
-      'Portal Reset Token Expired?',
-      'PortalResetTokenExpired',
-      'Portal_Reset_Token_Expired',
-      'PortalPasswordTokenExpired',
-      'Portal_Password_Token_Expired',
-    ]),
+  const row = employee as BcEmployee & Record<string, unknown>
+  const configuredValue = firstEmployeeField(employee, [
+    'TokenExpired',
+    'Token Expired',
+    'Token Expired?',
+    'Token_Expired',
+    'ResetTokenExpired',
+    'Reset_Token_Expired',
+    'Password_Reset_Token_Expired',
+    'PasswordResetTokenExpired',
+    'PasswordTokenExpired',
+    'Password_Token_Expired',
+    'Portal Reset Token Expired',
+    'Portal Reset Token Expired?',
+    'PortalResetTokenExpired',
+    'Portal_Reset_Token_Expired',
+    'PortalPasswordTokenExpired',
+    'Portal_Password_Token_Expired',
+  ])
+  if (configuredValue !== '') return resetTokenIsExpired(configuredValue)
+  const dynamicExpiry = Object.entries(row).find(
+    ([name, value]) =>
+      isResetTokenExpiryFieldName(name) &&
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== '',
   )
+  return dynamicExpiry ? resetTokenIsExpired(dynamicExpiry[1]) : false
 }
 
 export function employeeResetTokenMatches(employee: BcEmployee, resetToken: string) {
@@ -492,6 +555,8 @@ export function buildAuthRouter() {
         return
       }
 
+      cachePasswordResetToken(staffNo, resetToken)
+
       res.json({
         message: 'A password reset token has been sent to the email address in your employee profile.',
       })
@@ -533,7 +598,9 @@ export function buildAuthRouter() {
         })
         return
       }
-      if (!employeeResetTokenMatches(employee, resetToken)) {
+      const tokenMatchesBc = employeeResetTokenMatches(employee, resetToken)
+      const tokenMatchesRecentRequest = cachedPasswordResetTokenMatches(staffNo, resetToken)
+      if (!tokenMatchesBc && !tokenMatchesRecentRequest) {
         res.status(422).json({
           message: 'Reset token is wrong or has expired. Kindly use the last token sent to your email.',
         })
@@ -548,6 +615,8 @@ export function buildAuthRouter() {
         res.status(502).json({ message: 'Business Central did not update the password.' })
         return
       }
+
+      clearCachedPasswordResetToken(staffNo)
 
       res.json({ message: 'Password updated successfully. Kindly sign in using your new password.' })
     } catch (error) {

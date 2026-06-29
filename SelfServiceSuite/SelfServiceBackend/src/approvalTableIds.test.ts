@@ -22,6 +22,9 @@ import { soapFaultMessage } from './bcClient.js'
 import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
+  cachedPasswordResetTokenMatches,
+  cachePasswordResetToken,
+  clearCachedPasswordResetToken,
   employeeResetToken,
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
@@ -457,6 +460,7 @@ describe('forgot-password token state', () => {
     assert.equal(employeeResetToken({ 'Reset Token': 42327 } as never), '42327')
     assert.equal(employeeResetToken({ PortalResetToken: 23234 } as never), '23234')
     assert.equal(employeeResetToken({ Portal_Reset_Token: '23234' } as never), '23234')
+    assert.equal(employeeResetToken({ Actual_Portal_Reset_Token_Value: '54321' } as never), '54321')
   })
 
   it('reads reset-token expiry aliases exposed by different BC employee pages', () => {
@@ -464,6 +468,7 @@ describe('forgot-password token state', () => {
     assert.equal(employeeResetTokenIsExpired({ PortalResetTokenExpired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'Yes' } as never), true)
+    assert.equal(employeeResetTokenIsExpired({ Actual_Portal_Reset_Token_Expired: 'Yes' } as never), true)
   })
 
   it('accepts a matching token from either reset-token field family', () => {
@@ -488,5 +493,21 @@ describe('forgot-password token state', () => {
       employeeResetTokenMatches({ Reset_Token: '39084', Portal_Reset_Token: '23234' } as never, '11111'),
       false,
     )
+    assert.equal(
+      employeeResetTokenMatches({
+        No: 'ABH-114',
+        Actual_Portal_Reset_Token_Value: '16062',
+        Actual_Portal_Reset_Token_Expired: 'No',
+      } as never, '16062'),
+      true,
+    )
+  })
+
+  it('accepts a recently generated backend reset token even when BC does not expose it', () => {
+    clearCachedPasswordResetToken('ABH-114')
+    cachePasswordResetToken('ABH-114', '90514', 1_000)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_001), true)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '11111', 1_002), false)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_000 + 31 * 60 * 1000), false)
   })
 })
