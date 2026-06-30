@@ -10,15 +10,21 @@ import {
 import {
   findFrontendModuleSpec,
   findModuleSpec,
+  gatePassDocumentNo,
+  gatePassLineBinding,
   gatePassListFilterParts,
+  gatePassODataPagePayloadVariants,
+  gatePassODataPageSourcePatchPayloadVariants,
+  gatePassSoapPagePayloadVariants,
   gatePassSourceFromQuery,
   gatePassSourceFromRow,
+  hospitalCategoryCode,
   isMedicalClaimType,
   passengerTypeCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
 } from './staffModules.js'
-import { soapFaultMessage } from './bcClient.js'
+import { friendlySoapFaultMessage, soapFaultMessage } from './bcClient.js'
 import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
@@ -82,6 +88,154 @@ describe('gatePassFilters', () => {
     assert.equal(gatePassSourceFromRow({ Linkto: 'Store Issue' }), 'storeIssue')
     assert.equal(gatePassSourceFromRow({ LinkTo: 'Transfer Order' }), 'transferOrder')
     assert.equal(gatePassSourceFromRow({ Link_To: 'Asset Transfer' }), 'assetTransfer')
+    assert.equal(gatePassSourceFromRow({ Link_to: 'Asset Transfer' }), 'assetTransfer')
+  })
+
+  it('reads gate pass numbers from BC page and OData aliases', () => {
+    assert.equal(gatePassDocumentNo({ GatePassNo: '001' }), '001')
+    assert.equal(gatePassDocumentNo({ Gate_Pass_No: '002' }), '002')
+    assert.equal(gatePassDocumentNo({ Gate_Pass_No_: '003' }), '003')
+  })
+
+  it('reads the linked source document number from HIJRA page aliases', () => {
+    assert.deepEqual(
+      gatePassLineBinding({ Link_To: 'Transfer Order', Transfer_No_: '108008' }, '003'),
+      {
+        source: 'transferOrder',
+        lineService: 'QyTransferShipmentLine',
+        lineHeaderField: 'DocumentNo',
+        documentNo: '108008',
+      },
+    )
+    assert.deepEqual(
+      gatePassLineBinding({ Link_to: 'Asset Transfer', AssetTransferNo: 'IPI000003' }, '003'),
+      {
+        source: 'assetTransfer',
+        lineService: 'QyTransferShipmentLine',
+        lineHeaderField: 'DocumentNo',
+        documentNo: 'IPI000003',
+      },
+    )
+  })
+
+  it('builds HIJRA OData page payload variants for gate pass create', () => {
+    const variants = gatePassODataPagePayloadVariants(
+      'assetTransfer',
+      { label: 'Asset Transfer Requisitions', linkTo: 'Asset Transfer', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
+      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+      {
+        sourceDocumentNo: 'IPI000003',
+        dateOut: '2026-06-29',
+        timeOut: '12:00',
+        fromLocation: 'BLUE',
+        toLocation: 'YELLOW',
+        comment: 'Portal test',
+      },
+      'IPI000003',
+    )
+    assert.ok(variants.some((payload) =>
+      payload.Link_to === 'Asset Transfer' &&
+      payload.AssetTransferNo === 'IPI000003' &&
+      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
+      payload.EmployeeNo === 'E0010' &&
+      payload.TimeOut === '12:00:00',
+    ))
+    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
+    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
+    assert.equal(variants.some((payload) => 'Asset_Transfer_No' in payload), false)
+  })
+
+  it('does not send Store Issue numbers as Asset Transfer numbers in OData page create', () => {
+    const variants = gatePassODataPagePayloadVariants(
+      'storeIssue',
+      { label: 'Gate Pass Store Requisitions', linkTo: 'Store Issue', lineService: 'QyStoreRequisitionLines', lineHeaderField: 'RequistionNo', scopeToEmployee: true },
+      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+      {
+        sourceDocumentNo: '1175',
+        dateOut: '2026-06-30',
+        timeOut: '12:00',
+        fromLocation: 'BLUE',
+        toLocation: 'BRANCH OFFICE',
+        comment: 'Portal test',
+      },
+      '1175',
+    )
+    assert.ok(variants.some((payload) =>
+      payload.Link_to === 'Store Issue' &&
+      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
+      payload.EmployeeNo === 'E0010' &&
+      payload.TimeOut === '12:00:00',
+    ))
+    assert.equal(variants.some((payload) => 'AssetTransferNo' in payload), false)
+    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
+    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
+    assert.deepEqual(
+      gatePassODataPageSourcePatchPayloadVariants(
+        'storeIssue',
+        { label: 'Gate Pass Store Requisitions', linkTo: 'Store Issue', lineService: 'QyStoreRequisitionLines', lineHeaderField: 'RequistionNo', scopeToEmployee: true },
+        { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+        { sourceDocumentNo: '1175' },
+        '1175',
+      ),
+      [],
+    )
+  })
+
+  it('does not send Transfer Order numbers as Asset Transfer numbers in OData page create', () => {
+    const variants = gatePassODataPagePayloadVariants(
+      'transferOrder',
+      { label: 'Gate Pass Transfer Orders', linkTo: 'Transfer Order', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
+      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+      {
+        sourceDocumentNo: '108008',
+        dateOut: '2026-06-30',
+        timeOut: '12:00',
+        fromLocation: 'GREEN',
+        toLocation: 'RED',
+        comment: 'Portal test',
+      },
+      '108008',
+    )
+    assert.ok(variants.some((payload) =>
+      payload.Link_to === 'Transfer Order' &&
+      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
+      payload.EmployeeNo === 'E0010' &&
+      payload.TimeOut === '12:00:00',
+    ))
+    assert.equal(variants.some((payload) => 'AssetTransferNo' in payload), false)
+    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
+    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
+    assert.deepEqual(
+      gatePassODataPageSourcePatchPayloadVariants(
+        'transferOrder',
+        { label: 'Gate Pass Transfer Orders', linkTo: 'Transfer Order', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
+        { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+        { sourceDocumentNo: '108008' },
+        '108008',
+      ),
+      [],
+    )
+  })
+
+  it('builds HIJRA SOAP page payload variants for gate pass create', () => {
+    const variants = gatePassSoapPagePayloadVariants(
+      { label: 'Asset Transfer Requisitions', linkTo: 'Asset Transfer', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
+      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
+      {
+        sourceDocumentNo: '12',
+        dateOut: '2026-06-29',
+        timeOut: '12:00',
+        fromLocation: 'BLUE',
+        toLocation: 'YELLOW',
+        description: 'Testing',
+        comment: 'Portal test',
+      },
+      '12',
+    )
+    assert.ok(variants.some((payload) => payload.Link_to === 'Asset Transfer' && payload.Transfer_No === '12'))
+    assert.ok(variants.some((payload) => payload.Linkto === 'Asset Transfer' && payload.TransferNo === '12'))
+    assert.ok(variants.some((payload) => payload.Employee_No === 'E0010'))
+    assert.ok(variants.some((payload) => payload.Time_Out === '12:00:00'))
   })
 
   it('scopes only Store Issue gate passes to the employee', () => {
@@ -126,6 +280,14 @@ describe('soapFaultMessage', () => {
   it('extracts a readable Business Central fault without returning the envelope', () => {
     const xml = '<s:Fault><faultstring xml:lang="en-US">The value &quot;0&quot; cannot be evaluated.</faultstring></s:Fault>'
     assert.equal(soapFaultMessage(xml), 'The value "0" cannot be evaluated.')
+  })
+
+  it('explains Business Central 20-character setup code faults', () => {
+    const fault = 'The length of the string is 28, but it must be less than or equal to 20 characters. Value: Total Reward and Recognition'
+    assert.equal(
+      friendlySoapFaultMessage(fault),
+      '"Total Reward and Recognition" is 28 characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center setup code, not the form text. Shorten that setup code in Business Central, then retry.',
+    )
   })
 })
 
@@ -231,6 +393,12 @@ describe('staffClaim saveLine params', () => {
     assert.equal(payload.hospitalCategory, 2)
     assert.equal(payload.medicalAmount, 100)
   })
+
+  it('maps HIJRA medical hospital category labels to BC option codes', () => {
+    assert.equal(hospitalCategoryCode('Government'), 1)
+    assert.equal(hospitalCategoryCode('Non Govt'), 2)
+    assert.equal(hospitalCategoryCode('Online'), 3)
+  })
 })
 
 describe('approvalDocumentNoCandidates', () => {
@@ -312,6 +480,36 @@ describe('salaryAdvance saveHeader params', () => {
   })
 })
 
+describe('purchaseRequisition saveHeader params', () => {
+  it('uses short BC code values instead of long department display names', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    const params = await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          description: 'Office supplies',
+          departmentCode: 'Total Reward and Recognition',
+          requestingDepartmentCode: 'TRR',
+          responsibilityCenter: 'Total Reward and Recognition',
+        },
+      } as Request,
+      user: {
+        employeeNo: 'E001',
+        userID: 'USER1',
+        department: 'Human Resources and Rewards',
+        responsibleCenter: 'RC-001',
+      } as AuthUser,
+      no: '',
+    })
+
+    assert.equal(params.department, 'TRR')
+    assert.equal(params.requestingDepartment, 'TRR')
+    assert.equal(params.requestingDepartmentCode, 'TRR')
+    assert.equal(params.shortcutDimension2Code, 'TRR')
+    assert.equal(params.responsibilityCenter, 'RC-001')
+  })
+})
+
 describe('ESS request mutation contracts', () => {
   it('wires header edit and approval actions for every editable ESS module', () => {
     const modules = [
@@ -385,6 +583,26 @@ describe('mapModuleLines', () => {
 })
 
 describe('mapRequest status', () => {
+  it('maps Gate_Pass_Card page rows by Gate_Pass_No', () => {
+    const mapped = mapRequest(
+      {
+        Gate_Pass_No: 'GP260630133258191',
+        Link_to: 'Store Issue',
+        EmployeeNo: 'E0010',
+        EmployeeName: 'Beza Yoseff Abrehamm',
+        DateOut: '2026-06-30',
+        AssetFromLocation: 'BLUE',
+        AssetToLocation: 'BRANCH OFFICE',
+        Status: 'Open',
+      },
+      'gatePass',
+    )
+    assert.equal(mapped.id, 'gatePass-GP260630133258191')
+    assert.equal(mapped.requestNo, 'GP260630133258191')
+    assert.equal(mapped.status, 'Open')
+    assert.equal(mapped.makerEmployeeNo, 'E0010')
+  })
+
   it('prefers ApprovalStatus for transfer orders', () => {
     const mapped = mapRequest(
       {

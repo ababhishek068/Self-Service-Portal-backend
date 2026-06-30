@@ -48,10 +48,10 @@ const testDefaults: Record<
     comment: 'Testing',
   },
   assetTransfer: {
-    sourceDocumentNo: '12',
+    sourceDocumentNo: 'IPI000003',
     timeOut: '12:00',
-    fromLocation: 'BLUE',
-    toLocation: 'YELLOW',
+    fromLocation: '08',
+    toLocation: '02',
     description: 'Test asset transfer gate pass',
     comment: 'Testing',
   },
@@ -73,29 +73,29 @@ export function GatePass({ source }: { source: GatePassSource }) {
       header: 'Date Created',
       cell: (row) => formatDate(payloadValue(row, ['DateCreated', 'Date_Created'], row.createdAt)),
     },
-    { id: 'employee', header: 'Employee', cell: (row) => payloadValue(row, ['EmployeeName'], row.makerName || row.makerEmployeeNo) },
-    { id: 'department', header: 'Department', cell: (row) => payloadValue(row, ['DistrictDepartmentName'], row.departmentName || row.departmentCode) },
-    { id: 'sector', header: 'Sector', cell: (row) => payloadValue(row, ['SectorName']) },
-    { id: 'from', header: 'From', cell: (row) => payloadValue(row, ['FromLocation']) },
-    { id: 'to', header: 'To', cell: (row) => payloadValue(row, ['ToLocation']) },
+    { id: 'employee', header: 'Employee', cell: (row) => payloadValue(row, ['EmployeeName', 'Employee_Name'], row.makerName || row.makerEmployeeNo) },
+    { id: 'department', header: 'Department', cell: (row) => payloadValue(row, ['DistrictDepartmentName', 'District_Department_Name'], row.departmentName || row.departmentCode) },
+    { id: 'sector', header: 'Sector', cell: (row) => payloadValue(row, ['SectorName', 'Sector_Name']) },
+    { id: 'from', header: 'From', cell: (row) => payloadValue(row, ['FromLocation', 'From_Location', 'AssetFromLocation']) },
+    { id: 'to', header: 'To', cell: (row) => payloadValue(row, ['ToLocation', 'To_Location', 'AssetToLocation']) },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
   ]
   const lineColumns = source === 'storeIssue'
     ? [
         { label: 'Type', paths: ['type', 'Type'] },
-        { label: 'Issuing Store', paths: ['issuingStore', 'IssuingStore'] },
-        { label: 'No.', paths: ['itemNo', 'ItemNo', 'LineNo'] },
+        { label: 'Issuing Store', paths: ['issuingStore', 'IssuingStore', 'Issuing_Store'] },
+        { label: 'No.', paths: ['itemNo', 'ItemNo', 'Item_No', 'LineNo', 'Line_No'] },
         { label: 'Description', paths: ['description', 'Description'] },
-        { label: 'Quantity Requested', paths: ['quantityRequested', 'QuantityRequested'] },
-        { label: 'Quantity Issued', paths: ['quantityIssued', 'QuantityIssued'] },
+        { label: 'Quantity Requested', paths: ['quantityRequested', 'QuantityRequested', 'Quantity_Requested'] },
+        { label: 'Quantity Issued', paths: ['quantityIssued', 'QuantityIssued', 'Quantity_Issued'] },
       ]
     : [
-        { label: 'Item No.', paths: ['itemNo', 'ItemNo'] },
+        { label: 'Item No.', paths: ['itemNo', 'ItemNo', 'Item_No'] },
         { label: 'Description', paths: ['description', 'Description'] },
         { label: 'Quantity', paths: ['quantity', 'Quantity'] },
-        { label: 'Unit of Measure', paths: ['unitOfMeasure', 'UnitofMeasure'] },
-        { label: 'Quantity Shipped', paths: ['quantityShipped', 'QuantityShipped'] },
-        { label: 'Quantity Received', paths: ['quantityReceived', 'QuantityReceived'] },
+        { label: 'Unit of Measure', paths: ['unitOfMeasure', 'UnitofMeasure', 'Unit_of_Measure'] },
+        { label: 'Quantity Shipped', paths: ['quantityShipped', 'QuantityShipped', 'Quantity_Shipped'] },
+        { label: 'Quantity Received', paths: ['quantityReceived', 'QuantityReceived', 'Quantity_Received'] },
       ]
 
   return (
@@ -137,17 +137,17 @@ export function GatePass({ source }: { source: GatePassSource }) {
       cancelStatuses={['Pending Approval']}
       moduleConfig={{ module: 'gatePass', entity: 'selfServiceGatePasses' }}
       detailFields={[
-        { label: 'Gate Pass No.', paths: ['request.requestNo'] },
-        { label: 'Date Created', paths: ['payload.DateCreated', 'payload.Date_Created', 'request.createdAt'], format: 'date' },
-        { label: 'Employee', paths: ['payload.EmployeeName', 'request.makerName', 'request.makerEmployeeNo'] },
+        { label: 'Gate Pass No.', paths: ['request.requestNo', 'payload.GatePassNo', 'payload.Gate_Pass_No', 'payload.Gate_Pass_No_'] },
+        { label: 'Date Created', paths: ['payload.DateCreated', 'payload.Date_Created', 'payload.DateOut', 'request.createdAt'], format: 'date' },
+        { label: 'Employee', paths: ['payload.EmployeeName', 'payload.Employee_Name', 'request.makerName', 'request.makerEmployeeNo'] },
         { label: 'Returned Status', paths: ['payload.Returned'], format: 'returned' },
-        { label: 'Sector', paths: ['payload.SectorName'] },
-        { label: 'Department', paths: ['payload.DistrictDepartmentName', 'request.departmentName'] },
-        { label: 'From Location', paths: ['payload.FromLocation'] },
-        { label: 'To Location', paths: ['payload.ToLocation'] },
+        { label: 'Sector', paths: ['payload.SectorName', 'payload.Sector_Name'] },
+        { label: 'Department', paths: ['payload.DistrictDepartmentName', 'payload.District_Department_Name', 'request.departmentName'] },
+        { label: 'From Location', paths: ['payload.FromLocation', 'payload.From_Location', 'payload.AssetFromLocation'] },
+        { label: 'To Location', paths: ['payload.ToLocation', 'payload.To_Location', 'payload.AssetToLocation'] },
         { label: 'Description', paths: ['payload.Description', 'request.title'] },
         { label: 'Comment', paths: ['payload.Comment'] },
-        { label: 'Transfer No.', paths: ['payload.TransferNo', 'payload.Transfer_No'] },
+        { label: sourceDocumentLabel, paths: ['payload.sourceDocumentNo', 'payload.TransferNo', 'payload.Transfer_No', 'payload.Transfer_No_', 'payload.AssetTransferNo'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       detailLineLabel="Gate Pass Lines"

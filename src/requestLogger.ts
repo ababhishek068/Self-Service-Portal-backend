@@ -17,7 +17,7 @@ interface BcCall {
 
 interface BcRequestLog {
   protocol: 'OData' | 'SOAP'
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PATCH'
   operation: string
   target: string
   metadata?: string

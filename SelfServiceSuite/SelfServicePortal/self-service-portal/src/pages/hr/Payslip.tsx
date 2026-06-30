@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
-import { downloadPayslipPdf, listPayrollPeriods } from '@/api/endpoints/payroll'
+import { listPayrollPeriods, openPayslipPdf } from '@/api/endpoints/payroll'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { PortalFormCard } from '@/components/shared/PortalFormCard'
 import { Button } from '@/components/ui/button'
@@ -45,7 +45,7 @@ export function Payslip() {
     setLoading(true)
     setError('')
     try {
-      await downloadPayslipPdf(year, month)
+      await openPayslipPdf(year, month)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Payslip generation failed.')
     } finally {
@@ -87,7 +87,7 @@ export function Payslip() {
               disabled={loading || !year || !month}
             >
               <Download className="h-4 w-4" />
-              {loading ? 'Generating...' : 'Generate PDF'}
+              {loading ? 'Generating...' : 'View PDF'}
             </Button>
           </div>
           {error ? <p className="text-center text-sm text-red-600">{error}</p> : null}

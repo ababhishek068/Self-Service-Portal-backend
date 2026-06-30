@@ -449,7 +449,18 @@ function mapClaimLine(row: ODataRecord, index: number) {
     accountName: text(row, ['accountName', 'AccountName', 'Account_Name']),
     hospitalCategory: optionCode(
       text(row, ['hospitalCategory', 'HospitalCategory', 'Hospital_Category']),
-      { government: '1', private: '2', online: '3' },
+      {
+        government: '1',
+        govt: '1',
+        private: '2',
+        'non govt': '2',
+        'non-govt': '2',
+        'non government': '2',
+        'non-government': '2',
+        nongovt: '2',
+        online: '3',
+        outline: '3',
+      },
     ),
     medicalAmount: number(row, ['medicalAmount', 'MedicalAmount', 'Medical_Amount']),
     amount: number(row, ['amount', 'Amount']),
@@ -970,27 +981,139 @@ function employeeDisplayName(row: ODataRecord) {
   ].filter(Boolean).join(' ')
 }
 
+const EMPLOYEE_NO_KEYS = ['No', 'EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No']
+const EMPLOYEE_DEPARTMENT_KEYS = [
+  'DepartmentCode',
+  'Department_Code',
+  'Department',
+  'DepartmentName',
+  'Department_Name',
+  'DistrictDepartmentCode',
+  'District_Department_Code',
+  'DistrictDepartmentName',
+  'District_Department_Name',
+  'GlobalDimension1Code',
+  'Global_Dimension_1_Code',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+  'ShortcutDimension1Code',
+  'Shortcut_Dimension_1_Code',
+  'ShortcutDimension2Code',
+  'Shortcut_Dimension_2_Code',
+]
+
+function normalizedMatchValue(value: unknown) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function valuesForKeys(row: ODataRecord, keys: string[]) {
+  return keys
+    .map((key) => row[key])
+    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map((value) => String(value).trim())
+}
+
+function employeeNoFromRow(row: ODataRecord) {
+  return text(row, EMPLOYEE_NO_KEYS)
+}
+
+function activeEmployee(row: ODataRecord) {
+  const status = normalizedMatchValue(text(row, ['Status', 'EmployeeStatus', 'Employee_Status']))
+  return !status || status === 'active'
+}
+
+function userDepartmentCandidates(authUser: AuthUser) {
+  return [
+    authUser.department,
+    authUser.departmentName,
+    authUser.branchCode,
+    authUser.branchName,
+    ...(authUser.permissionDepartments ?? []),
+  ]
+    .map(normalizedMatchValue)
+    .filter(Boolean)
+}
+
+function employeeMatchesUserDepartment(row: ODataRecord, authUser: AuthUser) {
+  const candidates = new Set(userDepartmentCandidates(authUser))
+  if (candidates.size === 0) return true
+  return valuesForKeys(row, EMPLOYEE_DEPARTMENT_KEYS)
+    .map(normalizedMatchValue)
+    .some((value) => candidates.has(value))
+}
+
+async function fetchActiveEmployees() {
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `Status eq 'Active'`,
+  }).catch(() => fetchOData('QyHREmployee').catch(() => [] as ODataRecord[]))) as ODataRecord[]
+  return (Array.isArray(rows) ? rows : []).filter(activeEmployee)
+}
+
 async function fetchHodDepartmentStaff(authUser: AuthUser) {
-  const department = odataString(authUser.department)
-  if (!department) return [] as ODataRecord[]
-  return (await fetchOData('QyHREmployee', {
-    $filter:
-      `No ne '${odataString(authUser.employeeNo)}'` +
-      ` and Status eq 'Active'` +
-      ` and GlobalDimension2Code eq '${department}'`,
-  }).catch(() => [])) as ODataRecord[]
+  const rows = await fetchActiveEmployees()
+  return rows.filter((row) => {
+    const employeeNo = employeeNoFromRow(row)
+    return (
+      employeeNo &&
+      employeeNo !== authUser.employeeNo &&
+      employeeMatchesUserDepartment(row, authUser)
+    )
+  })
+}
+
+function dateOnly(value: unknown) {
+  const raw = String(value ?? '').trim()
+  return raw ? raw.slice(0, 10) : ''
+}
+
+function activeLeaveRow(row: ODataRecord, today: string) {
+  const status = normalizedMatchValue(text(row, ['Status', 'ApprovalStatus', 'Approval_Status']))
+  if (/cancel|reject|draft|open|pending/.test(status)) return false
+  const startDate = dateOnly(text(row, ['StartDate', 'Start_Date', 'FromDate', 'From_Date']))
+  const endDate = dateOnly(text(row, ['EndDate', 'End_Date', 'ToDate', 'To_Date', 'ReturnDate', 'Return_Date']))
+  if (!startDate && !endDate) return false
+  if (startDate && startDate > today) return false
+  if (endDate && endDate < today) return false
+  return true
+}
+
+function leaveTypeCode(row: ODataRecord) {
+  return text(row, ['Code', 'LeaveType', 'Leave_Type', 'LeaveCode', 'Leave_Code'])
+}
+
+function leaveTypeLabel(row: ODataRecord, fallback: string) {
+  return text(row, ['Description', 'Name', 'LeaveTypeDescription', 'Leave_Type_Description', 'Code'], fallback)
+}
+
+function leaveLedgerEmployeeNo(row: ODataRecord) {
+  return text(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
+}
+
+function leaveLedgerType(row: ODataRecord) {
+  return text(row, ['LeaveType', 'Leave_Type', 'LeaveCode', 'Leave_Code', 'Code'])
+}
+
+function leaveLedgerDays(row: ODataRecord) {
+  return number(row, ['NoofDays', 'No_of_Days', 'NoOfDays', 'Days', 'Quantity'])
+}
+
+function employeeLeaveBalance(row: ODataRecord) {
+  return number(row, [
+    'LeaveBalance',
+    'Leave_Balance',
+    'AnnualLeaveBalance',
+    'Annual_Leave_Balance',
+    'Balance',
+  ])
 }
 
 async function activeLeaveForEmployee(employeeNo: string) {
   const today = new Date().toISOString().slice(0, 10)
   const rows = (await fetchOData('QyHRLeaveApplications', {
-    $filter:
-      `EmployeeNo eq '${odataString(employeeNo)}'` +
-      ` and Status eq 'Posted'`,
+    $filter: `EmployeeNo eq '${odataString(employeeNo)}'`,
   }).catch(() => [])) as ODataRecord[]
   for (const row of Array.isArray(rows) ? rows : []) {
-    const endDate = text(row, ['End_Date', 'EndDate']).slice(0, 10)
-    if (endDate && endDate > today) return row
+    if (activeLeaveRow(row, today)) return row
   }
   return null
 }
@@ -1687,12 +1810,17 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       if (!authUser.HOD) throw portalError('HOD access required', 403)
       const today = new Date().toISOString().slice(0, 10)
+      const staffRows = await fetchHodDepartmentStaff(authUser)
+      const staffNos = new Set(staffRows.map(employeeNoFromRow).filter(Boolean))
       const rows = (await fetchOData('QyAttendanceLedger', {
-        $filter: authUser.department
-          ? `DepartmentCode eq '${odataString(authUser.department)}' and Date eq ${today}`
-          : `Date eq ${today}`,
-      })) as ODataRecord[] | null
-      res.json({ rows: (Array.isArray(rows) ? rows : []).map((row) => attendanceRow(row, authUser)) })
+        $filter: `Date eq ${today}`,
+      }).catch(() => fetchOData('QyAttendanceLedger').catch(() => [] as ODataRecord[]))) as ODataRecord[] | null
+      const todayRows = (Array.isArray(rows) ? rows : []).filter((row) => {
+        const rowDate = dateOnly(text(row, ['Date', 'AttendanceDate', 'PostingDate']))
+        const rowEmployeeNo = text(row, ['StaffNo', 'EmployeeNo', 'Employee_No'])
+        return rowDate === today && (!staffNos.size || staffNos.has(rowEmployeeNo))
+      })
+      res.json({ rows: todayRows.map((row) => attendanceRow(row, authUser)) })
     }),
   )
 
@@ -2106,7 +2234,7 @@ export function buildPortalApiRouter() {
       const rows = await fetchHodDepartmentStaff(authUser)
       res.json({
         rows: rows.map((row) => {
-          const employeeNo = text(row, ['No', 'EmployeeNo'])
+          const employeeNo = employeeNoFromRow(row)
           return {
             id: employeeNo,
             employeeNo,
@@ -2129,7 +2257,7 @@ export function buildPortalApiRouter() {
       const rows = await fetchHodDepartmentStaff(authUser)
       res.json({
         rows: rows.map((row) => {
-          const employeeNo = text(row, ['No', 'EmployeeNo'])
+          const employeeNo = employeeNoFromRow(row)
           return {
             id: employeeNo,
             employeeNo,
@@ -2149,17 +2277,11 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       if (!authUser.HOD) throw portalError('HOD access required', 403)
-      const department = odataString(authUser.department)
-      const employees = (await fetchOData('QyHREmployee', {
-        $filter:
-          `No ne '${odataString(authUser.employeeNo)}'` +
-          ` and Status eq 'Active'` +
-          (department ? ` and GlobalDimension1Code eq '${department}'` : ''),
-      }).catch(() => [])) as ODataRecord[]
+      const employees = await fetchHodDepartmentStaff(authUser)
 
       const rows = []
       for (const employee of Array.isArray(employees) ? employees : []) {
-        const employeeNo = text(employee, ['No', 'EmployeeNo'])
+        const employeeNo = employeeNoFromRow(employee)
         if (!employeeNo) continue
         const leave = await activeLeaveForEmployee(employeeNo)
         if (!leave) continue
@@ -2186,17 +2308,11 @@ export function buildPortalApiRouter() {
       if (!authUser.HOD) throw portalError('HOD access required', 403)
       const employeeNo = String(req.params.employeeNo ?? '').trim()
       if (!employeeNo) throw portalError('Employee number is required', 422)
-      const rows = (await fetchOData('QyHREmployee', {
-        $filter:
-          `No eq '${odataString(employeeNo)}'` +
-          ` and Status eq 'Active'` +
-          ` and DepartmentCode eq '${odataString(authUser.department)}'`,
-        $top: 1,
-      }).catch(() => [])) as ODataRecord[]
-      const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+      const rows = await fetchHodDepartmentStaff(authUser)
+      const employee = rows.find((row) => employeeNoFromRow(row) === employeeNo) ?? null
       if (!employee) throw portalError('Employee details not found', 404)
       res.json({
-        employeeNo: text(employee, ['No', 'EmployeeNo']),
+        employeeNo: employeeNoFromRow(employee),
         firstName: text(employee, ['FirstName', 'First_Name']),
         middleName: text(employee, ['MiddleName', 'Middle_Name']),
         lastName: text(employee, ['LastName', 'Last_Name']),
@@ -2237,43 +2353,86 @@ export function buildPortalApiRouter() {
 
       const leaveTypeList = (Array.isArray(leaveTypes) ? leaveTypes : [])
         .map((row) => ({
-          code: text(row, ['Code']),
-          label: text(row, ['Description', 'Code']),
-          days: number(row, ['Days', 'NoofDays']),
+          code: leaveTypeCode(row),
+          label: leaveTypeLabel(row, leaveTypeCode(row)),
+          days: number(row, ['Days', 'NoofDays', 'No_of_Days', 'AnnualEntitlement', 'Annual_Entitlement']),
+          employeeBalanceFallback: false,
         }))
         .filter((row) => row.code)
 
+      const ledgerTypeLabels = new Map<string, string>()
       const ledgerByEmployeeAndType = new Map<string, { additions: number; deductions: number }>()
       for (const row of Array.isArray(ledgerRows) ? ledgerRows : []) {
-        const employeeNo = text(row, ['EmployeeNo', 'Employee_No'])
-        const leaveType = text(row, ['LeaveType', 'Leave_Type'])
+        const employeeNo = leaveLedgerEmployeeNo(row)
+        const leaveType = leaveLedgerType(row)
         if (!employeeNo || !leaveType) continue
+        if (!ledgerTypeLabels.has(leaveType)) {
+          ledgerTypeLabels.set(leaveType, leaveTypeLabel(row, leaveType))
+        }
         const key = `${employeeNo}::${leaveType}`
         const totals = ledgerByEmployeeAndType.get(key) ?? { additions: 0, deductions: 0 }
-        const days = number(row, ['NoofDays', 'No_of_Days'])
+        const days = leaveLedgerDays(row)
         if (days < 0) totals.deductions += Math.abs(days)
         else totals.additions += days
         ledgerByEmployeeAndType.set(key, totals)
       }
 
+      if (leaveTypeList.length === 0) {
+        for (const [code, label] of ledgerTypeLabels) {
+          leaveTypeList.push({ code, label, days: 0, employeeBalanceFallback: false })
+        }
+      }
+
+      const hasEmployeeLeaveBalances = (Array.isArray(employees) ? employees : [])
+        .some((employee) => employeeLeaveBalance(employee) !== 0)
+      if (leaveTypeList.length === 0 && hasEmployeeLeaveBalances) {
+        leaveTypeList.push({
+          code: 'LEAVE_BALANCE',
+          label: 'Leave Balance',
+          days: 0,
+          employeeBalanceFallback: true,
+        })
+      }
+
+      const hasLedgerRows = Array.isArray(ledgerRows) && ledgerRows.length > 0
+
       res.json(
         (Array.isArray(employees) ? employees : []).map((employee) => {
-          const employeeNo = text(employee, ['No', 'EmployeeNo'])
-          const firstName = text(employee, ['FirstName'])
-          const middleName = text(employee, ['MiddleName'])
-          const lastName = text(employee, ['LastName'])
+          const employeeNo = employeeNoFromRow(employee)
+          const firstName = text(employee, ['FirstName', 'First_Name'])
+          const middleName = text(employee, ['MiddleName', 'Middle_Name'])
+          const lastName = text(employee, ['LastName', 'Last_Name'])
           const fullName = text(employee, ['FullName', 'Name'], [firstName, middleName, lastName].filter(Boolean).join(' '))
+          const fallbackBalance = employeeLeaveBalance(employee)
           return {
             employeeNo,
             name: fullName,
-            department: text(employee, ['Department', 'DepartmentName', 'GlobalDimension2Code', 'ShortcutDimension2Code']),
+            department: text(employee, [
+              'Department',
+              'DepartmentName',
+              'Department_Name',
+              'DepartmentCode',
+              'Department_Code',
+              'GlobalDimension1Code',
+              'GlobalDimension2Code',
+              'ShortcutDimension2Code',
+            ]),
             leaveTypes: leaveTypeList.map((leaveType) => {
               const totals = ledgerByEmployeeAndType.get(`${employeeNo}::${leaveType.code}`) ?? {
                 additions: 0,
                 deductions: 0,
               }
+              const useEmployeeBalance =
+                leaveType.employeeBalanceFallback ||
+                (!hasLedgerRows && fallbackBalance !== 0 && (
+                  leaveType.code === '0001' ||
+                  leaveTypeList.length === 1 ||
+                  /annual|leave balance/i.test(leaveType.label)
+                ))
               const rawBalance =
-                leaveType.code === '0001'
+                useEmployeeBalance
+                  ? fallbackBalance
+                  : leaveType.code === '0001'
                   ? totals.additions - totals.deductions
                   : leaveType.days - (totals.deductions - totals.additions)
               return {

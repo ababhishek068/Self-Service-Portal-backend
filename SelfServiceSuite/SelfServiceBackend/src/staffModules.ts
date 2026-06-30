@@ -230,7 +230,7 @@ export function gatePassSourceFromQuery(value: unknown): GatePassSourceKey {
 }
 
 export function gatePassSourceFromRow(row: ODataRecord): GatePassSourceKey {
-  return normalizedGatePassSource(fieldText(row, ['Linkto', 'LinkTo', 'Link_To']))
+  return normalizedGatePassSource(fieldText(row, ['Linkto', 'LinkTo', 'Link_to', 'Link_To', 'Link']))
 }
 
 export function gatePassListFilterParts(source: GatePassSourceKey, user: AuthUser) {
@@ -249,8 +249,101 @@ export function gatePassLineBinding(row: ODataRecord, fallbackNo: string) {
     source,
     lineService: sourceSpec.lineService,
     lineHeaderField: sourceSpec.lineHeaderField,
-    documentNo: fieldText(row, ['TransferNo', 'Transfer_No'], fallbackNo),
+    documentNo: gatePassTransferNo(row, fallbackNo),
   }
+}
+
+const RECENT_GATE_PASS_TTL_MS = 6 * 60 * 60 * 1000
+const recentGatePassCreates = new Map<string, { row: ODataRecord; expiresAt: number }>()
+
+function gatePassEmployeeNo(row: ODataRecord) {
+  return fieldText(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
+}
+
+function pruneRecentGatePassCreates() {
+  const now = Date.now()
+  for (const [key, value] of recentGatePassCreates) {
+    if (value.expiresAt <= now) recentGatePassCreates.delete(key)
+  }
+}
+
+function recentGatePassRow(no: string) {
+  pruneRecentGatePassCreates()
+  return recentGatePassCreates.get(no)?.row ?? null
+}
+
+function gatePassRowMatchesSource(row: ODataRecord, source: GatePassSourceKey, user: AuthUser) {
+  if (gatePassSourceFromRow(row) !== source) return false
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  if (!sourceSpec.scopeToEmployee) return true
+  const employeeNo = gatePassEmployeeNo(row)
+  return !employeeNo || employeeNo === user.employeeNo
+}
+
+function mergeRecentGatePassRow(row: ODataRecord) {
+  const no = gatePassDocumentNo(row)
+  const recent = no ? recentGatePassRow(no) : null
+  return recent ? { ...row, ...recent } : row
+}
+
+function mergeRecentGatePassRows(rows: ODataRecord[], source: GatePassSourceKey, user: AuthUser) {
+  pruneRecentGatePassCreates()
+  const byNo = new Map<string, ODataRecord>()
+  const anonymous: ODataRecord[] = []
+  for (const row of rows.map(mergeRecentGatePassRow)) {
+    const no = gatePassDocumentNo(row)
+    if (!no) {
+      anonymous.push(row)
+      continue
+    }
+    byNo.set(no, byNo.has(no) ? { ...byNo.get(no), ...row } : row)
+  }
+  for (const { row } of recentGatePassCreates.values()) {
+    if (!gatePassRowMatchesSource(row, source, user)) continue
+    const no = gatePassDocumentNo(row)
+    if (!no) continue
+    byNo.set(no, byNo.has(no) ? { ...byNo.get(no), ...row } : row)
+  }
+  return [...byNo.values(), ...anonymous]
+}
+
+function rememberRecentGatePassCreate(
+  source: GatePassSourceKey,
+  user: AuthUser,
+  values: GatePassPageValues,
+  created: ODataRecord | null,
+) {
+  const no = gatePassDocumentNo(created ?? {}) || String(values.gatePassNo ?? '').trim()
+  if (!no) return created
+  const row = cleanODataPayload({
+    ...(created ?? {}),
+    GatePassNo: no,
+    Gate_Pass_No: no,
+    Linkto: values.linkTo,
+    Link_to: values.linkTo,
+    gatePassSource: source,
+    sourceDocumentNo: values.sourceDocumentNo,
+    TransferNo: values.sourceDocumentNo,
+    Transfer_No: values.sourceDocumentNo,
+    EmployeeNo: values.employeeNo,
+    EmployeeName: user.displayName,
+    DateCreated: new Date().toISOString().slice(0, 10),
+    DateOut: values.dateOut,
+    TimeOut: values.timeOut,
+    FromLocation: values.fromLocation,
+    AssetFromLocation: values.fromLocation,
+    ToLocation: values.toLocation,
+    AssetToLocation: values.toLocation,
+    Description: values.description || values.linkTo,
+    Comment: values.comment,
+    ResponsibilityCenter: values.responsibilityCenter,
+    Status: fieldText(created ?? {}, ['Status']) || 'Open',
+  })
+  recentGatePassCreates.set(no, {
+    row,
+    expiresAt: Date.now() + RECENT_GATE_PASS_TTL_MS,
+  })
+  return row
 }
 
 function cleanODataPayload(payload: Record<string, unknown>) {
@@ -271,8 +364,36 @@ function normalizeBcTime(value: unknown) {
   return raw
 }
 
-function gatePassDocumentNo(row: ODataRecord) {
-  return fieldText(row, ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_'])
+function generateGatePassNo() {
+  const stamp = new Date().toISOString().replace(/\D/g, '').slice(2, 14)
+  const suffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0')
+  return `GP${stamp}${suffix}`
+}
+
+export function gatePassDocumentNo(row: ODataRecord) {
+  return fieldText(row, ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_', 'GatePassNumber', 'No'])
+}
+
+function gatePassTransferNo(row: Record<string, unknown>, fallback = '') {
+  return fieldText(row, [
+    'transferNo',
+    'TransferNo',
+    'Transfer_No',
+    'Transfer_No_',
+    'assetTransferNo',
+    'AssetTransferNo',
+    'Asset_Transfer_No',
+    'transferOrderNo',
+    'TransferOrderNo',
+    'Transfer_Order_No',
+    'storeIssueNo',
+    'StoreIssueNo',
+    'Store_Issue_No',
+    'sourceDocumentNo',
+    'SourceDocumentNo',
+    'Source_Document_No',
+    'DocumentNo',
+  ], fallback)
 }
 
 function gatePassODataInsertUnsupported(error: unknown) {
@@ -280,24 +401,349 @@ function gatePassODataInsertUnsupported(error: unknown) {
   return /MethodNotImplemented|does not support insert|Entity does not support insert/i.test(message)
 }
 
-function gatePassSoapPagePayload(
+function gatePassSoapPageServiceNames() {
+  const configured = config.BC_GATE_PASS_PAGE_SERVICE
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return [
+    ...configured,
+    'Gate_Pass_Card',
+    'Gatepass_Card',
+    'GatePassCard',
+    'GatepassCard',
+    'Gate_Pass',
+    'GatePass',
+    'Gatepass',
+  ].filter((item, index, items) => items.indexOf(item) === index)
+}
+
+function gatePassODataPageServiceNames() {
+  const configured = config.BC_GATE_PASS_PAGE_SERVICE
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return configured.length ? configured : ['Gate_Pass_Card']
+}
+
+function bcSoapPageServiceNotFound(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /Service\s+"?Page\/[^"]+"?\s+was not found|Service .* was not found|Page\/.*not found/i.test(message)
+}
+
+function readableBcError(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const jsonStart = raw.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const data = JSON.parse(raw.slice(jsonStart))
+      const message = data?.error?.message
+      const code = data?.error?.code
+      if (
+        /Internal_InvalidTableRelation/i.test(String(code ?? '')) &&
+        /field Transfer No/i.test(String(message ?? '')) &&
+        /related table \(Asset Transfer\)/i.test(String(message ?? ''))
+      ) {
+        const invalidNo = String(message ?? '').match(/value \(([^)]+)\)/i)?.[1]
+        return `Invalid Asset Transfer No${invalidNo ? ` "${invalidNo}"` : ''}. Select an existing Asset Transfer document from Business Central.`
+      }
+      if (message && code) return `${code}: ${message}`
+      if (message) return String(message)
+    } catch {
+      // Keep the original error if the payload is not standalone JSON.
+    }
+  }
+  return raw
+}
+
+function gatePassPageSourceDocumentFieldNames(source: GatePassSourceKey) {
+  return source === 'assetTransfer' ? ['AssetTransferNo'] : []
+}
+
+type GatePassPageValues = {
+  gatePassNo: unknown
+  linkTo: string
+  sourceDocumentNo: string
+  dateOut: unknown
+  timeOut: string
+  description: unknown
+  comment: unknown
+  fromLocation: unknown
+  toLocation: unknown
+  employeeNo: string
+  responsibilityCenter: unknown
+}
+
+function gatePassPageValues(
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+): GatePassPageValues {
+  return {
+    gatePassNo: fieldText(body, ['gatePassNo', 'gatePassNumber']) || generateGatePassNo(),
+    linkTo: sourceSpec.linkTo,
+    sourceDocumentNo,
+    dateOut: body.dateOut ?? body.issueDate,
+    timeOut: normalizeBcTime(body.timeOut),
+    description: body.description ?? body.reason,
+    comment: body.comment,
+    fromLocation: body.fromLocation ?? body.from,
+    toLocation: body.toLocation ?? body.to ?? body.destination,
+    employeeNo: user.employeeNo,
+    responsibilityCenter: firstBcCodeValue(body.responsibilityCenter, user.responsibleCenter),
+  }
+}
+
+function gatePassPagePayloads(values: GatePassPageValues) {
+  const canonicalFull = {
+    Gate_Pass_No: values.gatePassNo,
+    Link_to: values.linkTo,
+    Transfer_No: values.sourceDocumentNo,
+    Date_Out: values.dateOut,
+    Time_Out: values.timeOut,
+    Description: values.description,
+    Comment: values.comment,
+    From_Location: values.fromLocation,
+    To_Location: values.toLocation,
+    Employee_No: values.employeeNo,
+    Responsibility_Center: values.responsibilityCenter,
+  }
+  const canonicalTitleFull = {
+    Gate_Pass_No: values.gatePassNo,
+    Link_To: values.linkTo,
+    Transfer_No: values.sourceDocumentNo,
+    Date_Out: values.dateOut,
+    Time_Out: values.timeOut,
+    Description: values.description,
+    Comment: values.comment,
+    From_Location: values.fromLocation,
+    To_Location: values.toLocation,
+    Employee_No: values.employeeNo,
+    Responsibility_Center: values.responsibilityCenter,
+  }
+  const odataFull = {
+    GatePassNo: values.gatePassNo,
+    Linkto: values.linkTo,
+    TransferNo: values.sourceDocumentNo,
+    DateOut: values.dateOut,
+    TimeOut: values.timeOut,
+    Description: values.description,
+    Comment: values.comment,
+    FromLocation: values.fromLocation,
+    ToLocation: values.toLocation,
+    EmployeeNo: values.employeeNo,
+    ResponsibilityCenter: values.responsibilityCenter,
+  }
+  const canonicalMinimal = {
+    Link_to: values.linkTo,
+    Transfer_No: values.sourceDocumentNo,
+    Employee_No: values.employeeNo,
+    Date_Out: values.dateOut,
+    Time_Out: values.timeOut,
+    From_Location: values.fromLocation,
+    To_Location: values.toLocation,
+    Comment: values.comment,
+  }
+  const canonicalTitleMinimal = {
+    Link_To: values.linkTo,
+    Transfer_No: values.sourceDocumentNo,
+    Employee_No: values.employeeNo,
+    Date_Out: values.dateOut,
+    Time_Out: values.timeOut,
+    From_Location: values.fromLocation,
+    To_Location: values.toLocation,
+    Comment: values.comment,
+  }
+  const odataMinimal = {
+    Linkto: values.linkTo,
+    TransferNo: values.sourceDocumentNo,
+    EmployeeNo: values.employeeNo,
+    DateOut: values.dateOut,
+    TimeOut: values.timeOut,
+    FromLocation: values.fromLocation,
+    ToLocation: values.toLocation,
+    Comment: values.comment,
+  }
+  return [
+    canonicalFull,
+    canonicalTitleFull,
+    odataFull,
+    canonicalMinimal,
+    canonicalTitleMinimal,
+    odataMinimal,
+  ].map(cleanODataPayload)
+}
+
+function gatePassODataPagePayloads(source: GatePassSourceKey, values: GatePassPageValues) {
+  const basePayloads = [
+    {
+      Gate_Pass_No: values.gatePassNo,
+      Link_to: values.linkTo,
+      EmployeeNo: values.employeeNo,
+      DateOut: values.dateOut,
+      TimeOut: values.timeOut,
+      Comment: values.comment,
+      AssetFromLocation: values.fromLocation,
+      AssetToLocation: values.toLocation,
+      ResponsibilityCenter: values.responsibilityCenter,
+    },
+    {
+      Gate_Pass_No: values.gatePassNo,
+      Link_to: values.linkTo,
+      EmployeeNo: values.employeeNo,
+      DateOut: values.dateOut,
+      TimeOut: values.timeOut,
+      Comment: values.comment,
+    },
+  ]
+  const sourceFields = gatePassPageSourceDocumentFieldNames(source)
+  if (sourceFields.length === 0) {
+    return basePayloads.map(cleanODataPayload)
+  }
+  const payloads: Record<string, unknown>[] = []
+  for (const sourceField of sourceFields) {
+    for (const payload of basePayloads) {
+      payloads.push(cleanODataPayload({
+        ...payload,
+        [sourceField]: values.sourceDocumentNo,
+      }))
+    }
+  }
+  return payloads
+}
+
+export function gatePassODataPagePayloadVariants(
+  source: GatePassSourceKey,
   sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
   user: AuthUser,
   body: Record<string, unknown>,
   sourceDocumentNo: string,
 ) {
-  return cleanODataPayload({
-    Gate_Pass_No: body.gatePassNo ?? body.gatePassNumber,
-    Link_to: sourceSpec.linkTo,
-    Transfer_No: sourceDocumentNo,
-    Date_Out: body.dateOut ?? body.issueDate,
-    Time_Out: normalizeBcTime(body.timeOut),
-    Description: body.description ?? body.reason,
-    Comment: body.comment,
-    From_Location: body.fromLocation ?? body.from,
-    To_Location: body.toLocation ?? body.to ?? body.destination,
-    Employee_No: user.employeeNo,
-  })
+  const seen = new Set<string>()
+  const variants: Record<string, unknown>[] = []
+  for (const payload of gatePassODataPagePayloads(source, gatePassPageValues(sourceSpec, user, body, sourceDocumentNo))) {
+    const key = JSON.stringify(payload)
+    if (seen.has(key)) continue
+    seen.add(key)
+    variants.push(payload)
+  }
+  return variants
+}
+
+function gatePassODataPageSourcePatchPayloads(
+  source: GatePassSourceKey,
+  _values: GatePassPageValues,
+) {
+  if (source === 'assetTransfer') return [] as Record<string, unknown>[]
+  return [] as Record<string, unknown>[]
+}
+
+export function gatePassODataPageSourcePatchPayloadVariants(
+  source: GatePassSourceKey,
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+) {
+  return gatePassODataPageSourcePatchPayloads(
+    source,
+    gatePassPageValues(sourceSpec, user, body, sourceDocumentNo),
+  )
+}
+
+async function patchGatePassODataPageSource(
+  serviceName: string,
+  created: ODataRecord | null,
+  values: GatePassPageValues,
+) {
+  const patches = gatePassODataPageSourcePatchPayloads(
+    normalizedGatePassSource(values.linkTo),
+    values,
+  )
+  if (patches.length === 0) {
+    return created ?? cleanODataPayload({
+      Gate_Pass_No: values.gatePassNo,
+      Link_to: values.linkTo,
+      EmployeeNo: values.employeeNo,
+    })
+  }
+  throw new Error(
+    `OData page source link failed for ${serviceName}: no supported source-link patch fields are published for this Gate_Pass_Card page.`,
+  )
+}
+
+export function gatePassSoapPagePayloadVariants(
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+) {
+  const seen = new Set<string>()
+  const variants: Record<string, unknown>[] = []
+  for (const payload of gatePassPagePayloads(gatePassPageValues(sourceSpec, user, body, sourceDocumentNo))) {
+    const key = JSON.stringify(payload)
+    if (seen.has(key)) continue
+    seen.add(key)
+    variants.push(payload)
+  }
+  return variants
+}
+
+async function createGatePassViaODataPage(
+  source: GatePassSourceKey,
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+) {
+  const serviceNames = gatePassODataPageServiceNames()
+  const values = gatePassPageValues(sourceSpec, user, body, sourceDocumentNo)
+  const variants = gatePassODataPagePayloadVariants(source, sourceSpec, user, body, sourceDocumentNo)
+  let lastError: unknown
+  for (const serviceName of serviceNames) {
+    for (const payload of variants) {
+      let created: ODataRecord | null = null
+      try {
+        created = await postOData(serviceName, payload)
+      } catch (error) {
+        lastError = error
+        continue
+      }
+      return await patchGatePassODataPageSource(serviceName, created, values)
+    }
+  }
+  throw new Error(
+    `OData page create failed for ${serviceNames.join(', ')}: ${readableBcError(lastError)}`,
+  )
+}
+
+async function createGatePassViaSoapPage(
+  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
+  user: AuthUser,
+  body: Record<string, unknown>,
+  sourceDocumentNo: string,
+) {
+  const variants = gatePassSoapPagePayloadVariants(sourceSpec, user, body, sourceDocumentNo)
+  const serviceNames = gatePassSoapPageServiceNames()
+  let lastError: unknown
+  for (const serviceName of serviceNames) {
+    for (const fields of variants) {
+      try {
+        return await createSoapPageRecord(serviceName, fields)
+      } catch (error) {
+        lastError = error
+        if (bcSoapPageServiceNotFound(error)) break
+      }
+    }
+  }
+  const message = lastError instanceof Error ? lastError.message : String(lastError ?? '')
+  throw Object.assign(
+    new Error(
+      `${message} Tried SOAP page services: ${serviceNames.join(', ')}. Publish BC page 51244 "Gate Pass Card" as a SOAP Web Service or set BC_GATE_PASS_PAGE_SERVICE to the exact published Service Name.`,
+    ),
+    { cause: lastError },
+  )
 }
 
 async function createGatePassViaBusinessCentral(
@@ -311,22 +757,31 @@ async function createGatePassViaBusinessCentral(
   const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
   const sourceDocumentNo = fieldText(body, [
     'sourceDocumentNo',
+    'sourceDocumentNumber',
+    'sourceNo',
+    'documentNo',
+    'storeIssueNo',
+    'assetTransferNo',
     'transferNo',
     'TransferNo',
     'Transfer_No',
+    'Transfer_No_',
   ])
   if (!sourceDocumentNo) {
     throw Object.assign(new Error(`${sourceSpec.linkTo} document number is required`), {
       status: 422,
     })
   }
+  const gatePassNo = fieldText(body, ['gatePassNo', 'gatePassNumber']) || generateGatePassNo()
+  const createBody = { ...body, gatePassNo }
+  const pageValues = gatePassPageValues(sourceSpec, user, createBody, sourceDocumentNo)
 
   const beforeRows = await listPortalModuleRows(spec, user, { gatePassSource: source }).catch(
     () => [] as ODataRecord[],
   )
   const beforeNumbers = new Set(beforeRows.map(gatePassDocumentNo).filter(Boolean))
   const payload = cleanODataPayload({
-    GatePassNo: body.gatePassNo ?? body.gatePassNumber,
+    GatePassNo: gatePassNo,
     Linkto: sourceSpec.linkTo,
     TransferNo: sourceDocumentNo,
     DateOut: body.dateOut ?? body.issueDate,
@@ -343,19 +798,30 @@ async function createGatePassViaBusinessCentral(
     created = await postOData(spec.headerService, payload)
   } catch (error) {
     if (!gatePassODataInsertUnsupported(error)) throw error
-    created = await createSoapPageRecord(
-      config.BC_GATE_PASS_PAGE_SERVICE,
-      gatePassSoapPagePayload(sourceSpec, user, body, sourceDocumentNo),
-    ).catch((soapError) => {
-      const message = soapError instanceof Error ? soapError.message : String(soapError ?? '')
+    let odataPageError: unknown
+    try {
+      created = await createGatePassViaODataPage(source, sourceSpec, user, createBody, sourceDocumentNo)
+    } catch (odataError) {
+      odataPageError = odataError
+      created = await createGatePassViaSoapPage(sourceSpec, user, createBody, sourceDocumentNo).catch((soapError) => {
+        const odataMessage = readableBcError(odataPageError)
+        const soapMessage = readableBcError(soapError)
+        throw Object.assign(
+          new Error(
+            `Business Central QyGatePass is read-only for creation. OData Gate_Pass_Card create failed: ${odataMessage}. SOAP Gate Pass Card create also failed: ${soapMessage}`,
+          ),
+          { status: 502, code: 'BC_GATE_PASS_CREATE_FAILED' },
+        )
+      })
+    }
+    if (!created) {
       throw Object.assign(
-        new Error(
-          `Business Central QyGatePass is read-only for creation, and SOAP page ${config.BC_GATE_PASS_PAGE_SERVICE} could not create the gate pass: ${message}`,
-        ),
+        new Error('Business Central did not return a gate pass record after creation.'),
         { status: 502, code: 'BC_GATE_PASS_CREATE_FAILED' },
       )
-    })
+    }
   }
+  created = rememberRecentGatePassCreate(source, user, pageValues, created)
   let no = created ? gatePassDocumentNo(created) : ''
   for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
@@ -363,7 +829,7 @@ async function createGatePassViaBusinessCentral(
     const row = rows.find((candidate) => {
       const candidateNo = gatePassDocumentNo(candidate)
       if (!candidateNo || beforeNumbers.has(candidateNo)) return false
-      const transferNo = fieldText(candidate, ['TransferNo', 'Transfer_No'])
+      const transferNo = gatePassTransferNo(candidate)
       return !transferNo || transferNo === sourceDocumentNo
     })
     no = row ? gatePassDocumentNo(row) : ''
@@ -385,15 +851,36 @@ function purchaseLineTypeCode(value: unknown) {
   return numericCode(value, { service: 1, item: 2, asset: 4 })
 }
 
+function bcCodeValue(value: unknown, maxLength = 20) {
+  const raw = String(value ?? '').trim()
+  return raw && raw.length <= maxLength ? raw : ''
+}
+
+function firstBcCodeValue(...values: unknown[]) {
+  for (const value of values) {
+    const code = bcCodeValue(value)
+    if (code) return code
+  }
+  return ''
+}
+
 function userDepartmentCode(user: AuthUser, body: Record<string, unknown>) {
-  return String(
-    body.departmentCode ??
-      body.requestingDepartment ??
-      body.requestingDepartmentCode ??
-      body.department ??
-      user.department ??
-      '',
-  ).trim()
+  return firstBcCodeValue(
+    body.departmentCode,
+    body.requestingDepartmentCode,
+    body.shortcutDimension2Code,
+    body.requestingDepartment,
+    body.department,
+    user.department,
+  )
+}
+
+function userResponsibilityCenter(user: AuthUser, body: Record<string, unknown>) {
+  return firstBcCodeValue(
+    body.responsibilityCenter,
+    body.responsibleCenter,
+    user.responsibleCenter,
+  )
 }
 
 function transportRequestTypeCode(value: unknown) {
@@ -401,7 +888,18 @@ function transportRequestTypeCode(value: unknown) {
 }
 
 export function hospitalCategoryCode(value: unknown) {
-  return numericCode(value, { government: 1, private: 2, online: 3 })
+  return numericCode(value, {
+    government: 1,
+    govt: 1,
+    private: 2,
+    'non govt': 2,
+    'non-govt': 2,
+    'non government': 2,
+    'non-government': 2,
+    nongovt: 2,
+    online: 3,
+    outline: 3,
+  })
 }
 
 export function passengerTypeCode(value: unknown) {
@@ -803,11 +1301,7 @@ const purchaseRequisition: ModuleSpec = {
       requestingDepartment: userDepartmentCode(user, req.body),
       requestingDepartmentCode: userDepartmentCode(user, req.body),
       shortcutDimension2Code: userDepartmentCode(user, req.body),
-      responsibilityCenter:
-        req.body?.responsibilityCenter ??
-        req.body?.responsibleCenter ??
-        user.responsibleCenter ??
-        '',
+      responsibilityCenter: userResponsibilityCenter(user, req.body),
       orderDate:
         req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
     }),
@@ -1541,7 +2035,7 @@ export function approvalDocumentNoCandidates(
   if (document) {
     push(resolveAttachmentDocNo(spec, document, fallbackNo))
     if (spec.module === 'transfer-order') {
-      push(fieldText(document, ['GatePassNo', 'Gate_Pass_No']))
+      push(gatePassDocumentNo(document))
     }
     if (/^\d+$/.test(fallbackNo.trim())) {
       push(fallbackNo.trim().padStart(10, '0'))
@@ -1652,7 +2146,7 @@ export async function fetchPortalApprovalEntries(
 
   // Some BC builds post transfer-order approvals against the linked gate pass number.
   if (spec.module === 'transfer-order' && document) {
-    const gatePassNo = fieldText(document, ['GatePassNo', 'Gate_Pass_No'])
+    const gatePassNo = gatePassDocumentNo(document)
     const gatePassSpec = findModuleSpec('gate-pass')
     if (gatePassNo && gatePassSpec) {
       const gatePassEntries: ODataRecord[] = await fetchPortalApprovalEntries(gatePassSpec, gatePassNo)
@@ -1673,6 +2167,64 @@ function requestWithBody(body: Record<string, unknown>, params: Record<string, s
   return { body, params } as unknown as Request
 }
 
+async function fetchGatePassRowsForSource(
+  serviceName: string,
+  source: GatePassSourceKey,
+  user: AuthUser,
+) {
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  const rows: ODataRecord[] = []
+  const sourceFields = ['Linkto', 'Link_to', 'LinkTo', 'Link_To', 'Link']
+  for (const sourceField of sourceFields) {
+    const fetched = await fetchOData(serviceName, {
+      $filter: `${sourceField} eq '${odataString(sourceSpec.linkTo)}'`,
+    }).catch(() => [] as ODataRecord[])
+    if (Array.isArray(fetched)) rows.push(...fetched)
+  }
+  if (rows.length === 0) {
+    const fetched = await fetchOData(serviceName, {}).catch(() => [] as ODataRecord[])
+    if (Array.isArray(fetched)) rows.push(...fetched)
+  }
+  return rows.filter((row) => gatePassRowMatchesSource(row, source, user))
+}
+
+async function listGatePassRows(
+  spec: ModuleSpec,
+  user: AuthUser,
+  source: GatePassSourceKey,
+) {
+  const services = [
+    spec.headerService,
+    ...gatePassODataPageServiceNames(),
+  ].filter((item, index, items) => items.indexOf(item) === index)
+  const rows: ODataRecord[] = []
+  for (const serviceName of services) {
+    rows.push(...(await fetchGatePassRowsForSource(serviceName, source, user)))
+  }
+  return mergeRecentGatePassRows(rows, source, user)
+}
+
+async function getGatePassDocument(
+  spec: ModuleSpec,
+  no: string,
+) {
+  const services = [
+    spec.headerService,
+    ...gatePassODataPageServiceNames(),
+  ].filter((item, index, items) => items.indexOf(item) === index)
+  const keys = ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_', 'GatePassNumber', 'No']
+  for (const serviceName of services) {
+    for (const key of keys) {
+      const rows = (await fetchOData(serviceName, {
+        $filter: `${key} eq '${odataString(no)}'`,
+        $top: 1,
+      }).catch(() => null)) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows.length > 0) return mergeRecentGatePassRow(rows[0]!)
+    }
+  }
+  return recentGatePassRow(no)
+}
+
 export async function listPortalModuleRows(
   spec: ModuleSpec,
   user: AuthUser,
@@ -1681,12 +2233,13 @@ export async function listPortalModuleRows(
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
     return fetchFuelMaintenanceRows(spec, user)
   }
+  if (spec.module === 'gate-pass') {
+    return listGatePassRows(spec, user, options.gatePassSource ?? 'storeIssue')
+  }
   const filterParts =
-    spec.module === 'gate-pass'
-      ? gatePassListFilterParts(options.gatePassSource ?? 'storeIssue', user)
-      : spec.unscopedList
-        ? []
-        : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
+    spec.unscopedList
+      ? []
+      : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
   if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
   const fetched = await fetchOData(spec.headerService, {
     ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
@@ -1708,14 +2261,7 @@ export async function getPortalModuleDocument(
     : ''
 
   if (spec.module === 'gate-pass') {
-    for (const key of ['GatePassNo', 'Gate_Pass_No']) {
-      const rows = (await fetchOData(spec.headerService, {
-        $filter: `${key} eq '${odataString(no)}'`,
-        $top: 1,
-      })) as ODataRecord[] | null
-      if (Array.isArray(rows) && rows.length > 0) return rows[0]!
-    }
-    return null
+    return getGatePassDocument(spec, no)
   }
 
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
@@ -1990,7 +2536,7 @@ export async function cancelPortalModuleRequest(
     : null
   const params = await spec.params.cancel({
     req: requestWithBody({
-      transferNo: document?.TransferNo ?? document?.Transfer_No ?? '',
+      transferNo: gatePassTransferNo(document ?? {}),
     }),
     user,
     no,
@@ -2058,7 +2604,7 @@ export async function submitPortalModuleRequest(
   const document = spec.module === 'gate-pass' ? header : null
   const params = await spec.params.submit({
     req: requestWithBody({
-      transferNo: fieldText(document ?? {}, ['TransferNo', 'Transfer_No']),
+      transferNo: gatePassTransferNo(document ?? {}),
     }),
     user,
     no,
@@ -2198,6 +2744,8 @@ export function resolveAttachmentDocNo(spec: ModuleSpec, document: ODataRecord, 
     'Transport_Requisition_No',
     'GatePassNo',
     'Gate_Pass_No',
+    'Gate_Pass_No_',
+    'GatePassNumber',
     'ApplicationCode',
   ], fallbackNo)
 }

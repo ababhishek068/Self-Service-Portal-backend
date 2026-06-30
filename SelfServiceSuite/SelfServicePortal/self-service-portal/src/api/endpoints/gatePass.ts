@@ -12,20 +12,20 @@ export const gatePassSources: Array<{
 }> = [
   {
     value: 'storeIssue',
-    label: 'Store Requisitions',
-    singularLabel: 'Store Requisition',
+    label: 'Store Issue Gate Passes',
+    singularLabel: 'Store Issue Gate Pass',
     description: 'Gate passes generated from Store Issue documents.',
   },
   {
     value: 'transferOrder',
-    label: 'Transfer Orders',
-    singularLabel: 'Transfer Order',
+    label: 'Transfer Order Gate Passes',
+    singularLabel: 'Transfer Order Gate Pass',
     description: 'Gate passes generated from posted Transfer Orders.',
   },
   {
     value: 'assetTransfer',
-    label: 'Asset Transfers',
-    singularLabel: 'Asset Transfer',
+    label: 'Asset Transfer Gate Passes',
+    singularLabel: 'Asset Transfer Gate Pass',
     description: 'Gate passes generated from Asset Transfer documents.',
   },
 ]

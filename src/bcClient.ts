@@ -12,7 +12,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function requestWithCurlNtlm(options: {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PATCH'
   url: string
   headers: Record<string, string>
   body?: string
@@ -39,8 +39,8 @@ function requestWithCurlNtlm(options: {
       args.push('--header', `${key}: ${value}`)
     }
 
-    if (options.method === 'POST') {
-      args.push('--request', 'POST')
+    if (options.method === 'POST' || options.method === 'PATCH') {
+      args.push('--request', options.method)
       args.push('--data-binary', options.body ?? '')
     }
 
@@ -256,6 +256,71 @@ export async function postOData(serviceName: string, payload: Record<string, unk
   }
 }
 
+export async function patchOData(serviceName: string, payload: Record<string, unknown>) {
+  const base = normalizeBaseUrl(config.BC_ODATA_BASE_URL)
+  const url = /^https?:\/\//i.test(serviceName) ? new URL(serviceName) : new URL(serviceName, base)
+  const body = JSON.stringify(payload)
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'If-Match': '*',
+  }
+
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'PATCH',
+    operation: serviceName,
+    target: logTarget(url),
+    metadata: `bodyKeys=${Object.keys(payload).sort().join(',') || '-'}`,
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'PATCH',
+        url: url.toString(),
+        headers,
+        body,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Object.assign(
+          new Error(`Business Central OData ${response.statusCode}: ${response.body}`),
+          { status: response.statusCode === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+        )
+      }
+      const data = response.body ? JSON.parse(response.body) : null
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return data as ODataRecord | null
+    }
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        ...headers,
+        ...authHeaders(),
+      },
+      body,
+    })
+
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(`Business Central OData ${response.status}: ${text}`),
+        { status: response.status === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+      )
+    }
+    const data = text ? JSON.parse(text) : null
+    completeBcCall(call, response.status, responseBytes(text))
+    return data as ODataRecord | null
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
+}
+
 /**
  * Returns the count of rows that would be produced by `query` against
  * `serviceName`. Equivalent to Laravel's `->count()` over the OData client.
@@ -360,9 +425,17 @@ export function soapFaultMessage(xml: string) {
   return match ? decodeXml(match[1]!.trim()) : ''
 }
 
-function soapFaultError(status: number, xml: string) {
-  const fault = soapFaultMessage(xml)
-  const friendlyFault = /not supported by related approval workflow/i.test(fault)
+export function friendlySoapFaultMessage(fault: string) {
+  const codeLengthMatch = fault.match(
+    /length of the string is\s+(\d+),\s*but it must be less than or equal to\s+20\s+characters\.\s*Value:\s*([\s\S]+)$/i,
+  )
+  if (codeLengthMatch) {
+    const length = codeLengthMatch[1]
+    const value = codeLengthMatch[2]!.trim()
+    return `"${value}" is ${length} characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center setup code, not the form text. Shorten that setup code in Business Central, then retry.`
+  }
+
+  return /not supported by related approval workflow/i.test(fault)
     ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting approval.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
@@ -377,6 +450,11 @@ function soapFaultError(status: number, xml: string) {
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
       : fault
+}
+
+function soapFaultError(status: number, xml: string) {
+  const fault = soapFaultMessage(xml)
+  const friendlyFault = friendlySoapFaultMessage(fault)
   const message = friendlyFault
     ? `Business Central rejected the request: ${friendlyFault}`
     : `Business Central SOAP request failed with status ${status}`

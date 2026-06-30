@@ -10,10 +10,10 @@ export const claimTypeOptions = [
   { label: 'Other Claim', value: 'OTHER' },
 ]
 
-/** ESS hospital categories: 1 = Government, 2 = Private, 3 = Online. */
+/** ESS hospital categories: 1 = Government, 2 = Non Govt, 3 = Online. */
 export const hospitalCategoryOptions = [
   { label: 'Government', value: '1' },
-  { label: 'Private', value: '2' },
+  { label: 'Non Govt', value: '2' },
   { label: 'Online', value: '3' },
 ]
 

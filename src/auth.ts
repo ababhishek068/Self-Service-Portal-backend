@@ -140,14 +140,36 @@ interface BcEmployee {
   Gender?: string
   GlobalDimension1Code?: string
   GlobalDimension2Code?: string
+  Department?: string
+  DepartmentCode?: string
+  Department_Code?: string
   DepartmentName?: string
+  Department_Name?: string
+  DistrictDepartmentCode?: string
+  District_Department_Code?: string
+  DistrictDepartmentName?: string
+  District_Department_Name?: string
+  BranchCode?: string
+  Branch_Code?: string
   BranchName?: string
+  Branch_Name?: string
+  DivisionBranchCode?: string
+  Division_Branch_Code?: string
+  DivisionBranchName?: string
+  Division_Branch_Name?: string
+  ShortcutDimension1Code?: string
+  Shortcut_Dimension_1_Code?: string
+  ShortcutDimension2Code?: string
+  Shortcut_Dimension_2_Code?: string
   CustomerNo?: string
   JobID?: string
   JobTitle?: string
   JobGrade?: string
   PlaceOfDuty?: string
   ResponsibilityCenter?: string
+  Responsibility_Center?: string
+  ResponsibleCenter?: string
+  Responsible_Center?: string
   ManagerNo?: string
   SupervisorNo?: string
   EMail?: string
@@ -277,7 +299,43 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
-  const department = employee.GlobalDimension1Code ?? ''
+  const department = String(firstEmployeeField(employee, [
+    'GlobalDimension1Code',
+    'DepartmentCode',
+    'Department_Code',
+    'DistrictDepartmentCode',
+    'District_Department_Code',
+    'ShortcutDimension2Code',
+    'Shortcut_Dimension_2_Code',
+  ])).trim()
+  const departmentName = String(firstEmployeeField(employee, [
+    'DepartmentName',
+    'Department_Name',
+    'DistrictDepartmentName',
+    'District_Department_Name',
+    'Department',
+  ]) || department).trim()
+  const branchCode = String(firstEmployeeField(employee, [
+    'GlobalDimension2Code',
+    'BranchCode',
+    'Branch_Code',
+    'DivisionBranchCode',
+    'Division_Branch_Code',
+    'ShortcutDimension1Code',
+    'Shortcut_Dimension_1_Code',
+  ])).trim()
+  const branchName = String(firstEmployeeField(employee, [
+    'BranchName',
+    'Branch_Name',
+    'DivisionBranchName',
+    'Division_Branch_Name',
+  ]) || branchCode).trim()
+  const responsibleCenter = String(firstEmployeeField(employee, [
+    'ResponsibilityCenter',
+    'Responsibility_Center',
+    'ResponsibleCenter',
+    'Responsible_Center',
+  ])).trim()
   const accountNumber = employee.CustomerNo ?? ''
   const gender = employee.Gender ?? ''
   const userID = String(userSetup.UserID ?? '')
@@ -298,16 +356,16 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     isChangedPassword: Boolean(employee.ChangedPassword),
     mustChangePassword: !Boolean(employee.ChangedPassword),
     department,
-    departmentName: employee.DepartmentName ?? department,
-    branchCode: employee.GlobalDimension2Code ?? '',
-    branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
+    departmentName,
+    branchCode,
+    branchName,
     jobTitle: employee.JobTitle ?? employee.JobID ?? '',
     jobGrade: employee.JobGrade ?? '',
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
     leaveBalance: Number(employee.LeaveBalance ?? 0),
-    responsibleCenter: employee.ResponsibilityCenter ?? '',
+    responsibleCenter,
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,
     HOD: isHOD,

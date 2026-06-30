@@ -145,6 +145,9 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
   const requestNo = text(row, requestType === 'gatePass' ? [
     'GatePassNo',
     'Gate_Pass_No',
+    'Gate_Pass_No_',
+    'GatePassNumber',
+    'No',
   ] : requestType === 'leave' ? [
     'ApplicationCode',
     'Application_Code',
@@ -164,7 +167,7 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
   ])
   const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
   const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
-  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
+  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date_Created', 'DateOut', 'Date_Out', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {
     id: `${requestType}-${requestNo || crypto.randomUUID()}`,
