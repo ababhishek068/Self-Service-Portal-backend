@@ -44,6 +44,7 @@ function authUser(req: Request) {
 function soapTruthy(value: string | null | undefined) {
   if (!value) return false
   const normalized = String(value).trim().toLowerCase()
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized.length > 0
 }
 
@@ -72,6 +73,78 @@ export function leaveTypeIsAnnual(row: ODataRecord | null | undefined) {
 
 export function halfDayRequiresAnnualLeave(value: string) {
   return halfDayOptionValue(value) !== 0
+}
+
+function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback = '') {
+  if (!row) return fallback
+  for (const key of keys) {
+    const value = row[key]
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return fallback
+}
+
+function fieldNumber(row: ODataRecord | null | undefined, keys: string[]) {
+  if (!row) return null
+  for (const key of keys) {
+    const value = row[key]
+    if (value === null || value === undefined || value === '') continue
+    const numeric = Number(String(value).replaceAll(',', ''))
+    if (Number.isFinite(numeric)) return numeric
+  }
+  return null
+}
+
+function roundLeaveValue(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
+  return {
+    leaveBalance:
+      fieldNumber(row, ['LeaveBalance', 'Leave_Balance', 'AnnualLeaveBalance', 'Annual_Leave_Balance']) ??
+      (Number.isFinite(Number(user.leaveBalance)) ? Number(user.leaveBalance) : null),
+    earnedLeaveDays: fieldNumber(row, [
+      'EarnedLeaveDays',
+      'Earned_Leave_Days',
+      'EarnedLeave',
+      'Earned_Leave',
+    ]),
+  }
+}
+
+async function fetchCurrentEmployeeRow(employeeNo: string) {
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `No eq '${odataString(employeeNo)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+}
+
+function likelyActiveEmployee(row: ODataRecord) {
+  const status = fieldText(row, ['Status', 'EmployeeStatus', 'Employee_Status']).toLowerCase()
+  if (!status) return true
+  return !['inactive', 'terminated', 'resigned', 'dismissed', 'blocked', 'suspended'].includes(status)
+}
+
+async function fetchRelieverRows(employeeNo: string) {
+  const filters = [
+    `No ne '${odataString(employeeNo)}' and Status eq 'Active'`,
+    `No ne '${odataString(employeeNo)}'`,
+  ]
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHREmployee', {
+      $filter: filter,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    const list = Array.isArray(rows) ? rows : []
+    const activeRows = list.filter(likelyActiveEmployee)
+    if (activeRows.length > 0) return activeRows
+    if (list.length > 0) return list
+  }
+  return []
 }
 
 /** Business Central SOAP dates must use yyyy-mm-dd (locale-neutral). */
@@ -129,6 +202,76 @@ export function parseLeaveDatesReturn(rawValue: unknown) {
     if (normalizedKey === 'returndate') returnDate = (value ?? '').trim()
   }
   return { endDate, returnDate }
+}
+
+const leaveRequestSchema = z.object({
+  leaveType: z.string().min(1),
+  appliedDays: z.coerce.number(),
+  startDate: z.string().min(1),
+  isHalfDayLeave: z.union([z.literal('0'), z.literal('1'), z.literal('2')]).default('0'),
+  reliever: z.string().optional().default(''),
+  reason: z.string().min(1),
+  requisitionNo: z.string().optional().default(''),
+})
+
+function submittedLeaveNoFromReturn(value: unknown) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return ''
+  if (['true', 'false', '1', '0', 'yes', 'no', 'ok'].includes(normalized.toLowerCase())) return ''
+  return normalized
+}
+
+function sameBcDate(left: unknown, right: unknown) {
+  const leftDate = formatBcSoapDate(String(left ?? ''))
+  const rightDate = formatBcSoapDate(String(right ?? ''))
+  return Boolean(leftDate && rightDate && leftDate === rightDate)
+}
+
+function submittedLeaveScore(row: ODataRecord, body: z.infer<typeof leaveRequestSchema>, endDate: string) {
+  let score = 0
+  if (fieldText(row, ['LeaveType', 'Leave_Type', 'LeaveTypeCode', 'Leave_Type_Code']) === body.leaveType) score += 10
+  if (sameBcDate(fieldText(row, ['StartDate', 'Start_Date']), body.startDate)) score += 8
+  if (sameBcDate(fieldText(row, ['EndDate', 'End_Date']), endDate)) score += 8
+  const days = fieldNumber(row, ['DaysApplied', 'Days_Applied', 'NoofDays', 'No_of_Days'])
+  if (days !== null && Math.abs(days - body.appliedDays) < 0.01) score += 4
+  const reason = fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason', 'Description'])
+  if (reason && reason === body.reason) score += 2
+  const status = fieldText(row, ['Status']).toLowerCase()
+  if (status === 'open') score += 1
+  return score
+}
+
+async function resolveSubmittedLeaveNo(
+  user: ReturnType<typeof authUser>,
+  body: z.infer<typeof leaveRequestSchema>,
+  endDate: string,
+  rawReturnValue: unknown,
+) {
+  if (body.requisitionNo) return body.requisitionNo
+
+  const returnedNo = submittedLeaveNoFromReturn(rawReturnValue)
+  if (returnedNo) return returnedNo
+
+  const rows = (await fetchOData('QyHRLeaveApplications', {
+    $filter: `EmployeeNo eq '${odataString(user.employeeNo)}'`,
+    $orderby: 'ApplicationDate desc',
+    $top: 20,
+  }).catch(() => [])) as ODataRecord[] | null
+
+  const list = Array.isArray(rows) ? rows : []
+  let bestRow: ODataRecord | null = null
+  let bestScore = -1
+  for (const row of list) {
+    const score = submittedLeaveScore(row, body, endDate)
+    if (score > bestScore) {
+      bestRow = row
+      bestScore = score
+    }
+  }
+
+  return bestRow
+    ? fieldText(bestRow, ['ApplicationCode', 'No', 'ApplicationNo', 'Application_No'])
+    : ''
 }
 
 /* -------------------------------------------------------------------------- */
@@ -433,14 +576,22 @@ export function buildStaffRouter() {
     safe(async (req, res) => {
       const user = authUser(req)
       const notGender = user.Gender === 'Male' ? 'Female' : 'Male'
-      const rows = await fetchOData('QyHRLeaveType', {
-        $filter: `Gender ne '${odataString(notGender)}'`,
-      })
+      const [rows, employeeRow] = await Promise.all([
+        fetchOData('QyHRLeaveType', {
+          $filter: `Gender ne '${odataString(notGender)}'`,
+        }) as Promise<ODataRecord[] | null>,
+        fetchCurrentEmployeeRow(user.employeeNo),
+      ])
+      const metrics = employeeLeaveMetrics(employeeRow, user)
       res.json({
         rows: (Array.isArray(rows) ? rows : []).map((row) => ({
           ...row,
-          Hourly: Boolean(row.Hourly ?? row.Allow_Hourly ?? false),
-          Days: Number(row.Days ?? row.NoofDays ?? 0),
+          Hourly: soapTruthy(String(row.Hourly ?? row.Allow_Hourly ?? false)),
+          Days: leaveTypeIsAnnual(row)
+            ? roundLeaveValue(
+                metrics.earnedLeaveDays ?? metrics.leaveBalance ?? Number(row.Days ?? row.NoofDays ?? 0),
+              )
+            : roundLeaveValue(Number(row.Days ?? row.NoofDays ?? 0)),
           Annual: leaveTypeIsAnnual(row),
         })),
       })
@@ -451,11 +602,8 @@ export function buildStaffRouter() {
     '/leave/relievers',
     safe(async (req, res) => {
       const user = authUser(req)
-      const rows = await fetchOData('QyHREmployee', {
-        $filter: `No ne '${odataString(user.employeeNo)}' and Status eq 'Active'`,
-        $select: 'No,FirstName,MiddleName,LastName',
-      })
-      res.json({ rows: Array.isArray(rows) ? rows : [] })
+      const rows = await fetchRelieverRows(user.employeeNo)
+      res.json({ rows })
     }),
   )
 
@@ -466,7 +614,7 @@ export function buildStaffRouter() {
       const leaveTypeCode = req.params.type
       const today = new Date().toISOString().slice(0, 10)
 
-      const [typeRows, pendingCount, ledgerRows] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
@@ -481,11 +629,14 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveLedger', {
           $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
         }) as Promise<ODataRecord[] | null>,
+        fetchCurrentEmployeeRow(user.employeeNo),
       ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
-      const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
+      const isHourly = soapTruthy(String(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false))
+      const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
+      const metrics = employeeLeaveMetrics(employeeRow, user)
 
       let additions = 0
       let deductions = 0
@@ -500,14 +651,17 @@ export function buildStaffRouter() {
       }
 
       let leaveBalance = 0
-      if (leaveTypeRow?.Code === '0001') {
-        leaveBalance = additions - deductions
+      if (isAnnual) {
+        leaveBalance = metrics.leaveBalance ?? metrics.earnedLeaveDays ?? additions - deductions
       } else {
         leaveBalance = leaveTypeDays - (deductions - additions)
       }
-      const balance = leaveBalance >= 0 ? Math.trunc(leaveBalance) : 0
+      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
+      const entitlement = isAnnual
+        ? roundLeaveValue(metrics.earnedLeaveDays ?? metrics.leaveBalance ?? leaveTypeDays)
+        : roundLeaveValue(leaveTypeDays)
 
-      res.json({ balance, pendingCount, isHourly })
+      res.json({ balance, pendingCount, isHourly, entitlement })
     }),
   )
 
@@ -586,17 +740,7 @@ export function buildStaffRouter() {
     '/leave',
     safe(async (req, res) => {
       const user = authUser(req)
-      const body = z
-        .object({
-          leaveType: z.string().min(1),
-          appliedDays: z.coerce.number(),
-          startDate: z.string().min(1),
-          isHalfDayLeave: z.union([z.literal('0'), z.literal('1'), z.literal('2')]).default('0'),
-          reliever: z.string().optional().default(''),
-          reason: z.string().min(1),
-          requisitionNo: z.string().optional().default(''),
-        })
-        .parse(req.body)
+      const body = leaveRequestSchema.parse(req.body)
 
       const action = body.requisitionNo ? 'edit' : 'create'
 
@@ -650,7 +794,8 @@ export function buildStaffRouter() {
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
       })
 
-      const ok = Boolean(result.returnValue)
+      const ok = soapTruthy(result.returnValue)
+      const documentNo = ok ? await resolveSubmittedLeaveNo(user, body, endDate, result.returnValue) : ''
       res.json({
         ok,
         message: ok
@@ -659,6 +804,15 @@ export function buildStaffRouter() {
             : 'Leave application created successfully'
           : 'Leave application failed. Please try again.',
         returnValue: result.returnValue,
+        documentNo,
+        request: documentNo
+          ? {
+              id: `leave-${documentNo}`,
+              requestNo: documentNo,
+              requestType: 'leave',
+              status: 'Open',
+            }
+          : undefined,
       })
     }),
   )

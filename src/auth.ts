@@ -299,15 +299,27 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
-  const department = String(firstEmployeeField(employee, [
-    'GlobalDimension1Code',
-    'DepartmentCode',
-    'Department_Code',
-    'DistrictDepartmentCode',
-    'District_Department_Code',
-    'ShortcutDimension2Code',
-    'Shortcut_Dimension_2_Code',
-  ])).trim()
+  const department = (() => {
+    const shortCodeCandidates = [
+      firstEmployeeField(employee, ['GlobalDimension1Code', 'Global_Dimension_1_Code']),
+      firstEmployeeField(employee, ['DepartmentCode', 'Department_Code']),
+      firstEmployeeField(employee, ['ShortcutDimension2Code', 'Shortcut_Dimension_2_Code']),
+      firstEmployeeField(employee, ['DistrictDepartmentCode', 'District_Department_Code']),
+    ]
+    for (const value of shortCodeCandidates) {
+      const code = String(value ?? '').trim()
+      if (code && code.length <= 20) return code
+    }
+    return String(firstEmployeeField(employee, [
+      'GlobalDimension1Code',
+      'DepartmentCode',
+      'Department_Code',
+      'DistrictDepartmentCode',
+      'District_Department_Code',
+      'ShortcutDimension2Code',
+      'Shortcut_Dimension_2_Code',
+    ])).trim()
+  })()
   const departmentName = String(firstEmployeeField(employee, [
     'DepartmentName',
     'Department_Name',

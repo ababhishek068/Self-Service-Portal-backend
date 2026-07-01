@@ -7,7 +7,8 @@ interface RequestProgressProps {
 }
 
 export function RequestProgress({ status, hasLines = false, requiresLines = false }: RequestProgressProps) {
-  const approvalStarted = status !== 'Draft'
+  // BC keeps header Status as Open after submit; only move step 3 once approval is in flight.
+  const approvalStarted = status !== 'Draft' && status !== 'Open'
   const detailReady = !requiresLines || hasLines
   const steps = [
     { label: 'Draft created', note: 'Header saved in Business Central', done: true, active: false, icon: FileCheck2 },

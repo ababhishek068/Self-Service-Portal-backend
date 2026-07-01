@@ -507,7 +507,8 @@ export function RequestFormPage({
                       Edit
                     </Button>
                   ) : null}
-                  {canRequestApproval(moduleConfig?.module, selected.payload) ? (
+                  {isEditableRequestStatus(selected.status) &&
+                  canRequestApproval(moduleConfig?.module, selected.payload) ? (
                     <Button
                       type="button"
                       disabled={actionId === selected.id}
@@ -605,8 +606,7 @@ export function RequestFormPage({
                     attachments={selected.attachments}
                     canUpload={canUploadRequestAttachments(selected.status)}
                     canDelete={canDeleteRequestItems(selected.status)}
-                    onUpdated={(request) => {
-                      queryClient.setQueryData([...queryKey, 'detail', selected.id], request)
+                    onUpdated={() => {
                       void refreshLists()
                       void detailQuery.refetch()
                     }}

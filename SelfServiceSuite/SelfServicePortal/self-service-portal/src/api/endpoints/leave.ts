@@ -13,6 +13,7 @@ export interface LeaveBalance {
   balance: number
   pendingCount: number
   isHourly: boolean
+  entitlement?: number
 }
 
 export async function getLeaveBalance(typeCode: string): Promise<LeaveBalance> {
@@ -96,6 +97,7 @@ export interface SubmitLeaveResult {
   ok: boolean
   message: string
   returnValue?: string
+  documentNo?: string
   request?: PortalRequest
 }
 

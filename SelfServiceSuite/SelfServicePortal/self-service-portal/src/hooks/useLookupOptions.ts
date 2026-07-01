@@ -5,7 +5,6 @@ export function useLookupOptions(catalog: string, fallback: LookupOption[] = [])
   const query = useQuery({
     queryKey: ['lookups', catalog],
     queryFn: () => listLookupOptions(catalog),
-    staleTime: 5 * 60 * 1000,
   })
 
   return {

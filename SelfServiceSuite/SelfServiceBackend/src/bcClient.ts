@@ -437,6 +437,8 @@ export function friendlySoapFaultMessage(fault: string) {
 
   return /not supported by related approval workflow/i.test(fault)
     ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting approval.'
+    : /Requesting Department must have a value/i.test(fault)
+      ? 'Requesting Department is missing on this purchase requisition. Ask HR to set a short department code (20 characters or less, for example HC) on the employee card, then save the requisition header again before adding lines.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
     : /can't be evaluated into type Boolean/i.test(fault)

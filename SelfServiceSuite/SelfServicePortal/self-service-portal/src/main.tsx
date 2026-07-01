@@ -11,7 +11,10 @@ import './index.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      // Always read Business Central data from the API; do not retain BC payloads in cache.
+      staleTime: 0,
+      gcTime: 0,
+      refetchOnMount: 'always',
       refetchOnWindowFocus: false,
     },
   },

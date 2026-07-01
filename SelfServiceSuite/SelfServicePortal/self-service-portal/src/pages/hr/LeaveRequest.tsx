@@ -150,6 +150,7 @@ export function LeaveRequest() {
     setBalanceLoading(true)
     getLeaveBalance(leaveType)
       .then((res) => {
+        setEntitlement(res.entitlement ?? type?.days ?? null)
         setBalance(res.balance)
         setIsHourly(res.isHourly)
         setPendingDuplicate(res.pendingCount > 0)
@@ -263,9 +264,14 @@ export function LeaveRequest() {
         reason,
       })
       if (result.ok) {
+        const returnValue = String(result.returnValue ?? '').trim()
+        const returnDocumentNo =
+          returnValue && !['true', 'false', '1', '0', 'yes', 'no', 'ok'].includes(returnValue.toLowerCase())
+            ? returnValue
+            : ''
         const createdRequestId =
           result.request?.id ??
-          (result.returnValue ? `leave-${result.returnValue}` : '')
+          (result.documentNo ? `leave-${result.documentNo}` : returnDocumentNo ? `leave-${returnDocumentNo}` : '')
         let attachmentError = ''
         if (creationAttachments.length > 0) {
           try {
@@ -651,8 +657,7 @@ export function LeaveRequest() {
                   attachments={selected.attachments}
                   canUpload={canUploadRequestAttachments(selected.status)}
                   canDelete={canDeleteRequestItems(selected.status)}
-                  onUpdated={(request) => {
-                    queryClient.setQueryData(['hr', 'leave-list', 'detail', selected.id], request)
+                  onUpdated={() => {
                     void refreshLeave()
                   }}
                 />

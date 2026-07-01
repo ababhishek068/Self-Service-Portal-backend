@@ -690,12 +690,53 @@ function buildLeaveRequestDetail(
   entry?: ODataRecord,
 ) {
   const mapped = mapRequest(row, 'leave')
+  const steps = mapApprovalSteps(approvalSteps)
+  const resolvedStatus = resolveRequestStatusFromApprovalSteps(mapped.status, steps)
   return {
     ...mapped,
+    status: resolvedStatus,
     payload: leavePayloadFromRow(row, no, entry),
-    approvalSteps: mapApprovalSteps(approvalSteps),
+    approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
+}
+
+export function resolveRequestStatusFromApprovalSteps(
+  mappedStatus: string,
+  approvalSteps: unknown,
+) {
+  const status = mappedStatus || 'Open'
+  if (status !== 'Open' && status !== 'Draft') return status
+  const steps = Array.isArray(approvalSteps)
+    ? (approvalSteps as Array<{ status?: unknown }>)
+    : mapApprovalSteps(approvalSteps)
+  const hasSubmittedApprovalEntry = steps.some((step) =>
+    ['Pending Approval', 'Submitted'].includes(String(step.status ?? '')),
+  )
+  return hasSubmittedApprovalEntry ? 'Pending Approval' : status
+}
+
+function forceSubmittedRequestDetail<T extends Record<string, unknown>>(detail: T): T {
+  const status = String(detail.status ?? '')
+  if (status !== 'Open' && status !== 'Draft') return detail
+  const existingSteps = Array.isArray(detail.approvalSteps)
+    ? detail.approvalSteps
+    : []
+  const approvalSteps = existingSteps.length
+    ? existingSteps
+    : mapApprovalSteps([
+        {
+          Status: 'Pending Approval',
+          SequenceNo: 1,
+          ApproverName: 'Awaiting approver assignment',
+          Comment: 'Submitted for approval in Business Central',
+        },
+      ])
+  return {
+    ...detail,
+    status: 'Pending Approval',
+    approvalSteps,
+  } as T
 }
 
 function buildLeaveApprovalFallback(
@@ -814,8 +855,14 @@ async function requestDetail(
       : Promise.resolve([] as ODataRecord[]),
   ])
   const mapped = mapRequest(row, module as PortalModuleKey)
+  const mappedApprovalSteps = mapApprovalSteps(approvers)
+  const resolvedStatus = resolveRequestStatusFromApprovalSteps(
+    mapped.status,
+    mappedApprovalSteps,
+  )
   return {
     ...mapped,
+    status: resolvedStatus,
     payload: {
       ...row,
       ...(module === 'gatePass' && gatePassBinding
@@ -827,7 +874,7 @@ async function requestDetail(
         : {}),
       lines: mapModuleLines(module, row, Array.isArray(lines) ? lines : []),
     },
-    approvalSteps: resolveRequestApprovalSteps(approvers, row, mapped.status),
+    approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
     attachments: mapAttachments(attachments),
   }
 }
@@ -1316,12 +1363,11 @@ export function buildPortalApiRouter() {
       const spec = findFrontendModuleSpec(module)
       if (!spec) throw portalError(`${module} is not supported`, 501)
       await submitPortalModuleRequest(spec, user(req), no)
-      res.json(
-        await requestDetail(requestId, user(req)).catch(() => ({
+      const detail = await requestDetail(requestId, user(req)).catch(() => ({
           id: requestId,
           status: 'Pending Approval',
-        })),
-      )
+        }))
+      res.json(forceSubmittedRequestDetail(detail))
     }),
   )
 

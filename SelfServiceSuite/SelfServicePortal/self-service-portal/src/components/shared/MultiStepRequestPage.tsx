@@ -514,7 +514,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const selected = detailQuery.data
   const editable = selected ? isEditableRequestStatus(selected.status) : false
   const submittable = selected
-    ? canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
+    ? editable && canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
     : false
   const cancelStatuses = config.cancelStatuses ?? ['Pending Approval']
   const supportsAttachments =
@@ -733,8 +733,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     attachments={selected.attachments}
                     canUpload={canUploadRequestAttachments(selected.status)}
                     canDelete={canDeleteRequestItems(selected.status)}
-                    onUpdated={(request) => {
-                      queryClient.setQueryData([...config.queryKey, 'detail', selected.id], request)
+                    onUpdated={() => {
                       void refresh()
                     }}
                   />

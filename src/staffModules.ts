@@ -5,6 +5,7 @@ import {
   createSoapPageRecord,
   fetchOData,
   odataString,
+  patchOData,
   postOData,
   type ODataRecord,
 } from './bcClient.js'
@@ -980,11 +981,124 @@ function firstBcCodeValue(...values: unknown[]) {
 function userDepartmentCode(user: AuthUser, body: Record<string, unknown>) {
   return firstBcCodeValue(
     body.departmentCode,
+    body.DepartmentCode,
+    body.Department_Code,
     body.requestingDepartmentCode,
+    body.RequestingDepartmentCode,
+    body.Requesting_Department_Code,
+    body.requesting_Department_Code,
     body.shortcutDimension2Code,
+    body.ShortcutDimension2Code,
+    body.Shortcut_Dimension_2_Code,
+    body.shortcut_Dimension_2_Code,
+    body.globalDimension2Code,
+    body.GlobalDimension2Code,
+    body.Global_Dimension_2_Code,
+    body.global_Dimension_2_Code,
     body.requestingDepartment,
+    body.RequestingDepartment,
+    body.Requesting_Department,
+    body.requesting_Department,
     body.department,
+    body.Department,
     user.department,
+    ...(user.permissionDepartments ?? []),
+  )
+}
+
+export function resolvePurchaseRequestingDepartment(
+  user: AuthUser,
+  header: ODataRecord | null | undefined,
+  body: Record<string, unknown> = {},
+) {
+  return firstBcCodeValue(
+    userDepartmentCode(user, body),
+    purchaseHeaderDepartmentCode(header),
+    user.department,
+    user.departmentName,
+    ...(user.permissionDepartments ?? []),
+  )
+}
+
+async function loadUserDepartmentCodeFromBc(user: AuthUser) {
+  if (!user.employeeNo) return ''
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `No eq '${odataString(user.employeeNo)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  if (!employee) return ''
+  return firstBcCodeValue(
+    employee.GlobalDimension1Code,
+    employee.Global_Dimension_1_Code,
+    employee.DepartmentCode,
+    employee.Department_Code,
+    employee.ShortcutDimension2Code,
+    employee.Shortcut_Dimension_2_Code,
+    employee.DistrictDepartmentCode,
+    employee.District_Department_Code,
+    employee.DepartmentName,
+    employee.Department_Name,
+    employee.DistrictDepartmentName,
+    employee.District_Department_Name,
+    user.department,
+    user.departmentName,
+    ...(user.permissionDepartments ?? []),
+  )
+}
+
+export async function resolvePurchaseRequestingDepartmentForSave(
+  user: AuthUser,
+  header: ODataRecord | null | undefined,
+  body: Record<string, unknown> = {},
+) {
+  const resolved = resolvePurchaseRequestingDepartment(user, header, body)
+  if (resolved) return resolved
+  return loadUserDepartmentCodeFromBc(user)
+}
+
+function purchaseHeaderODataEntity(header: ODataRecord, no: string) {
+  const documentType = fieldText(header, ['Document_Type', 'DocumentType'], 'Quote')
+  const documentNo = fieldText(header, ['No', 'Document_No'], no)
+  if (documentType && documentNo) {
+    return `QyPurchaseHeader(Document_Type='${odataString(documentType)}',No='${odataString(documentNo)}')`
+  }
+  return `QyPurchaseHeader('${odataString(documentNo || no)}')`
+}
+
+function purchaseHeaderDepartmentPatchBody(department: string) {
+  return {
+    Requesting_Department: department,
+    Requesting_Department_Code: department,
+    RequestingDepartment: department,
+    RequestingDepartmentCode: department,
+    Shortcut_Dimension_2_Code: department,
+    ShortcutDimension2Code: department,
+    Global_Dimension_1_Code: department,
+    GlobalDimension1Code: department,
+    Department_Code: department,
+    DepartmentCode: department,
+  }
+}
+
+async function patchPurchaseHeaderDepartment(
+  header: ODataRecord,
+  no: string,
+  department: string,
+) {
+  try {
+    await patchOData(purchaseHeaderODataEntity(header, no), purchaseHeaderDepartmentPatchBody(department))
+  } catch {
+    // Some tenants block OData PATCH on QyPurchaseHeader; SOAP header edit remains the primary path.
+  }
+}
+
+function purchaseDepartmentMissingError() {
+  return Object.assign(
+    new Error(
+      'Requesting Department is missing on this purchase requisition. The portal could not find a short department code (20 characters or less) on the employee card or purchase header. Ask HR to set it in Business Central, log out and back in, then create a new requisition.',
+    ),
+    { status: 422, code: 'BC_PURCHASE_DEPARTMENT_REQUIRED' },
   )
 }
 
@@ -994,6 +1108,101 @@ function userResponsibilityCenter(user: AuthUser, body: Record<string, unknown>)
     body.responsibleCenter,
     user.responsibleCenter,
   )
+}
+
+function purchaseDepartmentAliases(department: string) {
+  if (!department) return {}
+  return {
+    department,
+    departmentCode: department,
+    DepartmentCode: department,
+    Department_Code: department,
+    requestingDepartment: department,
+    RequestingDepartment: department,
+    requesting_Department: department,
+    Requesting_Department: department,
+    requestingDepartmentCode: department,
+    RequestingDepartmentCode: department,
+    requesting_Department_Code: department,
+    Requesting_Department_Code: department,
+    shortcutDimension2Code: department,
+    ShortcutDimension2Code: department,
+    shortcut_Dimension_2_Code: department,
+    Shortcut_Dimension_2_Code: department,
+    globalDimension1Code: department,
+    GlobalDimension1Code: department,
+    global_Dimension_1_Code: department,
+    Global_Dimension_1_Code: department,
+    globalDimension2Code: department,
+    GlobalDimension2Code: department,
+    global_Dimension_2_Code: department,
+    Global_Dimension_2_Code: department,
+  }
+}
+
+function purchaseHeaderDepartmentCode(header: ODataRecord | null | undefined) {
+  if (!header) return ''
+  return firstBcCodeValue(
+    fieldText(header, [
+      'Requesting_Department_Code',
+      'RequestingDepartmentCode',
+      'Requesting_Department',
+      'RequestingDepartment',
+    ]),
+    fieldText(header, [
+      'Shortcut_Dimension_2_Code',
+      'ShortcutDimension2Code',
+      'Global_Dimension_1_Code',
+      'GlobalDimension1Code',
+      'Department_Code',
+      'DepartmentCode',
+      'Department',
+      'District_Department_Code',
+      'DistrictDepartmentCode',
+    ]),
+    fieldText(header, [
+      'Department_Name',
+      'DepartmentName',
+      'District_Department_Name',
+      'DistrictDepartmentName',
+    ]),
+  )
+}
+
+function purchaseHeaderDescription(header: ODataRecord | null | undefined, body: Record<string, unknown>) {
+  return fieldText(
+    header ?? {},
+    ['Posting_Description', 'PostingDescription', 'Description', 'Reason'],
+    String(body.description ?? body.postingDescription ?? body.reason ?? ''),
+  )
+}
+
+function purchaseHeaderOrderDate(header: ODataRecord | null | undefined, body: Record<string, unknown>) {
+  return fieldText(
+    header ?? {},
+    ['Needed_By_Date', 'OrderDate', 'Order_Date', 'DocumentDate', 'Document_Date'],
+    String(body.dateNeeded ?? body.orderDate ?? body.requestDate ?? ''),
+  )
+}
+
+function purchaseHeaderResponsibilityCenter(
+  header: ODataRecord | null | undefined,
+  body: Record<string, unknown>,
+  user: AuthUser,
+) {
+  return firstBcCodeValue(
+    fieldText(header ?? {}, ['ResponsibilityCenter', 'Responsibility_Center']),
+    userResponsibilityCenter(user, body),
+  )
+}
+
+function purchaseBodyWithDepartment(
+  user: AuthUser,
+  body: Record<string, unknown>,
+  header?: ODataRecord | null,
+) {
+  const department = resolvePurchaseRequestingDepartment(user, header, body)
+  return department ? { ...body, ...purchaseDepartmentAliases(department) } : body
 }
 
 function transportRequestTypeCode(value: unknown) {
@@ -1400,24 +1609,24 @@ const purchaseRequisition: ModuleSpec = {
     cancel: 'CancelPurchaseRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      reqNo: no,
-      postingDescription:
-        req.body?.description ??
-        req.body?.postingDescription ??
-        req.body?.reason ??
-        '',
-      pricesIncludingVAT: false,
-      myUserId: user.userID,
-      department: userDepartmentCode(user, req.body),
-      requestingDepartment: userDepartmentCode(user, req.body),
-      requestingDepartmentCode: userDepartmentCode(user, req.body),
-      shortcutDimension2Code: userDepartmentCode(user, req.body),
-      responsibilityCenter: userResponsibilityCenter(user, req.body),
-      orderDate:
-        req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
-    }),
+    saveHeader: ({ req, user, no }) => {
+      const department = userDepartmentCode(user, req.body)
+      return {
+        action: no ? 'edit' : 'create',
+        reqNo: no,
+        postingDescription:
+          req.body?.description ??
+          req.body?.postingDescription ??
+          req.body?.reason ??
+          '',
+        pricesIncludingVAT: false,
+        myUserId: user.userID,
+        ...purchaseDepartmentAliases(department),
+        responsibilityCenter: userResponsibilityCenter(user, req.body),
+        orderDate:
+          req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
+      }
+    },
     saveLine: ({ req, no }) => ({
       action: req.body?.action ?? 'create',
       reqNo: no,
@@ -2525,12 +2734,19 @@ export async function createPortalModuleRequest(
     })
   }
 
-  const headerBody =
+  let headerBody =
     spec.module === 'fuel'
       ? { ...body, requestType: fuelTypeCode(body.requestType ?? 'Vehicle fuel') }
       : spec.module === 'maintenance'
         ? { ...body, requestType: maintenanceTypeCode(body.requestType) }
-        : body
+        : spec.module === 'purchase-requisition'
+          ? purchaseBodyWithDepartment(user, body, null)
+          : body
+  if (spec.module === 'purchase-requisition') {
+    const department = await resolvePurchaseRequestingDepartmentForSave(user, null, headerBody)
+    if (!department) throw purchaseDepartmentMissingError()
+    headerBody = { ...headerBody, ...purchaseDepartmentAliases(department) }
+  }
   const headerRequest = requestWithBody(headerBody)
   const headerKey = spec.headerKey ?? 'No'
   const existingNumbers = spec.headerReturnsBoolean
@@ -2582,8 +2798,9 @@ export async function createPortalModuleRequest(
         action: 'create',
         lineNo: Number(lines[index]?.lineNo ?? (index + 1) * 10000),
       }
+      const lineBody = await ensurePurchaseRequisitionDepartmentBeforeLine(spec, user, no, line)
       const lineParams = await spec.params.saveLine({
-        req: requestWithBody(line),
+        req: requestWithBody(lineBody),
         user,
         no,
       })
@@ -2806,6 +3023,49 @@ export async function updatePortalModuleHeader(
   }
 }
 
+async function ensurePurchaseRequisitionDepartmentBeforeLine(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  body: Record<string, unknown>,
+) {
+  if (spec.module !== 'purchase-requisition' || !spec.soap.saveHeader || !spec.params?.saveHeader) {
+    return body
+  }
+
+  const header = await getPortalModuleDocument(spec, user, no, false)
+  let department = resolvePurchaseRequestingDepartment(user, header, body)
+  if (!department) department = await loadUserDepartmentCodeFromBc(user)
+  if (!department) throw purchaseDepartmentMissingError()
+
+  const lineBody = { ...body, ...purchaseDepartmentAliases(department) }
+  const headerBody = purchaseBodyWithDepartment(
+    user,
+    {
+      description: purchaseHeaderDescription(header, body),
+      postingDescription: purchaseHeaderDescription(header, body),
+      orderDate: purchaseHeaderOrderDate(header, body),
+      requestDate: purchaseHeaderOrderDate(header, body),
+      responsibilityCenter: purchaseHeaderResponsibilityCenter(header, body, user),
+    },
+    header,
+  )
+  const headerParams = await spec.params.saveHeader({
+    req: requestWithBody(headerBody),
+    user,
+    no,
+  })
+  const headerResult = await callSoapMethod(spec.soap.saveHeader, headerParams)
+  if (!ok(headerResult)) {
+    throw Object.assign(new Error(`Business Central did not update ${no}`), { status: 502 })
+  }
+  if (header) {
+    await patchPurchaseHeaderDepartment(header, no, department)
+  }
+
+  return lineBody
+}
+
 /**
  * Create or edit a single line on an existing document. `body.action`
  * (`create`/`edit`) drives the BC behaviour; defaults to create.
@@ -2821,7 +3081,8 @@ export async function savePortalModuleLine(
       status: 501,
     })
   }
-  const params = await spec.params.saveLine({ req: requestWithBody(body), user, no })
+  const lineBody = await ensurePurchaseRequisitionDepartmentBeforeLine(spec, user, no, body)
+  const params = await spec.params.saveLine({ req: requestWithBody(lineBody), user, no })
   const result = await callSoapMethod(spec.soap.saveLine, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not save the ${spec.module} line`), {

@@ -25,10 +25,16 @@ import {
   approvalDocumentNoCandidates,
   resolveGatePassTransferNo,
   portalApprovalEntryFilter,
+  resolvePurchaseRequestingDepartment,
 } from './staffModules.js'
 import { friendlySoapFaultMessage, soapFaultMessage } from './bcClient.js'
 import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
-import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
+import {
+  approvalModule,
+  mapApprovalSteps,
+  mapModuleLines,
+  resolveRequestStatusFromApprovalSteps,
+} from './portalApi.js'
 import {
   employeeResetToken,
   employeeResetTokenIsExpired,
@@ -446,6 +452,14 @@ describe('mapApprovalSteps', () => {
     assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
+
+  it('treats open request headers with approval entries as pending approval', () => {
+    const steps = mapApprovalSteps([{ EntryNo: 1, ApproverID: 'HOD', Status: 'Open' }])
+    assert.equal(resolveRequestStatusFromApprovalSteps('Open', steps), 'Pending Approval')
+    assert.equal(resolveRequestStatusFromApprovalSteps('Draft', steps), 'Pending Approval')
+    assert.equal(resolveRequestStatusFromApprovalSteps('Open', []), 'Open')
+    assert.equal(resolveRequestStatusFromApprovalSteps('Approved', steps), 'Approved')
+  })
 })
 
 describe('approvalModule', () => {
@@ -492,6 +506,31 @@ describe('salaryAdvance saveHeader params', () => {
 })
 
 describe('purchaseRequisition saveHeader params', () => {
+  it('resolves requesting department from header department name', () => {
+    assert.equal(
+      resolvePurchaseRequestingDepartment(
+        { employeeNo: 'E001', userID: 'USER1', department: '', departmentName: '' } as AuthUser,
+        { DepartmentName: 'HC' },
+        {},
+      ),
+      'HC',
+    )
+  })
+
+  it('resolves requesting department from header shortcut dimension', () => {
+    assert.equal(
+      resolvePurchaseRequestingDepartment(
+        { employeeNo: 'E001', userID: 'USER1', department: '' } as AuthUser,
+        {
+          Shortcut_Dimension_2_Code: 'HC',
+          Global_Dimension_1_Code: 'Human Resources and Rewards',
+        },
+        {},
+      ),
+      'HC',
+    )
+  })
+
   it('uses short BC code values instead of long department display names', async () => {
     const spec = findModuleSpec('purchase-requisition')
     assert.ok(spec?.params?.saveHeader)
@@ -514,10 +553,43 @@ describe('purchaseRequisition saveHeader params', () => {
     })
 
     assert.equal(params.department, 'TRR')
+    assert.equal(params.departmentCode, 'TRR')
+    assert.equal(params.DepartmentCode, 'TRR')
     assert.equal(params.requestingDepartment, 'TRR')
+    assert.equal(params.RequestingDepartment, 'TRR')
+    assert.equal(params.Requesting_Department, 'TRR')
     assert.equal(params.requestingDepartmentCode, 'TRR')
+    assert.equal(params.RequestingDepartmentCode, 'TRR')
+    assert.equal(params.Requesting_Department_Code, 'TRR')
     assert.equal(params.shortcutDimension2Code, 'TRR')
+    assert.equal(params.ShortcutDimension2Code, 'TRR')
+    assert.equal(params.Shortcut_Dimension_2_Code, 'TRR')
     assert.equal(params.responsibilityCenter, 'RC-001')
+  })
+
+  it('accepts BC-style department aliases from the request body', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    const params = await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          description: 'Office supplies',
+          DepartmentCode: 'Total Reward and Recognition',
+          Requesting_Department_Code: 'HC',
+        },
+      } as Request,
+      user: {
+        employeeNo: 'E001',
+        userID: 'USER1',
+        department: '',
+      } as AuthUser,
+      no: '',
+    })
+
+    assert.equal(params.department, 'HC')
+    assert.equal(params.requestingDepartment, 'HC')
+    assert.equal(params.Requesting_Department, 'HC')
+    assert.equal(params.Requesting_Department_Code, 'HC')
   })
 })
 
