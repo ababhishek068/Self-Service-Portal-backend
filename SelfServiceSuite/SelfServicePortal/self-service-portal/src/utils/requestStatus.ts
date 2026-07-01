@@ -69,6 +69,25 @@ const OPEN_BC_STATUS_MODULES = new Set([
   'leave',
 ])
 
+function hasGatePassSourceNumber(payload: Record<string, unknown> | undefined) {
+  if (!payload) return false
+  return [
+    'sourceDocumentNo',
+    'SourceDocumentNo',
+    'Source_Document_No',
+    'TransferNo',
+    'Transfer_No',
+    'Transfer_No_',
+    'AssetTransferNo',
+    'Asset_Transfer_No',
+    'StoreIssueNo',
+    'Store_Issue_No',
+    'RequisitionNo',
+    'RequistionNo',
+    'DocumentNo',
+  ].some((key) => String(payload[key] ?? '').trim() !== '')
+}
+
 /** Matches ESS action-header blades: Request Approval only in the BC pre-submission status. */
 export function canRequestApproval(
   module: string | undefined,
@@ -76,6 +95,7 @@ export function canRequestApproval(
 ) {
   const status = bcDocumentStatus(payload, module)
   if (!status || !module) return false
+  if (module === 'gatePass' && !hasGatePassSourceNumber(payload)) return false
   if (module === 'transferOrder') return status === 'Open'
   if (PENDING_BC_STATUS_MODULES.has(module)) return status === 'Pending'
   if (OPEN_BC_STATUS_MODULES.has(module)) return status === 'Open'

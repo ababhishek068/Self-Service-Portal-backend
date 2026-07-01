@@ -10,6 +10,7 @@ import {
 import {
   findFrontendModuleSpec,
   findModuleSpec,
+  gatePassApprovalSetupMessage,
   gatePassDocumentNo,
   gatePassLineBinding,
   gatePassListFilterParts,
@@ -22,6 +23,7 @@ import {
   isMedicalClaimType,
   passengerTypeCode,
   approvalDocumentNoCandidates,
+  resolveGatePassTransferNo,
   portalApprovalEntryFilter,
 } from './staffModules.js'
 import { friendlySoapFaultMessage, soapFaultMessage } from './bcClient.js'
@@ -145,7 +147,7 @@ describe('gatePassFilters', () => {
     assert.equal(variants.some((payload) => 'Asset_Transfer_No' in payload), false)
   })
 
-  it('does not send Store Issue numbers as Asset Transfer numbers in OData page create', () => {
+  it('does not create Store Issue gate passes through OData page without a source field', () => {
     const variants = gatePassODataPagePayloadVariants(
       'storeIssue',
       { label: 'Gate Pass Store Requisitions', linkTo: 'Store Issue', lineService: 'QyStoreRequisitionLines', lineHeaderField: 'RequistionNo', scopeToEmployee: true },
@@ -160,15 +162,7 @@ describe('gatePassFilters', () => {
       },
       '1175',
     )
-    assert.ok(variants.some((payload) =>
-      payload.Link_to === 'Store Issue' &&
-      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
-      payload.EmployeeNo === 'E0010' &&
-      payload.TimeOut === '12:00:00',
-    ))
-    assert.equal(variants.some((payload) => 'AssetTransferNo' in payload), false)
-    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
-    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
+    assert.deepEqual(variants, [])
     assert.deepEqual(
       gatePassODataPageSourcePatchPayloadVariants(
         'storeIssue',
@@ -181,7 +175,7 @@ describe('gatePassFilters', () => {
     )
   })
 
-  it('does not send Transfer Order numbers as Asset Transfer numbers in OData page create', () => {
+  it('does not create Transfer Order gate passes through OData page without a source field', () => {
     const variants = gatePassODataPagePayloadVariants(
       'transferOrder',
       { label: 'Gate Pass Transfer Orders', linkTo: 'Transfer Order', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
@@ -196,15 +190,7 @@ describe('gatePassFilters', () => {
       },
       '108008',
     )
-    assert.ok(variants.some((payload) =>
-      payload.Link_to === 'Transfer Order' &&
-      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
-      payload.EmployeeNo === 'E0010' &&
-      payload.TimeOut === '12:00:00',
-    ))
-    assert.equal(variants.some((payload) => 'AssetTransferNo' in payload), false)
-    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
-    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
+    assert.deepEqual(variants, [])
     assert.deepEqual(
       gatePassODataPageSourcePatchPayloadVariants(
         'transferOrder',
@@ -286,8 +272,33 @@ describe('soapFaultMessage', () => {
     const fault = 'The length of the string is 28, but it must be less than or equal to 20 characters. Value: Total Reward and Recognition'
     assert.equal(
       friendlySoapFaultMessage(fault),
-      '"Total Reward and Recognition" is 28 characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center setup code, not the form text. Shorten that setup code in Business Central, then retry.',
+      'Manual Business Central setup is required: "Total Reward and Recognition" is 28 characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center code, not the form text. Change that BC code to 20 characters or less, for example "TRR", and keep the long text only as the description/name. Then retry.',
     )
+  })
+
+  it('maps missing source requisition faults to actionable guidance', () => {
+    assert.match(
+      friendlySoapFaultMessage('Requisition is no longer editable or it does not exist'),
+      /missing, already posted, or closed/i,
+    )
+  })
+})
+
+describe('gatePassApprovalSetupMessage', () => {
+  it('explains the BC source-link setup needed for OData-created gate passes', () => {
+    const message = gatePassApprovalSetupMessage('GP260630135453604', '1175', 'Store Issue')
+    assert.match(message, /Manual Business Central setup is required/)
+    assert.match(message, /page 51244 "Gate Pass Card"/)
+    assert.match(message, /RequestGatePassApproval/)
+    assert.match(message, /Store Issue 1175/)
+  })
+})
+
+describe('resolveGatePassTransferNo', () => {
+  it('reads HIJRA transfer and store issue field variants', () => {
+    assert.equal(resolveGatePassTransferNo({ Transfer_No_: '108008' }), '108008')
+    assert.equal(resolveGatePassTransferNo({ Store_Issue_No: '1175' }), '1175')
+    assert.equal(resolveGatePassTransferNo({}, { sourceDocumentNo: '1175' }), '1175')
   })
 })
 

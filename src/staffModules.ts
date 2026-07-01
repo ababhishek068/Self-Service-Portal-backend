@@ -14,6 +14,7 @@ import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
 import { formatBcSoapDate } from './staff.js'
 import {
+  bcDocumentStatus,
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
@@ -127,6 +128,38 @@ function soapActionOk(spec: ModuleSpec, result: SoapResult) {
     return approvalOk(result)
   }
   return ok(result)
+}
+
+function isGatePassApprovalRecordFault(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    /Requisition is no longer editable or it does not exist/i.test(message) ||
+    /linked Business Central document is missing/i.test(message)
+  )
+}
+
+export function gatePassApprovalSetupMessage(no: string, transferNo: string, sourceLabel = '') {
+  const source = sourceLabel ? `${sourceLabel} ` : ''
+  const sourceText = transferNo ? `${source}${transferNo}` : 'the linked source document'
+  return `Business Central created Gate Pass ${no}, but RequestGatePassApproval could not find an editable native gate-pass requisition for ${sourceText}. Manual Business Central setup is required: page 51244 "Gate Pass Card" is currently writable through OData, but the Store Issue/Transfer Order source link used by the approval codeunit is not being persisted for these OData-created cards. Ask the BC developer to either expose and persist the source link field used by RequestGatePassApproval on page 51244 (for example TransferNo/Transfer_No/Store Issue No), or publish a codeunit action that creates the gate pass from the source document and then requests approval.`
+}
+
+function gatePassApprovalSetupError(no: string, transferNo: string, sourceLabel = '') {
+  return Object.assign(new Error(gatePassApprovalSetupMessage(no, transferNo, sourceLabel)), {
+    status: 422,
+    code: 'BC_GATE_PASS_APPROVAL_SETUP_REQUIRED',
+  })
+}
+
+function gatePassODataPageSourceUnsupportedMessage(sourceLabel: string) {
+  return `Manual Business Central setup is required: page 51244 "Gate Pass Card" is published as Gate_Pass_Card, but it does not expose a writable ${sourceLabel} source-number field through OData. The current published page supports AssetTransferNo only, so OData-created ${sourceLabel} gate passes cannot be linked to the source document or sent for approval. Ask the BC developer to expose and persist the ${sourceLabel} source-link field used by RequestGatePassApproval on page 51244, or publish a codeunit action that creates the gate pass from the source document and requests approval.`
+}
+
+function gatePassODataPageSourceUnsupportedError(sourceLabel: string) {
+  return Object.assign(new Error(gatePassODataPageSourceUnsupportedMessage(sourceLabel)), {
+    status: 502,
+    code: 'BC_GATE_PASS_SOURCE_FIELD_MISSING',
+  })
 }
 
 const REC_ID_HEADER_MODULES = new Set(['fuel', 'maintenance', 'salary-advance'])
@@ -389,11 +422,82 @@ function gatePassTransferNo(row: Record<string, unknown>, fallback = '') {
     'storeIssueNo',
     'StoreIssueNo',
     'Store_Issue_No',
+    'RequisitionNo',
+    'RequistionNo',
     'sourceDocumentNo',
     'SourceDocumentNo',
     'Source_Document_No',
     'DocumentNo',
   ], fallback)
+}
+
+/** Resolve the linked source document number ESS sends as `transferNo` on gate pass approval. */
+export function resolveGatePassTransferNo(
+  row: ODataRecord,
+  ...fallbacks: Array<Record<string, unknown>>
+) {
+  let transferNo = gatePassTransferNo(row)
+  for (const fallback of fallbacks) {
+    if (transferNo) break
+    transferNo = gatePassTransferNo(fallback)
+  }
+  return transferNo
+}
+
+async function fetchODataTop1(service: string, filter: string) {
+  const rows = (await fetchOData(service, { $filter: filter, $top: 1 }).catch(
+    () => null,
+  )) as ODataRecord[] | null
+  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+}
+
+/** Gate pass approval requires a real linked source document with lines in BC. */
+async function assertGatePassSourceReady(header: ODataRecord) {
+  const source = gatePassSourceFromRow(header)
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  const transferNo = resolveGatePassTransferNo(header)
+  if (!transferNo) {
+    throw Object.assign(
+      new Error(
+        'This gate pass has no linked Store Issue / Transfer / Asset Transfer number in Business Central. Create a new gate pass with a valid source document number.',
+      ),
+      { status: 422 },
+    )
+  }
+  if (source === 'assetTransfer') return transferNo
+
+  const lineRows = (await fetchOData(sourceSpec.lineService, {
+    $filter: `${sourceSpec.lineHeaderField} eq '${odataString(transferNo)}'`,
+    $top: 1,
+  }).catch(() => null)) as ODataRecord[] | null
+  if (Array.isArray(lineRows) && lineRows.length > 0) return transferNo
+
+  const headerServices =
+    source === 'transferOrder'
+      ? ['QyTransferOrderHeader']
+      : ['QyStoreRequisitionHeader']
+  for (const service of headerServices) {
+    const row = await fetchODataTop1(service, `No eq '${odataString(transferNo)}'`)
+    if (row) {
+      const status = bcDocumentStatus(
+        source === 'transferOrder' ? 'transfer-order' : 'store-requisition',
+        row,
+      )
+      throw Object.assign(
+        new Error(
+          `Linked ${sourceSpec.linkTo} ${transferNo} exists in Business Central (status: ${status || 'unknown'}) but has no lines available for gate pass approval. Use a posted store issue / released transfer with lines, then create a new gate pass.`,
+        ),
+        { status: 422 },
+      )
+    }
+  }
+
+  throw Object.assign(
+    new Error(
+      `${sourceSpec.linkTo} document ${transferNo} was not found in Business Central. Enter a valid source number from BC — not a placeholder test value.`,
+    ),
+    { status: 422 },
+  )
 }
 
 function gatePassODataInsertUnsupported(error: unknown) {
@@ -576,6 +680,9 @@ function gatePassPagePayloads(values: GatePassPageValues) {
 }
 
 function gatePassODataPagePayloads(source: GatePassSourceKey, values: GatePassPageValues) {
+  const sourceFields = gatePassPageSourceDocumentFieldNames(source)
+  if (sourceFields.length === 0) return [] as Record<string, unknown>[]
+
   const basePayloads = [
     {
       Gate_Pass_No: values.gatePassNo,
@@ -597,10 +704,6 @@ function gatePassODataPagePayloads(source: GatePassSourceKey, values: GatePassPa
       Comment: values.comment,
     },
   ]
-  const sourceFields = gatePassPageSourceDocumentFieldNames(source)
-  if (sourceFields.length === 0) {
-    return basePayloads.map(cleanODataPayload)
-  }
   const payloads: Record<string, unknown>[] = []
   for (const sourceField of sourceFields) {
     for (const payload of basePayloads) {
@@ -700,6 +803,9 @@ async function createGatePassViaODataPage(
   const serviceNames = gatePassODataPageServiceNames()
   const values = gatePassPageValues(sourceSpec, user, body, sourceDocumentNo)
   const variants = gatePassODataPagePayloadVariants(source, sourceSpec, user, body, sourceDocumentNo)
+  if (variants.length === 0) {
+    throw gatePassODataPageSourceUnsupportedError(sourceSpec.linkTo)
+  }
   let lastError: unknown
   for (const serviceName of serviceNames) {
     for (const payload of variants) {
@@ -772,6 +878,13 @@ async function createGatePassViaBusinessCentral(
       status: 422,
     })
   }
+  await assertGatePassSourceReady({
+    Link_to: sourceSpec.linkTo,
+    Linkto: sourceSpec.linkTo,
+    TransferNo: sourceDocumentNo,
+    Transfer_No: sourceDocumentNo,
+    SourceDocumentNo: sourceDocumentNo,
+  })
   const gatePassNo = fieldText(body, ['gatePassNo', 'gatePassNumber']) || generateGatePassNo()
   const createBody = { ...body, gatePassNo }
   const pageValues = gatePassPageValues(sourceSpec, user, createBody, sourceDocumentNo)
@@ -2378,12 +2491,24 @@ export async function createPortalModuleRequest(
   if (spec.module === 'gate-pass') {
     const no = await createGatePassViaBusinessCentral(spec, user, body)
     if (body.submit === true && spec.soap.submit && spec.params?.submit) {
+      const createdDoc = (await getPortalModuleDocument(spec, user, no, false)) ?? {}
+      const sourceLabel = GATE_PASS_SOURCE_SPECS[gatePassSourceFromRow(createdDoc)]?.linkTo ?? ''
+      const transferNo = await assertGatePassSourceReady({
+        ...createdDoc,
+        TransferNo: resolveGatePassTransferNo(createdDoc, body),
+        Transfer_No: resolveGatePassTransferNo(createdDoc, body),
+      })
       const submitParams = await spec.params.submit({
-        req: requestWithBody(body),
+        req: requestWithBody({ transferNo }),
         user,
         no,
       })
-      const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
+      const submitResult = await callSoapMethod(spec.soap.submit, submitParams).catch((error) => {
+        if (isGatePassApprovalRecordFault(error)) {
+          throw gatePassApprovalSetupError(no, transferNo, sourceLabel)
+        }
+        throw error
+      })
       if (!soapActionOk(spec, submitResult)) {
         throw Object.assign(
           new Error(`Business Central created ${no}, but approval submission failed`),
@@ -2531,12 +2656,21 @@ export async function cancelPortalModuleRequest(
       status: 501,
     })
   }
-  const document = spec.module === 'gate-pass'
-    ? await getPortalModuleDocument(spec, user, no, false)
-    : null
+  const document =
+    spec.module === 'gate-pass' ? await getPortalModuleDocument(spec, user, no, false) : null
+  const transferNo =
+    spec.module === 'gate-pass' && document
+      ? resolveGatePassTransferNo(document)
+      : ''
+  if (spec.module === 'gate-pass' && !transferNo) {
+    throw Object.assign(
+      new Error('This gate pass has no linked source document number in Business Central.'),
+      { status: 422 },
+    )
+  }
   const params = await spec.params.cancel({
     req: requestWithBody({
-      transferNo: gatePassTransferNo(document ?? {}),
+      transferNo,
     }),
     user,
     no,
@@ -2601,15 +2735,33 @@ export async function submitPortalModuleRequest(
       )
     }
   }
-  const document = spec.module === 'gate-pass' ? header : null
+  if (spec.module === 'claim') {
+    const lines = await listPortalModuleLines(spec, header, no)
+    if (!Array.isArray(lines) || lines.length === 0) {
+      throw Object.assign(new Error('Add at least one claim line before requesting approval.'), {
+        status: 422,
+      })
+    }
+  }
+  let gatePassTransfer = ''
+  let gatePassSourceLabel = ''
+  if (spec.module === 'gate-pass') {
+    gatePassSourceLabel = GATE_PASS_SOURCE_SPECS[gatePassSourceFromRow(header)]?.linkTo ?? ''
+    gatePassTransfer = await assertGatePassSourceReady(header)
+  }
   const params = await spec.params.submit({
     req: requestWithBody({
-      transferNo: gatePassTransferNo(document ?? {}),
+      transferNo: gatePassTransfer,
     }),
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.submit, params)
+  const result = await callSoapMethod(spec.soap.submit, params).catch((error) => {
+    if (spec.module === 'gate-pass' && isGatePassApprovalRecordFault(error)) {
+      throw gatePassApprovalSetupError(no, gatePassTransfer, gatePassSourceLabel)
+    }
+    throw error
+  })
   if (!soapActionOk(spec, result)) {
     if (spec.module === 'fuel' || spec.module === 'maintenance') {
       const docType = fieldText(header, ['DocumentType', 'Document_Type'])

@@ -432,7 +432,7 @@ export function friendlySoapFaultMessage(fault: string) {
   if (codeLengthMatch) {
     const length = codeLengthMatch[1]
     const value = codeLengthMatch[2]!.trim()
-    return `"${value}" is ${length} characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center setup code, not the form text. Shorten that setup code in Business Central, then retry.`
+    return `Manual Business Central setup is required: "${value}" is ${length} characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center code, not the form text. Change that BC code to 20 characters or less, for example "TRR", and keep the long text only as the description/name. Then retry.`
   }
 
   return /not supported by related approval workflow/i.test(fault)
@@ -449,6 +449,8 @@ export function friendlySoapFaultMessage(fault: string) {
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
+    : /no longer editable or it does not exist/i.test(fault)
+      ? 'The linked Business Central document is missing, already posted, or closed. For gate passes use a valid open/posted Store Issue, Transfer Order, or Asset Transfer number. For claims ensure the header is still Pending and has lines.'
       : fault
 }
 
