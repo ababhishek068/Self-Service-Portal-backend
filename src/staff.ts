@@ -44,6 +44,7 @@ function authUser(req: Request) {
 function soapTruthy(value: string | null | undefined) {
   if (!value) return false
   const normalized = String(value).trim().toLowerCase()
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized.length > 0
 }
 
@@ -72,6 +73,157 @@ export function leaveTypeIsAnnual(row: ODataRecord | null | undefined) {
 
 export function halfDayRequiresAnnualLeave(value: string) {
   return halfDayOptionValue(value) !== 0
+}
+
+function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback = '') {
+  if (!row) return fallback
+  for (const key of keys) {
+    const value = row[key]
+    if (value !== undefined && value !== null && String(value) !== '') return String(value)
+  }
+  return fallback
+}
+
+function fieldNumber(row: ODataRecord | null | undefined, keys: string[]) {
+  const value = fieldText(row, keys)
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function roundLeaveValue(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
+  return {
+    leaveBalance:
+      fieldNumber(row, ['LeaveBalance', 'Leave_Balance', 'AnnualLeaveBalance', 'Annual_Leave_Balance']) ??
+      (Number.isFinite(Number(user.leaveBalance)) ? Number(user.leaveBalance) : null),
+    earnedLeaveDays: fieldNumber(row, [
+      'EarnedLeaveDays',
+      'Earned_Leave_Days',
+      'EarnedLeave',
+      'Earned_Leave',
+    ]),
+  }
+}
+
+async function fetchCurrentEmployeeRow(employeeNo: string) {
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `No eq '${odataString(employeeNo)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+}
+
+function likelyActiveEmployee(row: ODataRecord) {
+  const status = fieldText(row, ['Status', 'EmploymentStatus', 'Employment_Status']).trim().toLowerCase()
+  if (!status) return true
+  return !['inactive', 'terminated', 'resigned', 'dismissed', 'blocked', 'suspended'].includes(status)
+}
+
+async function fetchRelieverRows(employeeNo: string) {
+  const filters = [
+    `No ne '${odataString(employeeNo)}' and Status eq 'Active'`,
+    `No ne '${odataString(employeeNo)}'`,
+  ]
+
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHREmployee', {
+      $filter: filter,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    const list = Array.isArray(rows) ? rows : []
+    const activeRows = list.filter(likelyActiveEmployee)
+    if (activeRows.length > 0) return activeRows
+    if (list.length > 0 && filter.includes('No ne')) return list
+  }
+
+  return []
+}
+
+function submittedLeaveNoFromReturn(value: unknown) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return ''
+  const lower = normalized.toLowerCase()
+  if (['true', 'false', '1', '0', 'yes', 'no'].includes(lower)) return ''
+  return normalized
+}
+
+function sameBcDate(left: unknown, right: string) {
+  const leftDate = formatBcSoapDate(String(left ?? ''))
+  const rightDate = formatBcSoapDate(right)
+  return Boolean(leftDate && rightDate && leftDate === rightDate)
+}
+
+function submittedLeaveScore(row: ODataRecord, body: {
+  leaveType: string
+  appliedDays: number
+  startDate: string
+  reason: string
+}, endDate: string) {
+  let score = 0
+  if (fieldText(row, ['LeaveType', 'Leave_Type']) === body.leaveType) score += 4
+  if (sameBcDate(fieldText(row, ['StartDate', 'Start_Date']), body.startDate)) score += 4
+  if (sameBcDate(fieldText(row, ['EndDate', 'End_Date']), endDate)) score += 2
+
+  const days = fieldNumber(row, ['DaysApplied', 'Days_Applied'])
+  if (days !== null && Math.abs(days - body.appliedDays) < 0.001) score += 3
+
+  const reason = fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason', 'Purpose', 'Description'])
+    .trim()
+    .toLowerCase()
+  if (reason && reason === body.reason.trim().toLowerCase()) score += 2
+
+  const status = fieldText(row, ['Status', 'DocumentStatus', 'ApprovalStatus']).trim().toLowerCase()
+  if (!status || status === 'open' || status === 'pending') score += 1
+
+  return score
+}
+
+async function resolveSubmittedLeaveNo(
+  user: ReturnType<typeof authUser>,
+  body: {
+    leaveType: string
+    appliedDays: number
+    startDate: string
+    reason: string
+    requisitionNo: string
+  },
+  endDate: string,
+  rawReturnValue: unknown,
+) {
+  if (body.requisitionNo) return body.requisitionNo
+
+  const fromReturn = submittedLeaveNoFromReturn(rawReturnValue)
+  if (fromReturn) return fromReturn
+
+  const baseFilter =
+    `EmployeeNo eq '${odataString(user.employeeNo)}'` +
+    ` and LeaveType eq '${odataString(body.leaveType)}'`
+  const queryOptions = [
+    { $filter: baseFilter, $orderby: 'ApplicationDate desc', $top: 20 },
+    { $filter: baseFilter, $top: 20 },
+  ]
+
+  for (const options of queryOptions) {
+    const rows = (await fetchOData('QyHRLeaveApplications', options).catch(() => [])) as ODataRecord[] | null
+    const list = Array.isArray(rows) ? rows : []
+    if (!list.length) continue
+
+    const ranked = list
+      .map((row) => ({
+        row,
+        no: fieldText(row, ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo']),
+        score: submittedLeaveScore(row, body, endDate),
+      }))
+      .filter((item) => item.no)
+      .sort((left, right) => right.score - left.score)
+
+    if (ranked[0]?.no) return ranked[0].no
+  }
+
+  return ''
 }
 
 /** Business Central SOAP dates must use yyyy-mm-dd (locale-neutral). */
@@ -433,16 +585,26 @@ export function buildStaffRouter() {
     safe(async (req, res) => {
       const user = authUser(req)
       const notGender = user.Gender === 'Male' ? 'Female' : 'Male'
-      const rows = await fetchOData('QyHRLeaveType', {
-        $filter: `Gender ne '${odataString(notGender)}'`,
-      })
+      const [rows, employeeRow] = await Promise.all([
+        fetchOData('QyHRLeaveType', {
+          $filter: `Gender ne '${odataString(notGender)}'`,
+        }),
+        fetchCurrentEmployeeRow(user.employeeNo),
+      ])
+      const metrics = employeeLeaveMetrics(employeeRow, user)
       res.json({
-        rows: (Array.isArray(rows) ? rows : []).map((row) => ({
-          ...row,
-          Hourly: Boolean(row.Hourly ?? row.Allow_Hourly ?? false),
-          Days: Number(row.Days ?? row.NoofDays ?? 0),
-          Annual: leaveTypeIsAnnual(row),
-        })),
+        rows: (Array.isArray(rows) ? rows : []).map((row) => {
+          const annual = leaveTypeIsAnnual(row)
+          const genericDays = Number(row.Days ?? row.NoofDays ?? 0)
+          return {
+            ...row,
+            Hourly: Boolean(row.Hourly ?? row.Allow_Hourly ?? false),
+            Days: roundLeaveValue(
+              annual ? metrics.earnedLeaveDays ?? metrics.leaveBalance ?? genericDays : genericDays,
+            ),
+            Annual: annual,
+          }
+        }),
       })
     }),
   )
@@ -451,11 +613,8 @@ export function buildStaffRouter() {
     '/leave/relievers',
     safe(async (req, res) => {
       const user = authUser(req)
-      const rows = await fetchOData('QyHREmployee', {
-        $filter: `No ne '${odataString(user.employeeNo)}' and Status eq 'Active'`,
-        $select: 'No,FirstName,MiddleName,LastName',
-      })
-      res.json({ rows: Array.isArray(rows) ? rows : [] })
+      const rows = await fetchRelieverRows(user.employeeNo)
+      res.json({ rows })
     }),
   )
 
@@ -466,7 +625,7 @@ export function buildStaffRouter() {
       const leaveTypeCode = req.params.type
       const today = new Date().toISOString().slice(0, 10)
 
-      const [typeRows, pendingCount, ledgerRows] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
@@ -481,11 +640,14 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveLedger', {
           $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
         }) as Promise<ODataRecord[] | null>,
+        fetchCurrentEmployeeRow(user.employeeNo),
       ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
+      const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
+      const metrics = employeeLeaveMetrics(employeeRow, user)
 
       let additions = 0
       let deductions = 0
@@ -500,14 +662,17 @@ export function buildStaffRouter() {
       }
 
       let leaveBalance = 0
-      if (leaveTypeRow?.Code === '0001') {
-        leaveBalance = additions - deductions
+      if (isAnnual) {
+        leaveBalance = metrics.leaveBalance ?? metrics.earnedLeaveDays ?? additions - deductions
       } else {
         leaveBalance = leaveTypeDays - (deductions - additions)
       }
-      const balance = leaveBalance >= 0 ? Math.trunc(leaveBalance) : 0
+      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
+      const entitlement = roundLeaveValue(
+        isAnnual ? metrics.earnedLeaveDays ?? metrics.leaveBalance ?? leaveTypeDays : leaveTypeDays,
+      )
 
-      res.json({ balance, pendingCount, isHourly })
+      res.json({ balance, entitlement, pendingCount, isHourly })
     }),
   )
 
@@ -650,7 +815,10 @@ export function buildStaffRouter() {
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
       })
 
-      const ok = Boolean(result.returnValue)
+      const ok = soapTruthy(result.returnValue)
+      const documentNo = ok
+        ? await resolveSubmittedLeaveNo(user, body, endDate, result.returnValue).catch(() => body.requisitionNo)
+        : ''
       res.json({
         ok,
         message: ok
@@ -659,6 +827,15 @@ export function buildStaffRouter() {
             : 'Leave application created successfully'
           : 'Leave application failed. Please try again.',
         returnValue: result.returnValue,
+        documentNo,
+        request: documentNo
+          ? {
+              id: `leave-${documentNo}`,
+              requestNo: documentNo,
+              requestType: 'leave',
+              status: 'Open',
+            }
+          : undefined,
       })
     }),
   )

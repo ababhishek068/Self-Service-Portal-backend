@@ -11,6 +11,7 @@ export interface LeaveType {
 
 export interface LeaveBalance {
   balance: number
+  entitlement?: number
   pendingCount: number
   isHourly: boolean
 }
@@ -36,12 +37,35 @@ export async function fetchLeaveTypes(): Promise<LeaveType[]> {
 export async function fetchRelievers(): Promise<Array<{ value: string; label: string }>> {
   requireAuthApiUrl()
   const { rows } = await authGet<{
-    rows: Array<{ No: string; FirstName?: string; MiddleName?: string; LastName?: string }>
+    rows: Array<{
+      No: string
+      EmployeeNo?: string
+      Employee_No?: string
+      FirstName?: string
+      First_Name?: string
+      MiddleName?: string
+      Middle_Name?: string
+      LastName?: string
+      Last_Name?: string
+      Name?: string
+      EmployeeName?: string
+    }>
   }>('/api/leave/relievers')
-  return rows.map((r) => ({
-    value: r.No,
-    label: `${r.No} - ${[r.FirstName, r.MiddleName, r.LastName].filter(Boolean).join(' ')}`.trim(),
-  }))
+  return rows
+    .map((r) => {
+      const value = r.No || r.EmployeeNo || r.Employee_No || ''
+      const name =
+        r.Name ||
+        r.EmployeeName ||
+        [r.FirstName ?? r.First_Name, r.MiddleName ?? r.Middle_Name, r.LastName ?? r.Last_Name]
+          .filter(Boolean)
+          .join(' ')
+      return {
+        value,
+        label: `${value}${name ? ` - ${name}` : ''}`.trim(),
+      }
+    })
+    .filter((row) => row.value)
 }
 
 export interface LeaveDates {

@@ -56,6 +56,11 @@ function formatPretty(iso: string): string {
   }
 }
 
+function formatDays(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return DASH
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
+}
+
 function filterLeaveTypesByGender(types: LeaveType[], gender: string): LeaveType[] {
   const g = gender.toLowerCase()
   return types.filter((type) => {
@@ -149,6 +154,7 @@ export function LeaveRequest() {
     getLeaveBalance(leaveType)
       .then((res) => {
         setBalance(res.balance)
+        setEntitlement(res.entitlement ?? type?.days ?? null)
         setIsHourly(res.isHourly)
         setPendingDuplicate(res.pendingCount > 0)
         if (res.pendingCount > 0) {
@@ -241,7 +247,7 @@ export function LeaveRequest() {
       return
     }
     if (balance !== null && submittedDays > balance) {
-      setError(`Insufficient leave balance. Available: ${balance} day(s).`)
+      setError(`Insufficient leave balance. Available: ${formatDays(balance)} day(s).`)
       return
     }
     const confirmed = await confirm({
@@ -396,14 +402,14 @@ export function LeaveRequest() {
                 placeholder="--select--"
                 options={availableTypes.map((t) => ({
                   value: t.code,
-                  label: `${t.description} (Entitlement: ${t.days})`,
+                  label: `${t.description} (Entitlement: ${formatDays(t.days)})`,
                 }))}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Leave Entitlement</Label>
               <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                {entitlement !== null ? `${entitlement} days` : DASH}
+                {entitlement !== null ? `${formatDays(entitlement)} days` : DASH}
               </p>
             </div>
             <div className="space-y-1.5">
@@ -413,7 +419,7 @@ export function LeaveRequest() {
                   <Skeleton className="h-6 w-16" />
                 ) : balance !== null ? (
                   <Badge variant="green" className="px-4 py-1 text-sm">
-                    {balance}
+                    {formatDays(balance)}
                   </Badge>
                 ) : (
                   <span className="text-sm text-slate-400">{DASH}</span>
@@ -650,7 +656,7 @@ export function LeaveRequest() {
                   canUpload={canUploadRequestAttachments(selected.status)}
                   canDelete={canDeleteRequestItems(selected.status)}
                   onUpdated={(request) => {
-                    queryClient.setQueryData(['hr', 'leave-list', 'detail', selected.id], request)
+                    queryClient.setQueryData(['hr', 'leave-detail', selected.id], request)
                     void refreshLeave()
                   }}
                 />

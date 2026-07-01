@@ -679,10 +679,17 @@ function buildLeaveRequestDetail(
   entry?: ODataRecord,
 ) {
   const mapped = mapRequest(row, 'leave')
+  const steps = mapApprovalSteps(approvalSteps)
+  const pendingApprovalEntry = steps.find((step) => step.status === 'Pending Approval' || step.status === 'Submitted')
+  const resolvedStatus =
+    mapped.status === 'Open' && pendingApprovalEntry
+      ? 'Pending Approval'
+      : mapped.status
   return {
     ...mapped,
+    status: resolvedStatus,
     payload: leavePayloadFromRow(row, no, entry),
-    approvalSteps: mapApprovalSteps(approvalSteps),
+    approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
 }
