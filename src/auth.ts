@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
-import { callSoapMethod, fetchOData, odataString } from './bcClient.js'
+import { callSoapMethod, fetchOData, odataString, type ODataRecord } from './bcClient.js'
 import { config } from './config.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
@@ -161,6 +161,80 @@ interface BcUserSetup {
   UserID?: string
   EmployeeNo?: string
   ApproverID?: string
+}
+
+function employeeFieldText(record: Record<string, unknown>, keys: string[], fallback = '') {
+  for (const key of keys) {
+    const value = record[key]
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim()
+  }
+  return fallback
+}
+
+export async function resolveEmployeeJobTitle(
+  employee: BcEmployee,
+  employeeNo = String(employee.No ?? ''),
+) {
+  const record = employee as Record<string, unknown>
+  const direct = employeeFieldText(record, [
+    'JobTitle',
+    'Job_Title',
+    'JobTitleDescription',
+    'Job_Title_Description',
+    'Position',
+    'CurrentJobTitle',
+    'Designation',
+    'JobDescription',
+  ])
+  if (direct) return direct
+
+  const jobId = employeeFieldText(record, ['JobID', 'Job_ID'])
+  if (jobId) {
+    const jobServices = ['QyHRJob', 'QyJob', 'QyHRJobs']
+    const jobFilters = [`Code eq '${odataString(jobId)}'`, `No eq '${odataString(jobId)}'`]
+    for (const service of jobServices) {
+      for (const filter of jobFilters) {
+        const rows = (await fetchOData(service, { $filter: filter, $top: 1 }).catch(
+          () => [],
+        )) as ODataRecord[] | null
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        const title = employeeFieldText(rows[0] as Record<string, unknown>, [
+          'Title',
+          'Description',
+          'JobTitle',
+          'Job_Title',
+          'Name',
+        ])
+        if (title) return title
+      }
+    }
+  }
+
+  if (employeeNo) {
+    const history = (await fetchOData('QyEmploymentHistory', {
+      $filter: `Employee_No eq '${odataString(employeeNo)}'`,
+      $top: 1,
+      $orderby: 'Starting_Date desc',
+    }).catch(() => [])) as ODataRecord[] | null
+    if (Array.isArray(history) && history.length > 0) {
+      const title = employeeFieldText(history[0] as Record<string, unknown>, [
+        'Job_Title',
+        'JobTitle',
+        'Position',
+        'Designation',
+      ])
+      if (title) return title
+    }
+  }
+
+  return ''
+}
+
+export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> {
+  const employee = await fetchEmployee(user.employeeNo)
+  if (!employee) return user
+  const jobTitle = await resolveEmployeeJobTitle(employee, user.employeeNo)
+  return jobTitle ? { ...user, jobTitle } : user
 }
 
 /** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
@@ -362,6 +436,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const gender = employee.Gender ?? ''
   const userID = String(userSetup.UserID ?? '')
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || await hasApprovalEntries(userID)
+  const jobTitle = await resolveEmployeeJobTitle(employee, employeeNo)
 
   return {
     employeeNo,
@@ -381,7 +456,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     departmentName: employee.DepartmentName ?? department,
     branchCode: employee.GlobalDimension2Code ?? '',
     branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
-    jobTitle: employee.JobTitle ?? employee.JobID ?? '',
+    jobTitle,
     jobGrade: employee.JobGrade ?? '',
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
@@ -635,12 +710,24 @@ export function buildAuthRouter() {
     })
   })
 
-  router.get('/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
+  router.get('/me', requireAuth, async (req, res, next) => {
+    try {
+      const user = await refreshAuthUserProfile(req.session.authUser!)
+      req.session.authUser = user
+      res.json({ user, token: signAuthToken(user) })
+    } catch (error) {
+      next(error)
+    }
   })
 
-  router.get('/auth/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
+  router.get('/auth/me', requireAuth, async (req, res, next) => {
+    try {
+      const user = await refreshAuthUserProfile(req.session.authUser!)
+      req.session.authUser = user
+      res.json({ user, token: signAuthToken(user) })
+    } catch (error) {
+      next(error)
+    }
   })
 
   router.post('/auth/logout', requireAuth, (_req, res) => {

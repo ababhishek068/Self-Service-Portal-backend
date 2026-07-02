@@ -29,9 +29,11 @@ import {
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
   resetTokenIsExpired,
+  resolveEmployeeJobTitle,
   type AuthUser,
 } from './auth.js'
-import { documentStatusFromBc, mapRequest } from './erpMappings.js'
+import { documentStatusFromBc, mapRequest, resolveLeaveStatus } from './erpMappings.js'
+import { markLeaveSentForApproval, clearLeaveSentForApproval } from './leaveApprovalCache.js'
 import {
   bcDocumentStatus,
   canRequestApprovalForSpec,
@@ -404,6 +406,40 @@ describe('mapRequest status', () => {
       'Pending Approval',
     )
   })
+
+  it('prefers ApprovalStatus for leave applications', () => {
+    const mapped = mapRequest(
+      {
+        ApplicationCode: 'LV00018',
+        Status: 'Open',
+        ApprovalStatus: 'Pending Approval',
+      },
+      'leave',
+    )
+    assert.equal(mapped.status, 'Pending Approval')
+    assert.equal(
+      documentStatusFromBc({ Status: 'Open', ApprovalStatus: 'Pending Approval' }, 'leave'),
+      'Pending Approval',
+    )
+    assert.equal(
+      resolveLeaveStatus({ Status: 'Open', ApprovalStatus: 'Pending' }),
+      'Pending Approval',
+    )
+    assert.equal(
+      resolveLeaveStatus(
+        { Status: 'Open', ApprovalStatus: '' },
+        [{ Status: 'Open', DocumentNo: 'LV00018' }],
+      ),
+      'Pending Approval',
+    )
+    clearLeaveSentForApproval('LV00099')
+    markLeaveSentForApproval('LV00099')
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00099', Status: 'Open', ApprovalStatus: '' }),
+      'Pending Approval',
+    )
+    clearLeaveSentForApproval('LV00099')
+  })
 })
 
 describe('requestWorkflow', () => {
@@ -509,5 +545,19 @@ describe('forgot-password token state', () => {
     assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_001), true)
     assert.equal(cachedPasswordResetTokenMatches('ABH-114', '11111', 1_002), false)
     assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_000 + 31 * 60 * 1000), false)
+  })
+})
+
+describe('resolveEmployeeJobTitle', () => {
+  it('reads Job_Title from Business Central employee payloads', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'HB-001',
+        Job_Title: 'Finance and Admin Director',
+        JobID: 'FAD',
+      } as never,
+      'HB-001',
+    )
+    assert.equal(title, 'Finance and Admin Director')
   })
 })

@@ -2,12 +2,15 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth } from './auth.js'
-import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, type ApprovalTableKey } from './approvalTableIds.js'
+import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, approvalTableIdsFor, type ApprovalTableKey } from './approvalTableIds.js'
 import {
   findFrontendModuleSpec,
   getPortalModuleDocument,
   listPortalModuleLines,
+  uploadPortalAttachment,
 } from './staffModules.js'
+import { resolveLeaveStatus, statusFromBc, documentStatusFromBc } from './erpMappings.js'
+import { markLeaveSentForApproval } from './leaveApprovalCache.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -46,6 +49,17 @@ function soapTruthy(value: string | null | undefined) {
   const normalized = String(value).trim().toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized.length > 0
+}
+
+/** Leave create/update should not treat arbitrary BC error text as success. */
+function soapLeaveActionOk(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return false
+  const normalized = raw.toLowerCase()
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false
+  if (['true', '1', 'yes'].includes(normalized)) return true
+  if (/^lv\d+/i.test(raw)) return true
+  return /^[a-z]{1,6}\d{2,}$/i.test(raw)
 }
 
 /** Convert the portal's normal/first-half/second-half selection to BC's Boolean flag. */
@@ -142,6 +156,227 @@ async function fetchRelieverRows(employeeNo: string) {
   return []
 }
 
+function normalizeScheduleDate(value: string) {
+  const raw = (value ?? '').trim()
+  if (!raw || raw.startsWith('0001-01-01')) return ''
+  return formatBcSoapDate(raw) || raw.slice(0, 10)
+}
+
+function leaveScheduleEmployeeNo(row: ODataRecord) {
+  return fieldText(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
+}
+
+function employeeDisplayFromRow(row: ODataRecord) {
+  const employeeNo = fieldText(row, ['No', 'EmployeeNo', 'Employee_No'])
+  return {
+    employeeNo,
+    employeeName:
+      fieldText(row, ['FullName', 'Name', 'EmployeeName']) ||
+      [fieldText(row, ['FirstName', 'First_Name']), fieldText(row, ['LastName', 'Last_Name'])]
+        .filter(Boolean)
+        .join(' '),
+    jobTitle: fieldText(row, ['JobTitle', 'Job_Title', 'Position']),
+    departmentCode: fieldText(row, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code']),
+  }
+}
+
+function mapLeaveRowsToSchedule(
+  leaveRows: ODataRecord[],
+  directory: Map<string, ReturnType<typeof employeeDisplayFromRow>>,
+  userEmployeeNo: string,
+  scope: string,
+) {
+  const allowedEmployees = new Set(directory.keys())
+
+  return leaveRows
+    .map((row) => {
+      const employeeNo = leaveScheduleEmployeeNo(row) || userEmployeeNo
+      if (scope !== 'self' && allowedEmployees.size > 0 && !allowedEmployees.has(employeeNo)) return null
+
+      const person =
+        directory.get(employeeNo) ??
+        ({
+          employeeNo,
+          employeeName: fieldText(row, ['EmployeeName', 'StaffName'], employeeNo),
+          jobTitle: '',
+          departmentCode: '',
+        } as const)
+
+      const status = resolveLeaveStatus(row)
+      if (status === 'Cancelled' || status === 'Rejected') return null
+
+      const startDate = normalizeScheduleDate(
+        fieldText(row, ['StartDate', 'Start_Date']) || fieldText(row, ['ApplicationDate', 'Application_Date']),
+      )
+      const endDate = normalizeScheduleDate(fieldText(row, ['EndDate', 'End_Date'])) || startDate
+      if (!startDate) return null
+
+      const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+      if (!applicationCode) return null
+
+      return {
+        id: applicationCode,
+        applicationCode,
+        employeeNo,
+        employeeName: person.employeeName || employeeNo,
+        jobTitle: person.jobTitle,
+        leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
+        daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied', 'NoofDays', 'No_of_Days']),
+        startDate,
+        endDate,
+        returnDate: normalizeScheduleDate(fieldText(row, ['ReturnDate', 'Return_Date'])),
+        status,
+        isSelf: employeeNo === userEmployeeNo,
+      }
+    })
+    .filter(Boolean)
+}
+
+async function fetchScheduleEmployeeDirectory(user: ReturnType<typeof authUser>, scope: string) {
+  const directory = new Map<string, ReturnType<typeof employeeDisplayFromRow>>()
+  const addRow = (row: ODataRecord) => {
+    const employee = employeeDisplayFromRow(row)
+    if (!employee.employeeNo) return
+    directory.set(employee.employeeNo, employee)
+  }
+
+  const selfRow = await fetchCurrentEmployeeRow(user.employeeNo)
+  if (selfRow) addRow(selfRow)
+
+  if (scope === 'self') {
+    return directory
+  }
+
+  const department = odataString(user.department)
+  const branch = odataString(user.branchCode)
+  const filters = [
+    department ? `GlobalDimension1Code eq '${department}' and Status eq 'Active'` : '',
+    department ? `DepartmentCode eq '${department}' and Status eq 'Active'` : '',
+    department ? `GlobalDimension1Code eq '${department}'` : '',
+    branch ? `GlobalDimension2Code eq '${branch}' and Status eq 'Active'` : '',
+    `Status eq 'Active'`,
+  ].filter(Boolean)
+
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHREmployee', {
+      $filter: filter,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    const list = Array.isArray(rows) ? rows.filter(likelyActiveEmployee) : []
+    for (const row of list) addRow(row)
+    if (directory.size > 1) break
+  }
+
+  return directory
+}
+
+async function fetchLeaveApprovalEntriesByDocumentNos(documentNos: string[]) {
+  const grouped = new Map<string, ODataRecord[]>()
+  const unique = [...new Set(documentNos.map((value) => value.trim()).filter(Boolean))]
+  if (!unique.length) return grouped
+
+  for (let offset = 0; offset < unique.length; offset += 12) {
+    const chunk = unique.slice(offset, offset + 12)
+    const docFilter = chunk.map((no) => `DocumentNo eq '${odataString(no)}'`).join(' or ')
+    const rows = (await fetchOData('QyApprovalEntry', {
+      $filter: `(${docFilter}) and ${approvalTableFilter('leave')}`,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    mergeLeaveApprovalRows(grouped, Array.isArray(rows) ? rows : [])
+  }
+
+  const missing = unique.filter((no) => leaveApprovalEntriesForDocument(grouped, no).length === 0)
+  for (let offset = 0; offset < missing.length; offset += 12) {
+    const chunk = missing.slice(offset, offset + 12)
+    const docFilter = chunk.map((no) => `DocumentNo eq '${odataString(no)}'`).join(' or ')
+    const rows = (await fetchOData('QyApprovalEntry', {
+      $filter: `(${docFilter})`,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    mergeLeaveApprovalRows(grouped, filterLikelyLeaveApprovalEntries(Array.isArray(rows) ? rows : []))
+  }
+
+  return grouped
+}
+
+function filterLikelyLeaveApprovalEntries(rows: ODataRecord[]) {
+  const leaveTableIds = new Set(approvalTableIdsFor('leave'))
+  return rows.filter((row) => {
+    const tableId = Number(row.TableID ?? row.TableId ?? 0)
+    if (leaveTableIds.has(tableId)) return true
+    const documentType = fieldText(row, ['DocumentType', 'Document_Type']).toLowerCase()
+    return documentType.includes('leave')
+  })
+}
+
+function mergeLeaveApprovalRows(grouped: Map<string, ODataRecord[]>, rows: ODataRecord[]) {
+  for (const row of rows) {
+    const docNo = fieldText(row, ['DocumentNo', 'Document_No'])
+    if (!docNo) continue
+    const list = grouped.get(docNo) ?? []
+    list.push(row)
+    grouped.set(docNo, list)
+  }
+}
+
+function leaveApprovalEntriesForDocument(
+  grouped: Map<string, ODataRecord[]>,
+  documentNo: string,
+) {
+  const trimmed = documentNo.trim()
+  return [
+    ...(grouped.get(trimmed) ?? []),
+    ...(grouped.get(trimmed.toUpperCase()) ?? []),
+    ...(grouped.get(trimmed.toLowerCase()) ?? []),
+  ]
+}
+
+async function fetchLeaveScheduleRows(user: ReturnType<typeof authUser>, scope: string) {
+  const directory = await fetchScheduleEmployeeDirectory(user, scope)
+  const { start, end } = yearWindow()
+
+  if (scope === 'self') {
+    const filters = [
+      `UserID eq '${odataString(user.userID)}' and (ApplicationDate gt ${start} and ApplicationDate lt ${end})`,
+      `EmployeeNo eq '${odataString(user.employeeNo)}' and (StartDate gt ${start} and StartDate lt ${end})`,
+      `EmployeeNo eq '${odataString(user.employeeNo)}' and (ApplicationDate gt ${start} and ApplicationDate lt ${end})`,
+    ]
+    const collected = new Map<string, ODataRecord>()
+    for (const filter of filters) {
+      const rows = (await fetchOData('QyHRLeaveApplications', {
+        $filter: filter,
+        $top: 100,
+      }).catch(() => [])) as ODataRecord[] | null
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+        if (!applicationCode) continue
+        collected.set(applicationCode, row)
+      }
+    }
+    return mapLeaveRowsToSchedule([...collected.values()], directory, user.employeeNo, scope)
+  }
+
+  const filters = [
+    `StartDate gt ${start} and StartDate lt ${end}`,
+    `ApplicationDate gt ${start} and ApplicationDate lt ${end}`,
+  ]
+
+  const collected = new Map<string, ODataRecord>()
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHRLeaveApplications', {
+      $filter: filter,
+      $top: 500,
+    }).catch(() => [])) as ODataRecord[] | null
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+      if (!applicationCode) continue
+      collected.set(applicationCode, row)
+    }
+  }
+
+  return mapLeaveRowsToSchedule([...collected.values()], directory, user.employeeNo, scope)
+}
+
 function submittedLeaveNoFromReturn(value: unknown) {
   const normalized = String(value ?? '').trim()
   if (!normalized) return ''
@@ -202,28 +437,163 @@ async function resolveSubmittedLeaveNo(
     `EmployeeNo eq '${odataString(user.employeeNo)}'` +
     ` and LeaveType eq '${odataString(body.leaveType)}'`
   const queryOptions = [
+    {
+      $filter: `UserID eq '${odataString(user.userID)}'`,
+      $orderby: 'ApplicationDate desc',
+      $top: 15,
+    },
+    {
+      $filter: `EmployeeNo eq '${odataString(user.employeeNo)}'`,
+      $orderby: 'ApplicationDate desc',
+      $top: 15,
+    },
     { $filter: baseFilter, $orderby: 'ApplicationDate desc', $top: 20 },
     { $filter: baseFilter, $top: 20 },
   ]
 
+  const ranked: Array<{ no: string; score: number }> = []
+  const seen = new Set<string>()
+
   for (const options of queryOptions) {
     const rows = (await fetchOData('QyHRLeaveApplications', options).catch(() => [])) as ODataRecord[] | null
     const list = Array.isArray(rows) ? rows : []
-    if (!list.length) continue
-
-    const ranked = list
-      .map((row) => ({
-        row,
-        no: fieldText(row, ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo']),
-        score: submittedLeaveScore(row, body, endDate),
-      }))
-      .filter((item) => item.no)
-      .sort((left, right) => right.score - left.score)
-
-    if (ranked[0]?.no) return ranked[0].no
+    for (const row of list) {
+      const no = fieldText(row, ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo'])
+      if (!no || seen.has(no)) continue
+      seen.add(no)
+      ranked.push({ no, score: submittedLeaveScore(row, body, endDate) })
+    }
   }
 
+  ranked.sort((left, right) => right.score - left.score)
+  if (ranked[0]?.no) return ranked[0].no
+
   return ''
+}
+
+async function pollSubmittedLeaveNo(
+  user: ReturnType<typeof authUser>,
+  body: {
+    leaveType: string
+    appliedDays: number
+    startDate: string
+    reason: string
+    requisitionNo: string
+  },
+  endDate: string,
+  rawReturnValue: unknown,
+) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const no = await resolveSubmittedLeaveNo(
+      user,
+      body,
+      endDate,
+      attempt === 0 ? rawReturnValue : '',
+    )
+    if (no) return no
+    if (attempt < 7) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
+    }
+  }
+  return ''
+}
+
+async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string) {
+  const filters = [
+    `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
+    `ApplicationCode eq '${odataString(no)}' and UserID eq '${odataString(user.userID)}'`,
+    `Application_Code eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
+    `ApplicationCode eq '${odataString(no)}'`,
+    `No eq '${odataString(no)}'`,
+  ]
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHRLeaveApplications', {
+      $filter: filter,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+  }
+  return null
+}
+
+function mapLeaveApprovalStepsSimple(entries: ODataRecord[]) {
+  return entries.map((entry, index) => {
+    const rawStatus = fieldText(entry, ['Status'], 'Open')
+    const status = rawStatus === 'Open' ? 'Pending Approval' : rawStatus
+    return {
+      id: fieldText(entry, ['EntryNo', 'Entry_No'], `approval-${index}`),
+      actorName: fieldText(entry, ['ApproverName', 'ApproverID'], 'Approver'),
+      role: 'Approver',
+      status,
+      timestamp: fieldText(entry, ['DateTimeSentforApproval', 'DueDate'], new Date().toISOString()),
+      sequenceNo: index + 1,
+    }
+  })
+}
+
+function mapLeaveAttachmentsSimple(rows: ODataRecord[]) {
+  return rows.map((row, index) => {
+    const baseName = fieldText(row, ['FileName', 'Name'], `attachment-${index + 1}`)
+    const extension = fieldText(row, ['FileExtension', 'Extension'])
+    const fileName =
+      extension && !baseName.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+        ? `${baseName}.${extension}`
+        : baseName
+    return {
+      id: fieldText(row, ['ID', 'Id', 'AttachmentID', 'Attachment_ID', 'EntryNo', 'Entry_No'], String(index + 1)),
+      fileName,
+      fileType: fieldText(row, ['MimeType', 'ContentType'], 'application/octet-stream'),
+      size: fieldNumber(row, ['FileSize', 'Size']),
+      description: fieldText(row, ['Description'], baseName),
+      progress: 100,
+      uploadedAt: fieldText(row, ['AttachedDate', 'Date', 'CreatedAt'], ''),
+    }
+  })
+}
+
+function buildLeavePortalDetail(
+  row: ODataRecord,
+  no: string,
+  user: ReturnType<typeof authUser>,
+  approvalEntries: ODataRecord[],
+  attachments: ODataRecord[],
+) {
+  const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
+      const status = resolveLeaveStatus(row, approvalEntries)
+  return {
+    id: `leave-${applicationCode}`,
+    requestNo: applicationCode,
+    requestType: 'leave',
+    title: `Leave application ${applicationCode}`,
+    status,
+    makerEmployeeNo: fieldText(row, ['EmployeeNo', 'Employee_No'], user.employeeNo),
+    makerName: fieldText(row, ['EmployeeName', 'StaffName'], user.employeeNo),
+    departmentCode: '',
+    departmentName: '',
+    responsibleCenter: '',
+    amount: 0,
+    sourceDocument: { documentNo: applicationCode, erpEntity: 'Leave Requisition' },
+    createdAt: fieldText(row, ['ApplicationDate', 'Application_Date'], new Date().toISOString()),
+    submittedAt: fieldText(row, ['ApplicationDate', 'Application_Date'], ''),
+    approverEmployeeNo: '',
+    approverName: '',
+    payload: {
+      ...row,
+      ApplicationCode: applicationCode,
+      LeaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
+      DaysApplied: fieldText(row, ['DaysApplied', 'Days_Applied']),
+      StartDate: fieldText(row, ['StartDate', 'Start_Date']),
+      EndDate: fieldText(row, ['EndDate', 'End_Date']),
+      ReturnDate: fieldText(row, ['ReturnDate', 'Return_Date']),
+      RelieverName: fieldText(row, ['RelieverName', 'Reliever_Name']),
+      Reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason', 'reason']),
+    },
+    approvalSteps: mapLeaveApprovalStepsSimple(approvalEntries).map((step) => ({
+      ...step,
+      actorEmployeeNo: '',
+    })),
+    attachments: mapLeaveAttachmentsSimple(attachments),
+  }
 }
 
 /** Business Central SOAP dates must use yyyy-mm-dd (locale-neutral). */
@@ -560,22 +930,45 @@ export function buildStaffRouter() {
     safe(async (req, res) => {
       const user = authUser(req)
       const { start, end } = yearWindow()
-      const rows = await fetchOData('QyHRLeaveApplications', {
-        $filter: `UserID eq '${odataString(user.userID)}' and (ApplicationDate gt ${start} and ApplicationDate lt ${end})`,
-      })
+      const filters = [
+        `UserID eq '${odataString(user.userID)}' and (ApplicationDate gt ${start} and ApplicationDate lt ${end})`,
+        `EmployeeNo eq '${odataString(user.employeeNo)}' and (ApplicationDate gt ${start} and ApplicationDate lt ${end})`,
+      ]
+      const collected = new Map<string, ODataRecord>()
+      for (const filter of filters) {
+        const rows = (await fetchOData('QyHRLeaveApplications', {
+          $filter: filter,
+          $top: 100,
+        }).catch(() => [])) as ODataRecord[] | null
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const code = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+          if (!code) continue
+          collected.set(code, row)
+        }
+      }
+      const list = [...collected.values()]
+      const approvalsByDoc = await fetchLeaveApprovalEntriesByDocumentNos(
+        list.map((row) => fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])),
+      )
       res.json({
-        rows: (Array.isArray(rows) ? rows : []).map((row) => ({
-          ApplicationCode: String(row.ApplicationCode ?? ''),
-          LeaveType: String(row.LeaveType ?? row.Leave_Type ?? ''),
-          LeaveTypeCode: String(row.LeaveTypeCode ?? row.Leave_Type_Code ?? row.LeaveType ?? ''),
-          ApplicationDate: String(row.ApplicationDate ?? row.Application_Date ?? ''),
-          DaysApplied: Number(row.DaysApplied ?? row.Days_Applied ?? row.NoofDays ?? row.No_of_Days ?? 0) || undefined,
-          StartDate: String(row.StartDate ?? row.Start_Date ?? ''),
-          EndDate: String(row.EndDate ?? row.End_Date ?? ''),
-          ReturnDate: String(row.ReturnDate ?? row.Return_Date ?? ''),
-          RelieverName: String(row.RelieverName ?? row.Reliever_Name ?? ''),
-          Status: String(row.Status ?? ''),
-        })),
+        rows: list.map((row) => {
+          const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+          const approvalEntries = leaveApprovalEntriesForDocument(approvalsByDoc, applicationCode)
+          return {
+            ApplicationCode: applicationCode,
+            LeaveType: String(row.LeaveType ?? row.Leave_Type ?? ''),
+            LeaveTypeCode: String(row.LeaveTypeCode ?? row.Leave_Type_Code ?? row.LeaveType ?? ''),
+            ApplicationDate: String(row.ApplicationDate ?? row.Application_Date ?? ''),
+            DaysApplied:
+              Number(row.DaysApplied ?? row.Days_Applied ?? row.NoofDays ?? row.No_of_Days ?? 0) ||
+              undefined,
+            StartDate: String(row.StartDate ?? row.Start_Date ?? ''),
+            EndDate: String(row.EndDate ?? row.End_Date ?? ''),
+            ReturnDate: String(row.ReturnDate ?? row.Return_Date ?? ''),
+            RelieverName: String(row.RelieverName ?? row.Reliever_Name ?? ''),
+            Status: resolveLeaveStatus(row, approvalEntries),
+          }
+        }),
       })
     }),
   )
@@ -719,31 +1112,110 @@ export function buildStaffRouter() {
   )
 
   router.get(
+    '/leave/schedule',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const scope = typeof req.query.scope === 'string' ? req.query.scope : 'self'
+      const rows = await fetchLeaveScheduleRows(user, scope === 'self' ? 'self' : 'department')
+      res.json({ rows })
+    }),
+  )
+
+  router.get(
+    '/leave/request/:no',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const no = String(req.params.no ?? '').trim()
+      const row = await fetchOwnedLeaveRow(user, no)
+      if (!row) {
+        res.status(404).json({ message: 'Leave application not found' })
+        return
+      }
+      const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
+      const approvalEntries = leaveApprovalEntriesForDocument(
+        await fetchLeaveApprovalEntriesByDocumentNos([applicationCode]),
+        applicationCode,
+      )
+      const attachments = (await fetchOData('QyDocumentAttachments', {
+        $filter: `No eq '${odataString(applicationCode)}' and TableID eq 50532`,
+      }).catch(() => [])) as ODataRecord[] | null
+      res.json(
+        buildLeavePortalDetail(
+          row,
+          applicationCode,
+          user,
+          approvalEntries,
+          Array.isArray(attachments) ? attachments : [],
+        ),
+      )
+    }),
+  )
+
+  router.post(
+    '/leave/:no/attachments',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const no = String(req.params.no ?? '').trim()
+      if (!no) {
+        res.status(422).json({ ok: false, message: 'Leave application number is required.' })
+        return
+      }
+
+      const row = await fetchOwnedLeaveRow(user, no)
+      if (!row) {
+        res.status(404).json({ ok: false, message: 'Leave application not found.' })
+        return
+      }
+
+      const approvalEntries = leaveApprovalEntriesForDocument(
+        await fetchLeaveApprovalEntriesByDocumentNos([no]),
+        no,
+      )
+      const status = resolveLeaveStatus(row, approvalEntries)
+      if (status !== 'Open' && status !== 'Draft') {
+        res.status(422).json({
+          ok: false,
+          message: 'Attachments cannot be added after the request has been submitted for approval.',
+          code: 'ATTACHMENT_LOCKED',
+        })
+        return
+      }
+
+      await uploadPortalAttachment(50532, no, req.body ?? {})
+      const attachments = (await fetchOData('QyDocumentAttachments', {
+        $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
+      }).catch(() => [])) as ODataRecord[] | null
+
+      res.status(201).json({
+        ok: true,
+        attachments: mapLeaveAttachmentsSimple(Array.isArray(attachments) ? attachments : []),
+      })
+    }),
+  )
+
+  router.get(
     '/leave/:no',
     safe(async (req, res) => {
       const user = authUser(req)
-      const no = req.params.no
+      const no = String(req.params.no ?? '')
 
-      const [reqRows, approvers, attachments] = await Promise.all([
-        fetchOData('QyHRLeaveApplications', {
-          $filter: `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
-          $top: 1,
-        }) as Promise<ODataRecord[] | null>,
-        fetchOData('QyApprovalEntry', {
-          $filter: `DocumentNo eq '${odataString(no)}'`,
-        }),
-        fetchOData('QyDocumentAttachments', {
-          $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
-        }).catch(() => []),
-      ])
-
-      const requisition = Array.isArray(reqRows) && reqRows.length > 0 ? reqRows[0]! : null
-      if (!requisition) {
+      const row = await fetchOwnedLeaveRow(user, no)
+      if (!row) {
         res.status(404).json({ message: 'Leave application not found' })
         return
       }
 
-      res.json({ requisition, approvers, attachments })
+      const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
+      const [approvers, attachments] = await Promise.all([
+        fetchOData('QyApprovalEntry', {
+          $filter: `DocumentNo eq '${odataString(applicationCode)}'`,
+        }),
+        fetchOData('QyDocumentAttachments', {
+          $filter: `No eq '${odataString(applicationCode)}' and TableID eq 50532`,
+        }).catch(() => []),
+      ])
+
+      res.json({ requisition: row, approvers, attachments })
     }),
   )
 
@@ -760,6 +1232,7 @@ export function buildStaffRouter() {
           reliever: z.string().optional().default(''),
           reason: z.string().min(1),
           requisitionNo: z.string().optional().default(''),
+          requestApproval: z.boolean().optional().default(true),
         })
         .parse(req.body)
 
@@ -815,25 +1288,48 @@ export function buildStaffRouter() {
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
       })
 
-      const ok = soapTruthy(result.returnValue)
-      const documentNo = ok
-        ? await resolveSubmittedLeaveNo(user, body, endDate, result.returnValue).catch(() => body.requisitionNo)
-        : ''
+      const soapOk = soapLeaveActionOk(result.returnValue)
+      const documentNo =
+        soapOk && action === 'create'
+          ? await pollSubmittedLeaveNo(user, body, endDate, result.returnValue).catch(() => '')
+          : soapOk
+            ? body.requisitionNo || submittedLeaveNoFromReturn(result.returnValue)
+            : ''
+
+      let status = 'Open'
+      if (documentNo && action === 'create' && body.requestApproval !== false) {
+        const approvalResult = await callSoapMethod('RequestLeaveApproval', {
+          requisitionNo: documentNo,
+          employeeNo: user.employeeNo,
+          tableID: 50532,
+        })
+        if (soapTruthy(approvalResult.returnValue)) {
+          status = 'Pending Approval'
+          markLeaveSentForApproval(documentNo)
+        }
+      }
+
+      const ok = action === 'create' ? Boolean(soapOk && documentNo) : soapOk
+
       res.json({
         ok,
         message: ok
           ? action === 'edit'
             ? 'Leave application updated successfully'
-            : 'Leave application created successfully'
-          : 'Leave application failed. Please try again.',
+            : status === 'Pending Approval'
+              ? 'Leave application submitted for approval successfully'
+              : 'Leave application created successfully'
+          : soapOk && action === 'create' && !documentNo
+            ? 'Leave was saved in Business Central but the application number could not be confirmed. Refresh the list and open the latest application.'
+            : 'Leave application failed. Please verify reliever, dates, and leave balance, then try again.',
         returnValue: result.returnValue,
-        documentNo,
+        documentNo: documentNo || undefined,
         request: documentNo
           ? {
               id: `leave-${documentNo}`,
               requestNo: documentNo,
               requestType: 'leave',
-              status: 'Open',
+              status,
             }
           : undefined,
       })
@@ -958,11 +1454,35 @@ export function buildStaffRouter() {
         tableID: 50532,
       })
       const ok = soapTruthy(result.returnValue)
+      let resolvedStatus = ok ? 'Pending Approval' : undefined
+      if (ok) {
+        markLeaveSentForApproval(body.no)
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 350))
+          const row = await fetchOwnedLeaveRow(user, body.no)
+          const approvalEntries = leaveApprovalEntriesForDocument(
+            await fetchLeaveApprovalEntriesByDocumentNos([body.no]),
+            body.no,
+          )
+          if (row) {
+            const status = resolveLeaveStatus(row, approvalEntries)
+            if (status === 'Pending Approval' || status === 'Approved') {
+              resolvedStatus = status
+              break
+            }
+          } else if (approvalEntries.length > 0) {
+            resolvedStatus = 'Pending Approval'
+            break
+          }
+        }
+      }
       res.json({
         ok,
         message: ok
           ? 'Leave application sent for approval successfully'
           : 'Leave application could not be sent for approval.',
+        status: resolvedStatus,
+        requestId: ok ? `leave-${body.no}` : undefined,
       })
     }),
   )

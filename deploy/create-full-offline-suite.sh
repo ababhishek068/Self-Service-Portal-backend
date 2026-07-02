@@ -8,7 +8,7 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-UAT-${STAMP}-client-full-offline.zip"
+ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-fixes-full-offline.zip"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
 
@@ -84,6 +84,10 @@ Release date: ${STAMP}
 
 SUMMARY (${STAMP})
 ------------------
+- Leave: job title shown instead of HOD role badge in header and reliever list
+- Leave: submit now sends for approval in one step (no stuck Open status)
+- Leave: attachment upload fixed (correct document number after create)
+- Leave Planner: new calendar view under HR Services
 - Fuel request list: fixed BC OData 500 error
 - Store requisition: asset lines clear wrong item when type changes
 - Transfer orders: approval history lookup (doc no, gate pass, record ID) + pending placeholder

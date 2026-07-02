@@ -49,6 +49,8 @@ export async function fetchRelievers(): Promise<Array<{ value: string; label: st
       Last_Name?: string
       Name?: string
       EmployeeName?: string
+      JobTitle?: string
+      Job_Title?: string
     }>
   }>('/api/leave/relievers')
   return rows
@@ -60,9 +62,11 @@ export async function fetchRelievers(): Promise<Array<{ value: string; label: st
         [r.FirstName ?? r.First_Name, r.MiddleName ?? r.Middle_Name, r.LastName ?? r.Last_Name]
           .filter(Boolean)
           .join(' ')
+      const jobTitle = r.JobTitle || r.Job_Title || ''
+      const titleSuffix = jobTitle ? ` · ${jobTitle}` : ''
       return {
         value,
-        label: `${value}${name ? ` - ${name}` : ''}`.trim(),
+        label: `${value}${name ? ` - ${name}` : ''}${titleSuffix}`.trim(),
       }
     })
     .filter((row) => row.value)
@@ -107,6 +111,11 @@ export async function listLeaveRequests(): Promise<LeaveListRow[]> {
   return rows
 }
 
+export async function fetchLeaveRequestDetail(requestNo: string): Promise<PortalRequest> {
+  requireAuthApiUrl()
+  return authGet<PortalRequest>(`/api/leave/request/${encodeURIComponent(requestNo)}`)
+}
+
 export interface SubmitLeaveInput {
   leaveType: string
   appliedDays: number
@@ -114,12 +123,15 @@ export interface SubmitLeaveInput {
   isHalfDayLeave: '0' | '1' | '2'
   reliever?: string
   reason: string
+  /** When false, leave stays Open so attachments can be uploaded before approval. */
+  requestApproval?: boolean
 }
 
 export interface SubmitLeaveResult {
   ok: boolean
   message: string
   returnValue?: string
+  documentNo?: string
   request?: PortalRequest
 }
 
@@ -133,9 +145,60 @@ export async function cancelLeaveRequest(no: string): Promise<{ ok: boolean; mes
   return authPost<{ ok: boolean; message: string }>('/api/leave/cancel', { no })
 }
 
-export async function requestLeaveApproval(no: string): Promise<{ ok: boolean; message: string }> {
+export async function requestLeaveApproval(no: string): Promise<{
+  ok: boolean
+  message: string
+  status?: string
+  requestId?: string
+}> {
   requireAuthApiUrl()
-  return authPost<{ ok: boolean; message: string }>('/api/leave/approval', { no })
+  return authPost<{ ok: boolean; message: string; status?: string; requestId?: string }>(
+    '/api/leave/approval',
+    { no },
+  )
+}
+
+export async function uploadLeaveDocumentAttachment(
+  documentNo: string,
+  attachment: {
+    fileName: string
+    fileType: string
+    size: number
+    contentBase64: string
+    description?: string
+  },
+): Promise<{ ok: boolean }> {
+  requireAuthApiUrl()
+  return authPost<{ ok: boolean }>(
+    `/api/leave/${encodeURIComponent(documentNo)}/attachments`,
+    {
+      ...attachment,
+      description: attachment.description || attachment.fileName.replace(/\.[^.]+$/, '') || 'Leave Attachment',
+    },
+  )
+}
+
+export interface LeaveScheduleRow {
+  id: string
+  applicationCode: string
+  employeeNo: string
+  employeeName: string
+  jobTitle: string
+  leaveType: string
+  daysApplied: number | null
+  startDate: string
+  endDate: string
+  returnDate: string
+  status: string
+  isSelf: boolean
+}
+
+export async function fetchLeaveSchedule(scope: 'self' | 'department' = 'department'): Promise<LeaveScheduleRow[]> {
+  requireAuthApiUrl()
+  const { rows } = await authGet<{ rows: LeaveScheduleRow[] }>('/api/leave/schedule', {
+    params: { scope },
+  })
+  return rows
 }
 
 export async function downloadLeaveStatement(

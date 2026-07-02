@@ -1,4 +1,11 @@
 import type { ODataRecord } from './bcClient.js'
+import {
+  clearLeaveSentForApproval,
+  markLeaveSentForApproval,
+  wasLeaveSentForApproval,
+} from './leaveApprovalCache.js'
+
+export { markLeaveSentForApproval, clearLeaveSentForApproval, wasLeaveSentForApproval }
 
 export const requestServices = {
   imprest: 'QyImprestHeader',
@@ -65,8 +72,9 @@ function bool(row: ODataRecord, keys: string[], fallback = true) {
 export function statusFromBc(raw: string) {
   const status = raw.trim().toLowerCase()
   if (status === 'pending approval') return 'Pending Approval'
-  // BC uses "Pending" and "Open" for editable headers (ESS shows both as Open).
-  if (status === 'pending' || status === 'open') return 'Open'
+  // BC leave headers often keep Status/Open while ApprovalStatus is Pending.
+  if (status === 'pending') return 'Pending Approval'
+  if (status === 'open') return 'Open'
   if (status === 'draft') return 'Draft'
   if (status.includes('approve')) return 'Approved'
   if (status.includes('reject')) return 'Rejected'
@@ -76,12 +84,65 @@ export function statusFromBc(raw: string) {
   return raw.trim() || 'Open'
 }
 
-/** ESS transfer orders use ApprovalStatus; other modules use Status. */
+/** ESS transfer orders use ApprovalStatus; leave uses the same when Status stays Open. */
 export function documentStatusFromBc(row: ODataRecord, requestType: PortalModuleKey) {
-  if (requestType === 'transferOrder') {
+  if (requestType === 'transferOrder' || requestType === 'leave') {
     return text(row, ['ApprovalStatus', 'Approval_Status', 'Status', 'DocumentStatus'])
   }
   return text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])
+}
+
+export function leaveSentForApproval(row: ODataRecord) {
+  const sentAt = text(row, [
+    'DateTimeSentforApproval',
+    'Date_Time_Sent_for_Approval',
+    'DateTimeSentForApproval',
+  ])
+  return Boolean(sentAt && !sentAt.startsWith('0001-01-01'))
+}
+
+function leaveApprovalEntryIsActive(entry: ODataRecord) {
+  const rawStatus = text(entry, ['Status']).trim().toLowerCase()
+  return rawStatus === 'open' || rawStatus === 'pending' || rawStatus === 'created'
+}
+
+/** Resolve leave status from BC header fields plus optional approval entries. */
+export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  const docNo = text(row, ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo'])
+
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
+    return 'Pending Approval'
+  }
+
+  if (leaveSentForApproval(row)) return 'Pending Approval'
+
+  if (approvalEntries.some(leaveApprovalEntryIsActive)) {
+    return 'Pending Approval'
+  }
+
+  const mapped = statusFromBc(documentStatusFromBc(row, 'leave'))
+  if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') {
+    if (docNo) clearLeaveSentForApproval(docNo)
+    return mapped
+  }
+  if (mapped !== 'Open' && mapped !== 'Draft') return mapped
+
+  if (
+    approvalEntries.some((entry) => {
+      const stepStatus = statusFromBc(text(entry, ['Status'], 'Open'))
+      return ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(stepStatus)
+    })
+  ) {
+    return 'Pending Approval'
+  }
+
+  // BC often keeps Status/Open after RequestLeaveApproval; trust portal approval action.
+  if (docNo && wasLeaveSentForApproval(docNo)) {
+    return 'Pending Approval'
+  }
+
+  return mapped
 }
 
 export function mapEmployee(row: ODataRecord) {
@@ -101,7 +162,7 @@ export function mapEmployee(row: ODataRecord) {
     departmentName: text(row, ['DepartmentName', 'Department_Name'], departmentCode),
     branchCode: text(row, ['GlobalDimension2Code', 'BranchCode', 'Branch_Code'], 'HO'),
     branchName: text(row, ['BranchName', 'Branch_Name'], 'Head Office'),
-    jobTitle: text(row, ['JobTitle', 'Job_Title', 'JobID']),
+    jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),
     placeOfDuty: text(row, ['PlaceOfDuty', 'Place_of_Duty']),
     accountNumber: text(row, ['AccountNumber', 'Account_No', 'CustomerNo']),

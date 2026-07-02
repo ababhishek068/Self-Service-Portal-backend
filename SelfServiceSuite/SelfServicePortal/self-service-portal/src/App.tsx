@@ -44,6 +44,7 @@ import { StaffOnLeave } from '@/pages/hod/StaffOnLeave'
 import { Attendance } from '@/pages/hr/Attendance'
 import { DocumentRequisition } from '@/pages/hr/DocumentRequisition'
 import { HrComingSoon } from '@/pages/hr/HrComingSoon'
+import { LeavePlanner } from '@/pages/hr/LeavePlanner'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
 import { LeaveStatement } from '@/pages/hr/LeaveStatement'
 import { OvertimeRequest } from '@/pages/hr/OvertimeRequest'
@@ -112,6 +113,7 @@ export default function App() {
         <Route path="facility/gate-pass/asset-transfer" element={<GatePass source="assetTransfer" />} />
         <Route path="facility/vehicle-transfer" element={<VehicleTransfer />} />
         <Route path="hr/leave-request" element={<LeaveRequest />} />
+        <Route path="hr/leave-planner" element={<LeavePlanner />} />
         <Route path="hr/leave-statement" element={<LeaveStatement />} />
         <Route path="hr/attendance" element={<Attendance />} />
         <Route path="hr/performance" element={<Performance />} />

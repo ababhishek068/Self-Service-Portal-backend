@@ -6,6 +6,7 @@ import {
   Banknote,
   BarChart3,
   Building2,
+  CalendarDays,
   Car,
   CircleX,
   ClipboardCheck,
@@ -57,6 +58,7 @@ export const navigationMenu: NavItem[] = [
     icon: FileText,
     children: [
       { label: 'Leave Requisition', path: '/hr/leave-request', icon: Home },
+      { label: 'Leave Planner', path: '/hr/leave-planner', icon: CalendarDays },
       { label: 'Leave Statement', path: '/hr/leave-statement', icon: ReceiptText },
       { label: 'Attendance', path: '/hr/attendance', icon: UsersRound },
       { label: 'Competency', path: '/hr/performance', icon: BarChart3 },

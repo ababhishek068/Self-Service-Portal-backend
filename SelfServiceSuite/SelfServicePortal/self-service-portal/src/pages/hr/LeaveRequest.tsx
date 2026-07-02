@@ -3,12 +3,13 @@ import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
-import { FileUpload } from '@/components/shared/FileUpload'
+import { FileUpload, type FileUploadItemState } from '@/components/shared/FileUpload'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
 import { RequestProgress } from '@/components/shared/RequestProgress'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,18 +22,20 @@ import {
   fetchLeaveTypes,
   fetchRelievers,
   cancelLeaveRequest,
+  fetchLeaveRequestDetail,
   getLeaveBalance,
   getLeaveDates,
   listLeaveRequests,
   requestLeaveApproval,
   submitLeaveRequest,
+  uploadLeaveDocumentAttachment,
   type LeaveListRow,
   type LeaveType,
 } from '@/api/endpoints/leave'
 import {
   getModuleRequest,
-  uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
+import type { PortalRequest } from '@/types/erp.types'
 import { useAuth } from '@/hooks/useAuth'
 import type { Attachment } from '@/types/erp.types'
 import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
@@ -78,6 +81,73 @@ function payloadValue(payload: Record<string, unknown>, keys: string[], fallback
   return fallback
 }
 
+function resolveCreatedLeaveRequestId(result: {
+  request?: { id?: string; requestNo?: string }
+  documentNo?: string
+  returnValue?: string
+}) {
+  if (result.request?.id) return result.request.id
+  if (result.documentNo) return `leave-${result.documentNo}`
+  if (result.request?.requestNo) return `leave-${result.request.requestNo}`
+  const raw = String(result.returnValue ?? '').trim()
+  if (raw && !['true', 'false', '1', '0', 'yes', 'no'].includes(raw.toLowerCase())) {
+    return `leave-${raw}`
+  }
+  return ''
+}
+
+function resolveCreatedLeaveDocumentNo(result: {
+  request?: { requestNo?: string }
+  documentNo?: string
+  returnValue?: string
+}) {
+  if (result.documentNo) return result.documentNo
+  if (result.request?.requestNo) return result.request.requestNo
+  const raw = String(result.returnValue ?? '').trim()
+  if (raw && !['true', 'false', '1', '0', 'yes', 'no'].includes(raw.toLowerCase())) {
+    return raw
+  }
+  return ''
+}
+
+async function uploadLeaveAttachments(
+  documentNo: string,
+  files: Attachment[],
+  onFileState?: (fileId: string, state: FileUploadItemState) => void,
+) {
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 900 * attempt))
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 800))
+      }
+      for (const file of files) {
+        if (!file.contentBase64) {
+          throw new Error(`${file.fileName} could not be read. Please re-select the file.`)
+        }
+        onFileState?.(file.id, 'uploading')
+        await uploadLeaveDocumentAttachment(documentNo, {
+          fileName: file.fileName,
+          fileType: file.fileType,
+          size: file.size,
+          contentBase64: file.contentBase64,
+          description: file.description || 'Leave Attachment',
+        })
+        onFileState?.(file.id, 'success')
+      }
+      return
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error('Attachment upload failed.')
+      for (const file of files) {
+        onFileState?.(file.id, 'error')
+      }
+    }
+  }
+  throw lastError ?? new Error('Attachment upload failed.')
+}
+
 export function LeaveRequest() {
   const { employee } = useAuth()
   const queryClient = useQueryClient()
@@ -86,14 +156,18 @@ export function LeaveRequest() {
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
+  const [creationAttachmentStates, setCreationAttachmentStates] = useState<Record<string, FileUploadItemState>>({})
   const [detailAction, setDetailAction] = useState<string | null>(null)
   const detailQuery = useQuery({
     queryKey: ['hr', 'leave-detail', selectedRequestId],
-    queryFn: () =>
-      getModuleRequest(
-        { module: 'leave', entity: 'leave' },
-        selectedRequestId!,
-      ),
+    queryFn: async (): Promise<PortalRequest> => {
+      const requestNo = selectedRequestId!.replace(/^leave-/i, '')
+      try {
+        return await fetchLeaveRequestDetail(requestNo)
+      } catch {
+        return getModuleRequest({ module: 'leave', entity: 'leave' }, selectedRequestId!)
+      }
+    },
     enabled: Boolean(selectedRequestId),
   })
   const [leaveType, setLeaveType] = useState('')
@@ -105,6 +179,7 @@ export function LeaveRequest() {
   const [types, setTypes] = useState<LeaveType[]>([])
   const [relievers, setRelievers] = useState<Array<{ value: string; label: string }>>([])
   const [submittingForm, setSubmittingForm] = useState(false)
+  const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating' | 'uploading' | 'approval'>('idle')
 
   const gender = employee?.gender || 'Male'
   const availableTypes = filterLeaveTypesByGender(types, gender)
@@ -218,6 +293,7 @@ export function LeaveRequest() {
     setReliever('')
     setReason('')
     setCreationAttachments([])
+    setCreationAttachmentStates({})
     setError(null)
     setSuccess(null)
   }
@@ -242,8 +318,8 @@ export function LeaveRequest() {
       setError('A supporting attachment is required for sick leave.')
       return
     }
-    if (creationAttachments.some((file) => file.size > 2_999_000)) {
-      setError('Leave attachments cannot exceed 3 MB each.')
+    if (creationAttachments.some((file) => file.size > 10_000_000)) {
+      setError('Leave attachments cannot exceed 10 MB each.')
       return
     }
     if (balance !== null && submittedDays > balance) {
@@ -251,13 +327,20 @@ export function LeaveRequest() {
       return
     }
     const confirmed = await confirm({
-      title: 'Create leave draft',
-      message: 'Create this leave application as a draft? You can review attachments before requesting approval.',
-      confirmLabel: 'Create draft',
+      title: 'Create leave application',
+      message:
+        creationAttachments.length > 0
+          ? 'Create this leave application and upload the selected file(s)? You can then request approval below.'
+          : 'Create this leave application as a draft? You can then request approval below.',
+      confirmLabel: 'Create application',
     })
     if (!confirmed) return
     setSubmittingForm(true)
+    setSubmitPhase('creating')
+    setCreationAttachmentStates({})
+    const hasAttachments = creationAttachments.length > 0
     try {
+      // Step 1 — always create the draft first. Approval is a separate, explicit step.
       const result = await submitLeaveRequest({
         leaveType,
         appliedDays: submittedDays,
@@ -265,39 +348,73 @@ export function LeaveRequest() {
         isHalfDayLeave: halfDay,
         reliever,
         reason,
+        requestApproval: false,
       })
       if (result.ok) {
-        const createdRequestId =
-          result.request?.id ??
-          (result.returnValue ? `leave-${result.returnValue}` : '')
+        const documentNo = resolveCreatedLeaveDocumentNo(result)
+        const createdRequestId = documentNo
+          ? `leave-${documentNo}`
+          : resolveCreatedLeaveRequestId(result)
         let attachmentError = ''
-        if (creationAttachments.length > 0) {
+        const finalStatus = result.request?.status ?? 'Open'
+
+        // Step 2 — upload selected attachments onto the freshly created draft (BC needs the document no first).
+        if (hasAttachments) {
           try {
-            if (!createdRequestId) {
-              throw new Error('The document number was not returned.')
+            if (!documentNo) {
+              throw new Error('The document number was not returned. Refresh the list and open the latest application.')
             }
-            for (const file of creationAttachments) {
-              await uploadRequestAttachment(createdRequestId, {
-                fileName: file.fileName,
-                fileType: file.fileType,
-                size: file.size,
-                contentBase64: file.contentBase64,
-                description: file.description || 'Leave Attachment',
-              })
-            }
+            setSubmitPhase('uploading')
+            await uploadLeaveAttachments(documentNo, creationAttachments, (fileId, state) => {
+              setCreationAttachmentStates((current) => ({ ...current, [fileId]: state }))
+            })
           } catch (err: unknown) {
             attachmentError = err instanceof Error ? err.message : 'Attachment upload failed.'
           }
         }
+
         await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
         await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
-        resetForm()
-        if (createdRequestId) setSelectedRequestId(createdRequestId)
-        setSuccess(attachmentError
-          ? 'Leave draft was created, but its attachment could not be uploaded. Review the draft and retry the upload.'
-          : 'Leave draft created. Review it below, then click Request Approval.')
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-schedule'] })
+
+        if (createdRequestId && documentNo) {
+          setSelectedRequestId(createdRequestId)
+          let detail: PortalRequest | null = null
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            try {
+              detail = await fetchLeaveRequestDetail(documentNo)
+              break
+            } catch {
+              if (attempt < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
+              }
+            }
+          }
+          if (detail) {
+            queryClient.setQueryData(['hr', 'leave-detail', createdRequestId], {
+              ...detail,
+              status: finalStatus,
+            })
+          }
+        }
+
+        setSuccess(
+          attachmentError
+            ? 'Leave application created, but the attachment could not be uploaded. Open it below, retry the upload, then click Request Approval.'
+            : documentNo
+              ? hasAttachments
+                ? 'Leave application created and attachment uploaded. Review it below, then click Request Approval.'
+                : 'Leave application created as a draft. Review it below, then click Request Approval.'
+              : result.message,
+        )
         setError(null)
-        toast.success('Leave draft created. Review it before requesting approval.')
+        toast.success(
+          attachmentError
+            ? 'Leave created, but attachment upload failed.'
+            : documentNo
+              ? 'Leave application created. Click Request Approval below.'
+              : result.message ?? 'Leave application processed.',
+        )
         if (attachmentError) toast.error(attachmentError, 'Attachment not uploaded')
       } else {
         setError(result.message ?? 'Submission failed.')
@@ -308,6 +425,7 @@ export function LeaveRequest() {
       toast.error(err instanceof Error ? err.message : 'Submission failed.', 'Leave not submitted')
     } finally {
       setSubmittingForm(false)
+      setSubmitPhase('idle')
     }
   }
 
@@ -353,8 +471,40 @@ export function LeaveRequest() {
     try {
       const result = await requestLeaveApproval(selected.requestNo)
       if (!result.ok) throw new Error(result.message || 'Approval request failed')
-      await refreshLeave()
+      const nextStatus = result.status ?? 'Pending Approval'
+      queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
+        ...selected,
+        status: nextStatus,
+        approvalSteps:
+          selected.approvalSteps.length > 0
+            ? selected.approvalSteps
+            : [
+                {
+                  id: 'pending-approval',
+                  actorName: 'Awaiting approver assignment',
+                  role: 'Approver',
+                  status: 'Pending Approval',
+                  timestamp: new Date().toISOString(),
+                  sequenceNo: 1,
+                },
+              ],
+      })
+      queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+        (rows ?? []).map((row) =>
+          row.ApplicationCode === selected.requestNo ? { ...row, Status: nextStatus } : row,
+        ),
+      )
       toast.success(result.message || 'Leave application sent for approval')
+      try {
+        const detail = await fetchLeaveRequestDetail(selected.requestNo)
+        queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
+          ...detail,
+          status: nextStatus,
+        })
+      } catch {
+        // keep optimistic cache when detail refresh fails
+      }
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Approval request failed', 'Approval not requested')
     } finally {
@@ -368,7 +518,10 @@ export function LeaveRequest() {
     ? ['Open', 'Draft', 'Pending Approval'].includes(selected.status)
     : false
   const selectedCanRequestApproval = selected
-    ? ['Open', 'Draft'].includes(selected.status)
+    ? ['Open', 'Draft'].includes(selected.status) &&
+      !selected.approvalSteps.some((step) =>
+        ['Pending Approval', 'Submitted', 'Approved'].includes(step.status),
+      )
     : false
 
   return (
@@ -528,34 +681,67 @@ export function LeaveRequest() {
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-[1fr_280px] lg:gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="reason">Leave Reason</Label>
-                  <Textarea
-                    id="reason"
-                    rows={5}
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2 rounded border-l-4 border-orange-500 bg-orange-50 p-3 text-sm text-orange-800">
+              <div className="space-y-1.5">
+                <Label htmlFor="reason">Leave Reason</Label>
+                <Textarea
+                  id="reason"
+                  rows={5}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-3 rounded-xl border-l-4 border-orange-500 bg-orange-50 p-4 text-sm text-orange-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-bold">
                     Leave Attachments{leaveType === 'SICK' ? ' (Required)' : ' (Optional)'}
                   </p>
-                  <FileUpload files={creationAttachments} onChange={setCreationAttachments} />
-                  <p>Maximum 3 MB per file for leave creation.</p>
+                  {creationAttachments.length > 0 ? (
+                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                      {creationAttachments.length} file{creationAttachments.length === 1 ? '' : 's'} selected
+                    </span>
+                  ) : null}
                 </div>
+                <p className="text-xs text-orange-800/90">
+                  {creationAttachments.length > 0
+                    ? 'Selected files are listed below. They upload to Business Central right after the draft is created. You then click Request Approval below.'
+                    : 'Choose your files first — they appear here immediately, then upload automatically once the draft is created.'}
+                </p>
+                <FileUpload
+                  files={creationAttachments}
+                  onChange={(files) => {
+                    setCreationAttachments(files)
+                    setCreationAttachmentStates({})
+                  }}
+                  hideHeader
+                  hideEmptyState
+                  compactWhenHasFiles
+                  fileStates={creationAttachmentStates}
+                  emptyHint="No files selected yet. Choose PDF, DOC, DOCX, JPG, or PNG up to 10 MB each."
+                />
+                {submitPhase === 'uploading' ? (
+                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                    Uploading selected file(s) to the leave draft…
+                  </p>
+                ) : null}
+                <p className="text-xs text-orange-800/90">Maximum 10 MB per file for leave attachments.</p>
               </div>
 
               <div className="flex justify-center pt-2">
                 <Button
                   type="submit"
                   variant="accent"
-                  className="min-w-[140px] rounded-full"
+                  className="min-w-[180px] rounded-full"
                   disabled={submittingForm || !canSubmit}
                 >
-                  {submittingForm ? 'Creating draft…' : 'Create draft'}
+                  {submitPhase === 'creating'
+                    ? 'Creating draft…'
+                    : submitPhase === 'uploading'
+                      ? 'Uploading attachments…'
+                      : submittingForm
+                        ? 'Saving…'
+                        : 'Create Leave Application'}
                 </Button>
               </div>
             </div>
@@ -643,6 +829,12 @@ export function LeaveRequest() {
                     </dd>
                   </div>
                   <div>
+                    <dt className="text-xs text-slate-500">Reliever</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['RelieverName', 'Reliever_Name', 'Reliever'])}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-xs text-slate-500">Reason</dt>
                     <dd className="text-sm font-medium">
                       {payloadValue(selectedPayload, ['Reason', 'reason'])}
@@ -650,13 +842,26 @@ export function LeaveRequest() {
                   </div>
                 </dl>
 
+                {selected.approvalSteps.length > 0 ? (
+                  <section>
+                    <h3 className="mb-3 text-sm font-semibold text-slate-900">Approval workflow</h3>
+                    <ApprovalTimeline steps={selected.approvalSteps} />
+                  </section>
+                ) : null}
+
                 <RequestAttachments
                   requestId={selected.id}
                   attachments={selected.attachments}
                   canUpload={canUploadRequestAttachments(selected.status)}
                   canDelete={canDeleteRequestItems(selected.status)}
-                  onUpdated={(request) => {
+                  onUpdated={async (request) => {
                     queryClient.setQueryData(['hr', 'leave-detail', selected.id], request)
+                    try {
+                      const detail = await fetchLeaveRequestDetail(selected.requestNo)
+                      queryClient.setQueryData(['hr', 'leave-detail', selected.id], detail)
+                    } catch {
+                      // keep portal request payload when staff detail refresh fails
+                    }
                     void refreshLeave()
                   }}
                 />

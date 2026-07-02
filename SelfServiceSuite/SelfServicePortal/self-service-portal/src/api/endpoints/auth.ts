@@ -157,7 +157,8 @@ export async function fetchCurrentUser(): Promise<Employee | null> {
   requireAuthApiUrl()
   if (!getToken()) return null
   try {
-    const { user } = await authGet<{ user: AuthUser }>('/api/auth/me')
+    const { user, token } = await authGet<{ user: AuthUser; token?: string }>('/api/auth/me')
+    if (token) setToken(token)
     return toEmployee(user)
   } catch {
     return null

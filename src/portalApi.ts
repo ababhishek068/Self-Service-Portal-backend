@@ -14,11 +14,12 @@ import { requireAuth, type AuthUser } from './auth.js'
 import {
   approvalModuleFromEntry,
   approvalTableFilter,
+  approvalTableIdsFor,
   isSupportedFrontendModule,
   resolveApprovalModuleFromEntry,
   type SupportedFrontendModule,
 } from './approvalTableIds.js'
-import { mapItem, mapRequest, type PortalModuleKey } from './erpMappings.js'
+import { documentStatusFromBc, mapItem, mapRequest, resolveLeaveStatus, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
   createPortalModuleRequest,
@@ -631,8 +632,49 @@ async function fetchLeaveApplication(
   return null
 }
 
-async function fetchLeaveApprovalEntries(no: string, authUser: AuthUser) {
-  return fetchApproverEntriesForDocument(no, authUser)
+async function fetchLeaveApprovalEntries(no: string) {
+  for (const candidate of leaveDocumentNoCandidates(no)) {
+    const withTable = (await fetchOData('QyApprovalEntry', {
+      $filter: `DocumentNo eq '${odataString(candidate)}' and ${approvalTableFilter('leave')}`,
+    }).catch(() => [])) as ODataRecord[] | null
+    if (Array.isArray(withTable) && withTable.length > 0) return withTable
+
+    const anyTable = (await fetchOData('QyApprovalEntry', {
+      $filter: `DocumentNo eq '${odataString(candidate)}'`,
+      $top: 20,
+    }).catch(() => [])) as ODataRecord[] | null
+    const leaveRows = filterLikelyLeaveApprovalEntries(Array.isArray(anyTable) ? anyTable : [])
+    if (leaveRows.length > 0) return leaveRows
+  }
+  return []
+}
+
+function filterLikelyLeaveApprovalEntries(rows: ODataRecord[]) {
+  const leaveTableIds = new Set(approvalTableIdsFor('leave'))
+  return rows.filter((row) => {
+    const tableId = Number(row.TableID ?? row.TableId ?? 0)
+    if (leaveTableIds.has(tableId)) return true
+    const documentType = text(row, ['DocumentType', 'Document_Type']).toLowerCase()
+    return documentType.includes('leave')
+  })
+}
+
+function resolveLeaveDocumentStatus(
+  row: ODataRecord,
+  approvalSteps: ReturnType<typeof mapApprovalSteps>,
+  entry?: ODataRecord,
+  approvalEntries: ODataRecord[] = entry ? [entry] : [],
+) {
+  const resolved = resolveLeaveStatus(row, approvalEntries)
+  if (resolved !== 'Open' && resolved !== 'Draft') return resolved
+  if (
+    approvalSteps.some((step) =>
+      ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(step.status),
+    )
+  ) {
+    return 'Pending Approval'
+  }
+  return resolved
 }
 
 function leaveHintsFromApprovalEntry(entry?: ODataRecord): LeaveLookupHints {
@@ -680,16 +722,21 @@ function buildLeaveRequestDetail(
 ) {
   const mapped = mapRequest(row, 'leave')
   const steps = mapApprovalSteps(approvalSteps)
-  const pendingApprovalEntry = steps.find((step) => step.status === 'Pending Approval' || step.status === 'Submitted')
-  const resolvedStatus =
-    mapped.status === 'Open' && pendingApprovalEntry
-      ? 'Pending Approval'
-      : mapped.status
+  const approvalEntryRows = Array.isArray(approvalSteps)
+    ? (approvalSteps as ODataRecord[])
+    : entry
+      ? [entry]
+      : []
+  const resolvedStatus = resolveLeaveDocumentStatus(row, steps, entry, approvalEntryRows)
+  const approvalStepsResolved =
+    steps.length > 0
+      ? steps
+      : fallbackApprovalStepsFromHeader(row, resolvedStatus)
   return {
     ...mapped,
     status: resolvedStatus,
     payload: leavePayloadFromRow(row, no, entry),
-    approvalSteps: steps,
+    approvalSteps: approvalStepsResolved,
     attachments: mapAttachments(attachments),
   }
 }
@@ -748,18 +795,14 @@ async function resolveLeaveRequestDetail(
 ) {
   const { no } = parseRequestId(requestId)
   const approvalEntries =
-    options.approvalEntries ?? (await fetchLeaveApprovalEntries(no, authUser))
+    options.approvalEntries ?? (await fetchLeaveApprovalEntries(no))
   const entry = approvalEntries[0]
   const hints = leaveHintsFromApprovalEntry(entry)
   const row = await fetchLeaveApplication(no, hints, entry)
   const [approvers, attachments] = await Promise.all([
     approvalEntries.length
       ? Promise.resolve(approvalEntries)
-      : fetchOData('QyApprovalEntry', {
-          $filter:
-            `DocumentNo eq '${odataString(no)}'` +
-            ` and ${approvalTableFilter('leave')}`,
-        }).catch(() => [] as ODataRecord[]),
+      : fetchLeaveApprovalEntries(no),
     fetchDocumentAttachments(no, 50532).catch(() => [] as ODataRecord[]),
   ])
 
@@ -891,7 +934,11 @@ export function mapApprovalSteps(value: unknown) {
         id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
         actorEmployeeNo: approverId || senderId,
         actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
-        role: approverId ? 'Checker' : 'Requester',
+        role: text(
+          row,
+          ['ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation'],
+          approverId ? 'Approver' : 'Requester',
+        ),
         status,
         timestamp: text(row, ['DateTimeSentforApproval', 'DueDate', 'Date']),
         note: text(row, ['Comment', 'Comments']),
