@@ -42,7 +42,7 @@ import { HodTeamRequests } from '@/pages/hod/HodTeamRequests'
 import { HodEmployeeDetail } from '@/pages/hod/HodEmployeeDetail'
 import { StaffOnLeave } from '@/pages/hod/StaffOnLeave'
 import { Attendance } from '@/pages/hr/Attendance'
-import { DocumentRequisition } from '@/pages/hr/DocumentRequisition'
+import { HrServiceRequestLetters } from '@/pages/hr/HrServiceRequestLetters'
 import { HrComingSoon } from '@/pages/hr/HrComingSoon'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
 import { LeaveStatement } from '@/pages/hr/LeaveStatement'
@@ -116,9 +116,11 @@ export default function App() {
         <Route path="hr/attendance" element={<Attendance />} />
         <Route path="hr/performance" element={<Performance />} />
         <Route path="hr/training-request" element={<TrainingRequest />} />
+        <Route path="hr/staff-medical-claim" element={<StaffClaim medicalOnly />} />
         <Route path="hr/payslip" element={<Payslip />} />
         <Route path="hr/salary-advance" element={<SalaryAdvance />} />
-        <Route path="hr/document-requisition" element={<DocumentRequisition />} />
+        <Route path="hr/service-request-letters" element={<HrServiceRequestLetters />} />
+        <Route path="hr/document-requisition" element={<Navigate to="/hr/service-request-letters" replace />} />
         <Route
           path="hr/employee-resignation"
           element={(

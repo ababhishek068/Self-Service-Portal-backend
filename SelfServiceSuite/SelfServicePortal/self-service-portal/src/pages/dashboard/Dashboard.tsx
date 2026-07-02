@@ -84,7 +84,7 @@ const tiles: DashboardTile[] = [
   },
   {
     id: 'staffClaims',
-    label: 'Staff Claims',
+    label: 'Staff Claim',
     href: '/finance/staff-claim',
     icon: BadgeCheck,
     tone: 'from-emerald-700 via-emerald-700 to-emerald-800',

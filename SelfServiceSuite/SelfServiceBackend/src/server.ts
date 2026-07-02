@@ -273,8 +273,8 @@ app.use('/api', (_req, res) => {
 if (existsSync(portalIndex)) {
   app.use(
     express.static(portalStaticDir, {
-      setHeaders: (res, path) => {
-        if (path.endsWith('index.html')) {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html') || filePath.endsWith('.js') || filePath.endsWith('.css')) {
           res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
         }
       },

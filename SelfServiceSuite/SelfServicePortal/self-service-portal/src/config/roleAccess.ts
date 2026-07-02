@@ -37,6 +37,18 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: ['staff'],
   },
   {
+    label: 'Medical claim',
+    href: '/hr/staff-medical-claim',
+    description: 'Submit a medical expense claim through HR.',
+    roles: ['staff'],
+  },
+  {
+    label: 'HR service letters',
+    href: '/hr/service-request-letters',
+    description: 'Request guarantee, experience, mortgage, and emergency loan letters.',
+    roles: ['staff'],
+  },
+  {
     label: 'View payslip',
     href: '/hr/payslip',
     description: 'Generate your monthly payslip.',

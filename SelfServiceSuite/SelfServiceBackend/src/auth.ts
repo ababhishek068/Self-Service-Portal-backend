@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
 import { callSoapMethod, fetchOData, odataString } from './bcClient.js'
 import { config } from './config.js'
+import { employeeAnnualLeaveBalance } from './leaveBalance.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
 /**
@@ -376,7 +377,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
-    leaveBalance: Number(employee.LeaveBalance ?? 0),
+    leaveBalance: employeeAnnualLeaveBalance(employee as Record<string, unknown>) ?? 0,
     responsibleCenter,
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,

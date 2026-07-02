@@ -55,6 +55,11 @@ rsync -a \
 rsync -a \
   "$BC/public/" "$STAGING/SelfServiceSuite/SelfServiceBackend/public/"
 rsync -a \
+  --exclude 'node_modules/' \
+  "$FRONTEND/src/" "$STAGING/SelfServiceSuite/SelfServicePortal/self-service-portal/src/"
+rsync -a \
+  "$FRONTEND/dist/" "$STAGING/SelfServiceSuite/SelfServicePortal/self-service-portal/dist/"
+rsync -a \
   "$BC/src/" "$STAGING/SelfServiceSuite/SelfServiceBackend/src/"
 cp "$BC/package.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package.json"
 cp "$BC/package-lock.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package-lock.json"

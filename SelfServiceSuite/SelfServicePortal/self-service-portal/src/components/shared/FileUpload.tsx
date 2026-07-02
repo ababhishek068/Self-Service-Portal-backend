@@ -1,7 +1,7 @@
 import { FileUp, Paperclip } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import type { Attachment } from '@/types/erp.types'
-import { cn } from '@/lib/utils'
+import { cn, safeRandomId } from '@/lib/utils'
 import { AttachmentFileCard, formatFileSize } from './attachmentUi'
 
 interface FileUploadProps {
@@ -44,7 +44,7 @@ export function FileUpload({ files, onChange }: FileUploadProps) {
               reader.onerror = () => reject(new Error(`Could not read ${file.name}`))
               reader.onload = () =>
                 resolve({
-                  id: crypto.randomUUID(),
+                  id: safeRandomId(),
                   fileName: file.name,
                   fileType: file.type || 'application/octet-stream',
                   size: file.size,

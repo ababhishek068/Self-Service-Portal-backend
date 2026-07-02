@@ -13,6 +13,7 @@ import {
   CloudDownload,
   Crown,
   DoorOpen,
+  FileSignature,
   FileText,
   Fuel,
   Gauge,
@@ -61,14 +62,10 @@ export const navigationMenu: NavItem[] = [
       { label: 'Attendance', path: '/hr/attendance', icon: UsersRound },
       { label: 'Competency', path: '/hr/performance', icon: BarChart3 },
       { label: 'Training Request', path: '/hr/training-request', icon: FileText },
+      { label: 'Medical Claim', path: '/hr/staff-medical-claim', icon: BadgeCheck },
       { label: 'Payslip', path: '/hr/payslip', icon: Wallet },
       { label: 'Salary Advance', path: '/hr/salary-advance', icon: Banknote },
-      {
-        label: 'Document Requisition',
-        path: '/hr/document-requisition',
-        icon: FileText,
-        underConstruction: true,
-      },
+      { label: 'HR Service Request Letters', path: '/hr/service-request-letters', icon: FileSignature },
       {
         label: 'Employee Resignation',
         path: '/hr/employee-resignation',
@@ -89,7 +86,7 @@ export const navigationMenu: NavItem[] = [
     children: [
       { label: 'Imprest Requisition', path: '/finance/imprest', icon: Banknote },
       { label: 'Imprest Surrender', path: '/finance/imprest-surrender', icon: ReceiptText },
-      { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
+      { label: 'Staff Claim', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Petty Cash Request', path: '/finance/petty-cash', icon: Banknote },
       { label: 'Petty Cash Replenishment', path: '/finance/petty-cash-replenishment', icon: ReceiptText },
     ],

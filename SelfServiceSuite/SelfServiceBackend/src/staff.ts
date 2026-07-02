@@ -8,6 +8,24 @@ import {
   getPortalModuleDocument,
   listPortalModuleLines,
 } from './staffModules.js'
+import {
+  discoverAnnualLeaveBalance,
+  employeeAnnualLeaveBalance,
+  employeeLeaveMetrics as buildEmployeeLeaveMetrics,
+  leaveBalanceFieldSnapshot,
+  positiveSessionAnnualBalance,
+  resolveAnnualLeaveBalance,
+  resolveAnnualLeaveEntitlement,
+} from './leaveBalance.js'
+
+export {
+  discoverAnnualLeaveBalance,
+  employeeAnnualLeaveBalance,
+  employeeLeaveMetrics,
+  positiveSessionAnnualBalance,
+  resolveAnnualLeaveBalance,
+  resolveAnnualLeaveEntitlement,
+} from './leaveBalance.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -62,13 +80,16 @@ export function halfDayOptionValue(value: string) {
 
 export function leaveTypeIsAnnual(row: ODataRecord | null | undefined) {
   if (!row) return false
-  const annual = row.Annual ?? row.annual
+  const annual = row.Annual ?? row.annual ?? row.IsAnnual ?? row.isAnnual
   if (typeof annual === 'boolean') return annual
   if (typeof annual === 'string') {
     const normalized = annual.trim().toLowerCase()
-    return normalized === 'yes' || normalized === 'true'
+    return normalized === 'yes' || normalized === 'true' || normalized === '1'
   }
-  return String(row.Code ?? '') === '0001'
+  const code = String(row.Code ?? '').trim()
+  if (code === '0001' || code === '1') return true
+  const description = String(row.Description ?? row.Name ?? '').trim().toLowerCase()
+  return /annual\s*leave/.test(description)
 }
 
 export function halfDayRequiresAnnualLeave(value: string) {
@@ -101,26 +122,24 @@ function roundLeaveValue(value: number) {
   return Math.round(value * 100) / 100
 }
 
-function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
-  return {
-    leaveBalance:
-      fieldNumber(row, ['LeaveBalance', 'Leave_Balance', 'AnnualLeaveBalance', 'Annual_Leave_Balance']) ??
-      (Number.isFinite(Number(user.leaveBalance)) ? Number(user.leaveBalance) : null),
-    earnedLeaveDays: fieldNumber(row, [
-      'EarnedLeaveDays',
-      'Earned_Leave_Days',
-      'EarnedLeave',
-      'Earned_Leave',
-    ]),
-  }
+function metricsForUser(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
+  return buildEmployeeLeaveMetrics(row, user.leaveBalance)
 }
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `No eq '${odataString(employeeNo)}'`,
-    $top: 1,
-  }).catch(() => [])) as ODataRecord[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  const filters = [
+    `No eq '${odataString(employeeNo)}'`,
+    `Employee_No eq '${odataString(employeeNo)}'`,
+    `EmployeeNo eq '${odataString(employeeNo)}'`,
+  ]
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHREmployee', {
+      $filter: filter,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+  }
+  return null
 }
 
 function likelyActiveEmployee(row: ODataRecord) {
@@ -582,14 +601,17 @@ export function buildStaffRouter() {
         }) as Promise<ODataRecord[] | null>,
         fetchCurrentEmployeeRow(user.employeeNo),
       ])
-      const metrics = employeeLeaveMetrics(employeeRow, user)
+      const metrics = metricsForUser(employeeRow, user)
       res.json({
         rows: (Array.isArray(rows) ? rows : []).map((row) => ({
           ...row,
           Hourly: soapTruthy(String(row.Hourly ?? row.Allow_Hourly ?? false)),
           Days: leaveTypeIsAnnual(row)
             ? roundLeaveValue(
-                metrics.earnedLeaveDays ?? metrics.leaveBalance ?? Number(row.Days ?? row.NoofDays ?? 0),
+                resolveAnnualLeaveEntitlement(
+                  metrics,
+                  Number(row.Days ?? row.NoofDays ?? 0),
+                ),
               )
             : roundLeaveValue(Number(row.Days ?? row.NoofDays ?? 0)),
           Annual: leaveTypeIsAnnual(row),
@@ -636,7 +658,7 @@ export function buildStaffRouter() {
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
       const isHourly = soapTruthy(String(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false))
       const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
-      const metrics = employeeLeaveMetrics(employeeRow, user)
+      const metrics = metricsForUser(employeeRow, user)
 
       let additions = 0
       let deductions = 0
@@ -650,18 +672,27 @@ export function buildStaffRouter() {
         }
       }
 
+      const ledgerNet = additions - deductions
       let leaveBalance = 0
       if (isAnnual) {
-        leaveBalance = metrics.leaveBalance ?? metrics.earnedLeaveDays ?? additions - deductions
+        leaveBalance = resolveAnnualLeaveBalance(metrics, ledgerNet, leaveTypeDays)
       } else {
         leaveBalance = leaveTypeDays - (deductions - additions)
       }
       const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
       const entitlement = isAnnual
-        ? roundLeaveValue(metrics.earnedLeaveDays ?? metrics.leaveBalance ?? leaveTypeDays)
+        ? roundLeaveValue(resolveAnnualLeaveEntitlement(metrics, leaveTypeDays))
         : roundLeaveValue(leaveTypeDays)
 
-      res.json({ balance, pendingCount, isHourly, entitlement })
+      res.json({
+        balance,
+        pendingCount,
+        isHourly,
+        entitlement,
+        ...(balance === 0 && isAnnual
+          ? { leaveFields: leaveBalanceFieldSnapshot(employeeRow) }
+          : {}),
+      })
     }),
   )
 

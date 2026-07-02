@@ -28,7 +28,7 @@ import {
   resolvePurchaseRequestingDepartment,
 } from './staffModules.js'
 import { friendlySoapFaultMessage, soapFaultMessage } from './bcClient.js'
-import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
+import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave, employeeAnnualLeaveBalance, employeeLeaveMetrics, resolveAnnualLeaveBalance, resolveAnnualLeaveEntitlement } from './staff.js'
 import {
   approvalModule,
   mapApprovalSteps,
@@ -330,6 +330,55 @@ describe('leaveTypeIsAnnual', () => {
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: true }), true)
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: 'Yes' }), true)
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: false }), false)
+    assert.equal(leaveTypeIsAnnual({ Code: 'AL', Description: 'Annual Leave' }), true)
+    assert.equal(leaveTypeIsAnnual({ Code: 'SICK', Description: 'Sick Leave' }), false)
+  })
+})
+
+describe('annual leave balance helpers', () => {
+  it('prefers annual leave balance over generic leave balance', () => {
+    const row = {
+      LeaveBalance: -31,
+      EarnedLeaveDays: -31.17,
+      AnnualLeaveBalance: 43.28,
+    }
+    assert.equal(employeeAnnualLeaveBalance(row), 43.28)
+    assert.equal(
+      resolveAnnualLeaveBalance(
+        { annualLeaveBalance: 43.28, earnedLeaveDays: -31.17 },
+        0,
+        16,
+      ),
+      43.28,
+    )
+    assert.equal(
+      resolveAnnualLeaveEntitlement(
+        { annualLeaveBalance: 43.28, earnedLeaveDays: -31.17 },
+        16,
+      ),
+      43.28,
+    )
+  })
+
+  it('ignores negative generic leave balance values', () => {
+    assert.equal(
+      employeeLeaveMetrics({ LeaveBalance: -31, EarnedLeaveDays: -31.17 }, -31).annualLeaveBalance,
+      null,
+    )
+  })
+
+  it('discovers annual leave balance from non-standard OData field names', () => {
+    assert.equal(employeeAnnualLeaveBalance({ Annual_Leave_Bala: 43.28 }), 43.28)
+  })
+
+  it('falls back to leave type days only when annual balance is unavailable', () => {
+    assert.equal(
+      resolveAnnualLeaveEntitlement(
+        { annualLeaveBalance: null, earnedLeaveDays: -31.17 },
+        16,
+      ),
+      16,
+    )
   })
 })
 

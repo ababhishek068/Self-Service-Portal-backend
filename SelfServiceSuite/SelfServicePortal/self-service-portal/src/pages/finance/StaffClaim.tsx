@@ -17,6 +17,13 @@ function isMedicalClaim(claimType: unknown) {
   return String(claimType ?? '').toUpperCase().includes('MEDICAL')
 }
 
+function medicalClaimTypeOptions(options: LookupOption[]) {
+  const medical = options.filter(
+    (option) => isMedicalClaim(option.value) || isMedicalClaim(option.label),
+  )
+  return medical.length > 0 ? medical : claimTypeOptions.filter((option) => option.value === 'MEDICAL')
+}
+
 function accountNameForNo(accountNo: string, glAccounts: LookupOption[]) {
   const match = glAccounts.find((option) => option.value === accountNo)
   if (!match) return ''
@@ -100,23 +107,32 @@ function useStaffClaimLineChange(claimTypes: LookupOption[], glAccounts: LookupO
   )
 }
 
-export function StaffClaim() {
+export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
   const claimTypes = useLookupOptions('claim-types', claimTypeOptions)
   const glAccounts = useLookupOptions('gl-accounts')
-  const onLineValuesChange = useStaffClaimLineChange(claimTypes.options, glAccounts.options)
+  const claimTypeChoices = medicalOnly ? medicalClaimTypeOptions(claimTypes.options) : claimTypes.options
+  const defaultMedicalClaimType = claimTypeChoices[0]?.value ?? 'MEDICAL'
+  const onLineValuesChange = useStaffClaimLineChange(claimTypeChoices, glAccounts.options)
 
   return (
     <MultiStepRequestPage
-      title="Staff Claim"
-      headerLabel="New Claim Request"
-      description="Create a claim header, then add claim lines (claim type, GL account, hospital category, expenditure) before requesting approval."
+      title={medicalOnly ? 'Medical Claim' : 'Staff Claim'}
+      headerLabel={medicalOnly ? 'New Medical Claim' : 'New Claim Request'}
+      description={
+        medicalOnly
+          ? 'Create a medical claim header, then add claim lines with hospital category and medical amount before requesting approval.'
+          : 'Create a claim header, then add claim lines (claim type, GL account, hospital category, expenditure) before requesting approval.'
+      }
       module={module}
-      queryKey={['finance', 'staff-claim']}
+      queryKey={medicalOnly ? ['hr', 'staff-medical-claim'] : ['finance', 'staff-claim']}
       listRequests={() => listModuleRequests(module)}
-      newButtonLabel="New Claim Request"
+      newButtonLabel={medicalOnly ? 'New Medical Claim' : 'New Claim Request'}
       headerSchema={staffClaimHeaderSchema}
-      headerDefaults={{ claimDate: today, purpose: '' }}
-      buildHeaderPayload={(values) => ({ ...values, title: String(values.purpose || 'Staff Claim') })}
+      headerDefaults={{ claimDate: today, purpose: medicalOnly ? 'Medical Claim' : '' }}
+      buildHeaderPayload={(values) => ({
+        ...values,
+        title: String(values.purpose || (medicalOnly ? 'Medical Claim' : 'Staff Claim')),
+      })}
       headerFields={[
         { name: 'claimDate', label: 'Claim Date', type: 'date', readOnly: true, valuePaths: ['ClaimDate', 'Claim_Date', 'Date'] },
         { name: 'purpose', label: 'Claim Purpose', type: 'textarea', valuePaths: ['Purpose', 'ClaimDescription', 'Claim_Description'] },
@@ -137,7 +153,7 @@ export function StaffClaim() {
         addLabel: 'Add Claim Line',
         schema: staffClaimLineSchema,
         defaultValues: {
-          claimType: '',
+          claimType: medicalOnly ? defaultMedicalClaimType : '',
           accountNo: '',
           accountName: '',
           hospitalCategory: '',
@@ -158,7 +174,7 @@ export function StaffClaim() {
         },
         onValuesChange: onLineValuesChange,
         fields: [
-          { name: 'claimType', label: 'Claim Type', type: 'select', options: claimTypes.options },
+          { name: 'claimType', label: 'Claim Type', type: 'select', options: claimTypeChoices },
           { name: 'accountNo', label: 'Account No.', type: 'select', options: glAccounts.options },
           {
             name: 'hospitalCategory',

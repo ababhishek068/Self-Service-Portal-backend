@@ -10,6 +10,7 @@ import {
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
+import { employeeAnnualLeaveBalance } from './leaveBalance.js'
 import { requireAuth, type AuthUser } from './auth.js'
 import {
   approvalModuleFromEntry,
@@ -1110,12 +1111,34 @@ async function fetchHodDepartmentStaff(authUser: AuthUser) {
 
 function dateOnly(value: unknown) {
   const raw = String(value ?? '').trim()
-  return raw ? raw.slice(0, 10) : ''
+  if (!raw) return ''
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const slashYmd = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(raw)
+  if (slashYmd) {
+    const [, year, month, day] = slashYmd
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  const slashDmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw)
+  if (slashDmy) {
+    const [, first, second, year] = slashDmy
+    const firstNumber = Number(first)
+    const secondNumber = Number(second)
+    const day = firstNumber > 12 ? first : second
+    const month = firstNumber > 12 ? second : first
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function activeLeaveRow(row: ODataRecord, today: string) {
   const status = normalizedMatchValue(text(row, ['Status', 'ApprovalStatus', 'Approval_Status']))
-  if (/cancel|reject|draft|open|pending/.test(status)) return false
+  if (/cancel|reject|draft/.test(status)) return false
   const startDate = dateOnly(text(row, ['StartDate', 'Start_Date', 'FromDate', 'From_Date']))
   const endDate = dateOnly(text(row, ['EndDate', 'End_Date', 'ToDate', 'To_Date', 'ReturnDate', 'Return_Date']))
   if (!startDate && !endDate) return false
@@ -1145,22 +1168,24 @@ function leaveLedgerDays(row: ODataRecord) {
 }
 
 function employeeLeaveBalance(row: ODataRecord) {
-  return number(row, [
-    'LeaveBalance',
-    'Leave_Balance',
-    'AnnualLeaveBalance',
-    'Annual_Leave_Balance',
-    'Balance',
-  ])
+  return employeeAnnualLeaveBalance(row) ?? 0
 }
 
 async function activeLeaveForEmployee(employeeNo: string) {
   const today = new Date().toISOString().slice(0, 10)
-  const rows = (await fetchOData('QyHRLeaveApplications', {
-    $filter: `EmployeeNo eq '${odataString(employeeNo)}'`,
-  }).catch(() => [])) as ODataRecord[]
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (activeLeaveRow(row, today)) return row
+  const filters = [
+    `EmployeeNo eq '${odataString(employeeNo)}'`,
+    `Employee_No eq '${odataString(employeeNo)}'`,
+    `StaffNo eq '${odataString(employeeNo)}'`,
+    `Staff_No eq '${odataString(employeeNo)}'`,
+  ]
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHRLeaveApplications', {
+      $filter: filter,
+    }).catch(() => [])) as ODataRecord[]
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (activeLeaveRow(row, today)) return row
+    }
   }
   return null
 }
@@ -2440,8 +2465,6 @@ export function buildPortalApiRouter() {
         })
       }
 
-      const hasLedgerRows = Array.isArray(ledgerRows) && ledgerRows.length > 0
-
       res.json(
         (Array.isArray(employees) ? employees : []).map((employee) => {
           const employeeNo = employeeNoFromRow(employee)
@@ -2464,13 +2487,15 @@ export function buildPortalApiRouter() {
               'ShortcutDimension2Code',
             ]),
             leaveTypes: leaveTypeList.map((leaveType) => {
-              const totals = ledgerByEmployeeAndType.get(`${employeeNo}::${leaveType.code}`) ?? {
+              const employeeTypeKey = `${employeeNo}::${leaveType.code}`
+              const totals = ledgerByEmployeeAndType.get(employeeTypeKey) ?? {
                 additions: 0,
                 deductions: 0,
               }
+              const hasEmployeeTypeLedger = ledgerByEmployeeAndType.has(employeeTypeKey)
               const useEmployeeBalance =
                 leaveType.employeeBalanceFallback ||
-                (!hasLedgerRows && fallbackBalance !== 0 && (
+                (!hasEmployeeTypeLedger && fallbackBalance !== 0 && (
                   leaveType.code === '0001' ||
                   leaveTypeList.length === 1 ||
                   /annual|leave balance/i.test(leaveType.label)
