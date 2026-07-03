@@ -1,5 +1,6 @@
 import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { env } from '@/config/env'
+import { trackAxiosActivity } from '@/lib/apiActivity'
 
 /**
  * HTTP client for "our backend" (Node/Express) — way #2 login.
@@ -90,9 +91,13 @@ export function clearToken(): void {
 
 export const authHttp: AxiosInstance = axios.create({
   baseURL: env.AUTH_API_URL || '',
-  timeout: 20000,
+  timeout: 45000,
   headers: { Accept: 'application/json' },
 })
+
+// Register first so it settles the global activity counter using the raw
+// AxiosError (which carries `config`) before the error is normalized below.
+trackAxiosActivity(authHttp)
 
 authHttp.interceptors.request.use((config) => {
   const base = resolveApiBaseUrl()

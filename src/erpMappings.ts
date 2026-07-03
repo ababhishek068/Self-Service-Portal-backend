@@ -1,11 +1,4 @@
 import type { ODataRecord } from './bcClient.js'
-import {
-  clearLeaveSentForApproval,
-  markLeaveSentForApproval,
-  wasLeaveSentForApproval,
-} from './leaveApprovalCache.js'
-
-export { markLeaveSentForApproval, clearLeaveSentForApproval, wasLeaveSentForApproval }
 
 export const requestServices = {
   imprest: 'QyImprestHeader',
@@ -103,13 +96,48 @@ export function leaveSentForApproval(row: ODataRecord) {
 
 function leaveApprovalEntryIsActive(entry: ODataRecord) {
   const rawStatus = text(entry, ['Status']).trim().toLowerCase()
-  return rawStatus === 'open' || rawStatus === 'pending' || rawStatus === 'created'
+  if (rawStatus === 'open' || rawStatus === 'pending' || rawStatus === 'created') return true
+  return rawStatus.includes('pending')
 }
 
-/** Resolve leave status from BC header fields plus optional approval entries. */
-export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
-  const docNo = text(row, ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo'])
+function leaveSentForApprovalFlag(row: ODataRecord) {
+  for (const key of ['Sent_for_Approval', 'SentForApproval', 'Sent_For_Approval']) {
+    const value = row[key]
+    if (value === true || value === 1) return true
+    if (typeof value === 'string' && ['true', '1', 'yes'].includes(value.trim().toLowerCase())) return true
+  }
+  return false
+}
 
+/**
+ * Last-resort safety net: scan every status-like header field for a value that
+ * says "pending". Catches BC deployments that expose the pending state on the
+ * leave header under a field name we don't explicitly read. Only ever used to
+ * promote Open/Draft → Pending, never to override a terminal status.
+ */
+function leaveHeaderSignalsPending(row: ODataRecord) {
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) continue
+    const valueType = typeof value
+    if (valueType !== 'string' && valueType !== 'number' && valueType !== 'boolean') continue
+    const name = key.toLowerCase()
+    const statusLike =
+      name.includes('status') ||
+      name.includes('approv') ||
+      name.includes('sent') ||
+      name.includes('stage') ||
+      name.includes('state')
+    if (!statusLike) continue
+    if (String(value).toLowerCase().includes('pending')) return true
+  }
+  return false
+}
+
+/**
+ * Resolve leave status strictly from Business Central data (header fields +
+ * approval entries). BC is the single source of truth — nothing is stored locally.
+ */
+export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
   const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
   if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
     return 'Pending Approval'
@@ -117,16 +145,20 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
 
   if (leaveSentForApproval(row)) return 'Pending Approval'
 
+  if (leaveSentForApprovalFlag(row)) return 'Pending Approval'
+
   if (approvalEntries.some(leaveApprovalEntryIsActive)) {
     return 'Pending Approval'
   }
 
   const mapped = statusFromBc(documentStatusFromBc(row, 'leave'))
   if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') {
-    if (docNo) clearLeaveSentForApproval(docNo)
     return mapped
   }
   if (mapped !== 'Open' && mapped !== 'Draft') return mapped
+
+  // Only promote Open/Draft → Pending below; terminal states already returned.
+  if (leaveHeaderSignalsPending(row)) return 'Pending Approval'
 
   if (
     approvalEntries.some((entry) => {
@@ -137,12 +169,12 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
     return 'Pending Approval'
   }
 
-  // BC often keeps Status/Open after RequestLeaveApproval; trust portal approval action.
-  if (docNo && wasLeaveSentForApproval(docNo)) {
-    return 'Pending Approval'
-  }
-
   return mapped
+}
+
+/** True only when Business Central itself reflects the leave as pending approval. */
+export function leaveIsPendingInBc(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  return resolveLeaveStatus(row, approvalEntries) === 'Pending Approval'
 }
 
 export function mapEmployee(row: ODataRecord) {

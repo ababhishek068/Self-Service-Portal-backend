@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
@@ -8,6 +8,7 @@ import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import { useProgress } from '@/components/feedback/ProgressProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
 import { RequestProgress } from '@/components/shared/RequestProgress'
@@ -32,6 +33,7 @@ import {
   type LeaveListRow,
   type LeaveType,
 } from '@/api/endpoints/leave'
+import { AuthApiError } from '@/api/client/authClient'
 import {
   getModuleRequest,
 } from '@/api/endpoints/requestEndpoint'
@@ -64,11 +66,33 @@ function formatDays(value: number | null | undefined): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
 }
 
+function normalizeGender(gender: string | undefined | null): 'female' | 'male' | '' {
+  const g = String(gender ?? '').trim().toLowerCase()
+  if (!g) return ''
+  if (g === 'f' || g.startsWith('female') || g === 'woman') return 'female'
+  if (g === 'm' || g.startsWith('male') || g === 'man') return 'male'
+  return ''
+}
+
+function leaveTypeIsFemaleOnly(type: LeaveType): boolean {
+  const code = type.code.trim().toUpperCase()
+  const desc = type.description.trim().toLowerCase()
+  if (['MATERNITY', 'PRENATAL'].includes(code)) return true
+  return desc.includes('maternity') || desc.includes('prenatal')
+}
+
+function leaveTypeIsMaleOnly(type: LeaveType): boolean {
+  const code = type.code.trim().toUpperCase()
+  const desc = type.description.trim().toLowerCase()
+  if (code === 'PATERNITY') return true
+  return desc.includes('paternity')
+}
+
 function filterLeaveTypesByGender(types: LeaveType[], gender: string): LeaveType[] {
-  const g = gender.toLowerCase()
+  const g = normalizeGender(gender)
   return types.filter((type) => {
-    if (['MATERNITY', 'PRENATAL'].includes(type.code)) return g === 'female'
-    if (type.code === 'PATERNITY') return g === 'male'
+    if (leaveTypeIsFemaleOnly(type)) return g === 'female'
+    if (leaveTypeIsMaleOnly(type)) return g === 'male'
     return true
   })
 }
@@ -148,11 +172,41 @@ async function uploadLeaveAttachments(
   throw lastError ?? new Error('Attachment upload failed.')
 }
 
+async function syncLeaveStatusFromBc(
+  requestNo: string,
+  requestId: string,
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  // Gentle background reconcile: a handful of checks spaced out, not a
+  // rapid poll. The backend already confirms pending before responding, so
+  // this only covers the case where BC is still catching up.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 4000))
+    try {
+      const detail = await fetchLeaveRequestDetail(requestNo, { silent: true })
+      if (['Pending Approval', 'Approved'].includes(detail.status)) {
+        queryClient.setQueryData(['hr', 'leave-detail', requestId], detail)
+        queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+          (rows ?? []).map((row) =>
+            row.ApplicationCode === requestNo ? { ...row, Status: detail.status } : row,
+          ),
+        )
+        return
+      }
+    } catch {
+      // keep polling until BC reflects the approval
+    }
+  }
+  void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
+  void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-detail', requestId] })
+}
+
 export function LeaveRequest() {
   const { employee } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
+  const progress = useProgress()
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
@@ -181,7 +235,7 @@ export function LeaveRequest() {
   const [submittingForm, setSubmittingForm] = useState(false)
   const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating' | 'uploading' | 'approval'>('idle')
 
-  const gender = employee?.gender || 'Male'
+  const gender = employee?.gender || ''
   const availableTypes = filterLeaveTypesByGender(types, gender)
 
   useEffect(() => {
@@ -216,6 +270,7 @@ export function LeaveRequest() {
     setAppliedHours('')
     setStartDate('')
     setStartDateTime('')
+    setHalfDay('0')
     setError(null)
     setSuccess(null)
     if (!leaveType) {
@@ -239,13 +294,19 @@ export function LeaveRequest() {
         }
       })
       .finally(() => setBalanceLoading(false))
-  }, [leaveType, types])
+  }, [leaveType])
+
+  const leaveDatesRequestId = useRef(0)
 
   useEffect(() => {
     setEndDate('')
     setReturnDate('')
 
-    const duration = isHourly ? Number(appliedHours) : Number(appliedDays)
+    const duration = isHourly
+      ? Number(appliedHours)
+      : halfDay !== '0'
+        ? 0.5
+        : Number(appliedDays)
     const starting = isHourly ? startDateTime : startDate
     if (!duration || !starting || !leaveType) return
 
@@ -259,10 +320,12 @@ export function LeaveRequest() {
     }
 
     const dateOnly = isHourly ? starting.slice(0, 10) : starting
+    const requestId = ++leaveDatesRequestId.current
     setError(null)
     setDatesLoading(true)
     getLeaveDates(leaveType, duration, dateOnly, halfDay)
       .then((res) => {
+        if (requestId !== leaveDatesRequestId.current) return
         if (res.isWeekend) {
           setError('Leave start date cannot be on a weekend')
           if (isHourly) setStartDateTime('')
@@ -272,7 +335,17 @@ export function LeaveRequest() {
         setEndDate(res.endDate)
         setReturnDate(res.returnDate)
       })
-      .finally(() => setDatesLoading(false))
+      .catch((err: unknown) => {
+        if (requestId !== leaveDatesRequestId.current) return
+        const message =
+          err instanceof AuthApiError
+            ? err.message
+            : 'Could not calculate leave dates. Check start date and applied days.'
+        setError(message)
+      })
+      .finally(() => {
+        if (requestId === leaveDatesRequestId.current) setDatesLoading(false)
+      })
   }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, entitlement])
 
   useEffect(() => {
@@ -309,7 +382,11 @@ export function LeaveRequest() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     const submittedStartDate = isHourly ? startDateTime.slice(0, 10) : startDate
-    const submittedDays = isHourly ? Number(appliedHours || 0) : Number(appliedDays || 0)
+    const submittedDays = isHourly
+      ? Number(appliedHours || 0)
+      : halfDay !== '0'
+        ? 0.5
+        : Number(appliedDays || 0)
     if (!leaveType || !reason.trim() || !endDate || !submittedStartDate || !submittedDays) {
       setError('Please complete all required fields.')
       return
@@ -339,6 +416,10 @@ export function LeaveRequest() {
     setSubmitPhase('creating')
     setCreationAttachmentStates({})
     const hasAttachments = creationAttachments.length > 0
+    const progressId = progress.show({
+      title: 'Creating leave application…',
+      message: 'Saving your request — you can keep browsing',
+    })
     try {
       // Step 1 — always create the draft first. Approval is a separate, explicit step.
       const result = await submitLeaveRequest({
@@ -365,6 +446,10 @@ export function LeaveRequest() {
               throw new Error('The document number was not returned. Refresh the list and open the latest application.')
             }
             setSubmitPhase('uploading')
+            progress.update(progressId, {
+              title: 'Uploading attachments…',
+              message: 'Sending your files — you can keep browsing',
+            })
             await uploadLeaveAttachments(documentNo, creationAttachments, (fileId, state) => {
               setCreationAttachmentStates((current) => ({ ...current, [fileId]: state }))
             })
@@ -424,6 +509,7 @@ export function LeaveRequest() {
       setError(err instanceof Error ? err.message : 'Submission failed.')
       toast.error(err instanceof Error ? err.message : 'Submission failed.', 'Leave not submitted')
     } finally {
+      progress.hide(progressId)
       setSubmittingForm(false)
       setSubmitPhase('idle')
     }
@@ -446,6 +532,10 @@ export function LeaveRequest() {
     })
     if (!confirmed) return
     setDetailAction('cancel')
+    const progressId = progress.show({
+      title: 'Cancelling leave…',
+      message: 'Updating your request — you can keep browsing',
+    })
     try {
       const result = await cancelLeaveRequest(selected.requestNo)
       if (!result.ok) throw new Error(result.message || 'Leave cancellation failed')
@@ -454,6 +544,7 @@ export function LeaveRequest() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Leave cancellation failed', 'Cancel failed')
     } finally {
+      progress.hide(progressId)
       setDetailAction(null)
     }
   }
@@ -468,46 +559,116 @@ export function LeaveRequest() {
     })
     if (!confirmed) return
     setDetailAction('approval')
+    const progressId = progress.show({
+      title: 'Sending for approval…',
+      message: 'Submitting your request — you can keep browsing',
+    })
     try {
       const result = await requestLeaveApproval(selected.requestNo)
       if (!result.ok) throw new Error(result.message || 'Approval request failed')
-      const nextStatus = result.status ?? 'Pending Approval'
+      const confirmed =
+        result.confirmedInBc ?? ['Pending Approval', 'Approved'].includes(result.status ?? '')
+      if (!confirmed && result.diagnostic) {
+        // Ground-truth from BC so we can tell a workflow issue (senderAll=0)
+        // apart from a detection issue (senderAll>0 but no match for this leave).
+        console.warn(
+          `[leave-approval] ${selected.requestNo}: BC returned "${result.diagnostic.soapReturnValue}" ` +
+            `but no pending entry detected. senderAll=${result.diagnostic.senderAll} ` +
+            `byDoc=${result.diagnostic.byDoc} senderMatches=${result.diagnostic.senderMatches} ` +
+            `headerStatus="${result.diagnostic.headerStatus}"`,
+          result.diagnostic.senderDocs,
+        )
+      }
+      const nextStatus =
+        confirmed && result.status && result.status !== 'Open'
+          ? result.status
+          : confirmed
+            ? 'Pending Approval'
+            : selected.status
+      const nextApprovalSteps =
+        result.approvalSteps && result.approvalSteps.length > 0
+          ? result.approvalSteps
+          : selected.approvalSteps.length > 0
+            ? selected.approvalSteps
+            : confirmed
+              ? [
+                  {
+                    id: 'pending-approval',
+                    actorName: 'Awaiting approver assignment',
+                    role: 'Approver',
+                    status: 'Pending Approval',
+                    timestamp: new Date().toISOString(),
+                    sequenceNo: 1,
+                  },
+                ]
+              : selected.approvalSteps
       queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
         ...selected,
         status: nextStatus,
-        approvalSteps:
-          selected.approvalSteps.length > 0
-            ? selected.approvalSteps
-            : [
-                {
-                  id: 'pending-approval',
-                  actorName: 'Awaiting approver assignment',
-                  role: 'Approver',
-                  status: 'Pending Approval',
-                  timestamp: new Date().toISOString(),
-                  sequenceNo: 1,
-                },
-              ],
+        approvalSteps: nextApprovalSteps,
       })
-      queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
-        (rows ?? []).map((row) =>
-          row.ApplicationCode === selected.requestNo ? { ...row, Status: nextStatus } : row,
-        ),
-      )
+      if (confirmed) {
+        queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+          (rows ?? []).map((row) =>
+            row.ApplicationCode === selected.requestNo ? { ...row, Status: nextStatus } : row,
+          ),
+        )
+      }
       toast.success(result.message || 'Leave application sent for approval')
+      if (!confirmed) {
+        void syncLeaveStatusFromBc(selected.requestNo, selected.id, queryClient)
+      }
       try {
         const detail = await fetchLeaveRequestDetail(selected.requestNo)
+        const mergedApprovalSteps =
+          detail.approvalSteps.length > 0
+            ? detail.approvalSteps.map((step, index) => {
+                const previous = nextApprovalSteps[index]
+                if (
+                  previous &&
+                  previous.actorName &&
+                  previous.actorName !== 'Awaiting approver assignment' &&
+                  (!step.actorName ||
+                    step.actorName === 'Awaiting approver assignment' ||
+                    step.actorName === step.actorEmployeeNo)
+                ) {
+                  return {
+                    ...step,
+                    actorName: previous.actorName,
+                    actorEmployeeNo: step.actorEmployeeNo || ('actorEmployeeNo' in previous ? previous.actorEmployeeNo : undefined),
+                  }
+                }
+                return step
+              })
+            : nextApprovalSteps
+        const detailStatus = ['Pending Approval', 'Approved'].includes(detail.status)
+          ? detail.status
+          : nextStatus
         queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
           ...detail,
-          status: nextStatus,
+          status: detailStatus,
+          approvalSteps: mergedApprovalSteps,
+          approverName:
+            detail.approverName ||
+            mergedApprovalSteps[0]?.actorName ||
+            selected.approverName ||
+            '',
         })
+        if (['Pending Approval', 'Approved'].includes(detail.status)) {
+          queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+            (rows ?? []).map((row) =>
+              row.ApplicationCode === selected.requestNo ? { ...row, Status: detail.status } : row,
+            ),
+          )
+        }
       } catch {
-        // keep optimistic cache when detail refresh fails
+        // keep cached state when detail refresh fails
       }
       void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Approval request failed', 'Approval not requested')
     } finally {
+      progress.hide(progressId)
       setDetailAction(null)
     }
   }
@@ -883,7 +1044,11 @@ export function LeaveRequest() {
                       disabled={detailAction === 'cancel'}
                       onClick={() => void cancelSelectedLeave()}
                     >
-                      {detailAction === 'cancel' ? 'Cancelling…' : 'Cancel Application'}
+                      {detailAction === 'cancel'
+                        ? 'Cancelling…'
+                        : selectedCanRequestApproval
+                          ? 'Discard Application'
+                          : 'Cancel Application'}
                     </Button>
                   </div>
                 ) : null}

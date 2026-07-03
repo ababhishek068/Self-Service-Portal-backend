@@ -19,7 +19,20 @@ import {
   portalApprovalEntryFilter,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
-import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave } from './staff.js'
+import { resolveLeaveApprovalSteps } from './leaveApprovalSteps.js'
+import {
+  isHalfDaySelection,
+  halfDayOptionValue,
+  formatBcSoapDate,
+  normalizeLeaveStartDate,
+  parseLeaveDatesReturn,
+  computeLeaveDatesFallback,
+  leaveTypeIsAnnual,
+  halfDayRequiresAnnualLeave,
+  employeeLeaveMetrics,
+  resolveAnnualLeaveBalance,
+  resolveAnnualLeaveEntitlement,
+} from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
   cachedPasswordResetTokenMatches,
@@ -29,11 +42,15 @@ import {
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
   resetTokenIsExpired,
-  resolveEmployeeJobTitle,
   type AuthUser,
 } from './auth.js'
-import { documentStatusFromBc, mapRequest, resolveLeaveStatus } from './erpMappings.js'
-import { markLeaveSentForApproval, clearLeaveSentForApproval } from './leaveApprovalCache.js'
+import { inferEmployeeJobId, resolveEmployeeJobTitle } from './employeeProfile.js'
+import {
+  documentStatusFromBc,
+  mapRequest,
+  resolveLeaveStatus,
+  leaveIsPendingInBc,
+} from './erpMappings.js'
 import {
   bcDocumentStatus,
   canRequestApprovalForSpec,
@@ -168,6 +185,76 @@ describe('halfDayRequiresAnnualLeave', () => {
   })
 })
 
+describe('employeeLeaveMetrics', () => {
+  const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
+
+  it('reads earned leave and annual balance fields from BC employee OData', () => {
+    const metrics = employeeLeaveMetrics(
+      {
+        EarnedLeaveDays: 16,
+        Annual_Leave_balance: 16,
+      },
+      user,
+    )
+    assert.equal(metrics.earnedLeaveDays, 16)
+    assert.equal(metrics.leaveBalance, 16)
+  })
+
+  it('does not treat missing leave fields as zero', () => {
+    const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
+    assert.equal(metrics.earnedLeaveDays, null)
+    assert.equal(metrics.leaveBalance, null)
+  })
+})
+
+describe('resolveAnnualLeaveBalance', () => {
+  it('prefers earned leave over ledger when BC exposes it', () => {
+    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
+  })
+
+  it('falls back to ledger when employee card fields are absent', () => {
+    const metrics = { earnedLeaveDays: null, leaveBalance: null }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
+  })
+})
+
+describe('resolveLeaveApprovalSteps', () => {
+  it('shows a pending placeholder when BC header is pending but entries are not ready yet', () => {
+    const steps = resolveLeaveApprovalSteps(
+      { ApplicationCode: 'LV00116', Status: 'Open', ApprovalStatus: 'Pending Approval' },
+      [],
+      'LV00116',
+    )
+    assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
+  })
+
+  it('maps BC approval entries to approver names', () => {
+    const steps = resolveLeaveApprovalSteps(
+      { ApplicationCode: 'LV00116', Status: 'Open' },
+      [{ EntryNo: 10, ApproverID: 'HOD01', ApproverName: 'Jane Manager', Status: 'Open', SequenceNo: 1 }],
+      'LV00116',
+    )
+    assert.equal(steps[0]?.actorName, 'Jane Manager')
+    assert.equal(steps[0]?.status, 'Pending Approval')
+  })
+
+  it('discovers approver fields from leave header OData aliases', () => {
+    const pendingSteps = resolveLeaveApprovalSteps(
+      {
+        ApplicationCode: 'LV00116',
+        Status: 'Open',
+        ApprovalStatus: 'Pending Approval',
+        Current_Approver_ID: 'ABH-050',
+        Current_Approver_Name: 'Finance Director',
+      },
+      [],
+      'LV00116',
+    )
+    assert.equal(pendingSteps[0]?.actorName, 'Finance Director')
+  })
+})
+
 describe('normalizeLeaveStartDate', () => {
   it('converts portal dates to yyyy-mm-dd for Business Central SOAP', () => {
     assert.equal(normalizeLeaveStartDate('2026-06-22'), '2026-06-22')
@@ -183,6 +270,29 @@ describe('parseLeaveDatesReturn', () => {
       parseLeaveDatesReturn('EndDate=6/22/2026#ReturnDate=6/23/2026'),
       { endDate: '6/22/2026', returnDate: '6/23/2026' },
     )
+  })
+
+  it('parses a single ISO date when BC returns only the end date', () => {
+    assert.deepEqual(parseLeaveDatesReturn('2026-07-17'), {
+      endDate: '2026-07-17',
+      returnDate: '',
+    })
+  })
+})
+
+describe('computeLeaveDatesFallback', () => {
+  it('uses the same day for half-day leave and the next working day as return', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
+      endDate: '2026-07-17',
+      returnDate: '2026-07-20',
+    })
+  })
+
+  it('spans full days for normal leave', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
+      endDate: '2026-07-18',
+      returnDate: '2026-07-20',
+    })
   })
 })
 
@@ -432,13 +542,38 @@ describe('mapRequest status', () => {
       ),
       'Pending Approval',
     )
-    clearLeaveSentForApproval('LV00099')
-    markLeaveSentForApproval('LV00099')
     assert.equal(
-      resolveLeaveStatus({ ApplicationCode: 'LV00099', Status: 'Open', ApprovalStatus: '' }),
+      resolveLeaveStatus({ Status: 'Open', ApprovalStatus: '', Sent_for_Approval: true }),
       'Pending Approval',
     )
-    clearLeaveSentForApproval('LV00099')
+  })
+})
+
+describe('leave status is driven only by Business Central', () => {
+  it('does not invent Pending when BC shows Open (nothing stored locally)', () => {
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00300', Status: 'Open', ApprovalStatus: '' }),
+      'Open',
+    )
+  })
+
+  it('shows the final BC status without any local override', () => {
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00302', Status: 'Approved', ApprovalStatus: '' }),
+      'Approved',
+    )
+  })
+
+  it('leaveIsPendingInBc reflects only Business Central data', () => {
+    assert.equal(leaveIsPendingInBc({ Status: 'Open', ApprovalStatus: '' }, []), false)
+    assert.equal(
+      leaveIsPendingInBc({ Status: 'Open', ApprovalStatus: 'Pending Approval' }, []),
+      true,
+    )
+    assert.equal(
+      leaveIsPendingInBc({ Status: 'Open' }, [{ Status: 'Open', DocumentNo: 'LV00303' }]),
+      true,
+    )
   })
 })
 
@@ -555,9 +690,71 @@ describe('resolveEmployeeJobTitle', () => {
         No: 'HB-001',
         Job_Title: 'Finance and Admin Director',
         JobID: 'FAD',
-      } as never,
+      },
       'HB-001',
     )
     assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('discovers job title fields exposed with alternate OData names', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'ABH-114',
+        Job_ID: 'ITM',
+        Job_Title_Description: 'IT Manger',
+      },
+      'ABH-114',
+    )
+    assert.equal(title, 'IT Manger')
+  })
+
+  it('reads ABH-style Job description field on employee OData', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'ABH-114',
+        Job_ID: 'ITM',
+        Job: 'IT Manger',
+      },
+      'ABH-114',
+    )
+    assert.equal(title, 'IT Manger')
+  })
+
+  it('infers ABH job code from corporate email local-part', () => {
+    assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
+  })
+
+  it('derives WS/Page OData base from the SOAP codeunit URL', async () => {
+    const { derivePageODataBaseFromSoapCodeunit } = await import('./employeeProfile.js')
+    assert.equal(
+      derivePageODataBaseFromSoapCodeunit(
+        'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Codeunit/CuStaffPortal',
+      ),
+      'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Page/',
+    )
+  })
+
+  it('maps ABH job code FAD to Finance and Admin Director', async () => {
+    const title = await resolveEmployeeJobTitle(
+      { No: 'ABH-029', Job_ID: 'FAD', Job: 'Finance and Admin Director' },
+      'ABH-029',
+    )
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('maps ABH employee number ABH-029 when BC returns no job fields', async () => {
+    const title = await resolveEmployeeJobTitle({ No: 'ABH-029' }, 'ABH-029')
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('maps FAD from ABH Job field when Job_ID is absent on OData', async () => {
+    assert.equal(inferEmployeeJobId({ No: 'ABH-029', Job: 'FAD' }), 'FAD')
+    const title = await resolveEmployeeJobTitle({ No: 'ABH-029', Job: 'FAD' }, 'ABH-029')
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('does not treat long email local-parts as job codes', () => {
+    assert.equal(inferEmployeeJobId({ EMail: 'tesfaye@abhpartners.com' }), '')
+    assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
   })
 })

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { fetchCurrentUser, loginRequest, logoutRequest, registerRequest, type AuthProvider, type RegisterInput } from '@/api/endpoints/auth'
+import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
 import { AuthContext, type AuthContextValue } from './authContextValue'
 import type { Employee } from '@/types/erp.types'
 
@@ -13,7 +14,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     fetchCurrentUser()
-      .then((user) => {
+      .then(async (user) => {
+        if (cancelled || !user) {
+          if (!cancelled) setEmployee(user)
+          return
+        }
+        if (!user.jobTitle?.trim()) {
+          try {
+            const details = await getEmployeeProfileDetails()
+            if (details.jobTitle?.trim()) {
+              if (!cancelled) setEmployee({ ...user, jobTitle: details.jobTitle })
+              return
+            }
+          } catch {
+            /* profile details are optional */
+          }
+        }
         if (!cancelled) setEmployee(user)
       })
       .catch(() => {
@@ -31,7 +47,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSubmitting(true)
     setError(null)
     try {
-      const next = await loginRequest(staffNo, password, provider)
+      let next = await loginRequest(staffNo, password, provider)
+      if (!next.jobTitle?.trim()) {
+        try {
+          const details = await getEmployeeProfileDetails()
+          if (details.jobTitle?.trim()) {
+            next = { ...next, jobTitle: details.jobTitle }
+          }
+        } catch {
+          /* profile details are optional */
+        }
+      }
       setEmployee(next)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Login failed'

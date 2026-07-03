@@ -10,7 +10,8 @@ import {
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
-import { requireAuth, type AuthUser } from './auth.js'
+import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
+import { resolveEmployeeJobTitleByNo } from './employeeProfile.js'
 import {
   approvalModuleFromEntry,
   approvalTableFilter,
@@ -19,6 +20,14 @@ import {
   resolveApprovalModuleFromEntry,
   type SupportedFrontendModule,
 } from './approvalTableIds.js'
+import {
+  enrichLeaveApprovalEntries,
+  fallbackApprovalStepsFromHeader,
+  leaveDocumentNoCandidates,
+  mapApprovalSteps,
+  resolveLeaveApprovalSteps,
+  resolveLeaveApprovalStepsAsync,
+} from './leaveApprovalSteps.js'
 import { documentStatusFromBc, mapItem, mapRequest, resolveLeaveStatus, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
@@ -569,14 +578,6 @@ interface LeaveLookupHints {
   userId?: string
 }
 
-function leaveDocumentNoCandidates(no: string) {
-  const trimmed = no.trim()
-  const values = [trimmed, trimmed.toUpperCase()]
-  if (/^lv/i.test(trimmed)) {
-    values.push(trimmed.replace(/^lv/i, ''))
-  }
-  return [...new Set(values.filter(Boolean))]
-}
 
 async function fetchLeaveApplication(
   no: string,
@@ -728,15 +729,11 @@ function buildLeaveRequestDetail(
       ? [entry]
       : []
   const resolvedStatus = resolveLeaveDocumentStatus(row, steps, entry, approvalEntryRows)
-  const approvalStepsResolved =
-    steps.length > 0
-      ? steps
-      : fallbackApprovalStepsFromHeader(row, resolvedStatus)
   return {
     ...mapped,
     status: resolvedStatus,
     payload: leavePayloadFromRow(row, no, entry),
-    approvalSteps: approvalStepsResolved,
+    approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
 }
@@ -801,13 +798,27 @@ async function resolveLeaveRequestDetail(
   const row = await fetchLeaveApplication(no, hints, entry)
   const [approvers, attachments] = await Promise.all([
     approvalEntries.length
-      ? Promise.resolve(approvalEntries)
-      : fetchLeaveApprovalEntries(no),
+      ? enrichLeaveApprovalEntries(approvalEntries)
+      : enrichLeaveApprovalEntries(await fetchLeaveApprovalEntries(no)),
     fetchDocumentAttachments(no, 50532).catch(() => [] as ODataRecord[]),
   ])
 
   if (row) {
-    return buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const approvalEntryRows = approvers.length
+      ? (approvers as ODataRecord[])
+      : entry
+        ? [entry]
+        : []
+    const detail = buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const approvalStepsResolved = await resolveLeaveApprovalStepsAsync(row, approvalEntryRows, no, {
+      employeeNo: text(row, ['EmployeeNo', 'Employee_No'], authUser.employeeNo),
+      userID: authUser.userID,
+      department: authUser.department,
+    })
+    return {
+      ...detail,
+      approvalSteps: approvalStepsResolved,
+    }
   }
 
   if (options.allowMissingSource && approvalEntries.length) {
@@ -871,36 +882,6 @@ async function requestDetail(
   }
 }
 
-function fallbackApprovalStepsFromHeader(row: ODataRecord, mappedStatus: string) {
-  if (!['Pending Approval', 'Approved', 'Rejected'].includes(mappedStatus)) return []
-
-  const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo', 'CurrentApproverID'])
-  const approverName = text(row, ['ApproverName'], approverId)
-  if (approverId || approverName) {
-    return mapApprovalSteps([
-      {
-        ApproverID: approverId,
-        ApproverName: approverName,
-        Status: mappedStatus,
-        SequenceNo: 1,
-      },
-    ])
-  }
-
-  if (mappedStatus === 'Pending Approval') {
-    return mapApprovalSteps([
-      {
-        Status: 'Pending Approval',
-        SequenceNo: 1,
-        ApproverName: 'Awaiting approver assignment',
-        Comment: 'Submitted for approval in Business Central',
-      },
-    ])
-  }
-
-  return []
-}
-
 function resolveRequestApprovalSteps(
   approvers: ODataRecord[],
   row: ODataRecord,
@@ -917,36 +898,7 @@ function resolveRequestApprovalSteps(
   return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
 }
 
-export function mapApprovalSteps(value: unknown) {
-  const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
-  return rows
-    .map((row, index) => {
-      const rawStatus = text(row, ['Status'], 'Pending Approval')
-      const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo'])
-      const senderId = text(row, ['SenderID', 'UserID'])
-      const status =
-        rawStatus === 'Open'
-          ? 'Pending Approval'
-          : rawStatus === 'Created'
-            ? 'Submitted'
-            : rawStatus
-      return {
-        id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
-        actorEmployeeNo: approverId || senderId,
-        actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
-        role: text(
-          row,
-          ['ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation'],
-          approverId ? 'Approver' : 'Requester',
-        ),
-        status,
-        timestamp: text(row, ['DateTimeSentforApproval', 'DueDate', 'Date']),
-        note: text(row, ['Comment', 'Comments']),
-        sequenceNo: number(row, ['SequenceNo', 'Sequence_No'], index + 1),
-      }
-    })
-    .sort((left, right) => left.sequenceNo - right.sequenceNo)
-}
+export { mapApprovalSteps } from './leaveApprovalSteps.js'
 
 function mapAttachments(value: unknown) {
   const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
@@ -1810,7 +1762,9 @@ export function buildPortalApiRouter() {
         }).catch(() => [] as ODataRecord[]),
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
+      const jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
       res.json({
+        jobTitle,
         sector: text(employee, ['Sector', 'GlobalDimension1Code']),
         division: text(employee, ['Division']),
         district: text(employee, ['District', 'GlobalDimension2Code']),
@@ -2259,7 +2213,7 @@ export function buildPortalApiRouter() {
         idNumber: text(employee, ['IDNumber', 'ID_Number']),
         gender: text(employee, ['Gender']),
         contractType: text(employee, ['TypeofContract', 'Type_of_Contract']),
-        jobTitle: text(employee, ['JobTitle', 'Job_Title']),
+        jobTitle: await resolveEmployeeJobTitle(employee as never, text(employee, ['No', 'EmployeeNo'])),
         department: text(employee, ['DepartmentName', 'Department_Name'], authUser.departmentName),
         employmentDate: text(employee, ['EmploymentDate', 'DateOfJoin']),
       })

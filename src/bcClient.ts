@@ -16,6 +16,7 @@ function requestWithCurlNtlm(options: {
   url: string
   headers: Record<string, string>
   body?: string
+  timeoutMs?: number
 }) {
   return new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
     if (!config.BC_NAV_USER || !config.BC_NAV_PASSWORD) {
@@ -24,11 +25,14 @@ function requestWithCurlNtlm(options: {
     }
 
     const username = config.BC_DOMAIN ? `${config.BC_DOMAIN}\\${config.BC_NAV_USER}` : config.BC_NAV_USER
+    const timeoutSeconds = Math.max(1, Math.ceil((options.timeoutMs ?? config.BC_REQUEST_TIMEOUT_MS) / 1000))
     const args = [
       '--silent',
       '--show-error',
       '--location',
       '--ntlm',
+      '--max-time',
+      String(timeoutSeconds),
       '--user',
       `${username}:${config.BC_NAV_PASSWORD}`,
       '--write-out',
@@ -107,8 +111,12 @@ function toQueryString(query: Record<string, unknown>) {
  * Low-level OData GET. Returns the parsed JSON body as-is so callers can
  * read both `value` and `@odata.count` if they asked for `$count=true`.
  */
-export async function fetchODataRaw(serviceName: string, query: Record<string, unknown> = {}) {
-  const base = normalizeBaseUrl(config.BC_ODATA_BASE_URL)
+export async function fetchODataRaw(
+  serviceName: string,
+  query: Record<string, unknown> = {},
+  baseUrl: string = config.BC_ODATA_BASE_URL,
+) {
+  const base = normalizeBaseUrl(baseUrl)
   const url = new URL(serviceName, base)
   const qs = toQueryString(query)
   if (qs) url.search = qs
@@ -128,6 +136,7 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
         method: 'GET',
         url: url.toString(),
         headers: { Accept: 'application/json' },
+        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
       })
       statusCode = response.statusCode
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -152,6 +161,7 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
         Accept: 'application/json',
         ...authHeaders(),
       },
+      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
     })
 
     statusCode = response.status
@@ -181,6 +191,65 @@ export async function fetchOData(serviceName: string, query: Record<string, unkn
   const data = await fetchODataRaw(serviceName, query)
   if (data && typeof data === 'object' && Array.isArray(data.value)) return data.value as ODataRecord[]
   return data
+}
+
+export async function fetchODataFromBase(
+  baseUrl: string,
+  serviceName: string,
+  query: Record<string, unknown> = {},
+) {
+  const data = await fetchODataRaw(serviceName, query, baseUrl)
+  if (data && typeof data === 'object' && Array.isArray(data.value)) return data.value as ODataRecord[]
+  return data
+}
+
+/** Fetch raw OData $metadata XML from a company OData base URL. */
+export async function fetchODataMetadata(baseUrl: string) {
+  const base = normalizeBaseUrl(baseUrl)
+  const url = new URL('$metadata', base).toString()
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'GET',
+    operation: '$metadata',
+    target: logTarget(url),
+    metadata: 'metadata',
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'GET',
+        url,
+        headers: { Accept: 'application/xml' },
+        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw new Error(`Business Central OData metadata ${response.statusCode}: ${response.body}`)
+      }
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return response.body
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/xml',
+        ...authHeaders(),
+      },
+      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
+    })
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw new Error(`Business Central OData metadata ${response.status}: ${text}`)
+    }
+    completeBcCall(call, response.status, responseBytes(text))
+    return text
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
 }
 
 export async function postOData(serviceName: string, payload: Record<string, unknown>) {

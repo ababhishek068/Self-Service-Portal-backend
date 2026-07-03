@@ -4,6 +4,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { assertRealErpConfig, env } from '@/config/env'
+import { trackAxiosActivity } from '@/lib/apiActivity'
 import type { ODataError } from '@/types/erp.types'
 
 /**
@@ -51,6 +52,9 @@ export const erpHttp = axios.create({
     'Content-Type': 'application/json',
   },
 })
+
+// Register first so it settles the counter on the raw AxiosError.
+trackAxiosActivity(erpHttp)
 
 const friendlyMessages: Record<number, string> = {
   400: 'The request was not accepted by ERP. Please review highlighted fields.',

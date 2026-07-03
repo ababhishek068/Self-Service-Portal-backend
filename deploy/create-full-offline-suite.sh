@@ -8,7 +8,8 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-fixes-full-offline.zip"
+ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-pending-diag2-full-offline.zip"
+ABH_ENV="$ROOT/deploy/windows/host.env.abh-uat-ip.example"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
 
@@ -31,6 +32,7 @@ echo "==> Syncing latest builds into SelfServiceSuite..."
 rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy" "$BC/src"
 mkdir -p "$BC/dist" "$BC/public" "$BC/src" "$BC/logs"
 cp -R "$ROOT/dist/." "$BC/dist/"
+echo "leave-pending-diag2-2026-07-03" > "$BC/dist/BUILD_ID.txt"
 cp -R "$FRONTEND/dist/." "$BC/public/"
 rsync -a \
   --exclude '*.tmp' \
@@ -52,14 +54,24 @@ rsync -a \
 echo "==> Overlaying latest backend build + env files..."
 rsync -a \
   "$BC/dist/" "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/"
+echo "leave-pending-diag2-2026-07-03" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
 rsync -a \
   "$BC/public/" "$STAGING/SelfServiceSuite/SelfServiceBackend/public/"
 rsync -a \
   "$BC/src/" "$STAGING/SelfServiceSuite/SelfServiceBackend/src/"
 cp "$BC/package.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package.json"
 cp "$BC/package-lock.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package-lock.json"
-cp "$BC/.env" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
+if [[ ! -f "$ABH_ENV" ]]; then
+  echo "ERROR: ABH env template missing at $ABH_ENV"
+  exit 1
+fi
+cp "$ABH_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
+cp "$ABH_ENV" "$BC/.env"
 cp "$BC/.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env.example"
+cp "$ROOT/deploy/windows/host.env.abh-uat.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.abh-uat.example"
+cp "$ABH_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.abh-uat-ip.example"
+cp "$ROOT/deploy/windows/ENV-ON-NEW-HOST.txt" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/ENV-ON-NEW-HOST.txt"
+cp "$BC/deploy/windows/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
 cp "$BC/deploy/windows/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
 cp "$BC/deploy/windows/start-self-service.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/start-self-service.bat"
 cp "$ROOT/deploy/windows/client-mac-helper.ps1" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/client-mac-helper.ps1"
@@ -84,6 +96,25 @@ Release date: ${STAMP}
 
 SUMMARY (${STAMP})
 ------------------
+- Leave: Pending Approval now shows reliably in the list — approvals are matched
+  both by document number AND by everything you submitted (sender side), so number
+  formatting differences in BC no longer hide a pending leave
+- Leave: fixed excessive Business Central calls after "Request Approval" — the
+  sender-side lookup and status polling no longer repeat every second; approval
+  responds faster and the page settles instead of fetching continuously
+- Leave: verbose per-leave status logging is now OFF by default (set
+  LOG_LEAVE_STATUS=true only when diagnosing)
+- Leave: added extra pending detection (scans leave header status fields) and,
+  when approval can't be confirmed, records a ground-truth diagnostic to the log
+  and browser console (shows whether BC actually created an approval entry)
+- UI: background status reconcile after "Request Approval" is now SILENT — it no
+  longer flashes the "Fetching data" loader every few seconds
+- UI: global progress indicator — top loading bar on every API call + a branded progress dialog for submits/cancels/approvals and slow Business Central history fetches
+- Leave: status is now read 100% live from Business Central (no local cache) — Pending Approval reflects BC exactly
+- ENV: bundled .env uses ABH WS/Page OData on 7047 + BC_JOB_TITLE_BY_CODE=ITM:IT Manger
+- Profile: job title from Employee Card OData (7047 Page/) and job-code lookup — header shows IT Manger instead of STAFF
+- Leave: approver name now resolves from approval entries, leave header, manager, user setup, or department HOD
+- Leave: annual leave balance now reads Earned Leave Days / Annual Leave balance from BC OData (fixes 0 balance when BC card shows 16)
 - Leave: job title shown instead of HOD role badge in header and reliever list
 - Leave: submit now sends for approval in one step (no stuck Open status)
 - Leave: attachment upload fixed (correct document number after create)
@@ -122,10 +153,11 @@ INSTALL / UPDATE ON CLIENT HOST
 4. Start all services:
    C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
 
-5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
+5. Open http://146.161.102.7:4000 and press Ctrl+F5 once.
 
 If .env is ever missing, copy the template for YOUR client:
-   ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
+   ABH (146.161.102.7): SelfServiceBackend\deploy\windows\host.env.abh-uat-ip.example
+   ABH (abh-erp-ml):      SelfServiceBackend\deploy\windows\host.env.abh-uat.example
    HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
    See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt
 EOF

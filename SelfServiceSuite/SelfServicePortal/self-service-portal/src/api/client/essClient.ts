@@ -1,5 +1,6 @@
 import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { env } from '@/config/env'
+import { trackAxiosActivity } from '@/lib/apiActivity'
 
 /**
  * HTTP client for the Laravel ESS backend.
@@ -24,6 +25,9 @@ export const essHttp: AxiosInstance = axios.create({
     'X-Requested-With': 'XMLHttpRequest',
   },
 })
+
+// Register first so it settles the counter on the raw AxiosError.
+trackAxiosActivity(essHttp)
 
 async function fetchCsrfToken(): Promise<string> {
   if (csrfToken) return csrfToken

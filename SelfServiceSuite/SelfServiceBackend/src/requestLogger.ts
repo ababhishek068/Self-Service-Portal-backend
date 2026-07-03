@@ -55,6 +55,11 @@ export function currentRequestId() {
   return requestContext.getStore()?.requestId ?? 'background'
 }
 
+/** Emit a diagnostic line to the console and the integration log file. */
+export function logDiagnostic(line: string) {
+  writeLog(line)
+}
+
 export function apiRequestLogger(req: Request, res: Response, next: NextFunction) {
   const suppliedRequestId = req.header('x-request-id')?.trim()
   const requestId = suppliedRequestId

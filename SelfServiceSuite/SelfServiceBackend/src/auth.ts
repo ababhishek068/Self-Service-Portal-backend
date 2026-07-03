@@ -171,70 +171,31 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
   return fallback
 }
 
-export async function resolveEmployeeJobTitle(
-  employee: BcEmployee,
-  employeeNo = String(employee.No ?? ''),
-) {
-  const record = employee as Record<string, unknown>
-  const direct = employeeFieldText(record, [
-    'JobTitle',
-    'Job_Title',
-    'JobTitleDescription',
-    'Job_Title_Description',
-    'Position',
-    'CurrentJobTitle',
-    'Designation',
-    'JobDescription',
-  ])
-  if (direct) return direct
+import {
+  configuredJobTitleByEmployeeNo,
+  fetchMergedEmployeeRecord,
+  resolveAuthUserJobTitle,
+  resolveEmployeeJobTitle,
+  resolveEmployeeJobTitleByNo,
+} from './employeeProfile.js'
 
-  const jobId = employeeFieldText(record, ['JobID', 'Job_ID'])
-  if (jobId) {
-    const jobServices = ['QyHRJob', 'QyJob', 'QyHRJobs']
-    const jobFilters = [`Code eq '${odataString(jobId)}'`, `No eq '${odataString(jobId)}'`]
-    for (const service of jobServices) {
-      for (const filter of jobFilters) {
-        const rows = (await fetchOData(service, { $filter: filter, $top: 1 }).catch(
-          () => [],
-        )) as ODataRecord[] | null
-        if (!Array.isArray(rows) || rows.length === 0) continue
-        const title = employeeFieldText(rows[0] as Record<string, unknown>, [
-          'Title',
-          'Description',
-          'JobTitle',
-          'Job_Title',
-          'Name',
-        ])
-        if (title) return title
-      }
-    }
-  }
-
-  if (employeeNo) {
-    const history = (await fetchOData('QyEmploymentHistory', {
-      $filter: `Employee_No eq '${odataString(employeeNo)}'`,
-      $top: 1,
-      $orderby: 'Starting_Date desc',
-    }).catch(() => [])) as ODataRecord[] | null
-    if (Array.isArray(history) && history.length > 0) {
-      const title = employeeFieldText(history[0] as Record<string, unknown>, [
-        'Job_Title',
-        'JobTitle',
-        'Position',
-        'Designation',
-      ])
-      if (title) return title
-    }
-  }
-
-  return ''
-}
+export { resolveEmployeeJobTitle } from './employeeProfile.js'
 
 export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> {
-  const employee = await fetchEmployee(user.employeeNo)
-  if (!employee) return user
-  const jobTitle = await resolveEmployeeJobTitle(employee, user.employeeNo)
-  return jobTitle ? { ...user, jobTitle } : user
+  const merged = await fetchMergedEmployeeRecord(user.employeeNo)
+  let jobTitle = await resolveAuthUserJobTitle(
+    merged ?? { No: user.employeeNo },
+    user.employeeNo,
+    user.email ?? '',
+  )
+  if (!jobTitle) {
+    jobTitle = await resolveEmployeeJobTitleByNo(user.employeeNo)
+  }
+  if (!jobTitle) {
+    jobTitle = configuredJobTitleByEmployeeNo(user.employeeNo)
+  }
+  if (!jobTitle) return user
+  return { ...user, jobTitle }
 }
 
 /** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
@@ -272,6 +233,36 @@ export function clearCachedPasswordResetToken(staffNo: string) {
 
 function employeeIsActive(employee: BcEmployee) {
   return employee.Status === 'Active' || employee.Password === 'Password@123'
+}
+
+function employeeLeaveBalanceFromRecord(record: Record<string, unknown>) {
+  const preferredKeys = [
+    'EarnedLeaveDays',
+    'Earned_Leave_Days',
+    'AnnualLeaveBalance',
+    'Annual_Leave_Balance',
+    'Annual_Leave_balance',
+    'AnnualLeavebalance',
+    'LeaveBalance',
+    'Leave_Balance',
+  ]
+  for (const key of preferredKeys) {
+    const value = record[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined || value === null || String(value).trim() === '') continue
+    const normalized = key.toLowerCase().replace(/[_\s]/g, '')
+    if (!['annualleavebalance', 'leavebalance', 'earnedleavedays', 'earnedleave'].includes(normalized)) {
+      continue
+    }
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
 }
 
 function firstEmployeeField(employee: BcEmployee, names: string[]) {
@@ -379,11 +370,8 @@ export function employeeResetTokenMatches(employee: BcEmployee, resetToken: stri
 }
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `No eq '${odataString(staffNo)}'`,
-    $top: 1,
-  })) as BcEmployee[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  const merged = await fetchMergedEmployeeRecord(staffNo)
+  return merged ? (merged as BcEmployee) : null
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
@@ -427,16 +415,30 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     .trim()
   const isCEO =
     employee.JobID === 'JOB_003' || config.CEO_OVERRIDE_EMPNOS.includes(employeeNo)
-  const isHOD = await isHeadOfDepartment(employeeNo)
+  const userID = String(userSetup.UserID ?? '')
+  const [isHOD, hasEntries] = await Promise.all([
+    isHeadOfDepartment(employeeNo),
+    hasApprovalEntries(userID),
+  ])
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
   const department = employee.GlobalDimension1Code ?? ''
   const accountNumber = employee.CustomerNo ?? ''
   const gender = employee.Gender ?? ''
-  const userID = String(userSetup.UserID ?? '')
-  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || await hasApprovalEntries(userID)
-  const jobTitle = await resolveEmployeeJobTitle(employee, employeeNo)
+  const email = String(employee.EMail ?? employee.Email ?? '').trim()
+  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
+  let jobTitle = await resolveAuthUserJobTitle(
+    employee as Record<string, unknown>,
+    employeeNo,
+    email,
+  )
+  if (!jobTitle) {
+    jobTitle = await resolveEmployeeJobTitleByNo(employeeNo)
+  }
+  if (!jobTitle) {
+    jobTitle = configuredJobTitleByEmployeeNo(employeeNo)
+  }
 
   return {
     employeeNo,
@@ -445,7 +447,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     userID,
     roles,
     role: isCEO ? 'ceo' : isHOD ? 'hod' : 'staff',
-    email: employee.EMail ?? employee.Email ?? '',
+    email,
     phoneNumber: employee.CellPhoneNumber ?? '',
     gender,
     Gender: gender,
@@ -461,7 +463,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
-    leaveBalance: Number(employee.LeaveBalance ?? 0),
+    leaveBalance: employeeLeaveBalanceFromRecord(employee as Record<string, unknown>),
     responsibleCenter: employee.ResponsibilityCenter ?? '',
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,
@@ -535,7 +537,8 @@ export async function authenticateBcUser(staffNo: string, password: string) {
     })
   }
 
-  return buildAuthUser(employee, userSetup)
+  const user = await buildAuthUser(employee, userSetup)
+  return refreshAuthUserProfile(user)
 }
 
 export function buildAuthRouter() {

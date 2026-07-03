@@ -111,9 +111,17 @@ export async function listLeaveRequests(): Promise<LeaveListRow[]> {
   return rows
 }
 
-export async function fetchLeaveRequestDetail(requestNo: string): Promise<PortalRequest> {
+export async function fetchLeaveRequestDetail(
+  requestNo: string,
+  opts?: { silent?: boolean },
+): Promise<PortalRequest> {
   requireAuthApiUrl()
-  return authGet<PortalRequest>(`/api/leave/request/${encodeURIComponent(requestNo)}`)
+  return authGet<PortalRequest>(
+    `/api/leave/request/${encodeURIComponent(requestNo)}`,
+    // `silent` opts this call out of the global loading indicator (used by the
+    // background status reconcile so it doesn't flash the loader every poll).
+    opts?.silent ? ({ silent: true } as Parameters<typeof authGet>[1]) : undefined,
+  )
 }
 
 export interface SubmitLeaveInput {
@@ -145,14 +153,41 @@ export async function cancelLeaveRequest(no: string): Promise<{ ok: boolean; mes
   return authPost<{ ok: boolean; message: string }>('/api/leave/cancel', { no })
 }
 
+export interface LeaveApprovalDiagnostic {
+  soapReturnValue: string
+  byDoc: number
+  senderAll: number
+  senderMatches: number
+  headerStatus: string
+  headerApprovalStatus: string
+  senderDocs: Array<{
+    no: string
+    status: string
+    tableId: number | string | null
+    sender: string
+    approver: string
+  }>
+}
+
 export async function requestLeaveApproval(no: string): Promise<{
   ok: boolean
   message: string
   status?: string
+  confirmedInBc?: boolean
   requestId?: string
+  approvalSteps?: PortalRequest['approvalSteps']
+  diagnostic?: LeaveApprovalDiagnostic
 }> {
   requireAuthApiUrl()
-  return authPost<{ ok: boolean; message: string; status?: string; requestId?: string }>(
+  return authPost<{
+    ok: boolean
+    message: string
+    status?: string
+    confirmedInBc?: boolean
+    requestId?: string
+    approvalSteps?: PortalRequest['approvalSteps']
+    diagnostic?: LeaveApprovalDiagnostic
+  }>(
     '/api/leave/approval',
     { no },
   )

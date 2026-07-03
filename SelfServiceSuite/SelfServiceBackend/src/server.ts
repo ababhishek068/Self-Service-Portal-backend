@@ -1,8 +1,9 @@
 import express, { type Request, type Response, type NextFunction } from 'express'
 import cors from 'cors'
 import session from 'express-session'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { callSoapMethod, fetchOData } from './bcClient.js'
 import { config, publicConfig } from './config.js'
@@ -51,8 +52,22 @@ app.use(
 app.use('/api', hydrateBearerAuth)
 app.use('/api', csrfGuard)
 
+function readBuildId() {
+  try {
+    const buildIdPath = resolve(dirname(fileURLToPath(import.meta.url)), 'BUILD_ID.txt')
+    return readFileSync(buildIdPath, 'utf8').trim()
+  } catch {
+    return 'dev'
+  }
+}
+
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'self-service-erp-backend', time: new Date().toISOString() })
+  res.json({
+    ok: true,
+    service: 'self-service-erp-backend',
+    build: readBuildId(),
+    time: new Date().toISOString(),
+  })
 })
 
 app.get('/api/config', (_req, res) => {
@@ -330,4 +345,29 @@ app.listen(config.PORT, config.HOST, () => {
       : `React portal build not found at ${portalStaticDir}`,
   )
   console.log(`BC integration logs are written to ${integrationLogPath}`)
+
+  const odataCompany = decodeURIComponent(
+    (config.BC_ODATA_BASE_URL.match(/Company\('([^']+)'\)/)?.[1] ?? '').replace(/\+/g, ' '),
+  )
+  const soapCompany = decodeURIComponent(
+    (config.BC_SOAP_PAGE_BASE_URL.match(/Company\('([^']+)'\)/)?.[1] ?? '').replace(/\+/g, ' '),
+  )
+  if (odataCompany && soapCompany && odataCompany !== soapCompany) {
+    console.warn(
+      `[bc-config] BC_ODATA_BASE_URL company (${odataCompany}) differs from BC_SOAP_PAGE_BASE_URL (${soapCompany}). Employee Card / job title fields may be missing.`,
+    )
+  }
+  if (/HIJRA/i.test(config.BC_SOAP_PAGE_BASE_URL) && /ABH/i.test(config.BC_ODATA_BASE_URL)) {
+    console.warn(
+      '[bc-config] BC_ODATA_BASE_URL looks like ABH but BC_SOAP_PAGE_BASE_URL still points at HIJRA. Set deploy/windows/host.env.abh-uat-ip.example values.',
+    )
+  }
+  if (
+    config.BC_ODATA_BASE_URL === config.BC_SOAP_PAGE_BASE_URL ||
+    /ODataV4\/Company/i.test(config.BC_SOAP_PAGE_BASE_URL)
+  ) {
+    console.warn(
+      '[bc-config] BC_SOAP_PAGE_BASE_URL should use WS/Page on port 7047 (not the same ODataV4 company URL on 7048). Employee Card job title fields may be missing.',
+    )
+  }
 })
