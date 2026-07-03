@@ -37,18 +37,6 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: ['staff'],
   },
   {
-    label: 'Medical claim',
-    href: '/hr/staff-medical-claim',
-    description: 'Submit a medical expense claim through HR.',
-    roles: ['staff'],
-  },
-  {
-    label: 'HR service letters',
-    href: '/hr/service-request-letters',
-    description: 'Request guarantee, experience, mortgage, and emergency loan letters.',
-    roles: ['staff'],
-  },
-  {
     label: 'View payslip',
     href: '/hr/payslip',
     description: 'Generate your monthly payslip.',
@@ -61,15 +49,15 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: approverRoles,
   },
   {
-    label: 'Department staff',
-    href: '/hod/department-staff',
-    description: 'View active employees in your department.',
-    roles: ['hod'],
-  },
-  {
     label: 'Staff on leave',
     href: '/hod/staff-on-leave',
     description: 'See who in your department is currently on leave.',
+    roles: ['hod'],
+  },
+  {
+    label: 'Team requests',
+    href: '/hod/team-requests',
+    description: 'Monitor requests submitted by your department.',
     roles: ['hod'],
   },
   {

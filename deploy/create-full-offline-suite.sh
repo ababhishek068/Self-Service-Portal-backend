@@ -8,7 +8,9 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-UAT-${STAMP}-client-full-offline.zip"
+ZIP_NAME="SelfServiceSuite-HIJRA-UAT-${STAMP}-latest-full-offline.zip"
+DEPLOY_WIN="$ROOT/deploy/windows"
+HIJRA_ENV="$ROOT/deploy/windows/host.env.hijra-uat-ip.example"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
 
@@ -31,6 +33,7 @@ echo "==> Syncing latest builds into SelfServiceSuite..."
 rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy" "$BC/src"
 mkdir -p "$BC/dist" "$BC/public" "$BC/src" "$BC/logs"
 cp -R "$ROOT/dist/." "$BC/dist/"
+echo "api-loading-${STAMP}" > "$BC/dist/BUILD_ID.txt"
 cp -R "$FRONTEND/dist/." "$BC/public/"
 rsync -a \
   --exclude '*.tmp' \
@@ -52,20 +55,26 @@ rsync -a \
 echo "==> Overlaying latest backend build + env files..."
 rsync -a \
   "$BC/dist/" "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/"
+echo "api-loading-${STAMP}" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
 rsync -a \
   "$BC/public/" "$STAGING/SelfServiceSuite/SelfServiceBackend/public/"
-rsync -a \
-  --exclude 'node_modules/' \
-  "$FRONTEND/src/" "$STAGING/SelfServiceSuite/SelfServicePortal/self-service-portal/src/"
-rsync -a \
-  "$FRONTEND/dist/" "$STAGING/SelfServiceSuite/SelfServicePortal/self-service-portal/dist/"
 rsync -a \
   "$BC/src/" "$STAGING/SelfServiceSuite/SelfServiceBackend/src/"
 cp "$BC/package.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package.json"
 cp "$BC/package-lock.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package-lock.json"
-cp "$BC/.env" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
-cp "$BC/.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env.example"
-cp "$BC/deploy/windows/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
+if [[ ! -f "$HIJRA_ENV" ]]; then
+  echo "ERROR: HIJRA env template missing at $HIJRA_ENV"
+  exit 1
+fi
+cp "$HIJRA_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
+cp "$HIJRA_ENV" "$BC/.env"
+cp "$DEPLOY_WIN/host.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env.example"
+cp "$DEPLOY_WIN/host.env.hijra-uat.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat.example"
+cp "$HIJRA_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat-ip.example"
+cp "$DEPLOY_WIN/host.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.example"
+cp "$DEPLOY_WIN/ENV-ON-NEW-HOST.txt" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/ENV-ON-NEW-HOST.txt"
+cp "$DEPLOY_WIN/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
+rm -f "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.abh-uat"*
 cp "$BC/deploy/windows/start-self-service.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/start-self-service.bat"
 cp "$ROOT/deploy/windows/client-mac-helper.ps1" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/client-mac-helper.ps1"
 cp "$ROOT/deploy/windows/start-client-mac-helper.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/start-client-mac-helper.bat"
@@ -89,14 +98,17 @@ Release date: ${STAMP}
 
 SUMMARY (${STAMP})
 ------------------
-- Fuel request list: fixed BC OData 500 error
-- Store requisition: asset lines clear wrong item when type changes
-- Transfer orders: approval history lookup (doc no, gate pass, record ID) + pending placeholder
-- Work tickets: New ticket + add line on open tickets
-- Pending Approval status, Cancel on list/detail (all modules)
-- Finance attachments, imprest lines, staff claim medical, petty cash replenishment fields
-- HOD staff list, on-leave, attendance pages
-- Attendance MAC: run client helper on each employee PC (see below)
+- UI: global API loading — top progress bar on every call; full-screen blocker on saves/submits (no double-clicks)
+- Leave: End Date / Return Date calculate correctly (half-day, BC fallback, clearer errors)
+- Leave: Pending Approval shows reliably in the list — approvals matched by document number and sender side
+- Leave: reduced excessive BC calls after Request Approval
+- Leave: status read live from Business Central (no local cache)
+- ENV: bundled .env is HIJRA UAT (BC 10.30.7.14 + portal http://10.30.4.23:4000)
+- Portal: HIJRA branding + module menu only (no ABH templates or modules)
+- Leave: duplicate-pending block is opt-in via VITE_BLOCK_DUPLICATE_PENDING_LEAVE (default off for HIJRA)
+- Leave: job title in header and reliever list; annual leave balance from BC OData
+- Leave: attachment upload; two-step create then request approval
+- Fuel, store requisition, transfer orders, work tickets, HOD pages, attendance MAC helper
 
 BC ADMIN STILL REQUIRED (not portal bugs)
 -----------------------------------------
@@ -125,9 +137,9 @@ INSTALL / UPDATE ON CLIENT HOST
 
 5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
 
-If .env is ever missing, copy the template for YOUR client:
-   ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
-   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
+If .env is ever missing, copy:
+   HIJRA (BC IP 10.30.7.14):  SelfServiceBackend\deploy\windows\host.env.hijra-uat-ip.example
+   HIJRA (erp-app-uat):         SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
    See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt
 EOF
 

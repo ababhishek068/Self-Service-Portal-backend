@@ -7,20 +7,32 @@ interface RequestProgressProps {
 }
 
 export function RequestProgress({ status, hasLines = false, requiresLines = false }: RequestProgressProps) {
-  // BC keeps header Status as Open after submit; only move step 3 once approval is in flight.
-  const approvalStarted = status !== 'Draft' && status !== 'Open'
+  const approvalRequested = ['Pending Approval', 'Submitted', 'Approved', 'Rejected', 'Cancelled', 'Posted'].includes(status)
   const detailReady = !requiresLines || hasLines
+  const workflowNote = approvalRequested ? status : 'Not requested yet'
   const steps = [
     { label: 'Draft created', note: 'Header saved in Business Central', done: true, active: false, icon: FileCheck2 },
-    { label: requiresLines ? 'Lines & attachments' : 'Review details', note: detailReady ? 'Ready for approval' : 'Add at least one line', done: approvalStarted, active: !approvalStarted, icon: ListPlus },
-    { label: 'Approval workflow', note: approvalStarted ? status : 'Not requested yet', done: ['Approved', 'Rejected', 'Cancelled', 'Posted'].includes(status), active: approvalStarted, icon: Send },
+    {
+      label: requiresLines ? 'Lines & attachments' : 'Review details',
+      note: detailReady ? 'Ready for approval' : 'Add at least one line',
+      done: detailReady,
+      active: detailReady && !approvalRequested,
+      icon: ListPlus,
+    },
+    {
+      label: 'Approval workflow',
+      note: workflowNote,
+      done: ['Approved', 'Rejected', 'Cancelled', 'Posted'].includes(status),
+      active: ['Pending Approval', 'Submitted'].includes(status),
+      icon: Send,
+    },
   ]
 
   return (
     <div className="grid gap-2 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/80 to-white p-3 sm:grid-cols-3">
       {steps.map((step, index) => {
         const Icon = step.icon
-        const complete = step.done || (index === 1 && detailReady && approvalStarted)
+        const complete = step.done || (index === 1 && detailReady && approvalRequested)
         return (
           <div key={step.label} className={`relative flex items-center gap-3 rounded-xl border p-3 transition ${step.active ? 'border-blue-300 bg-white shadow-sm' : 'border-transparent'}`}>
             <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${complete ? 'bg-emerald-100 text-emerald-700' : step.active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-400'}`}>

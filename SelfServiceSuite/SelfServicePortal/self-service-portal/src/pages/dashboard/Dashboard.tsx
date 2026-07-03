@@ -84,7 +84,7 @@ const tiles: DashboardTile[] = [
   },
   {
     id: 'staffClaims',
-    label: 'Staff Claim',
+    label: 'Staff Claims',
     href: '/finance/staff-claim',
     icon: BadgeCheck,
     tone: 'from-emerald-700 via-emerald-700 to-emerald-800',
@@ -136,6 +136,7 @@ export function Dashboard() {
     enabled: canFetchSummary,
   })
   const firstName = employee?.displayName?.split(' ')[0] ?? 'there'
+  const profileSubtitle = employee?.jobTitle?.trim() || primaryRoleLabel
   const data = summary.data ?? null
   const tileValues = (data ?? {}) as Record<string, number | undefined>
   const summaryError =
@@ -195,8 +196,12 @@ export function Dashboard() {
                 </p>
                 <p className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
                   Hi {firstName}
-                  <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white backdrop-blur">
-                    {primaryRoleLabel}
+                  <span
+                    className={`rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white backdrop-blur ${
+                      employee?.jobTitle?.trim() ? 'normal-case' : 'uppercase'
+                    }`}
+                  >
+                    {profileSubtitle}
                   </span>
                 </p>
                 <p className="mt-1 text-xs text-white/70 sm:text-sm">

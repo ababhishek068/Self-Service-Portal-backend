@@ -10,38 +10,47 @@ import {
 import {
   findFrontendModuleSpec,
   findModuleSpec,
-  gatePassApprovalSetupMessage,
-  gatePassDocumentNo,
-  gatePassLineBinding,
   gatePassListFilterParts,
-  gatePassODataPagePayloadVariants,
-  gatePassODataPageSourcePatchPayloadVariants,
-  gatePassSoapPagePayloadVariants,
   gatePassSourceFromQuery,
   gatePassSourceFromRow,
-  hospitalCategoryCode,
   isMedicalClaimType,
   passengerTypeCode,
   approvalDocumentNoCandidates,
-  resolveGatePassTransferNo,
   portalApprovalEntryFilter,
-  resolvePurchaseRequestingDepartment,
 } from './staffModules.js'
-import { friendlySoapFaultMessage, soapFaultMessage } from './bcClient.js'
-import { isHalfDaySelection, halfDayOptionValue, formatBcSoapDate, normalizeLeaveStartDate, parseLeaveDatesReturn, leaveTypeIsAnnual, halfDayRequiresAnnualLeave, employeeAnnualLeaveBalance, employeeLeaveMetrics, resolveAnnualLeaveBalance, resolveAnnualLeaveEntitlement } from './staff.js'
+import { soapFaultMessage } from './bcClient.js'
+import { resolveLeaveApprovalSteps } from './leaveApprovalSteps.js'
 import {
-  approvalModule,
-  mapApprovalSteps,
-  mapModuleLines,
-  resolveRequestStatusFromApprovalSteps,
-} from './portalApi.js'
+  isHalfDaySelection,
+  halfDayOptionValue,
+  formatBcSoapDate,
+  normalizeLeaveStartDate,
+  parseLeaveDatesReturn,
+  computeLeaveDatesFallback,
+  leaveTypeIsAnnual,
+  halfDayRequiresAnnualLeave,
+  employeeLeaveMetrics,
+  resolveAnnualLeaveBalance,
+  resolveAnnualLeaveEntitlement,
+} from './staff.js'
+import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
+  cachedPasswordResetTokenMatches,
+  cachePasswordResetToken,
+  clearCachedPasswordResetToken,
   employeeResetToken,
   employeeResetTokenIsExpired,
+  employeeResetTokenMatches,
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { documentStatusFromBc, mapRequest } from './erpMappings.js'
+import { inferEmployeeJobId, resolveEmployeeJobTitle } from './employeeProfile.js'
+import {
+  documentStatusFromBc,
+  mapRequest,
+  resolveLeaveStatus,
+  leaveIsPendingInBc,
+} from './erpMappings.js'
 import {
   bcDocumentStatus,
   canRequestApprovalForSpec,
@@ -96,138 +105,6 @@ describe('gatePassFilters', () => {
     assert.equal(gatePassSourceFromRow({ Linkto: 'Store Issue' }), 'storeIssue')
     assert.equal(gatePassSourceFromRow({ LinkTo: 'Transfer Order' }), 'transferOrder')
     assert.equal(gatePassSourceFromRow({ Link_To: 'Asset Transfer' }), 'assetTransfer')
-    assert.equal(gatePassSourceFromRow({ Link_to: 'Asset Transfer' }), 'assetTransfer')
-  })
-
-  it('reads gate pass numbers from BC page and OData aliases', () => {
-    assert.equal(gatePassDocumentNo({ GatePassNo: '001' }), '001')
-    assert.equal(gatePassDocumentNo({ Gate_Pass_No: '002' }), '002')
-    assert.equal(gatePassDocumentNo({ Gate_Pass_No_: '003' }), '003')
-  })
-
-  it('reads the linked source document number from HIJRA page aliases', () => {
-    assert.deepEqual(
-      gatePassLineBinding({ Link_To: 'Transfer Order', Transfer_No_: '108008' }, '003'),
-      {
-        source: 'transferOrder',
-        lineService: 'QyTransferShipmentLine',
-        lineHeaderField: 'DocumentNo',
-        documentNo: '108008',
-      },
-    )
-    assert.deepEqual(
-      gatePassLineBinding({ Link_to: 'Asset Transfer', AssetTransferNo: 'IPI000003' }, '003'),
-      {
-        source: 'assetTransfer',
-        lineService: 'QyTransferShipmentLine',
-        lineHeaderField: 'DocumentNo',
-        documentNo: 'IPI000003',
-      },
-    )
-  })
-
-  it('builds HIJRA OData page payload variants for gate pass create', () => {
-    const variants = gatePassODataPagePayloadVariants(
-      'assetTransfer',
-      { label: 'Asset Transfer Requisitions', linkTo: 'Asset Transfer', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
-      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-      {
-        sourceDocumentNo: 'IPI000003',
-        dateOut: '2026-06-29',
-        timeOut: '12:00',
-        fromLocation: 'BLUE',
-        toLocation: 'YELLOW',
-        comment: 'Portal test',
-      },
-      'IPI000003',
-    )
-    assert.ok(variants.some((payload) =>
-      payload.Link_to === 'Asset Transfer' &&
-      payload.AssetTransferNo === 'IPI000003' &&
-      String(payload.Gate_Pass_No ?? '').startsWith('GP') &&
-      payload.EmployeeNo === 'E0010' &&
-      payload.TimeOut === '12:00:00',
-    ))
-    assert.equal(variants.some((payload) => 'Linkto' in payload), false)
-    assert.equal(variants.some((payload) => 'TransferNo' in payload), false)
-    assert.equal(variants.some((payload) => 'Asset_Transfer_No' in payload), false)
-  })
-
-  it('does not create Store Issue gate passes through OData page without a source field', () => {
-    const variants = gatePassODataPagePayloadVariants(
-      'storeIssue',
-      { label: 'Gate Pass Store Requisitions', linkTo: 'Store Issue', lineService: 'QyStoreRequisitionLines', lineHeaderField: 'RequistionNo', scopeToEmployee: true },
-      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-      {
-        sourceDocumentNo: '1175',
-        dateOut: '2026-06-30',
-        timeOut: '12:00',
-        fromLocation: 'BLUE',
-        toLocation: 'BRANCH OFFICE',
-        comment: 'Portal test',
-      },
-      '1175',
-    )
-    assert.deepEqual(variants, [])
-    assert.deepEqual(
-      gatePassODataPageSourcePatchPayloadVariants(
-        'storeIssue',
-        { label: 'Gate Pass Store Requisitions', linkTo: 'Store Issue', lineService: 'QyStoreRequisitionLines', lineHeaderField: 'RequistionNo', scopeToEmployee: true },
-        { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-        { sourceDocumentNo: '1175' },
-        '1175',
-      ),
-      [],
-    )
-  })
-
-  it('does not create Transfer Order gate passes through OData page without a source field', () => {
-    const variants = gatePassODataPagePayloadVariants(
-      'transferOrder',
-      { label: 'Gate Pass Transfer Orders', linkTo: 'Transfer Order', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
-      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-      {
-        sourceDocumentNo: '108008',
-        dateOut: '2026-06-30',
-        timeOut: '12:00',
-        fromLocation: 'GREEN',
-        toLocation: 'RED',
-        comment: 'Portal test',
-      },
-      '108008',
-    )
-    assert.deepEqual(variants, [])
-    assert.deepEqual(
-      gatePassODataPageSourcePatchPayloadVariants(
-        'transferOrder',
-        { label: 'Gate Pass Transfer Orders', linkTo: 'Transfer Order', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
-        { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-        { sourceDocumentNo: '108008' },
-        '108008',
-      ),
-      [],
-    )
-  })
-
-  it('builds HIJRA SOAP page payload variants for gate pass create', () => {
-    const variants = gatePassSoapPagePayloadVariants(
-      { label: 'Asset Transfer Requisitions', linkTo: 'Asset Transfer', lineService: 'QyTransferShipmentLine', lineHeaderField: 'DocumentNo', scopeToEmployee: false },
-      { employeeNo: 'E0010', responsibleCenter: 'FINANCE' } as never,
-      {
-        sourceDocumentNo: '12',
-        dateOut: '2026-06-29',
-        timeOut: '12:00',
-        fromLocation: 'BLUE',
-        toLocation: 'YELLOW',
-        description: 'Testing',
-        comment: 'Portal test',
-      },
-      '12',
-    )
-    assert.ok(variants.some((payload) => payload.Link_to === 'Asset Transfer' && payload.Transfer_No === '12'))
-    assert.ok(variants.some((payload) => payload.Linkto === 'Asset Transfer' && payload.TransferNo === '12'))
-    assert.ok(variants.some((payload) => payload.Employee_No === 'E0010'))
-    assert.ok(variants.some((payload) => payload.Time_Out === '12:00:00'))
   })
 
   it('scopes only Store Issue gate passes to the employee', () => {
@@ -273,39 +150,6 @@ describe('soapFaultMessage', () => {
     const xml = '<s:Fault><faultstring xml:lang="en-US">The value &quot;0&quot; cannot be evaluated.</faultstring></s:Fault>'
     assert.equal(soapFaultMessage(xml), 'The value "0" cannot be evaluated.')
   })
-
-  it('explains Business Central 20-character setup code faults', () => {
-    const fault = 'The length of the string is 28, but it must be less than or equal to 20 characters. Value: Total Reward and Recognition'
-    assert.equal(
-      friendlySoapFaultMessage(fault),
-      'Manual Business Central setup is required: "Total Reward and Recognition" is 28 characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center code, not the form text. Change that BC code to 20 characters or less, for example "TRR", and keep the long text only as the description/name. Then retry.',
-    )
-  })
-
-  it('maps missing source requisition faults to actionable guidance', () => {
-    assert.match(
-      friendlySoapFaultMessage('Requisition is no longer editable or it does not exist'),
-      /missing, already posted, or closed/i,
-    )
-  })
-})
-
-describe('gatePassApprovalSetupMessage', () => {
-  it('explains the BC source-link setup needed for OData-created gate passes', () => {
-    const message = gatePassApprovalSetupMessage('GP260630135453604', '1175', 'Store Issue')
-    assert.match(message, /Manual Business Central setup is required/)
-    assert.match(message, /page 51244 "Gate Pass Card"/)
-    assert.match(message, /RequestGatePassApproval/)
-    assert.match(message, /Store Issue 1175/)
-  })
-})
-
-describe('resolveGatePassTransferNo', () => {
-  it('reads HIJRA transfer and store issue field variants', () => {
-    assert.equal(resolveGatePassTransferNo({ Transfer_No_: '108008' }), '108008')
-    assert.equal(resolveGatePassTransferNo({ Store_Issue_No: '1175' }), '1175')
-    assert.equal(resolveGatePassTransferNo({}, { sourceDocumentNo: '1175' }), '1175')
-  })
 })
 
 describe('isHalfDaySelection', () => {
@@ -330,55 +174,6 @@ describe('leaveTypeIsAnnual', () => {
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: true }), true)
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: 'Yes' }), true)
     assert.equal(leaveTypeIsAnnual({ Code: 'LWOP', Annual: false }), false)
-    assert.equal(leaveTypeIsAnnual({ Code: 'AL', Description: 'Annual Leave' }), true)
-    assert.equal(leaveTypeIsAnnual({ Code: 'SICK', Description: 'Sick Leave' }), false)
-  })
-})
-
-describe('annual leave balance helpers', () => {
-  it('prefers annual leave balance over generic leave balance', () => {
-    const row = {
-      LeaveBalance: -31,
-      EarnedLeaveDays: -31.17,
-      AnnualLeaveBalance: 43.28,
-    }
-    assert.equal(employeeAnnualLeaveBalance(row), 43.28)
-    assert.equal(
-      resolveAnnualLeaveBalance(
-        { annualLeaveBalance: 43.28, earnedLeaveDays: -31.17 },
-        0,
-        16,
-      ),
-      43.28,
-    )
-    assert.equal(
-      resolveAnnualLeaveEntitlement(
-        { annualLeaveBalance: 43.28, earnedLeaveDays: -31.17 },
-        16,
-      ),
-      43.28,
-    )
-  })
-
-  it('ignores negative generic leave balance values', () => {
-    assert.equal(
-      employeeLeaveMetrics({ LeaveBalance: -31, EarnedLeaveDays: -31.17 }, -31).annualLeaveBalance,
-      null,
-    )
-  })
-
-  it('discovers annual leave balance from non-standard OData field names', () => {
-    assert.equal(employeeAnnualLeaveBalance({ Annual_Leave_Bala: 43.28 }), 43.28)
-  })
-
-  it('falls back to leave type days only when annual balance is unavailable', () => {
-    assert.equal(
-      resolveAnnualLeaveEntitlement(
-        { annualLeaveBalance: null, earnedLeaveDays: -31.17 },
-        16,
-      ),
-      16,
-    )
   })
 })
 
@@ -387,6 +182,76 @@ describe('halfDayRequiresAnnualLeave', () => {
     assert.equal(halfDayRequiresAnnualLeave('0'), false)
     assert.equal(halfDayRequiresAnnualLeave('1'), true)
     assert.equal(halfDayRequiresAnnualLeave('2'), true)
+  })
+})
+
+describe('employeeLeaveMetrics', () => {
+  const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
+
+  it('reads earned leave and annual balance fields from BC employee OData', () => {
+    const metrics = employeeLeaveMetrics(
+      {
+        EarnedLeaveDays: 16,
+        Annual_Leave_balance: 16,
+      },
+      user,
+    )
+    assert.equal(metrics.earnedLeaveDays, 16)
+    assert.equal(metrics.leaveBalance, 16)
+  })
+
+  it('does not treat missing leave fields as zero', () => {
+    const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
+    assert.equal(metrics.earnedLeaveDays, null)
+    assert.equal(metrics.leaveBalance, null)
+  })
+})
+
+describe('resolveAnnualLeaveBalance', () => {
+  it('prefers earned leave over ledger when BC exposes it', () => {
+    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
+  })
+
+  it('falls back to ledger when employee card fields are absent', () => {
+    const metrics = { earnedLeaveDays: null, leaveBalance: null }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
+  })
+})
+
+describe('resolveLeaveApprovalSteps', () => {
+  it('shows a pending placeholder when BC header is pending but entries are not ready yet', () => {
+    const steps = resolveLeaveApprovalSteps(
+      { ApplicationCode: 'LV00116', Status: 'Open', ApprovalStatus: 'Pending Approval' },
+      [],
+      'LV00116',
+    )
+    assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
+  })
+
+  it('maps BC approval entries to approver names', () => {
+    const steps = resolveLeaveApprovalSteps(
+      { ApplicationCode: 'LV00116', Status: 'Open' },
+      [{ EntryNo: 10, ApproverID: 'HOD01', ApproverName: 'Jane Manager', Status: 'Open', SequenceNo: 1 }],
+      'LV00116',
+    )
+    assert.equal(steps[0]?.actorName, 'Jane Manager')
+    assert.equal(steps[0]?.status, 'Pending Approval')
+  })
+
+  it('discovers approver fields from leave header OData aliases', () => {
+    const pendingSteps = resolveLeaveApprovalSteps(
+      {
+        ApplicationCode: 'LV00116',
+        Status: 'Open',
+        ApprovalStatus: 'Pending Approval',
+        Current_Approver_ID: 'ABH-050',
+        Current_Approver_Name: 'Finance Director',
+      },
+      [],
+      'LV00116',
+    )
+    assert.equal(pendingSteps[0]?.actorName, 'Finance Director')
   })
 })
 
@@ -405,6 +270,29 @@ describe('parseLeaveDatesReturn', () => {
       parseLeaveDatesReturn('EndDate=6/22/2026#ReturnDate=6/23/2026'),
       { endDate: '6/22/2026', returnDate: '6/23/2026' },
     )
+  })
+
+  it('parses a single ISO date when BC returns only the end date', () => {
+    assert.deepEqual(parseLeaveDatesReturn('2026-07-17'), {
+      endDate: '2026-07-17',
+      returnDate: '',
+    })
+  })
+})
+
+describe('computeLeaveDatesFallback', () => {
+  it('uses the same day for half-day leave and the next working day as return', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
+      endDate: '2026-07-17',
+      returnDate: '2026-07-20',
+    })
+  })
+
+  it('spans full days for normal leave', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
+      endDate: '2026-07-18',
+      returnDate: '2026-07-20',
+    })
   })
 })
 
@@ -459,12 +347,6 @@ describe('staffClaim saveLine params', () => {
     assert.equal(payload.hospitalCategory, 2)
     assert.equal(payload.medicalAmount, 100)
   })
-
-  it('maps HIJRA medical hospital category labels to BC option codes', () => {
-    assert.equal(hospitalCategoryCode('Government'), 1)
-    assert.equal(hospitalCategoryCode('Non Govt'), 2)
-    assert.equal(hospitalCategoryCode('Online'), 3)
-  })
 })
 
 describe('approvalDocumentNoCandidates', () => {
@@ -500,14 +382,6 @@ describe('mapApprovalSteps', () => {
     ])
     assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
     assert.equal(steps[0]?.status, 'Pending Approval')
-  })
-
-  it('treats open request headers with approval entries as pending approval', () => {
-    const steps = mapApprovalSteps([{ EntryNo: 1, ApproverID: 'HOD', Status: 'Open' }])
-    assert.equal(resolveRequestStatusFromApprovalSteps('Open', steps), 'Pending Approval')
-    assert.equal(resolveRequestStatusFromApprovalSteps('Draft', steps), 'Pending Approval')
-    assert.equal(resolveRequestStatusFromApprovalSteps('Open', []), 'Open')
-    assert.equal(resolveRequestStatusFromApprovalSteps('Approved', steps), 'Approved')
   })
 })
 
@@ -551,94 +425,6 @@ describe('salaryAdvance saveHeader params', () => {
     assert.equal(editParams.recId, '00000000-0000-0000-0000-000000000001')
     assert.equal(editParams.myAction, 'edit')
     assert.notEqual(editParams.recId, 'A00523')
-  })
-})
-
-describe('purchaseRequisition saveHeader params', () => {
-  it('resolves requesting department from header department name', () => {
-    assert.equal(
-      resolvePurchaseRequestingDepartment(
-        { employeeNo: 'E001', userID: 'USER1', department: '', departmentName: '' } as AuthUser,
-        { DepartmentName: 'HC' },
-        {},
-      ),
-      'HC',
-    )
-  })
-
-  it('resolves requesting department from header shortcut dimension', () => {
-    assert.equal(
-      resolvePurchaseRequestingDepartment(
-        { employeeNo: 'E001', userID: 'USER1', department: '' } as AuthUser,
-        {
-          Shortcut_Dimension_2_Code: 'HC',
-          Global_Dimension_1_Code: 'Human Resources and Rewards',
-        },
-        {},
-      ),
-      'HC',
-    )
-  })
-
-  it('uses short BC code values instead of long department display names', async () => {
-    const spec = findModuleSpec('purchase-requisition')
-    assert.ok(spec?.params?.saveHeader)
-    const params = await spec!.params!.saveHeader!({
-      req: {
-        body: {
-          description: 'Office supplies',
-          departmentCode: 'Total Reward and Recognition',
-          requestingDepartmentCode: 'TRR',
-          responsibilityCenter: 'Total Reward and Recognition',
-        },
-      } as Request,
-      user: {
-        employeeNo: 'E001',
-        userID: 'USER1',
-        department: 'Human Resources and Rewards',
-        responsibleCenter: 'RC-001',
-      } as AuthUser,
-      no: '',
-    })
-
-    assert.equal(params.department, 'TRR')
-    assert.equal(params.departmentCode, 'TRR')
-    assert.equal(params.DepartmentCode, 'TRR')
-    assert.equal(params.requestingDepartment, 'TRR')
-    assert.equal(params.RequestingDepartment, 'TRR')
-    assert.equal(params.Requesting_Department, 'TRR')
-    assert.equal(params.requestingDepartmentCode, 'TRR')
-    assert.equal(params.RequestingDepartmentCode, 'TRR')
-    assert.equal(params.Requesting_Department_Code, 'TRR')
-    assert.equal(params.shortcutDimension2Code, 'TRR')
-    assert.equal(params.ShortcutDimension2Code, 'TRR')
-    assert.equal(params.Shortcut_Dimension_2_Code, 'TRR')
-    assert.equal(params.responsibilityCenter, 'RC-001')
-  })
-
-  it('accepts BC-style department aliases from the request body', async () => {
-    const spec = findModuleSpec('purchase-requisition')
-    assert.ok(spec?.params?.saveHeader)
-    const params = await spec!.params!.saveHeader!({
-      req: {
-        body: {
-          description: 'Office supplies',
-          DepartmentCode: 'Total Reward and Recognition',
-          Requesting_Department_Code: 'HC',
-        },
-      } as Request,
-      user: {
-        employeeNo: 'E001',
-        userID: 'USER1',
-        department: '',
-      } as AuthUser,
-      no: '',
-    })
-
-    assert.equal(params.department, 'HC')
-    assert.equal(params.requestingDepartment, 'HC')
-    assert.equal(params.Requesting_Department, 'HC')
-    assert.equal(params.Requesting_Department_Code, 'HC')
   })
 })
 
@@ -715,26 +501,6 @@ describe('mapModuleLines', () => {
 })
 
 describe('mapRequest status', () => {
-  it('maps Gate_Pass_Card page rows by Gate_Pass_No', () => {
-    const mapped = mapRequest(
-      {
-        Gate_Pass_No: 'GP260630133258191',
-        Link_to: 'Store Issue',
-        EmployeeNo: 'E0010',
-        EmployeeName: 'Beza Yoseff Abrehamm',
-        DateOut: '2026-06-30',
-        AssetFromLocation: 'BLUE',
-        AssetToLocation: 'BRANCH OFFICE',
-        Status: 'Open',
-      },
-      'gatePass',
-    )
-    assert.equal(mapped.id, 'gatePass-GP260630133258191')
-    assert.equal(mapped.requestNo, 'GP260630133258191')
-    assert.equal(mapped.status, 'Open')
-    assert.equal(mapped.makerEmployeeNo, 'E0010')
-  })
-
   it('prefers ApprovalStatus for transfer orders', () => {
     const mapped = mapRequest(
       {
@@ -748,6 +514,65 @@ describe('mapRequest status', () => {
     assert.equal(
       documentStatusFromBc({ Status: 'Open', ApprovalStatus: 'Pending Approval' }, 'transferOrder'),
       'Pending Approval',
+    )
+  })
+
+  it('prefers ApprovalStatus for leave applications', () => {
+    const mapped = mapRequest(
+      {
+        ApplicationCode: 'LV00018',
+        Status: 'Open',
+        ApprovalStatus: 'Pending Approval',
+      },
+      'leave',
+    )
+    assert.equal(mapped.status, 'Pending Approval')
+    assert.equal(
+      documentStatusFromBc({ Status: 'Open', ApprovalStatus: 'Pending Approval' }, 'leave'),
+      'Pending Approval',
+    )
+    assert.equal(
+      resolveLeaveStatus({ Status: 'Open', ApprovalStatus: 'Pending' }),
+      'Pending Approval',
+    )
+    assert.equal(
+      resolveLeaveStatus(
+        { Status: 'Open', ApprovalStatus: '' },
+        [{ Status: 'Open', DocumentNo: 'LV00018' }],
+      ),
+      'Pending Approval',
+    )
+    assert.equal(
+      resolveLeaveStatus({ Status: 'Open', ApprovalStatus: '', Sent_for_Approval: true }),
+      'Pending Approval',
+    )
+  })
+})
+
+describe('leave status is driven only by Business Central', () => {
+  it('does not invent Pending when BC shows Open (nothing stored locally)', () => {
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00300', Status: 'Open', ApprovalStatus: '' }),
+      'Open',
+    )
+  })
+
+  it('shows the final BC status without any local override', () => {
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00302', Status: 'Approved', ApprovalStatus: '' }),
+      'Approved',
+    )
+  })
+
+  it('leaveIsPendingInBc reflects only Business Central data', () => {
+    assert.equal(leaveIsPendingInBc({ Status: 'Open', ApprovalStatus: '' }, []), false)
+    assert.equal(
+      leaveIsPendingInBc({ Status: 'Open', ApprovalStatus: 'Pending Approval' }, []),
+      true,
+    )
+    assert.equal(
+      leaveIsPendingInBc({ Status: 'Open' }, [{ Status: 'Open', DocumentNo: 'LV00303' }]),
+      true,
     )
   })
 })
@@ -803,13 +628,133 @@ describe('forgot-password token state', () => {
     assert.equal(employeeResetToken({ PasswordResetToken: 39084 } as never), '39084')
     assert.equal(employeeResetToken({ Password_Token: '77889' } as never), '77889')
     assert.equal(employeeResetToken({ Reset_Code: '12345' } as never), '12345')
+    assert.equal(employeeResetToken({ 'Reset Token': 42327 } as never), '42327')
     assert.equal(employeeResetToken({ PortalResetToken: 23234 } as never), '23234')
     assert.equal(employeeResetToken({ Portal_Reset_Token: '23234' } as never), '23234')
+    assert.equal(employeeResetToken({ Actual_Portal_Reset_Token_Value: '54321' } as never), '54321')
   })
 
   it('reads reset-token expiry aliases exposed by different BC employee pages', () => {
+    assert.equal(employeeResetTokenIsExpired({ 'Token Expired?': 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ PortalResetTokenExpired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'No' } as never), false)
     assert.equal(employeeResetTokenIsExpired({ Portal_Reset_Token_Expired: 'Yes' } as never), true)
+    assert.equal(employeeResetTokenIsExpired({ Actual_Portal_Reset_Token_Expired: 'Yes' } as never), true)
+  })
+
+  it('accepts a matching token from either reset-token field family', () => {
+    assert.equal(
+      employeeResetTokenMatches({
+        No: 'ABH-114',
+        'Reset Token': '42327',
+        'Token Expired?': 'No',
+        PortalResetToken: '',
+      } as never, '42327'),
+      true,
+    )
+    assert.equal(
+      employeeResetTokenMatches({ ResetToken: '39084', PortalResetToken: '23234' } as never, '39084'),
+      true,
+    )
+    assert.equal(
+      employeeResetTokenMatches({ ResetToken: '39084', PortalResetToken: '23234' } as never, '23234'),
+      true,
+    )
+    assert.equal(
+      employeeResetTokenMatches({ Reset_Token: '39084', Portal_Reset_Token: '23234' } as never, '11111'),
+      false,
+    )
+    assert.equal(
+      employeeResetTokenMatches({
+        No: 'ABH-114',
+        Actual_Portal_Reset_Token_Value: '16062',
+        Actual_Portal_Reset_Token_Expired: 'No',
+      } as never, '16062'),
+      true,
+    )
+  })
+
+  it('accepts a recently generated backend reset token even when BC does not expose it', () => {
+    clearCachedPasswordResetToken('ABH-114')
+    cachePasswordResetToken('ABH-114', '90514', 1_000)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_001), true)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '11111', 1_002), false)
+    assert.equal(cachedPasswordResetTokenMatches('ABH-114', '90514', 1_000 + 31 * 60 * 1000), false)
+  })
+})
+
+describe('resolveEmployeeJobTitle', () => {
+  it('reads Job_Title from Business Central employee payloads', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'HB-001',
+        Job_Title: 'Finance and Admin Director',
+        JobID: 'FAD',
+      },
+      'HB-001',
+    )
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('discovers job title fields exposed with alternate OData names', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'ABH-114',
+        Job_ID: 'ITM',
+        Job_Title_Description: 'IT Manger',
+      },
+      'ABH-114',
+    )
+    assert.equal(title, 'IT Manger')
+  })
+
+  it('reads ABH-style Job description field on employee OData', async () => {
+    const title = await resolveEmployeeJobTitle(
+      {
+        No: 'ABH-114',
+        Job_ID: 'ITM',
+        Job: 'IT Manger',
+      },
+      'ABH-114',
+    )
+    assert.equal(title, 'IT Manger')
+  })
+
+  it('infers ABH job code from corporate email local-part', () => {
+    assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
+  })
+
+  it('derives WS/Page OData base from the SOAP codeunit URL', async () => {
+    const { derivePageODataBaseFromSoapCodeunit } = await import('./employeeProfile.js')
+    assert.equal(
+      derivePageODataBaseFromSoapCodeunit(
+        'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Codeunit/CuStaffPortal',
+      ),
+      'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Page/',
+    )
+  })
+
+  it('maps ABH job code FAD to Finance and Admin Director', async () => {
+    const title = await resolveEmployeeJobTitle(
+      { No: 'ABH-029', Job_ID: 'FAD', Job: 'Finance and Admin Director' },
+      'ABH-029',
+    )
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('maps ABH employee number ABH-029 when BC returns no job fields', async () => {
+    const title = await resolveEmployeeJobTitle({ No: 'ABH-029' }, 'ABH-029')
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('maps FAD from ABH Job field when Job_ID is absent on OData', async () => {
+    assert.equal(inferEmployeeJobId({ No: 'ABH-029', Job: 'FAD' }), 'FAD')
+    const title = await resolveEmployeeJobTitle({ No: 'ABH-029', Job: 'FAD' }, 'ABH-029')
+    assert.equal(title, 'Finance and Admin Director')
+  })
+
+  it('does not treat long email local-parts as job codes', () => {
+    assert.equal(inferEmployeeJobId({ EMail: 'tesfaye@abhpartners.com' }), '')
+    assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
   })
 })

@@ -12,6 +12,38 @@ const csvList = z
       .filter(Boolean),
   )
 
+const jobTitleMap = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) => {
+    const map = new Map<string, string>()
+    for (const part of value.split(',')) {
+      const separator = part.indexOf(':')
+      if (separator <= 0) continue
+      const code = part.slice(0, separator).trim().toUpperCase()
+      const title = part.slice(separator + 1).trim()
+      if (code && title) map.set(code, title)
+    }
+    return map
+  })
+
+const jobTitleByEmpNoMap = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) => {
+    const map = new Map<string, string>()
+    for (const part of value.split(',')) {
+      const separator = part.indexOf(':')
+      if (separator <= 0) continue
+      const empNo = part.slice(0, separator).trim().toUpperCase()
+      const title = part.slice(separator + 1).trim()
+      if (empNo && title) map.set(empNo, title)
+    }
+    return map
+  })
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
@@ -23,8 +55,12 @@ const envSchema = z.object({
     .string()
     .url()
     .optional()
-    .default('http://erp-app-uat:2447/BC240/WS/HIJRA%20BANK/Page/'),
-  BC_GATE_PASS_PAGE_SERVICE: z.string().optional().default('Gate_Pass_Card'),
+    .default("http://erp-app-uat:2447/BC240/ODataV4/Company('HIJRA%20BANK')/"),
+  /** Optional WS/Page OData base (Employee Card). Auto-derived from BC_SOAP_CODEUNIT_URL when empty. */
+  BC_ODATA_PAGE_BASE_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
   BC_SOAP_NAMESPACE: z.string().default('urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal'),
   BC_AUTH_MODE: z.enum(['none', 'basic', 'ntlm']).default('ntlm'),
   BC_DOMAIN: z.string().optional().default(''),
@@ -44,6 +80,12 @@ const envSchema = z.object({
     .optional()
     .default('true')
     .transform((value) => value.toLowerCase() === 'true'),
+  /** Verbose per-leave status diagnostics on the leave list. Off by default. */
+  LOG_LEAVE_STATUS: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((value) => value.toLowerCase() === 'true'),
   BC_LOG_FILE: z.string().optional().default('bc-integration.log'),
   SESSION_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
   SESSION_COOKIE_SECURE: z
@@ -54,6 +96,21 @@ const envSchema = z.object({
 
   HOD_OVERRIDE_EMPNOS: csvList,
   CEO_OVERRIDE_EMPNOS: csvList,
+  /** Extra BC OData page names for employee/job title resolution (comma-separated). */
+  BC_EMPLOYEE_ODATA_EXTRA_SERVICES: csvList,
+  BC_JOB_ODATA_EXTRA_SERVICES: csvList,
+  /** Fallback job titles when BC OData does not expose them, e.g. ITM:IT Manger */
+  BC_JOB_TITLE_BY_CODE: jobTitleMap,
+  /** Fallback job titles by employee number when BC/job-code lookup fails, e.g. ABH-029:Finance and Admin Director */
+  BC_JOB_TITLE_BY_EMPNO: jobTitleByEmpNoMap,
+  /** Probe BC $metadata to discover extra OData pages (slow — off by default). */
+  BC_DISCOVER_ODATA_SERVICES: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((value) => value.toLowerCase() === 'true'),
+  /** Per-request timeout for Business Central HTTP calls (milliseconds). */
+  BC_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
   /** UAT parity with legacy ESS login where HOD menu is visible to all staff. */
   HOD_GRANT_ALL_AUTHENTICATED: z
     .string()
@@ -73,7 +130,6 @@ export function publicConfig() {
     soapCodeunitUrl: config.BC_SOAP_CODEUNIT_URL,
     soapPageBaseUrl: config.BC_SOAP_PAGE_BASE_URL,
     soapNamespace: config.BC_SOAP_NAMESPACE,
-    gatePassPageService: config.BC_GATE_PASS_PAGE_SERVICE,
     authMode: config.BC_AUTH_MODE,
   }
 }

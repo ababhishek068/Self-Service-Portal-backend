@@ -17,7 +17,7 @@ interface BcCall {
 
 interface BcRequestLog {
   protocol: 'OData' | 'SOAP'
-  method: 'GET' | 'POST' | 'PATCH'
+  method: 'GET' | 'POST'
   operation: string
   target: string
   metadata?: string
@@ -53,6 +53,11 @@ function duration(startedAt: number) {
 
 export function currentRequestId() {
   return requestContext.getStore()?.requestId ?? 'background'
+}
+
+/** Emit a diagnostic line to the console and the integration log file. */
+export function logDiagnostic(line: string) {
+  writeLog(line)
 }
 
 export function apiRequestLogger(req: Request, res: Response, next: NextFunction) {

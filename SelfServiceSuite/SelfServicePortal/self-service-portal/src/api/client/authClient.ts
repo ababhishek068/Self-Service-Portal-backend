@@ -1,4 +1,5 @@
 import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
+import { trackAxiosActivity } from '@/lib/apiActivity'
 import { env } from '@/config/env'
 
 /**
@@ -93,6 +94,9 @@ export const authHttp: AxiosInstance = axios.create({
   timeout: 20000,
   headers: { Accept: 'application/json' },
 })
+
+// Register first so every request/response is tracked before other interceptors run.
+trackAxiosActivity(authHttp)
 
 authHttp.interceptors.request.use((config) => {
   const base = resolveApiBaseUrl()

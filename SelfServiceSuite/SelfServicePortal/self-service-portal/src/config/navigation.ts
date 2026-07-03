@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import type { PortalRole } from '@/config/roles'
 import {
-  ArrowRightLeft,
   BadgeCheck,
   Banknote,
   BarChart3,
@@ -13,14 +12,12 @@ import {
   CloudDownload,
   Crown,
   DoorOpen,
-  FileSignature,
   FileText,
   Fuel,
   Gauge,
   Home,
   KeyRound,
   Landmark,
-  LogOut,
   PackageCheck,
   Plane,
   ReceiptText,
@@ -47,9 +44,8 @@ export interface NavItem {
 }
 
 /**
- * Navigation reflects the ESS portal module structure. Order, labels and
- * grouping are kept in sync with the ERP self-service scope so users have a
- * consistent mental model across the system.
+ * HIJRA Bank UAT navigation — matches the ESS / self-service scope for Hijra.
+ * ABH-only modules (e.g. Leave Planner) are intentionally omitted.
  */
 export const navigationMenu: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: Gauge },
@@ -60,22 +56,14 @@ export const navigationMenu: NavItem[] = [
       { label: 'Leave Requisition', path: '/hr/leave-request', icon: Home },
       { label: 'Leave Statement', path: '/hr/leave-statement', icon: ReceiptText },
       { label: 'Attendance', path: '/hr/attendance', icon: UsersRound },
-      { label: 'Competency', path: '/hr/performance', icon: BarChart3 },
+      { label: 'Performance', path: '/hr/performance', icon: BarChart3 },
       { label: 'Training Request', path: '/hr/training-request', icon: FileText },
-      { label: 'Medical Claim', path: '/hr/staff-medical-claim', icon: BadgeCheck },
       { label: 'Payslip', path: '/hr/payslip', icon: Wallet },
       { label: 'Salary Advance', path: '/hr/salary-advance', icon: Banknote },
-      { label: 'HR Service Request Letters', path: '/hr/service-request-letters', icon: FileSignature },
       {
-        label: 'Employee Resignation',
-        path: '/hr/employee-resignation',
-        icon: LogOut,
-        underConstruction: true,
-      },
-      {
-        label: 'Employee Transfer',
-        path: '/hr/employee-transfer',
-        icon: ArrowRightLeft,
+        label: 'Document Requisition',
+        path: '/hr/document-requisition',
+        icon: FileText,
         underConstruction: true,
       },
     ],
@@ -86,7 +74,7 @@ export const navigationMenu: NavItem[] = [
     children: [
       { label: 'Imprest Requisition', path: '/finance/imprest', icon: Banknote },
       { label: 'Imprest Surrender', path: '/finance/imprest-surrender', icon: ReceiptText },
-      { label: 'Staff Claim', path: '/finance/staff-claim', icon: BadgeCheck },
+      { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Petty Cash Request', path: '/finance/petty-cash', icon: Banknote },
       { label: 'Petty Cash Replenishment', path: '/finance/petty-cash-replenishment', icon: ReceiptText },
     ],
@@ -108,7 +96,6 @@ export const navigationMenu: NavItem[] = [
       { label: 'Store Requisition', path: '/facility/store-requisition', icon: Store },
       { label: 'Transport Requisition', path: '/facility/transport-request', icon: Car },
       { label: 'Fuel Requisition', path: '/facility/fuel-request', icon: Fuel },
-      { label: 'Maintenance Request', path: '/facility/maintenance-request', icon: Building2 },
       { label: 'Work Tickets', path: '/facility/work-tickets', icon: Ticket },
       { label: 'Transfer Orders', path: '/facility/transfer-order', icon: PackageCheck },
       {
@@ -139,7 +126,7 @@ export const navigationMenu: NavItem[] = [
     icon: UsersRound,
     roles: ['hod'],
     children: [
-      { label: 'Department Staff', path: '/hod/department-staff', icon: UsersRound },
+      { label: 'Department Staff', path: '/hod/team-requests', icon: UsersRound },
       { label: 'Staff on Leave', path: '/hod/staff-on-leave', icon: Plane },
     ],
   },

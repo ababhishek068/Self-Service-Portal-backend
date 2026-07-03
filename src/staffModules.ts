@@ -2,20 +2,16 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import {
   callSoapMethod,
-  createSoapPageRecord,
   fetchOData,
   odataString,
-  patchOData,
   postOData,
   type ODataRecord,
 } from './bcClient.js'
-import { config } from './config.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
 import { formatBcSoapDate } from './staff.js'
 import {
-  bcDocumentStatus,
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
@@ -131,38 +127,6 @@ function soapActionOk(spec: ModuleSpec, result: SoapResult) {
   return ok(result)
 }
 
-function isGatePassApprovalRecordFault(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  return (
-    /Requisition is no longer editable or it does not exist/i.test(message) ||
-    /linked Business Central document is missing/i.test(message)
-  )
-}
-
-export function gatePassApprovalSetupMessage(no: string, transferNo: string, sourceLabel = '') {
-  const source = sourceLabel ? `${sourceLabel} ` : ''
-  const sourceText = transferNo ? `${source}${transferNo}` : 'the linked source document'
-  return `Business Central created Gate Pass ${no}, but RequestGatePassApproval could not find an editable native gate-pass requisition for ${sourceText}. Manual Business Central setup is required: page 51244 "Gate Pass Card" is currently writable through OData, but the Store Issue/Transfer Order source link used by the approval codeunit is not being persisted for these OData-created cards. Ask the BC developer to either expose and persist the source link field used by RequestGatePassApproval on page 51244 (for example TransferNo/Transfer_No/Store Issue No), or publish a codeunit action that creates the gate pass from the source document and then requests approval.`
-}
-
-function gatePassApprovalSetupError(no: string, transferNo: string, sourceLabel = '') {
-  return Object.assign(new Error(gatePassApprovalSetupMessage(no, transferNo, sourceLabel)), {
-    status: 422,
-    code: 'BC_GATE_PASS_APPROVAL_SETUP_REQUIRED',
-  })
-}
-
-function gatePassODataPageSourceUnsupportedMessage(sourceLabel: string) {
-  return `Manual Business Central setup is required: page 51244 "Gate Pass Card" is published as Gate_Pass_Card, but it does not expose a writable ${sourceLabel} source-number field through OData. The current published page supports AssetTransferNo only, so OData-created ${sourceLabel} gate passes cannot be linked to the source document or sent for approval. Ask the BC developer to expose and persist the ${sourceLabel} source-link field used by RequestGatePassApproval on page 51244, or publish a codeunit action that creates the gate pass from the source document and requests approval.`
-}
-
-function gatePassODataPageSourceUnsupportedError(sourceLabel: string) {
-  return Object.assign(new Error(gatePassODataPageSourceUnsupportedMessage(sourceLabel)), {
-    status: 502,
-    code: 'BC_GATE_PASS_SOURCE_FIELD_MISSING',
-  })
-}
-
 const REC_ID_HEADER_MODULES = new Set(['fuel', 'maintenance', 'salary-advance'])
 
 async function resolveRecIdHeaderEditBody(
@@ -264,7 +228,7 @@ export function gatePassSourceFromQuery(value: unknown): GatePassSourceKey {
 }
 
 export function gatePassSourceFromRow(row: ODataRecord): GatePassSourceKey {
-  return normalizedGatePassSource(fieldText(row, ['Linkto', 'LinkTo', 'Link_to', 'Link_To', 'Link']))
+  return normalizedGatePassSource(fieldText(row, ['Linkto', 'LinkTo', 'Link_To']))
 }
 
 export function gatePassListFilterParts(source: GatePassSourceKey, user: AuthUser) {
@@ -283,101 +247,8 @@ export function gatePassLineBinding(row: ODataRecord, fallbackNo: string) {
     source,
     lineService: sourceSpec.lineService,
     lineHeaderField: sourceSpec.lineHeaderField,
-    documentNo: gatePassTransferNo(row, fallbackNo),
+    documentNo: fieldText(row, ['TransferNo', 'Transfer_No'], fallbackNo),
   }
-}
-
-const RECENT_GATE_PASS_TTL_MS = 6 * 60 * 60 * 1000
-const recentGatePassCreates = new Map<string, { row: ODataRecord; expiresAt: number }>()
-
-function gatePassEmployeeNo(row: ODataRecord) {
-  return fieldText(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
-}
-
-function pruneRecentGatePassCreates() {
-  const now = Date.now()
-  for (const [key, value] of recentGatePassCreates) {
-    if (value.expiresAt <= now) recentGatePassCreates.delete(key)
-  }
-}
-
-function recentGatePassRow(no: string) {
-  pruneRecentGatePassCreates()
-  return recentGatePassCreates.get(no)?.row ?? null
-}
-
-function gatePassRowMatchesSource(row: ODataRecord, source: GatePassSourceKey, user: AuthUser) {
-  if (gatePassSourceFromRow(row) !== source) return false
-  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
-  if (!sourceSpec.scopeToEmployee) return true
-  const employeeNo = gatePassEmployeeNo(row)
-  return !employeeNo || employeeNo === user.employeeNo
-}
-
-function mergeRecentGatePassRow(row: ODataRecord) {
-  const no = gatePassDocumentNo(row)
-  const recent = no ? recentGatePassRow(no) : null
-  return recent ? { ...row, ...recent } : row
-}
-
-function mergeRecentGatePassRows(rows: ODataRecord[], source: GatePassSourceKey, user: AuthUser) {
-  pruneRecentGatePassCreates()
-  const byNo = new Map<string, ODataRecord>()
-  const anonymous: ODataRecord[] = []
-  for (const row of rows.map(mergeRecentGatePassRow)) {
-    const no = gatePassDocumentNo(row)
-    if (!no) {
-      anonymous.push(row)
-      continue
-    }
-    byNo.set(no, byNo.has(no) ? { ...byNo.get(no), ...row } : row)
-  }
-  for (const { row } of recentGatePassCreates.values()) {
-    if (!gatePassRowMatchesSource(row, source, user)) continue
-    const no = gatePassDocumentNo(row)
-    if (!no) continue
-    byNo.set(no, byNo.has(no) ? { ...byNo.get(no), ...row } : row)
-  }
-  return [...byNo.values(), ...anonymous]
-}
-
-function rememberRecentGatePassCreate(
-  source: GatePassSourceKey,
-  user: AuthUser,
-  values: GatePassPageValues,
-  created: ODataRecord | null,
-) {
-  const no = gatePassDocumentNo(created ?? {}) || String(values.gatePassNo ?? '').trim()
-  if (!no) return created
-  const row = cleanODataPayload({
-    ...(created ?? {}),
-    GatePassNo: no,
-    Gate_Pass_No: no,
-    Linkto: values.linkTo,
-    Link_to: values.linkTo,
-    gatePassSource: source,
-    sourceDocumentNo: values.sourceDocumentNo,
-    TransferNo: values.sourceDocumentNo,
-    Transfer_No: values.sourceDocumentNo,
-    EmployeeNo: values.employeeNo,
-    EmployeeName: user.displayName,
-    DateCreated: new Date().toISOString().slice(0, 10),
-    DateOut: values.dateOut,
-    TimeOut: values.timeOut,
-    FromLocation: values.fromLocation,
-    AssetFromLocation: values.fromLocation,
-    ToLocation: values.toLocation,
-    AssetToLocation: values.toLocation,
-    Description: values.description || values.linkTo,
-    Comment: values.comment,
-    ResponsibilityCenter: values.responsibilityCenter,
-    Status: fieldText(created ?? {}, ['Status']) || 'Open',
-  })
-  recentGatePassCreates.set(no, {
-    row,
-    expiresAt: Date.now() + RECENT_GATE_PASS_TTL_MS,
-  })
-  return row
 }
 
 function cleanODataPayload(payload: Record<string, unknown>) {
@@ -398,462 +269,11 @@ function normalizeBcTime(value: unknown) {
   return raw
 }
 
-function generateGatePassNo() {
-  const stamp = new Date().toISOString().replace(/\D/g, '').slice(2, 14)
-  const suffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0')
-  return `GP${stamp}${suffix}`
+function gatePassDocumentNo(row: ODataRecord) {
+  return fieldText(row, ['GatePassNo', 'Gate_Pass_No'])
 }
 
-export function gatePassDocumentNo(row: ODataRecord) {
-  return fieldText(row, ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_', 'GatePassNumber', 'No'])
-}
-
-function gatePassTransferNo(row: Record<string, unknown>, fallback = '') {
-  return fieldText(row, [
-    'transferNo',
-    'TransferNo',
-    'Transfer_No',
-    'Transfer_No_',
-    'assetTransferNo',
-    'AssetTransferNo',
-    'Asset_Transfer_No',
-    'transferOrderNo',
-    'TransferOrderNo',
-    'Transfer_Order_No',
-    'storeIssueNo',
-    'StoreIssueNo',
-    'Store_Issue_No',
-    'RequisitionNo',
-    'RequistionNo',
-    'sourceDocumentNo',
-    'SourceDocumentNo',
-    'Source_Document_No',
-    'DocumentNo',
-  ], fallback)
-}
-
-/** Resolve the linked source document number ESS sends as `transferNo` on gate pass approval. */
-export function resolveGatePassTransferNo(
-  row: ODataRecord,
-  ...fallbacks: Array<Record<string, unknown>>
-) {
-  let transferNo = gatePassTransferNo(row)
-  for (const fallback of fallbacks) {
-    if (transferNo) break
-    transferNo = gatePassTransferNo(fallback)
-  }
-  return transferNo
-}
-
-async function fetchODataTop1(service: string, filter: string) {
-  const rows = (await fetchOData(service, { $filter: filter, $top: 1 }).catch(
-    () => null,
-  )) as ODataRecord[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
-}
-
-/** Gate pass approval requires a real linked source document with lines in BC. */
-async function assertGatePassSourceReady(header: ODataRecord) {
-  const source = gatePassSourceFromRow(header)
-  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
-  const transferNo = resolveGatePassTransferNo(header)
-  if (!transferNo) {
-    throw Object.assign(
-      new Error(
-        'This gate pass has no linked Store Issue / Transfer / Asset Transfer number in Business Central. Create a new gate pass with a valid source document number.',
-      ),
-      { status: 422 },
-    )
-  }
-  if (source === 'assetTransfer') return transferNo
-
-  const lineRows = (await fetchOData(sourceSpec.lineService, {
-    $filter: `${sourceSpec.lineHeaderField} eq '${odataString(transferNo)}'`,
-    $top: 1,
-  }).catch(() => null)) as ODataRecord[] | null
-  if (Array.isArray(lineRows) && lineRows.length > 0) return transferNo
-
-  const headerServices =
-    source === 'transferOrder'
-      ? ['QyTransferOrderHeader']
-      : ['QyStoreRequisitionHeader']
-  for (const service of headerServices) {
-    const row = await fetchODataTop1(service, `No eq '${odataString(transferNo)}'`)
-    if (row) {
-      const status = bcDocumentStatus(
-        source === 'transferOrder' ? 'transfer-order' : 'store-requisition',
-        row,
-      )
-      throw Object.assign(
-        new Error(
-          `Linked ${sourceSpec.linkTo} ${transferNo} exists in Business Central (status: ${status || 'unknown'}) but has no lines available for gate pass approval. Use a posted store issue / released transfer with lines, then create a new gate pass.`,
-        ),
-        { status: 422 },
-      )
-    }
-  }
-
-  throw Object.assign(
-    new Error(
-      `${sourceSpec.linkTo} document ${transferNo} was not found in Business Central. Enter a valid source number from BC — not a placeholder test value.`,
-    ),
-    { status: 422 },
-  )
-}
-
-function gatePassODataInsertUnsupported(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  return /MethodNotImplemented|does not support insert|Entity does not support insert/i.test(message)
-}
-
-function gatePassSoapPageServiceNames() {
-  const configured = config.BC_GATE_PASS_PAGE_SERVICE
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return [
-    ...configured,
-    'Gate_Pass_Card',
-    'Gatepass_Card',
-    'GatePassCard',
-    'GatepassCard',
-    'Gate_Pass',
-    'GatePass',
-    'Gatepass',
-  ].filter((item, index, items) => items.indexOf(item) === index)
-}
-
-function gatePassODataPageServiceNames() {
-  const configured = config.BC_GATE_PASS_PAGE_SERVICE
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return configured.length ? configured : ['Gate_Pass_Card']
-}
-
-function bcSoapPageServiceNotFound(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? '')
-  return /Service\s+"?Page\/[^"]+"?\s+was not found|Service .* was not found|Page\/.*not found/i.test(message)
-}
-
-function readableBcError(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error ?? '')
-  const jsonStart = raw.indexOf('{')
-  if (jsonStart >= 0) {
-    try {
-      const data = JSON.parse(raw.slice(jsonStart))
-      const message = data?.error?.message
-      const code = data?.error?.code
-      if (
-        /Internal_InvalidTableRelation/i.test(String(code ?? '')) &&
-        /field Transfer No/i.test(String(message ?? '')) &&
-        /related table \(Asset Transfer\)/i.test(String(message ?? ''))
-      ) {
-        const invalidNo = String(message ?? '').match(/value \(([^)]+)\)/i)?.[1]
-        return `Invalid Asset Transfer No${invalidNo ? ` "${invalidNo}"` : ''}. Select an existing Asset Transfer document from Business Central.`
-      }
-      if (message && code) return `${code}: ${message}`
-      if (message) return String(message)
-    } catch {
-      // Keep the original error if the payload is not standalone JSON.
-    }
-  }
-  return raw
-}
-
-function gatePassPageSourceDocumentFieldNames(source: GatePassSourceKey) {
-  return source === 'assetTransfer' ? ['AssetTransferNo'] : []
-}
-
-type GatePassPageValues = {
-  gatePassNo: unknown
-  linkTo: string
-  sourceDocumentNo: string
-  dateOut: unknown
-  timeOut: string
-  description: unknown
-  comment: unknown
-  fromLocation: unknown
-  toLocation: unknown
-  employeeNo: string
-  responsibilityCenter: unknown
-}
-
-function gatePassPageValues(
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-): GatePassPageValues {
-  return {
-    gatePassNo: fieldText(body, ['gatePassNo', 'gatePassNumber']) || generateGatePassNo(),
-    linkTo: sourceSpec.linkTo,
-    sourceDocumentNo,
-    dateOut: body.dateOut ?? body.issueDate,
-    timeOut: normalizeBcTime(body.timeOut),
-    description: body.description ?? body.reason,
-    comment: body.comment,
-    fromLocation: body.fromLocation ?? body.from,
-    toLocation: body.toLocation ?? body.to ?? body.destination,
-    employeeNo: user.employeeNo,
-    responsibilityCenter: firstBcCodeValue(body.responsibilityCenter, user.responsibleCenter),
-  }
-}
-
-function gatePassPagePayloads(values: GatePassPageValues) {
-  const canonicalFull = {
-    Gate_Pass_No: values.gatePassNo,
-    Link_to: values.linkTo,
-    Transfer_No: values.sourceDocumentNo,
-    Date_Out: values.dateOut,
-    Time_Out: values.timeOut,
-    Description: values.description,
-    Comment: values.comment,
-    From_Location: values.fromLocation,
-    To_Location: values.toLocation,
-    Employee_No: values.employeeNo,
-    Responsibility_Center: values.responsibilityCenter,
-  }
-  const canonicalTitleFull = {
-    Gate_Pass_No: values.gatePassNo,
-    Link_To: values.linkTo,
-    Transfer_No: values.sourceDocumentNo,
-    Date_Out: values.dateOut,
-    Time_Out: values.timeOut,
-    Description: values.description,
-    Comment: values.comment,
-    From_Location: values.fromLocation,
-    To_Location: values.toLocation,
-    Employee_No: values.employeeNo,
-    Responsibility_Center: values.responsibilityCenter,
-  }
-  const odataFull = {
-    GatePassNo: values.gatePassNo,
-    Linkto: values.linkTo,
-    TransferNo: values.sourceDocumentNo,
-    DateOut: values.dateOut,
-    TimeOut: values.timeOut,
-    Description: values.description,
-    Comment: values.comment,
-    FromLocation: values.fromLocation,
-    ToLocation: values.toLocation,
-    EmployeeNo: values.employeeNo,
-    ResponsibilityCenter: values.responsibilityCenter,
-  }
-  const canonicalMinimal = {
-    Link_to: values.linkTo,
-    Transfer_No: values.sourceDocumentNo,
-    Employee_No: values.employeeNo,
-    Date_Out: values.dateOut,
-    Time_Out: values.timeOut,
-    From_Location: values.fromLocation,
-    To_Location: values.toLocation,
-    Comment: values.comment,
-  }
-  const canonicalTitleMinimal = {
-    Link_To: values.linkTo,
-    Transfer_No: values.sourceDocumentNo,
-    Employee_No: values.employeeNo,
-    Date_Out: values.dateOut,
-    Time_Out: values.timeOut,
-    From_Location: values.fromLocation,
-    To_Location: values.toLocation,
-    Comment: values.comment,
-  }
-  const odataMinimal = {
-    Linkto: values.linkTo,
-    TransferNo: values.sourceDocumentNo,
-    EmployeeNo: values.employeeNo,
-    DateOut: values.dateOut,
-    TimeOut: values.timeOut,
-    FromLocation: values.fromLocation,
-    ToLocation: values.toLocation,
-    Comment: values.comment,
-  }
-  return [
-    canonicalFull,
-    canonicalTitleFull,
-    odataFull,
-    canonicalMinimal,
-    canonicalTitleMinimal,
-    odataMinimal,
-  ].map(cleanODataPayload)
-}
-
-function gatePassODataPagePayloads(source: GatePassSourceKey, values: GatePassPageValues) {
-  const sourceFields = gatePassPageSourceDocumentFieldNames(source)
-  if (sourceFields.length === 0) return [] as Record<string, unknown>[]
-
-  const basePayloads = [
-    {
-      Gate_Pass_No: values.gatePassNo,
-      Link_to: values.linkTo,
-      EmployeeNo: values.employeeNo,
-      DateOut: values.dateOut,
-      TimeOut: values.timeOut,
-      Comment: values.comment,
-      AssetFromLocation: values.fromLocation,
-      AssetToLocation: values.toLocation,
-      ResponsibilityCenter: values.responsibilityCenter,
-    },
-    {
-      Gate_Pass_No: values.gatePassNo,
-      Link_to: values.linkTo,
-      EmployeeNo: values.employeeNo,
-      DateOut: values.dateOut,
-      TimeOut: values.timeOut,
-      Comment: values.comment,
-    },
-  ]
-  const payloads: Record<string, unknown>[] = []
-  for (const sourceField of sourceFields) {
-    for (const payload of basePayloads) {
-      payloads.push(cleanODataPayload({
-        ...payload,
-        [sourceField]: values.sourceDocumentNo,
-      }))
-    }
-  }
-  return payloads
-}
-
-export function gatePassODataPagePayloadVariants(
-  source: GatePassSourceKey,
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-) {
-  const seen = new Set<string>()
-  const variants: Record<string, unknown>[] = []
-  for (const payload of gatePassODataPagePayloads(source, gatePassPageValues(sourceSpec, user, body, sourceDocumentNo))) {
-    const key = JSON.stringify(payload)
-    if (seen.has(key)) continue
-    seen.add(key)
-    variants.push(payload)
-  }
-  return variants
-}
-
-function gatePassODataPageSourcePatchPayloads(
-  source: GatePassSourceKey,
-  _values: GatePassPageValues,
-) {
-  if (source === 'assetTransfer') return [] as Record<string, unknown>[]
-  return [] as Record<string, unknown>[]
-}
-
-export function gatePassODataPageSourcePatchPayloadVariants(
-  source: GatePassSourceKey,
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-) {
-  return gatePassODataPageSourcePatchPayloads(
-    source,
-    gatePassPageValues(sourceSpec, user, body, sourceDocumentNo),
-  )
-}
-
-async function patchGatePassODataPageSource(
-  serviceName: string,
-  created: ODataRecord | null,
-  values: GatePassPageValues,
-) {
-  const patches = gatePassODataPageSourcePatchPayloads(
-    normalizedGatePassSource(values.linkTo),
-    values,
-  )
-  if (patches.length === 0) {
-    return created ?? cleanODataPayload({
-      Gate_Pass_No: values.gatePassNo,
-      Link_to: values.linkTo,
-      EmployeeNo: values.employeeNo,
-    })
-  }
-  throw new Error(
-    `OData page source link failed for ${serviceName}: no supported source-link patch fields are published for this Gate_Pass_Card page.`,
-  )
-}
-
-export function gatePassSoapPagePayloadVariants(
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-) {
-  const seen = new Set<string>()
-  const variants: Record<string, unknown>[] = []
-  for (const payload of gatePassPagePayloads(gatePassPageValues(sourceSpec, user, body, sourceDocumentNo))) {
-    const key = JSON.stringify(payload)
-    if (seen.has(key)) continue
-    seen.add(key)
-    variants.push(payload)
-  }
-  return variants
-}
-
-async function createGatePassViaODataPage(
-  source: GatePassSourceKey,
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-) {
-  const serviceNames = gatePassODataPageServiceNames()
-  const values = gatePassPageValues(sourceSpec, user, body, sourceDocumentNo)
-  const variants = gatePassODataPagePayloadVariants(source, sourceSpec, user, body, sourceDocumentNo)
-  if (variants.length === 0) {
-    throw gatePassODataPageSourceUnsupportedError(sourceSpec.linkTo)
-  }
-  let lastError: unknown
-  for (const serviceName of serviceNames) {
-    for (const payload of variants) {
-      let created: ODataRecord | null = null
-      try {
-        created = await postOData(serviceName, payload)
-      } catch (error) {
-        lastError = error
-        continue
-      }
-      return await patchGatePassODataPageSource(serviceName, created, values)
-    }
-  }
-  throw new Error(
-    `OData page create failed for ${serviceNames.join(', ')}: ${readableBcError(lastError)}`,
-  )
-}
-
-async function createGatePassViaSoapPage(
-  sourceSpec: (typeof GATE_PASS_SOURCE_SPECS)[GatePassSourceKey],
-  user: AuthUser,
-  body: Record<string, unknown>,
-  sourceDocumentNo: string,
-) {
-  const variants = gatePassSoapPagePayloadVariants(sourceSpec, user, body, sourceDocumentNo)
-  const serviceNames = gatePassSoapPageServiceNames()
-  let lastError: unknown
-  for (const serviceName of serviceNames) {
-    for (const fields of variants) {
-      try {
-        return await createSoapPageRecord(serviceName, fields)
-      } catch (error) {
-        lastError = error
-        if (bcSoapPageServiceNotFound(error)) break
-      }
-    }
-  }
-  const message = lastError instanceof Error ? lastError.message : String(lastError ?? '')
-  throw Object.assign(
-    new Error(
-      `${message} Tried SOAP page services: ${serviceNames.join(', ')}. Publish BC page 51244 "Gate Pass Card" as a SOAP Web Service or set BC_GATE_PASS_PAGE_SERVICE to the exact published Service Name.`,
-    ),
-    { cause: lastError },
-  )
-}
-
-async function createGatePassViaBusinessCentral(
+async function createGatePassViaOData(
   spec: ModuleSpec,
   user: AuthUser,
   body: Record<string, unknown>,
@@ -864,38 +284,22 @@ async function createGatePassViaBusinessCentral(
   const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
   const sourceDocumentNo = fieldText(body, [
     'sourceDocumentNo',
-    'sourceDocumentNumber',
-    'sourceNo',
-    'documentNo',
-    'storeIssueNo',
-    'assetTransferNo',
     'transferNo',
     'TransferNo',
     'Transfer_No',
-    'Transfer_No_',
   ])
   if (!sourceDocumentNo) {
     throw Object.assign(new Error(`${sourceSpec.linkTo} document number is required`), {
       status: 422,
     })
   }
-  await assertGatePassSourceReady({
-    Link_to: sourceSpec.linkTo,
-    Linkto: sourceSpec.linkTo,
-    TransferNo: sourceDocumentNo,
-    Transfer_No: sourceDocumentNo,
-    SourceDocumentNo: sourceDocumentNo,
-  })
-  const gatePassNo = fieldText(body, ['gatePassNo', 'gatePassNumber']) || generateGatePassNo()
-  const createBody = { ...body, gatePassNo }
-  const pageValues = gatePassPageValues(sourceSpec, user, createBody, sourceDocumentNo)
 
   const beforeRows = await listPortalModuleRows(spec, user, { gatePassSource: source }).catch(
     () => [] as ODataRecord[],
   )
   const beforeNumbers = new Set(beforeRows.map(gatePassDocumentNo).filter(Boolean))
   const payload = cleanODataPayload({
-    GatePassNo: gatePassNo,
+    GatePassNo: body.gatePassNo ?? body.gatePassNumber,
     Linkto: sourceSpec.linkTo,
     TransferNo: sourceDocumentNo,
     DateOut: body.dateOut ?? body.issueDate,
@@ -907,35 +311,7 @@ async function createGatePassViaBusinessCentral(
     EmployeeNo: user.employeeNo,
   })
 
-  let created: ODataRecord | null = null
-  try {
-    created = await postOData(spec.headerService, payload)
-  } catch (error) {
-    if (!gatePassODataInsertUnsupported(error)) throw error
-    let odataPageError: unknown
-    try {
-      created = await createGatePassViaODataPage(source, sourceSpec, user, createBody, sourceDocumentNo)
-    } catch (odataError) {
-      odataPageError = odataError
-      created = await createGatePassViaSoapPage(sourceSpec, user, createBody, sourceDocumentNo).catch((soapError) => {
-        const odataMessage = readableBcError(odataPageError)
-        const soapMessage = readableBcError(soapError)
-        throw Object.assign(
-          new Error(
-            `Business Central QyGatePass is read-only for creation. OData Gate_Pass_Card create failed: ${odataMessage}. SOAP Gate Pass Card create also failed: ${soapMessage}`,
-          ),
-          { status: 502, code: 'BC_GATE_PASS_CREATE_FAILED' },
-        )
-      })
-    }
-    if (!created) {
-      throw Object.assign(
-        new Error('Business Central did not return a gate pass record after creation.'),
-        { status: 502, code: 'BC_GATE_PASS_CREATE_FAILED' },
-      )
-    }
-  }
-  created = rememberRecentGatePassCreate(source, user, pageValues, created)
+  const created = await postOData(spec.headerService, payload)
   let no = created ? gatePassDocumentNo(created) : ''
   for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
@@ -943,7 +319,7 @@ async function createGatePassViaBusinessCentral(
     const row = rows.find((candidate) => {
       const candidateNo = gatePassDocumentNo(candidate)
       if (!candidateNo || beforeNumbers.has(candidateNo)) return false
-      const transferNo = gatePassTransferNo(candidate)
+      const transferNo = fieldText(candidate, ['TransferNo', 'Transfer_No'])
       return !transferNo || transferNo === sourceDocumentNo
     })
     no = row ? gatePassDocumentNo(row) : ''
@@ -965,263 +341,12 @@ function purchaseLineTypeCode(value: unknown) {
   return numericCode(value, { service: 1, item: 2, asset: 4 })
 }
 
-function bcCodeValue(value: unknown, maxLength = 20) {
-  const raw = String(value ?? '').trim()
-  return raw && raw.length <= maxLength ? raw : ''
-}
-
-function firstBcCodeValue(...values: unknown[]) {
-  for (const value of values) {
-    const code = bcCodeValue(value)
-    if (code) return code
-  }
-  return ''
-}
-
-function userDepartmentCode(user: AuthUser, body: Record<string, unknown>) {
-  return firstBcCodeValue(
-    body.departmentCode,
-    body.DepartmentCode,
-    body.Department_Code,
-    body.requestingDepartmentCode,
-    body.RequestingDepartmentCode,
-    body.Requesting_Department_Code,
-    body.requesting_Department_Code,
-    body.shortcutDimension2Code,
-    body.ShortcutDimension2Code,
-    body.Shortcut_Dimension_2_Code,
-    body.shortcut_Dimension_2_Code,
-    body.globalDimension2Code,
-    body.GlobalDimension2Code,
-    body.Global_Dimension_2_Code,
-    body.global_Dimension_2_Code,
-    body.requestingDepartment,
-    body.RequestingDepartment,
-    body.Requesting_Department,
-    body.requesting_Department,
-    body.department,
-    body.Department,
-    user.department,
-    ...(user.permissionDepartments ?? []),
-  )
-}
-
-export function resolvePurchaseRequestingDepartment(
-  user: AuthUser,
-  header: ODataRecord | null | undefined,
-  body: Record<string, unknown> = {},
-) {
-  return firstBcCodeValue(
-    userDepartmentCode(user, body),
-    purchaseHeaderDepartmentCode(header),
-    user.department,
-    user.departmentName,
-    ...(user.permissionDepartments ?? []),
-  )
-}
-
-async function loadUserDepartmentCodeFromBc(user: AuthUser) {
-  if (!user.employeeNo) return ''
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `No eq '${odataString(user.employeeNo)}'`,
-    $top: 1,
-  }).catch(() => [])) as ODataRecord[] | null
-  const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
-  if (!employee) return ''
-  return firstBcCodeValue(
-    employee.GlobalDimension1Code,
-    employee.Global_Dimension_1_Code,
-    employee.DepartmentCode,
-    employee.Department_Code,
-    employee.ShortcutDimension2Code,
-    employee.Shortcut_Dimension_2_Code,
-    employee.DistrictDepartmentCode,
-    employee.District_Department_Code,
-    employee.DepartmentName,
-    employee.Department_Name,
-    employee.DistrictDepartmentName,
-    employee.District_Department_Name,
-    user.department,
-    user.departmentName,
-    ...(user.permissionDepartments ?? []),
-  )
-}
-
-export async function resolvePurchaseRequestingDepartmentForSave(
-  user: AuthUser,
-  header: ODataRecord | null | undefined,
-  body: Record<string, unknown> = {},
-) {
-  const resolved = resolvePurchaseRequestingDepartment(user, header, body)
-  if (resolved) return resolved
-  return loadUserDepartmentCodeFromBc(user)
-}
-
-function purchaseHeaderODataEntity(header: ODataRecord, no: string) {
-  const documentType = fieldText(header, ['Document_Type', 'DocumentType'], 'Quote')
-  const documentNo = fieldText(header, ['No', 'Document_No'], no)
-  if (documentType && documentNo) {
-    return `QyPurchaseHeader(Document_Type='${odataString(documentType)}',No='${odataString(documentNo)}')`
-  }
-  return `QyPurchaseHeader('${odataString(documentNo || no)}')`
-}
-
-function purchaseHeaderDepartmentPatchBody(department: string) {
-  return {
-    Requesting_Department: department,
-    Requesting_Department_Code: department,
-    RequestingDepartment: department,
-    RequestingDepartmentCode: department,
-    Shortcut_Dimension_2_Code: department,
-    ShortcutDimension2Code: department,
-    Global_Dimension_1_Code: department,
-    GlobalDimension1Code: department,
-    Department_Code: department,
-    DepartmentCode: department,
-  }
-}
-
-async function patchPurchaseHeaderDepartment(
-  header: ODataRecord,
-  no: string,
-  department: string,
-) {
-  try {
-    await patchOData(purchaseHeaderODataEntity(header, no), purchaseHeaderDepartmentPatchBody(department))
-  } catch {
-    // Some tenants block OData PATCH on QyPurchaseHeader; SOAP header edit remains the primary path.
-  }
-}
-
-function purchaseDepartmentMissingError() {
-  return Object.assign(
-    new Error(
-      'Requesting Department is missing on this purchase requisition. The portal could not find a short department code (20 characters or less) on the employee card or purchase header. Ask HR to set it in Business Central, log out and back in, then create a new requisition.',
-    ),
-    { status: 422, code: 'BC_PURCHASE_DEPARTMENT_REQUIRED' },
-  )
-}
-
-function userResponsibilityCenter(user: AuthUser, body: Record<string, unknown>) {
-  return firstBcCodeValue(
-    body.responsibilityCenter,
-    body.responsibleCenter,
-    user.responsibleCenter,
-  )
-}
-
-function purchaseDepartmentAliases(department: string) {
-  if (!department) return {}
-  return {
-    department,
-    departmentCode: department,
-    DepartmentCode: department,
-    Department_Code: department,
-    requestingDepartment: department,
-    RequestingDepartment: department,
-    requesting_Department: department,
-    Requesting_Department: department,
-    requestingDepartmentCode: department,
-    RequestingDepartmentCode: department,
-    requesting_Department_Code: department,
-    Requesting_Department_Code: department,
-    shortcutDimension2Code: department,
-    ShortcutDimension2Code: department,
-    shortcut_Dimension_2_Code: department,
-    Shortcut_Dimension_2_Code: department,
-    globalDimension1Code: department,
-    GlobalDimension1Code: department,
-    global_Dimension_1_Code: department,
-    Global_Dimension_1_Code: department,
-    globalDimension2Code: department,
-    GlobalDimension2Code: department,
-    global_Dimension_2_Code: department,
-    Global_Dimension_2_Code: department,
-  }
-}
-
-function purchaseHeaderDepartmentCode(header: ODataRecord | null | undefined) {
-  if (!header) return ''
-  return firstBcCodeValue(
-    fieldText(header, [
-      'Requesting_Department_Code',
-      'RequestingDepartmentCode',
-      'Requesting_Department',
-      'RequestingDepartment',
-    ]),
-    fieldText(header, [
-      'Shortcut_Dimension_2_Code',
-      'ShortcutDimension2Code',
-      'Global_Dimension_1_Code',
-      'GlobalDimension1Code',
-      'Department_Code',
-      'DepartmentCode',
-      'Department',
-      'District_Department_Code',
-      'DistrictDepartmentCode',
-    ]),
-    fieldText(header, [
-      'Department_Name',
-      'DepartmentName',
-      'District_Department_Name',
-      'DistrictDepartmentName',
-    ]),
-  )
-}
-
-function purchaseHeaderDescription(header: ODataRecord | null | undefined, body: Record<string, unknown>) {
-  return fieldText(
-    header ?? {},
-    ['Posting_Description', 'PostingDescription', 'Description', 'Reason'],
-    String(body.description ?? body.postingDescription ?? body.reason ?? ''),
-  )
-}
-
-function purchaseHeaderOrderDate(header: ODataRecord | null | undefined, body: Record<string, unknown>) {
-  return fieldText(
-    header ?? {},
-    ['Needed_By_Date', 'OrderDate', 'Order_Date', 'DocumentDate', 'Document_Date'],
-    String(body.dateNeeded ?? body.orderDate ?? body.requestDate ?? ''),
-  )
-}
-
-function purchaseHeaderResponsibilityCenter(
-  header: ODataRecord | null | undefined,
-  body: Record<string, unknown>,
-  user: AuthUser,
-) {
-  return firstBcCodeValue(
-    fieldText(header ?? {}, ['ResponsibilityCenter', 'Responsibility_Center']),
-    userResponsibilityCenter(user, body),
-  )
-}
-
-function purchaseBodyWithDepartment(
-  user: AuthUser,
-  body: Record<string, unknown>,
-  header?: ODataRecord | null,
-) {
-  const department = resolvePurchaseRequestingDepartment(user, header, body)
-  return department ? { ...body, ...purchaseDepartmentAliases(department) } : body
-}
-
 function transportRequestTypeCode(value: unknown) {
   return numericCode(value, { city: 0, 'field trip': 1, field: 1 })
 }
 
 export function hospitalCategoryCode(value: unknown) {
-  return numericCode(value, {
-    government: 1,
-    govt: 1,
-    private: 2,
-    'non govt': 2,
-    'non-govt': 2,
-    'non government': 2,
-    'non-government': 2,
-    nongovt: 2,
-    online: 3,
-    outline: 3,
-  })
+  return numericCode(value, { government: 1, private: 2, online: 3 })
 }
 
 export function passengerTypeCode(value: unknown) {
@@ -1609,24 +734,19 @@ const purchaseRequisition: ModuleSpec = {
     cancel: 'CancelPurchaseRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => {
-      const department = userDepartmentCode(user, req.body)
-      return {
-        action: no ? 'edit' : 'create',
-        reqNo: no,
-        postingDescription:
-          req.body?.description ??
-          req.body?.postingDescription ??
-          req.body?.reason ??
-          '',
-        pricesIncludingVAT: false,
-        myUserId: user.userID,
-        ...purchaseDepartmentAliases(department),
-        responsibilityCenter: userResponsibilityCenter(user, req.body),
-        orderDate:
-          req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
-      }
-    },
+    saveHeader: ({ req, user, no }) => ({
+      action: no ? 'edit' : 'create',
+      reqNo: no,
+      postingDescription:
+        req.body?.description ??
+        req.body?.postingDescription ??
+        req.body?.reason ??
+        '',
+      pricesIncludingVAT: false,
+      myUserId: user.userID,
+      orderDate:
+        req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
+    }),
     saveLine: ({ req, no }) => ({
       action: req.body?.action ?? 'create',
       reqNo: no,
@@ -2357,7 +1477,7 @@ export function approvalDocumentNoCandidates(
   if (document) {
     push(resolveAttachmentDocNo(spec, document, fallbackNo))
     if (spec.module === 'transfer-order') {
-      push(gatePassDocumentNo(document))
+      push(fieldText(document, ['GatePassNo', 'Gate_Pass_No']))
     }
     if (/^\d+$/.test(fallbackNo.trim())) {
       push(fallbackNo.trim().padStart(10, '0'))
@@ -2468,7 +1588,7 @@ export async function fetchPortalApprovalEntries(
 
   // Some BC builds post transfer-order approvals against the linked gate pass number.
   if (spec.module === 'transfer-order' && document) {
-    const gatePassNo = gatePassDocumentNo(document)
+    const gatePassNo = fieldText(document, ['GatePassNo', 'Gate_Pass_No'])
     const gatePassSpec = findModuleSpec('gate-pass')
     if (gatePassNo && gatePassSpec) {
       const gatePassEntries: ODataRecord[] = await fetchPortalApprovalEntries(gatePassSpec, gatePassNo)
@@ -2489,64 +1609,6 @@ function requestWithBody(body: Record<string, unknown>, params: Record<string, s
   return { body, params } as unknown as Request
 }
 
-async function fetchGatePassRowsForSource(
-  serviceName: string,
-  source: GatePassSourceKey,
-  user: AuthUser,
-) {
-  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
-  const rows: ODataRecord[] = []
-  const sourceFields = ['Linkto', 'Link_to', 'LinkTo', 'Link_To', 'Link']
-  for (const sourceField of sourceFields) {
-    const fetched = await fetchOData(serviceName, {
-      $filter: `${sourceField} eq '${odataString(sourceSpec.linkTo)}'`,
-    }).catch(() => [] as ODataRecord[])
-    if (Array.isArray(fetched)) rows.push(...fetched)
-  }
-  if (rows.length === 0) {
-    const fetched = await fetchOData(serviceName, {}).catch(() => [] as ODataRecord[])
-    if (Array.isArray(fetched)) rows.push(...fetched)
-  }
-  return rows.filter((row) => gatePassRowMatchesSource(row, source, user))
-}
-
-async function listGatePassRows(
-  spec: ModuleSpec,
-  user: AuthUser,
-  source: GatePassSourceKey,
-) {
-  const services = [
-    spec.headerService,
-    ...gatePassODataPageServiceNames(),
-  ].filter((item, index, items) => items.indexOf(item) === index)
-  const rows: ODataRecord[] = []
-  for (const serviceName of services) {
-    rows.push(...(await fetchGatePassRowsForSource(serviceName, source, user)))
-  }
-  return mergeRecentGatePassRows(rows, source, user)
-}
-
-async function getGatePassDocument(
-  spec: ModuleSpec,
-  no: string,
-) {
-  const services = [
-    spec.headerService,
-    ...gatePassODataPageServiceNames(),
-  ].filter((item, index, items) => items.indexOf(item) === index)
-  const keys = ['GatePassNo', 'Gate_Pass_No', 'Gate_Pass_No_', 'GatePassNumber', 'No']
-  for (const serviceName of services) {
-    for (const key of keys) {
-      const rows = (await fetchOData(serviceName, {
-        $filter: `${key} eq '${odataString(no)}'`,
-        $top: 1,
-      }).catch(() => null)) as ODataRecord[] | null
-      if (Array.isArray(rows) && rows.length > 0) return mergeRecentGatePassRow(rows[0]!)
-    }
-  }
-  return recentGatePassRow(no)
-}
-
 export async function listPortalModuleRows(
   spec: ModuleSpec,
   user: AuthUser,
@@ -2555,13 +1617,12 @@ export async function listPortalModuleRows(
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
     return fetchFuelMaintenanceRows(spec, user)
   }
-  if (spec.module === 'gate-pass') {
-    return listGatePassRows(spec, user, options.gatePassSource ?? 'storeIssue')
-  }
   const filterParts =
-    spec.unscopedList
-      ? []
-      : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
+    spec.module === 'gate-pass'
+      ? gatePassListFilterParts(options.gatePassSource ?? 'storeIssue', user)
+      : spec.unscopedList
+        ? []
+        : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
   if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
   const fetched = await fetchOData(spec.headerService, {
     ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
@@ -2583,7 +1644,14 @@ export async function getPortalModuleDocument(
     : ''
 
   if (spec.module === 'gate-pass') {
-    return getGatePassDocument(spec, no)
+    for (const key of ['GatePassNo', 'Gate_Pass_No']) {
+      const rows = (await fetchOData(spec.headerService, {
+        $filter: `${key} eq '${odataString(no)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+    }
+    return null
   }
 
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
@@ -2698,26 +1766,14 @@ export async function createPortalModuleRequest(
   body: Record<string, unknown>,
 ) {
   if (spec.module === 'gate-pass') {
-    const no = await createGatePassViaBusinessCentral(spec, user, body)
+    const no = await createGatePassViaOData(spec, user, body)
     if (body.submit === true && spec.soap.submit && spec.params?.submit) {
-      const createdDoc = (await getPortalModuleDocument(spec, user, no, false)) ?? {}
-      const sourceLabel = GATE_PASS_SOURCE_SPECS[gatePassSourceFromRow(createdDoc)]?.linkTo ?? ''
-      const transferNo = await assertGatePassSourceReady({
-        ...createdDoc,
-        TransferNo: resolveGatePassTransferNo(createdDoc, body),
-        Transfer_No: resolveGatePassTransferNo(createdDoc, body),
-      })
       const submitParams = await spec.params.submit({
-        req: requestWithBody({ transferNo }),
+        req: requestWithBody(body),
         user,
         no,
       })
-      const submitResult = await callSoapMethod(spec.soap.submit, submitParams).catch((error) => {
-        if (isGatePassApprovalRecordFault(error)) {
-          throw gatePassApprovalSetupError(no, transferNo, sourceLabel)
-        }
-        throw error
-      })
+      const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
       if (!soapActionOk(spec, submitResult)) {
         throw Object.assign(
           new Error(`Business Central created ${no}, but approval submission failed`),
@@ -2734,19 +1790,12 @@ export async function createPortalModuleRequest(
     })
   }
 
-  let headerBody =
+  const headerBody =
     spec.module === 'fuel'
       ? { ...body, requestType: fuelTypeCode(body.requestType ?? 'Vehicle fuel') }
       : spec.module === 'maintenance'
         ? { ...body, requestType: maintenanceTypeCode(body.requestType) }
-        : spec.module === 'purchase-requisition'
-          ? purchaseBodyWithDepartment(user, body, null)
-          : body
-  if (spec.module === 'purchase-requisition') {
-    const department = await resolvePurchaseRequestingDepartmentForSave(user, null, headerBody)
-    if (!department) throw purchaseDepartmentMissingError()
-    headerBody = { ...headerBody, ...purchaseDepartmentAliases(department) }
-  }
+        : body
   const headerRequest = requestWithBody(headerBody)
   const headerKey = spec.headerKey ?? 'No'
   const existingNumbers = spec.headerReturnsBoolean
@@ -2798,9 +1847,8 @@ export async function createPortalModuleRequest(
         action: 'create',
         lineNo: Number(lines[index]?.lineNo ?? (index + 1) * 10000),
       }
-      const lineBody = await ensurePurchaseRequisitionDepartmentBeforeLine(spec, user, no, line)
       const lineParams = await spec.params.saveLine({
-        req: requestWithBody(lineBody),
+        req: requestWithBody(line),
         user,
         no,
       })
@@ -2873,21 +1921,12 @@ export async function cancelPortalModuleRequest(
       status: 501,
     })
   }
-  const document =
-    spec.module === 'gate-pass' ? await getPortalModuleDocument(spec, user, no, false) : null
-  const transferNo =
-    spec.module === 'gate-pass' && document
-      ? resolveGatePassTransferNo(document)
-      : ''
-  if (spec.module === 'gate-pass' && !transferNo) {
-    throw Object.assign(
-      new Error('This gate pass has no linked source document number in Business Central.'),
-      { status: 422 },
-    )
-  }
+  const document = spec.module === 'gate-pass'
+    ? await getPortalModuleDocument(spec, user, no, false)
+    : null
   const params = await spec.params.cancel({
     req: requestWithBody({
-      transferNo,
+      transferNo: document?.TransferNo ?? document?.Transfer_No ?? '',
     }),
     user,
     no,
@@ -2952,33 +1991,15 @@ export async function submitPortalModuleRequest(
       )
     }
   }
-  if (spec.module === 'claim') {
-    const lines = await listPortalModuleLines(spec, header, no)
-    if (!Array.isArray(lines) || lines.length === 0) {
-      throw Object.assign(new Error('Add at least one claim line before requesting approval.'), {
-        status: 422,
-      })
-    }
-  }
-  let gatePassTransfer = ''
-  let gatePassSourceLabel = ''
-  if (spec.module === 'gate-pass') {
-    gatePassSourceLabel = GATE_PASS_SOURCE_SPECS[gatePassSourceFromRow(header)]?.linkTo ?? ''
-    gatePassTransfer = await assertGatePassSourceReady(header)
-  }
+  const document = spec.module === 'gate-pass' ? header : null
   const params = await spec.params.submit({
     req: requestWithBody({
-      transferNo: gatePassTransfer,
+      transferNo: fieldText(document ?? {}, ['TransferNo', 'Transfer_No']),
     }),
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.submit, params).catch((error) => {
-    if (spec.module === 'gate-pass' && isGatePassApprovalRecordFault(error)) {
-      throw gatePassApprovalSetupError(no, gatePassTransfer, gatePassSourceLabel)
-    }
-    throw error
-  })
+  const result = await callSoapMethod(spec.soap.submit, params)
   if (!soapActionOk(spec, result)) {
     if (spec.module === 'fuel' || spec.module === 'maintenance') {
       const docType = fieldText(header, ['DocumentType', 'Document_Type'])
@@ -3023,49 +2044,6 @@ export async function updatePortalModuleHeader(
   }
 }
 
-async function ensurePurchaseRequisitionDepartmentBeforeLine(
-  spec: ModuleSpec,
-  user: AuthUser,
-  no: string,
-  body: Record<string, unknown>,
-) {
-  if (spec.module !== 'purchase-requisition' || !spec.soap.saveHeader || !spec.params?.saveHeader) {
-    return body
-  }
-
-  const header = await getPortalModuleDocument(spec, user, no, false)
-  let department = resolvePurchaseRequestingDepartment(user, header, body)
-  if (!department) department = await loadUserDepartmentCodeFromBc(user)
-  if (!department) throw purchaseDepartmentMissingError()
-
-  const lineBody = { ...body, ...purchaseDepartmentAliases(department) }
-  const headerBody = purchaseBodyWithDepartment(
-    user,
-    {
-      description: purchaseHeaderDescription(header, body),
-      postingDescription: purchaseHeaderDescription(header, body),
-      orderDate: purchaseHeaderOrderDate(header, body),
-      requestDate: purchaseHeaderOrderDate(header, body),
-      responsibilityCenter: purchaseHeaderResponsibilityCenter(header, body, user),
-    },
-    header,
-  )
-  const headerParams = await spec.params.saveHeader({
-    req: requestWithBody(headerBody),
-    user,
-    no,
-  })
-  const headerResult = await callSoapMethod(spec.soap.saveHeader, headerParams)
-  if (!ok(headerResult)) {
-    throw Object.assign(new Error(`Business Central did not update ${no}`), { status: 502 })
-  }
-  if (header) {
-    await patchPurchaseHeaderDepartment(header, no, department)
-  }
-
-  return lineBody
-}
-
 /**
  * Create or edit a single line on an existing document. `body.action`
  * (`create`/`edit`) drives the BC behaviour; defaults to create.
@@ -3081,8 +2059,7 @@ export async function savePortalModuleLine(
       status: 501,
     })
   }
-  const lineBody = await ensurePurchaseRequisitionDepartmentBeforeLine(spec, user, no, body)
-  const params = await spec.params.saveLine({ req: requestWithBody(lineBody), user, no })
+  const params = await spec.params.saveLine({ req: requestWithBody(body), user, no })
   const result = await callSoapMethod(spec.soap.saveLine, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not save the ${spec.module} line`), {
@@ -3157,8 +2134,6 @@ export function resolveAttachmentDocNo(spec: ModuleSpec, document: ODataRecord, 
     'Transport_Requisition_No',
     'GatePassNo',
     'Gate_Pass_No',
-    'Gate_Pass_No_',
-    'GatePassNumber',
     'ApplicationCode',
   ], fallbackNo)
 }

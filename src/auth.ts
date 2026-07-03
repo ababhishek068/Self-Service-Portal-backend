@@ -1,9 +1,8 @@
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
-import { callSoapMethod, fetchOData, odataString } from './bcClient.js'
+import { callSoapMethod, fetchOData, odataString, type ODataRecord } from './bcClient.js'
 import { config } from './config.js'
-import { employeeAnnualLeaveBalance } from './leaveBalance.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
 /**
@@ -141,36 +140,14 @@ interface BcEmployee {
   Gender?: string
   GlobalDimension1Code?: string
   GlobalDimension2Code?: string
-  Department?: string
-  DepartmentCode?: string
-  Department_Code?: string
   DepartmentName?: string
-  Department_Name?: string
-  DistrictDepartmentCode?: string
-  District_Department_Code?: string
-  DistrictDepartmentName?: string
-  District_Department_Name?: string
-  BranchCode?: string
-  Branch_Code?: string
   BranchName?: string
-  Branch_Name?: string
-  DivisionBranchCode?: string
-  Division_Branch_Code?: string
-  DivisionBranchName?: string
-  Division_Branch_Name?: string
-  ShortcutDimension1Code?: string
-  Shortcut_Dimension_1_Code?: string
-  ShortcutDimension2Code?: string
-  Shortcut_Dimension_2_Code?: string
   CustomerNo?: string
   JobID?: string
   JobTitle?: string
   JobGrade?: string
   PlaceOfDuty?: string
   ResponsibilityCenter?: string
-  Responsibility_Center?: string
-  ResponsibleCenter?: string
-  Responsible_Center?: string
   ManagerNo?: string
   SupervisorNo?: string
   EMail?: string
@@ -186,13 +163,106 @@ interface BcUserSetup {
   ApproverID?: string
 }
 
+function employeeFieldText(record: Record<string, unknown>, keys: string[], fallback = '') {
+  for (const key of keys) {
+    const value = record[key]
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim()
+  }
+  return fallback
+}
+
+import {
+  configuredJobTitleByEmployeeNo,
+  fetchMergedEmployeeRecord,
+  resolveAuthUserJobTitle,
+  resolveEmployeeJobTitle,
+  resolveEmployeeJobTitleByNo,
+} from './employeeProfile.js'
+
+export { resolveEmployeeJobTitle } from './employeeProfile.js'
+
+export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> {
+  const merged = await fetchMergedEmployeeRecord(user.employeeNo)
+  let jobTitle = await resolveAuthUserJobTitle(
+    merged ?? { No: user.employeeNo },
+    user.employeeNo,
+    user.email ?? '',
+  )
+  if (!jobTitle) {
+    jobTitle = await resolveEmployeeJobTitleByNo(user.employeeNo)
+  }
+  if (!jobTitle) {
+    jobTitle = configuredJobTitleByEmployeeNo(user.employeeNo)
+  }
+  if (!jobTitle) return user
+  return { ...user, jobTitle }
+}
+
 /** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
 function normalizeStaffNo(staffNo: string) {
   return staffNo.trim().replace(/__/g, '/')
 }
 
+const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000
+const passwordResetTokenCache = new Map<string, { token: string; expiresAt: number }>()
+
+export function cachePasswordResetToken(staffNo: string, token: string, now = Date.now()) {
+  const normalizedStaffNo = normalizeStaffNo(staffNo)
+  const normalizedToken = token.trim()
+  if (!normalizedStaffNo || !normalizedToken) return
+  passwordResetTokenCache.set(normalizedStaffNo, {
+    token: normalizedToken,
+    expiresAt: now + PASSWORD_RESET_TOKEN_TTL_MS,
+  })
+}
+
+export function cachedPasswordResetTokenMatches(staffNo: string, token: string, now = Date.now()) {
+  const normalizedStaffNo = normalizeStaffNo(staffNo)
+  const cached = passwordResetTokenCache.get(normalizedStaffNo)
+  if (!cached) return false
+  if (cached.expiresAt < now) {
+    passwordResetTokenCache.delete(normalizedStaffNo)
+    return false
+  }
+  return cached.token === token.trim()
+}
+
+export function clearCachedPasswordResetToken(staffNo: string) {
+  passwordResetTokenCache.delete(normalizeStaffNo(staffNo))
+}
+
 function employeeIsActive(employee: BcEmployee) {
   return employee.Status === 'Active' || employee.Password === 'Password@123'
+}
+
+function employeeLeaveBalanceFromRecord(record: Record<string, unknown>) {
+  const preferredKeys = [
+    'EarnedLeaveDays',
+    'Earned_Leave_Days',
+    'AnnualLeaveBalance',
+    'Annual_Leave_Balance',
+    'Annual_Leave_balance',
+    'AnnualLeavebalance',
+    'LeaveBalance',
+    'Leave_Balance',
+  ]
+  for (const key of preferredKeys) {
+    const value = record[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined || value === null || String(value).trim() === '') continue
+    const normalized = key.toLowerCase().replace(/[_\s]/g, '')
+    if (!['annualleavebalance', 'leavebalance', 'earnedleavedays', 'earnedleave'].includes(normalized)) {
+      continue
+    }
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
 }
 
 function firstEmployeeField(employee: BcEmployee, names: string[]) {
@@ -207,52 +277,101 @@ function firstEmployeeField(employee: BcEmployee, names: string[]) {
 }
 
 export function employeeResetToken(employee: BcEmployee) {
-  return String(
-    firstEmployeeField(employee, [
-      'ResetToken',
-      'Reset_Token',
-      'Password_Reset_Token',
-      'PasswordResetToken',
-      'ResetPasswordToken',
-      'PasswordToken',
-      'Password_Token',
-      'PasswordResetCode',
-      'ResetCode',
-      'Reset_Code',
-      'PortalResetToken',
-      'Portal_Reset_Token',
-      'PortalPasswordToken',
-      'Portal_Password_Token',
-      'password_token',
-    ]),
-  ).trim()
+  return employeeResetTokens(employee)[0] ?? ''
 }
 
-export function employeeResetTokenIsExpired(employee: BcEmployee) {
-  return resetTokenIsExpired(
-    firstEmployeeField(employee, [
-      'TokenExpired',
-      'Token_Expired',
-      'ResetTokenExpired',
-      'Reset_Token_Expired',
-      'Password_Reset_Token_Expired',
-      'PasswordResetTokenExpired',
-      'PasswordTokenExpired',
-      'Password_Token_Expired',
-      'PortalResetTokenExpired',
-      'Portal_Reset_Token_Expired',
-      'PortalPasswordTokenExpired',
-      'Portal_Password_Token_Expired',
-    ]),
+const EMPLOYEE_RESET_TOKEN_FIELDS = [
+  'Reset Token',
+  'ResetToken',
+  'Reset_Token',
+  'Password_Reset_Token',
+  'PasswordResetToken',
+  'ResetPasswordToken',
+  'PasswordToken',
+  'Password_Token',
+  'PasswordResetCode',
+  'ResetCode',
+  'Reset_Code',
+  'Portal Reset Token',
+  'PortalResetToken',
+  'Portal_Reset_Token',
+  'PortalPasswordToken',
+  'Portal_Password_Token',
+  'password_token',
+]
+
+function normalizedEmployeeFieldName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isResetTokenFieldName(name: string) {
+  const normalized = normalizedEmployeeFieldName(name)
+  return (
+    normalized.includes('reset') &&
+    normalized.includes('token') &&
+    !normalized.includes('expired')
   )
 }
 
+function isResetTokenExpiryFieldName(name: string) {
+  const normalized = normalizedEmployeeFieldName(name)
+  return (
+    normalized.includes('expired') &&
+    (normalized.includes('token') || normalized.includes('reset'))
+  )
+}
+
+export function employeeResetTokens(employee: BcEmployee) {
+  const row = employee as BcEmployee & Record<string, unknown>
+  const tokens = EMPLOYEE_RESET_TOKEN_FIELDS.map((name) => String(row[name] ?? '').trim()).filter(Boolean)
+  for (const [name, value] of Object.entries(row)) {
+    if (!isResetTokenFieldName(name)) continue
+    const token = String(value ?? '').trim()
+    if (token && !tokens.includes(token)) tokens.push(token)
+  }
+  return tokens
+}
+
+export function employeeResetTokenIsExpired(employee: BcEmployee) {
+  const row = employee as BcEmployee & Record<string, unknown>
+  const configuredValue = firstEmployeeField(employee, [
+    'TokenExpired',
+    'Token Expired',
+    'Token Expired?',
+    'Token_Expired',
+    'ResetTokenExpired',
+    'Reset_Token_Expired',
+    'Password_Reset_Token_Expired',
+    'PasswordResetTokenExpired',
+    'PasswordTokenExpired',
+    'Password_Token_Expired',
+    'Portal Reset Token Expired',
+    'Portal Reset Token Expired?',
+    'PortalResetTokenExpired',
+    'Portal_Reset_Token_Expired',
+    'PortalPasswordTokenExpired',
+    'Portal_Password_Token_Expired',
+  ])
+  if (configuredValue !== '') return resetTokenIsExpired(configuredValue)
+  const dynamicExpiry = Object.entries(row).find(
+    ([name, value]) =>
+      isResetTokenExpiryFieldName(name) &&
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== '',
+  )
+  return dynamicExpiry ? resetTokenIsExpired(dynamicExpiry[1]) : false
+}
+
+export function employeeResetTokenMatches(employee: BcEmployee, resetToken: string) {
+  const token = resetToken.trim()
+  if (!token || employeeResetTokenIsExpired(employee)) return false
+  return employeeResetTokens(employee).includes(token)
+}
+
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `No eq '${odataString(staffNo)}'`,
-    $top: 1,
-  })) as BcEmployee[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  const merged = await fetchMergedEmployeeRecord(staffNo)
+  return merged ? (merged as BcEmployee) : null
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
@@ -296,63 +415,30 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     .trim()
   const isCEO =
     employee.JobID === 'JOB_003' || config.CEO_OVERRIDE_EMPNOS.includes(employeeNo)
-  const isHOD = await isHeadOfDepartment(employeeNo)
+  const userID = String(userSetup.UserID ?? '')
+  const [isHOD, hasEntries] = await Promise.all([
+    isHeadOfDepartment(employeeNo),
+    hasApprovalEntries(userID),
+  ])
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
-  const department = (() => {
-    const shortCodeCandidates = [
-      firstEmployeeField(employee, ['GlobalDimension1Code', 'Global_Dimension_1_Code']),
-      firstEmployeeField(employee, ['DepartmentCode', 'Department_Code']),
-      firstEmployeeField(employee, ['ShortcutDimension2Code', 'Shortcut_Dimension_2_Code']),
-      firstEmployeeField(employee, ['DistrictDepartmentCode', 'District_Department_Code']),
-    ]
-    for (const value of shortCodeCandidates) {
-      const code = String(value ?? '').trim()
-      if (code && code.length <= 20) return code
-    }
-    return String(firstEmployeeField(employee, [
-      'GlobalDimension1Code',
-      'DepartmentCode',
-      'Department_Code',
-      'DistrictDepartmentCode',
-      'District_Department_Code',
-      'ShortcutDimension2Code',
-      'Shortcut_Dimension_2_Code',
-    ])).trim()
-  })()
-  const departmentName = String(firstEmployeeField(employee, [
-    'DepartmentName',
-    'Department_Name',
-    'DistrictDepartmentName',
-    'District_Department_Name',
-    'Department',
-  ]) || department).trim()
-  const branchCode = String(firstEmployeeField(employee, [
-    'GlobalDimension2Code',
-    'BranchCode',
-    'Branch_Code',
-    'DivisionBranchCode',
-    'Division_Branch_Code',
-    'ShortcutDimension1Code',
-    'Shortcut_Dimension_1_Code',
-  ])).trim()
-  const branchName = String(firstEmployeeField(employee, [
-    'BranchName',
-    'Branch_Name',
-    'DivisionBranchName',
-    'Division_Branch_Name',
-  ]) || branchCode).trim()
-  const responsibleCenter = String(firstEmployeeField(employee, [
-    'ResponsibilityCenter',
-    'Responsibility_Center',
-    'ResponsibleCenter',
-    'Responsible_Center',
-  ])).trim()
+  const department = employee.GlobalDimension1Code ?? ''
   const accountNumber = employee.CustomerNo ?? ''
   const gender = employee.Gender ?? ''
-  const userID = String(userSetup.UserID ?? '')
-  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || await hasApprovalEntries(userID)
+  const email = String(employee.EMail ?? employee.Email ?? '').trim()
+  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
+  let jobTitle = await resolveAuthUserJobTitle(
+    employee as Record<string, unknown>,
+    employeeNo,
+    email,
+  )
+  if (!jobTitle) {
+    jobTitle = await resolveEmployeeJobTitleByNo(employeeNo)
+  }
+  if (!jobTitle) {
+    jobTitle = configuredJobTitleByEmployeeNo(employeeNo)
+  }
 
   return {
     employeeNo,
@@ -361,7 +447,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     userID,
     roles,
     role: isCEO ? 'ceo' : isHOD ? 'hod' : 'staff',
-    email: employee.EMail ?? employee.Email ?? '',
+    email,
     phoneNumber: employee.CellPhoneNumber ?? '',
     gender,
     Gender: gender,
@@ -369,16 +455,16 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     isChangedPassword: Boolean(employee.ChangedPassword),
     mustChangePassword: !Boolean(employee.ChangedPassword),
     department,
-    departmentName,
-    branchCode,
-    branchName,
-    jobTitle: employee.JobTitle ?? employee.JobID ?? '',
+    departmentName: employee.DepartmentName ?? department,
+    branchCode: employee.GlobalDimension2Code ?? '',
+    branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
+    jobTitle,
     jobGrade: employee.JobGrade ?? '',
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
-    leaveBalance: employeeAnnualLeaveBalance(employee as Record<string, unknown>) ?? 0,
-    responsibleCenter,
+    leaveBalance: employeeLeaveBalanceFromRecord(employee as Record<string, unknown>),
+    responsibleCenter: employee.ResponsibilityCenter ?? '',
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,
     HOD: isHOD,
@@ -451,7 +537,8 @@ export async function authenticateBcUser(staffNo: string, password: string) {
     })
   }
 
-  return buildAuthUser(employee, userSetup)
+  const user = await buildAuthUser(employee, userSetup)
+  return refreshAuthUserProfile(user)
 }
 
 export function buildAuthRouter() {
@@ -546,6 +633,8 @@ export function buildAuthRouter() {
         return
       }
 
+      cachePasswordResetToken(staffNo, resetToken)
+
       res.json({
         message: 'A password reset token has been sent to the email address in your employee profile.',
       })
@@ -587,8 +676,9 @@ export function buildAuthRouter() {
         })
         return
       }
-      const storedToken = employeeResetToken(employee)
-      if (storedToken !== resetToken || employeeResetTokenIsExpired(employee)) {
+      const tokenMatchesBc = employeeResetTokenMatches(employee, resetToken)
+      const tokenMatchesRecentRequest = cachedPasswordResetTokenMatches(staffNo, resetToken)
+      if (!tokenMatchesBc && !tokenMatchesRecentRequest) {
         res.status(422).json({
           message: 'Reset token is wrong or has expired. Kindly use the last token sent to your email.',
         })
@@ -603,6 +693,8 @@ export function buildAuthRouter() {
         res.status(502).json({ message: 'Business Central did not update the password.' })
         return
       }
+
+      clearCachedPasswordResetToken(staffNo)
 
       res.json({ message: 'Password updated successfully. Kindly sign in using your new password.' })
     } catch (error) {
@@ -621,12 +713,24 @@ export function buildAuthRouter() {
     })
   })
 
-  router.get('/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
+  router.get('/me', requireAuth, async (req, res, next) => {
+    try {
+      const user = await refreshAuthUserProfile(req.session.authUser!)
+      req.session.authUser = user
+      res.json({ user, token: signAuthToken(user) })
+    } catch (error) {
+      next(error)
+    }
   })
 
-  router.get('/auth/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
+  router.get('/auth/me', requireAuth, async (req, res, next) => {
+    try {
+      const user = await refreshAuthUserProfile(req.session.authUser!)
+      req.session.authUser = user
+      res.json({ user, token: signAuthToken(user) })
+    } catch (error) {
+      next(error)
+    }
   })
 
   router.post('/auth/logout', requireAuth, (_req, res) => {

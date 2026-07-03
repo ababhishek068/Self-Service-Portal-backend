@@ -65,8 +65,9 @@ function bool(row: ODataRecord, keys: string[], fallback = true) {
 export function statusFromBc(raw: string) {
   const status = raw.trim().toLowerCase()
   if (status === 'pending approval') return 'Pending Approval'
-  // BC uses "Pending" and "Open" for editable headers (ESS shows both as Open).
-  if (status === 'pending' || status === 'open') return 'Open'
+  // BC leave headers often keep Status/Open while ApprovalStatus is Pending.
+  if (status === 'pending') return 'Pending Approval'
+  if (status === 'open') return 'Open'
   if (status === 'draft') return 'Draft'
   if (status.includes('approve')) return 'Approved'
   if (status.includes('reject')) return 'Rejected'
@@ -76,12 +77,104 @@ export function statusFromBc(raw: string) {
   return raw.trim() || 'Open'
 }
 
-/** ESS transfer orders use ApprovalStatus; other modules use Status. */
+/** ESS transfer orders use ApprovalStatus; leave uses the same when Status stays Open. */
 export function documentStatusFromBc(row: ODataRecord, requestType: PortalModuleKey) {
-  if (requestType === 'transferOrder') {
+  if (requestType === 'transferOrder' || requestType === 'leave') {
     return text(row, ['ApprovalStatus', 'Approval_Status', 'Status', 'DocumentStatus'])
   }
   return text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])
+}
+
+export function leaveSentForApproval(row: ODataRecord) {
+  const sentAt = text(row, [
+    'DateTimeSentforApproval',
+    'Date_Time_Sent_for_Approval',
+    'DateTimeSentForApproval',
+  ])
+  return Boolean(sentAt && !sentAt.startsWith('0001-01-01'))
+}
+
+function leaveApprovalEntryIsActive(entry: ODataRecord) {
+  const rawStatus = text(entry, ['Status']).trim().toLowerCase()
+  if (rawStatus === 'open' || rawStatus === 'pending' || rawStatus === 'created') return true
+  return rawStatus.includes('pending')
+}
+
+function leaveSentForApprovalFlag(row: ODataRecord) {
+  for (const key of ['Sent_for_Approval', 'SentForApproval', 'Sent_For_Approval']) {
+    const value = row[key]
+    if (value === true || value === 1) return true
+    if (typeof value === 'string' && ['true', '1', 'yes'].includes(value.trim().toLowerCase())) return true
+  }
+  return false
+}
+
+/**
+ * Last-resort safety net: scan every status-like header field for a value that
+ * says "pending". Catches BC deployments that expose the pending state on the
+ * leave header under a field name we don't explicitly read. Only ever used to
+ * promote Open/Draft → Pending, never to override a terminal status.
+ */
+function leaveHeaderSignalsPending(row: ODataRecord) {
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) continue
+    const valueType = typeof value
+    if (valueType !== 'string' && valueType !== 'number' && valueType !== 'boolean') continue
+    const name = key.toLowerCase()
+    const statusLike =
+      name.includes('status') ||
+      name.includes('approv') ||
+      name.includes('sent') ||
+      name.includes('stage') ||
+      name.includes('state')
+    if (!statusLike) continue
+    if (String(value).toLowerCase().includes('pending')) return true
+  }
+  return false
+}
+
+/**
+ * Resolve leave status strictly from Business Central data (header fields +
+ * approval entries). BC is the single source of truth — nothing is stored locally.
+ */
+export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
+    return 'Pending Approval'
+  }
+
+  if (leaveSentForApproval(row)) return 'Pending Approval'
+
+  if (leaveSentForApprovalFlag(row)) return 'Pending Approval'
+
+  if (approvalEntries.some(leaveApprovalEntryIsActive)) {
+    return 'Pending Approval'
+  }
+
+  const mapped = statusFromBc(documentStatusFromBc(row, 'leave'))
+  if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') {
+    return mapped
+  }
+  if (mapped !== 'Open' && mapped !== 'Draft') return mapped
+
+  // Only promote Open/Draft → Pending below; terminal states already returned.
+  if (leaveHeaderSignalsPending(row)) return 'Pending Approval'
+
+  if (
+    approvalEntries.some((entry) => {
+      const stepStatus = statusFromBc(text(entry, ['Status'], 'Open'))
+      return ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(stepStatus)
+    })
+  ) {
+    return 'Pending Approval'
+  }
+
+  return mapped
+}
+
+/** True only when Business Central itself reflects the leave as pending approval. */
+export function leaveIsPendingInBc(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  return resolveLeaveStatus(row, approvalEntries) === 'Pending Approval'
 }
 
 export function mapEmployee(row: ODataRecord) {
@@ -101,7 +194,7 @@ export function mapEmployee(row: ODataRecord) {
     departmentName: text(row, ['DepartmentName', 'Department_Name'], departmentCode),
     branchCode: text(row, ['GlobalDimension2Code', 'BranchCode', 'Branch_Code'], 'HO'),
     branchName: text(row, ['BranchName', 'Branch_Name'], 'Head Office'),
-    jobTitle: text(row, ['JobTitle', 'Job_Title', 'JobID']),
+    jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),
     placeOfDuty: text(row, ['PlaceOfDuty', 'Place_of_Duty']),
     accountNumber: text(row, ['AccountNumber', 'Account_No', 'CustomerNo']),
@@ -145,9 +238,6 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
   const requestNo = text(row, requestType === 'gatePass' ? [
     'GatePassNo',
     'Gate_Pass_No',
-    'Gate_Pass_No_',
-    'GatePassNumber',
-    'No',
   ] : requestType === 'leave' ? [
     'ApplicationCode',
     'Application_Code',
@@ -167,7 +257,7 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
   ])
   const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
   const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
-  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date_Created', 'DateOut', 'Date_Out', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
+  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {
     id: `${requestType}-${requestNo || crypto.randomUUID()}`,

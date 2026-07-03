@@ -10,6 +10,7 @@ import {
   downloadRequestAttachment,
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
+import { fetchLeaveRequestDetail, uploadLeaveDocumentAttachment } from '@/api/endpoints/leave'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 import { cn } from '@/lib/utils'
 import { AttachmentPanel } from './AttachmentPanel'
@@ -117,13 +118,25 @@ export function RequestAttachments({
 
     try {
       const contentBase64 = await readFileBase64(selectedFile)
-      const updated = await uploadRequestAttachment(requestId, {
-        fileName: selectedFile.name,
-        fileType: selectedFile.type || 'application/octet-stream',
-        size: selectedFile.size,
-        contentBase64,
-        description: desc,
-      })
+      const updated = requestId.startsWith('leave-')
+        ? await (async () => {
+            const documentNo = requestId.replace(/^leave-/i, '')
+            await uploadLeaveDocumentAttachment(documentNo, {
+              fileName: selectedFile.name,
+              fileType: selectedFile.type || 'application/octet-stream',
+              size: selectedFile.size,
+              contentBase64,
+              description: desc,
+            })
+            return fetchLeaveRequestDetail(documentNo)
+          })()
+        : await uploadRequestAttachment(requestId, {
+            fileName: selectedFile.name,
+            fileType: selectedFile.type || 'application/octet-stream',
+            size: selectedFile.size,
+            contentBase64,
+            description: desc,
+          })
       setProgress(100)
       onUpdated(updated)
       setDescription('')

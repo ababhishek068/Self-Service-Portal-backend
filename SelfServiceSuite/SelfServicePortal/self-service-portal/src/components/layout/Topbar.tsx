@@ -11,6 +11,8 @@ export function Topbar() {
   const { employee, logout } = useAuth()
   const { primaryRoleShortLabel } = usePermissions()
   const displayName = employee?.displayName?.split(' ')[0] ?? 'User'
+  const profileSubtitle = employee?.jobTitle?.trim() || primaryRoleShortLabel
+  const subtitleUsesJobTitle = Boolean(employee?.jobTitle?.trim())
   const [loggingOut, setLoggingOut] = useState(false)
 
   const handleLogout = async () => {
@@ -84,8 +86,13 @@ export function Topbar() {
           </div>
           <div className="hidden flex-col leading-tight md:flex">
             <span className="text-sm font-medium text-slate-800">{displayName}</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--portal-orange)]">
-              {primaryRoleShortLabel}
+            <span
+              className={`max-w-[12rem] truncate text-[10px] font-semibold tracking-wide text-[var(--portal-orange)] ${
+                subtitleUsesJobTitle ? 'normal-case' : 'uppercase'
+              }`}
+              title={profileSubtitle}
+            >
+              {profileSubtitle}
             </span>
           </div>
           <Button

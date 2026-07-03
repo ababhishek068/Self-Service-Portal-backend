@@ -10,16 +10,25 @@ import {
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
-import { employeeAnnualLeaveBalance } from './leaveBalance.js'
-import { requireAuth, type AuthUser } from './auth.js'
+import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
+import { resolveEmployeeJobTitleByNo } from './employeeProfile.js'
 import {
   approvalModuleFromEntry,
   approvalTableFilter,
+  approvalTableIdsFor,
   isSupportedFrontendModule,
   resolveApprovalModuleFromEntry,
   type SupportedFrontendModule,
 } from './approvalTableIds.js'
-import { mapItem, mapRequest, type PortalModuleKey } from './erpMappings.js'
+import {
+  enrichLeaveApprovalEntries,
+  fallbackApprovalStepsFromHeader,
+  leaveDocumentNoCandidates,
+  mapApprovalSteps,
+  resolveLeaveApprovalSteps,
+  resolveLeaveApprovalStepsAsync,
+} from './leaveApprovalSteps.js'
+import { documentStatusFromBc, mapItem, mapRequest, resolveLeaveStatus, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
   createPortalModuleRequest,
@@ -361,6 +370,128 @@ function approvalQueueItem(row: ODataRecord) {
   }
 }
 
+function normalizedApprovalDocKey(value: string) {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+/** Collect every document number BC still has for a batch of leave applications. */
+async function fetchExistingLeaveApplicationNos(documentNos: string[]) {
+  const existing = new Set<string>()
+  const unique = [
+    ...new Set(
+      documentNos.flatMap((no) => leaveDocumentNoCandidates(no)).map((no) => no.trim()).filter(Boolean),
+    ),
+  ]
+  if (!unique.length) return existing
+
+  for (let offset = 0; offset < unique.length; offset += 10) {
+    const chunk = unique.slice(offset, offset + 10)
+    for (const key of ['ApplicationCode', 'Application_Code', 'No']) {
+      const docFilter = chunk.map((no) => `${key} eq '${odataString(no)}'`).join(' or ')
+      const rows = (await fetchOData('QyHRLeaveApplications', {
+        $filter: `(${docFilter})`,
+        $top: 500,
+      }).catch(() => [])) as ODataRecord[] | null
+      for (const row of Array.isArray(rows) ? rows : []) {
+        for (const field of ['ApplicationCode', 'Application_Code', 'No']) {
+          const code = text(row, [field])
+          if (code) existing.add(normalizedApprovalDocKey(code))
+        }
+      }
+    }
+  }
+  return existing
+}
+
+/** Collect document numbers that still exist for a non-leave module header table. */
+async function fetchExistingModuleDocumentNos(
+  module: SupportedFrontendModuleAlias,
+  documentNos: string[],
+) {
+  const existing = new Set<string>()
+  const spec = findFrontendModuleSpec(module)
+  if (!spec) return null
+
+  const unique = [...new Set(documentNos.map((no) => no.trim()).filter(Boolean))]
+  if (!unique.length) return existing
+
+  const headerKeys =
+    spec.module === 'gate-pass'
+      ? ['GatePassNo', 'Gate_Pass_No']
+      : spec.module === 'transport'
+        ? ['Transport_Requisition_No', 'No']
+        : spec.module === 'fuel' || spec.module === 'maintenance'
+          ? ['RequisitionNo', 'Requisition_No', 'No']
+          : [spec.headerKey ?? 'No', 'No', 'ApplicationNo', 'Application_No']
+
+  for (let offset = 0; offset < unique.length; offset += 10) {
+    const chunk = unique.slice(offset, offset + 10)
+    for (const key of headerKeys) {
+      const docFilter = chunk.map((no) => `${key} eq '${odataString(no)}'`).join(' or ')
+      const rows = (await fetchOData(spec.headerService, {
+        $filter: `(${docFilter})`,
+        $top: 500,
+      }).catch(() => [])) as ODataRecord[] | null
+      for (const row of Array.isArray(rows) ? rows : []) {
+        for (const field of headerKeys) {
+          const code = text(row, [field])
+          if (code) existing.add(normalizedApprovalDocKey(code))
+        }
+      }
+    }
+  }
+  return existing
+}
+
+function approvalSourceDocumentExists(
+  module: string,
+  documentNo: string,
+  existingByModule: Map<string, Set<string>>,
+) {
+  const existing = existingByModule.get(module)
+  if (!existing) return true
+
+  const candidates =
+    module === 'leave' ? leaveDocumentNoCandidates(documentNo) : [documentNo.trim()].filter(Boolean)
+  return candidates.some((candidate) => existing.has(normalizedApprovalDocKey(candidate)))
+}
+
+/**
+ * Approval entries in BC often outlive deleted source documents. Hide rows whose
+ * underlying ERP document no longer exists so lists reflect live data only.
+ */
+async function filterApprovalEntriesWithExistingSource(rows: ODataRecord[]) {
+  if (!rows.length) return rows
+
+  const grouped = new Map<string, string[]>()
+  for (const row of rows) {
+    const item = approvalQueueItem(row)
+    if (!item.requestNo) continue
+    const bucket = grouped.get(item.module) ?? []
+    bucket.push(item.requestNo)
+    grouped.set(item.module, bucket)
+  }
+
+  const existingByModule = new Map<string, Set<string>>()
+  await Promise.all(
+    [...grouped.entries()].map(async ([module, documentNos]) => {
+      if (module === 'leave') {
+        existingByModule.set(module, await fetchExistingLeaveApplicationNos(documentNos))
+        return
+      }
+      if (!isSupportedModule(module)) return
+      const existing = await fetchExistingModuleDocumentNos(module, documentNos)
+      if (existing) existingByModule.set(module, existing)
+    }),
+  )
+
+  return rows.filter((row) => {
+    const item = approvalQueueItem(row)
+    if (!item.requestNo) return false
+    return approvalSourceDocumentExists(item.module, item.requestNo, existingByModule)
+  })
+}
+
 function optionCode(value: string, labels: Record<string, string>) {
   const normalized = value.trim().toLowerCase()
   return /^\d+$/.test(normalized) ? normalized : labels[normalized] ?? value
@@ -450,18 +581,7 @@ function mapClaimLine(row: ODataRecord, index: number) {
     accountName: text(row, ['accountName', 'AccountName', 'Account_Name']),
     hospitalCategory: optionCode(
       text(row, ['hospitalCategory', 'HospitalCategory', 'Hospital_Category']),
-      {
-        government: '1',
-        govt: '1',
-        private: '2',
-        'non govt': '2',
-        'non-govt': '2',
-        'non government': '2',
-        'non-government': '2',
-        nongovt: '2',
-        online: '3',
-        outline: '3',
-      },
+      { government: '1', private: '2', online: '3' },
     ),
     medicalAmount: number(row, ['medicalAmount', 'MedicalAmount', 'Medical_Amount']),
     amount: number(row, ['amount', 'Amount']),
@@ -580,14 +700,6 @@ interface LeaveLookupHints {
   userId?: string
 }
 
-function leaveDocumentNoCandidates(no: string) {
-  const trimmed = no.trim()
-  const values = [trimmed, trimmed.toUpperCase()]
-  if (/^lv/i.test(trimmed)) {
-    values.push(trimmed.replace(/^lv/i, ''))
-  }
-  return [...new Set(values.filter(Boolean))]
-}
 
 async function fetchLeaveApplication(
   no: string,
@@ -643,8 +755,49 @@ async function fetchLeaveApplication(
   return null
 }
 
-async function fetchLeaveApprovalEntries(no: string, authUser: AuthUser) {
-  return fetchApproverEntriesForDocument(no, authUser)
+async function fetchLeaveApprovalEntries(no: string) {
+  for (const candidate of leaveDocumentNoCandidates(no)) {
+    const withTable = (await fetchOData('QyApprovalEntry', {
+      $filter: `DocumentNo eq '${odataString(candidate)}' and ${approvalTableFilter('leave')}`,
+    }).catch(() => [])) as ODataRecord[] | null
+    if (Array.isArray(withTable) && withTable.length > 0) return withTable
+
+    const anyTable = (await fetchOData('QyApprovalEntry', {
+      $filter: `DocumentNo eq '${odataString(candidate)}'`,
+      $top: 20,
+    }).catch(() => [])) as ODataRecord[] | null
+    const leaveRows = filterLikelyLeaveApprovalEntries(Array.isArray(anyTable) ? anyTable : [])
+    if (leaveRows.length > 0) return leaveRows
+  }
+  return []
+}
+
+function filterLikelyLeaveApprovalEntries(rows: ODataRecord[]) {
+  const leaveTableIds = new Set(approvalTableIdsFor('leave'))
+  return rows.filter((row) => {
+    const tableId = Number(row.TableID ?? row.TableId ?? 0)
+    if (leaveTableIds.has(tableId)) return true
+    const documentType = text(row, ['DocumentType', 'Document_Type']).toLowerCase()
+    return documentType.includes('leave')
+  })
+}
+
+function resolveLeaveDocumentStatus(
+  row: ODataRecord,
+  approvalSteps: ReturnType<typeof mapApprovalSteps>,
+  entry?: ODataRecord,
+  approvalEntries: ODataRecord[] = entry ? [entry] : [],
+) {
+  const resolved = resolveLeaveStatus(row, approvalEntries)
+  if (resolved !== 'Open' && resolved !== 'Draft') return resolved
+  if (
+    approvalSteps.some((step) =>
+      ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(step.status),
+    )
+  ) {
+    return 'Pending Approval'
+  }
+  return resolved
 }
 
 function leaveHintsFromApprovalEntry(entry?: ODataRecord): LeaveLookupHints {
@@ -692,7 +845,12 @@ function buildLeaveRequestDetail(
 ) {
   const mapped = mapRequest(row, 'leave')
   const steps = mapApprovalSteps(approvalSteps)
-  const resolvedStatus = resolveRequestStatusFromApprovalSteps(mapped.status, steps)
+  const approvalEntryRows = Array.isArray(approvalSteps)
+    ? (approvalSteps as ODataRecord[])
+    : entry
+      ? [entry]
+      : []
+  const resolvedStatus = resolveLeaveDocumentStatus(row, steps, entry, approvalEntryRows)
   return {
     ...mapped,
     status: resolvedStatus,
@@ -700,44 +858,6 @@ function buildLeaveRequestDetail(
     approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
-}
-
-export function resolveRequestStatusFromApprovalSteps(
-  mappedStatus: string,
-  approvalSteps: unknown,
-) {
-  const status = mappedStatus || 'Open'
-  if (status !== 'Open' && status !== 'Draft') return status
-  const steps = Array.isArray(approvalSteps)
-    ? (approvalSteps as Array<{ status?: unknown }>)
-    : mapApprovalSteps(approvalSteps)
-  const hasSubmittedApprovalEntry = steps.some((step) =>
-    ['Pending Approval', 'Submitted'].includes(String(step.status ?? '')),
-  )
-  return hasSubmittedApprovalEntry ? 'Pending Approval' : status
-}
-
-function forceSubmittedRequestDetail<T extends Record<string, unknown>>(detail: T): T {
-  const status = String(detail.status ?? '')
-  if (status !== 'Open' && status !== 'Draft') return detail
-  const existingSteps = Array.isArray(detail.approvalSteps)
-    ? detail.approvalSteps
-    : []
-  const approvalSteps = existingSteps.length
-    ? existingSteps
-    : mapApprovalSteps([
-        {
-          Status: 'Pending Approval',
-          SequenceNo: 1,
-          ApproverName: 'Awaiting approver assignment',
-          Comment: 'Submitted for approval in Business Central',
-        },
-      ])
-  return {
-    ...detail,
-    status: 'Pending Approval',
-    approvalSteps,
-  } as T
 }
 
 function buildLeaveApprovalFallback(
@@ -794,23 +914,33 @@ async function resolveLeaveRequestDetail(
 ) {
   const { no } = parseRequestId(requestId)
   const approvalEntries =
-    options.approvalEntries ?? (await fetchLeaveApprovalEntries(no, authUser))
+    options.approvalEntries ?? (await fetchLeaveApprovalEntries(no))
   const entry = approvalEntries[0]
   const hints = leaveHintsFromApprovalEntry(entry)
   const row = await fetchLeaveApplication(no, hints, entry)
   const [approvers, attachments] = await Promise.all([
     approvalEntries.length
-      ? Promise.resolve(approvalEntries)
-      : fetchOData('QyApprovalEntry', {
-          $filter:
-            `DocumentNo eq '${odataString(no)}'` +
-            ` and ${approvalTableFilter('leave')}`,
-        }).catch(() => [] as ODataRecord[]),
+      ? enrichLeaveApprovalEntries(approvalEntries)
+      : enrichLeaveApprovalEntries(await fetchLeaveApprovalEntries(no)),
     fetchDocumentAttachments(no, 50532).catch(() => [] as ODataRecord[]),
   ])
 
   if (row) {
-    return buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const approvalEntryRows = approvers.length
+      ? (approvers as ODataRecord[])
+      : entry
+        ? [entry]
+        : []
+    const detail = buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const approvalStepsResolved = await resolveLeaveApprovalStepsAsync(row, approvalEntryRows, no, {
+      employeeNo: text(row, ['EmployeeNo', 'Employee_No'], authUser.employeeNo),
+      userID: authUser.userID,
+      department: authUser.department,
+    })
+    return {
+      ...detail,
+      approvalSteps: approvalStepsResolved,
+    }
   }
 
   if (options.allowMissingSource && approvalEntries.length) {
@@ -856,14 +986,8 @@ async function requestDetail(
       : Promise.resolve([] as ODataRecord[]),
   ])
   const mapped = mapRequest(row, module as PortalModuleKey)
-  const mappedApprovalSteps = mapApprovalSteps(approvers)
-  const resolvedStatus = resolveRequestStatusFromApprovalSteps(
-    mapped.status,
-    mappedApprovalSteps,
-  )
   return {
     ...mapped,
-    status: resolvedStatus,
     payload: {
       ...row,
       ...(module === 'gatePass' && gatePassBinding
@@ -875,39 +999,9 @@ async function requestDetail(
         : {}),
       lines: mapModuleLines(module, row, Array.isArray(lines) ? lines : []),
     },
-    approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
+    approvalSteps: resolveRequestApprovalSteps(approvers, row, mapped.status),
     attachments: mapAttachments(attachments),
   }
-}
-
-function fallbackApprovalStepsFromHeader(row: ODataRecord, mappedStatus: string) {
-  if (!['Pending Approval', 'Approved', 'Rejected'].includes(mappedStatus)) return []
-
-  const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo', 'CurrentApproverID'])
-  const approverName = text(row, ['ApproverName'], approverId)
-  if (approverId || approverName) {
-    return mapApprovalSteps([
-      {
-        ApproverID: approverId,
-        ApproverName: approverName,
-        Status: mappedStatus,
-        SequenceNo: 1,
-      },
-    ])
-  }
-
-  if (mappedStatus === 'Pending Approval') {
-    return mapApprovalSteps([
-      {
-        Status: 'Pending Approval',
-        SequenceNo: 1,
-        ApproverName: 'Awaiting approver assignment',
-        Comment: 'Submitted for approval in Business Central',
-      },
-    ])
-  }
-
-  return []
 }
 
 function resolveRequestApprovalSteps(
@@ -926,32 +1020,7 @@ function resolveRequestApprovalSteps(
   return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
 }
 
-export function mapApprovalSteps(value: unknown) {
-  const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
-  return rows
-    .map((row, index) => {
-      const rawStatus = text(row, ['Status'], 'Pending Approval')
-      const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo'])
-      const senderId = text(row, ['SenderID', 'UserID'])
-      const status =
-        rawStatus === 'Open'
-          ? 'Pending Approval'
-          : rawStatus === 'Created'
-            ? 'Submitted'
-            : rawStatus
-      return {
-        id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
-        actorEmployeeNo: approverId || senderId,
-        actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
-        role: approverId ? 'Checker' : 'Requester',
-        status,
-        timestamp: text(row, ['DateTimeSentforApproval', 'DueDate', 'Date']),
-        note: text(row, ['Comment', 'Comments']),
-        sequenceNo: number(row, ['SequenceNo', 'Sequence_No'], index + 1),
-      }
-    })
-    .sort((left, right) => left.sequenceNo - right.sequenceNo)
-}
+export { mapApprovalSteps } from './leaveApprovalSteps.js'
 
 function mapAttachments(value: unknown) {
   const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
@@ -1029,163 +1098,27 @@ function employeeDisplayName(row: ODataRecord) {
   ].filter(Boolean).join(' ')
 }
 
-const EMPLOYEE_NO_KEYS = ['No', 'EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No']
-const EMPLOYEE_DEPARTMENT_KEYS = [
-  'DepartmentCode',
-  'Department_Code',
-  'Department',
-  'DepartmentName',
-  'Department_Name',
-  'DistrictDepartmentCode',
-  'District_Department_Code',
-  'DistrictDepartmentName',
-  'District_Department_Name',
-  'GlobalDimension1Code',
-  'Global_Dimension_1_Code',
-  'GlobalDimension2Code',
-  'Global_Dimension_2_Code',
-  'ShortcutDimension1Code',
-  'Shortcut_Dimension_1_Code',
-  'ShortcutDimension2Code',
-  'Shortcut_Dimension_2_Code',
-]
-
-function normalizedMatchValue(value: unknown) {
-  return String(value ?? '').trim().toLowerCase()
-}
-
-function valuesForKeys(row: ODataRecord, keys: string[]) {
-  return keys
-    .map((key) => row[key])
-    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
-    .map((value) => String(value).trim())
-}
-
-function employeeNoFromRow(row: ODataRecord) {
-  return text(row, EMPLOYEE_NO_KEYS)
-}
-
-function activeEmployee(row: ODataRecord) {
-  const status = normalizedMatchValue(text(row, ['Status', 'EmployeeStatus', 'Employee_Status']))
-  return !status || status === 'active'
-}
-
-function userDepartmentCandidates(authUser: AuthUser) {
-  return [
-    authUser.department,
-    authUser.departmentName,
-    authUser.branchCode,
-    authUser.branchName,
-    ...(authUser.permissionDepartments ?? []),
-  ]
-    .map(normalizedMatchValue)
-    .filter(Boolean)
-}
-
-function employeeMatchesUserDepartment(row: ODataRecord, authUser: AuthUser) {
-  const candidates = new Set(userDepartmentCandidates(authUser))
-  if (candidates.size === 0) return true
-  return valuesForKeys(row, EMPLOYEE_DEPARTMENT_KEYS)
-    .map(normalizedMatchValue)
-    .some((value) => candidates.has(value))
-}
-
-async function fetchActiveEmployees() {
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `Status eq 'Active'`,
-  }).catch(() => fetchOData('QyHREmployee').catch(() => [] as ODataRecord[]))) as ODataRecord[]
-  return (Array.isArray(rows) ? rows : []).filter(activeEmployee)
-}
-
 async function fetchHodDepartmentStaff(authUser: AuthUser) {
-  const rows = await fetchActiveEmployees()
-  return rows.filter((row) => {
-    const employeeNo = employeeNoFromRow(row)
-    return (
-      employeeNo &&
-      employeeNo !== authUser.employeeNo &&
-      employeeMatchesUserDepartment(row, authUser)
-    )
-  })
-}
-
-function dateOnly(value: unknown) {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
-  const slashYmd = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(raw)
-  if (slashYmd) {
-    const [, year, month, day] = slashYmd
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
-  const slashDmy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw)
-  if (slashDmy) {
-    const [, first, second, year] = slashDmy
-    const firstNumber = Number(first)
-    const secondNumber = Number(second)
-    const day = firstNumber > 12 ? first : second
-    const month = firstNumber > 12 ? second : first
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
-  const parsed = new Date(raw)
-  if (Number.isNaN(parsed.getTime())) return ''
-  const year = parsed.getFullYear()
-  const month = String(parsed.getMonth() + 1).padStart(2, '0')
-  const day = String(parsed.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function activeLeaveRow(row: ODataRecord, today: string) {
-  const status = normalizedMatchValue(text(row, ['Status', 'ApprovalStatus', 'Approval_Status']))
-  if (/cancel|reject|draft/.test(status)) return false
-  const startDate = dateOnly(text(row, ['StartDate', 'Start_Date', 'FromDate', 'From_Date']))
-  const endDate = dateOnly(text(row, ['EndDate', 'End_Date', 'ToDate', 'To_Date', 'ReturnDate', 'Return_Date']))
-  if (!startDate && !endDate) return false
-  if (startDate && startDate > today) return false
-  if (endDate && endDate < today) return false
-  return true
-}
-
-function leaveTypeCode(row: ODataRecord) {
-  return text(row, ['Code', 'LeaveType', 'Leave_Type', 'LeaveCode', 'Leave_Code'])
-}
-
-function leaveTypeLabel(row: ODataRecord, fallback: string) {
-  return text(row, ['Description', 'Name', 'LeaveTypeDescription', 'Leave_Type_Description', 'Code'], fallback)
-}
-
-function leaveLedgerEmployeeNo(row: ODataRecord) {
-  return text(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
-}
-
-function leaveLedgerType(row: ODataRecord) {
-  return text(row, ['LeaveType', 'Leave_Type', 'LeaveCode', 'Leave_Code', 'Code'])
-}
-
-function leaveLedgerDays(row: ODataRecord) {
-  return number(row, ['NoofDays', 'No_of_Days', 'NoOfDays', 'Days', 'Quantity'])
-}
-
-function employeeLeaveBalance(row: ODataRecord) {
-  return employeeAnnualLeaveBalance(row) ?? 0
+  const department = odataString(authUser.department)
+  if (!department) return [] as ODataRecord[]
+  return (await fetchOData('QyHREmployee', {
+    $filter:
+      `No ne '${odataString(authUser.employeeNo)}'` +
+      ` and Status eq 'Active'` +
+      ` and GlobalDimension2Code eq '${department}'`,
+  }).catch(() => [])) as ODataRecord[]
 }
 
 async function activeLeaveForEmployee(employeeNo: string) {
   const today = new Date().toISOString().slice(0, 10)
-  const filters = [
-    `EmployeeNo eq '${odataString(employeeNo)}'`,
-    `Employee_No eq '${odataString(employeeNo)}'`,
-    `StaffNo eq '${odataString(employeeNo)}'`,
-    `Staff_No eq '${odataString(employeeNo)}'`,
-  ]
-  for (const filter of filters) {
-    const rows = (await fetchOData('QyHRLeaveApplications', {
-      $filter: filter,
-    }).catch(() => [])) as ODataRecord[]
-    for (const row of Array.isArray(rows) ? rows : []) {
-      if (activeLeaveRow(row, today)) return row
-    }
+  const rows = (await fetchOData('QyHRLeaveApplications', {
+    $filter:
+      `EmployeeNo eq '${odataString(employeeNo)}'` +
+      ` and Status eq 'Posted'`,
+  }).catch(() => [])) as ODataRecord[]
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const endDate = text(row, ['End_Date', 'EndDate']).slice(0, 10)
+    if (endDate && endDate > today) return row
   }
   return null
 }
@@ -1388,11 +1321,12 @@ export function buildPortalApiRouter() {
       const spec = findFrontendModuleSpec(module)
       if (!spec) throw portalError(`${module} is not supported`, 501)
       await submitPortalModuleRequest(spec, user(req), no)
-      const detail = await requestDetail(requestId, user(req)).catch(() => ({
+      res.json(
+        await requestDetail(requestId, user(req)).catch(() => ({
           id: requestId,
           status: 'Pending Approval',
-        }))
-      res.json(forceSubmittedRequestDetail(detail))
+        })),
+      )
     }),
   )
 
@@ -1658,10 +1592,9 @@ export function buildPortalApiRouter() {
           ` and ApproverID eq '${odataString(authUser.userID)}'`,
         $top: 200,
       })) as ODataRecord[] | null
+      const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
       res.json({
-        rows: (Array.isArray(rows) ? rows : [])
-          .map(approvalQueueItem)
-          .filter((item) => item.requestNo),
+        rows: liveRows.map(approvalQueueItem).filter((item) => item.requestNo),
       })
     }),
   )
@@ -1768,12 +1701,14 @@ export function buildPortalApiRouter() {
     '/approvals/count/:type/:status',
     safe(async (req, res) => {
       const authUser = user(req)
-      const count = await fetchODataCount('QyApprovalEntry', {
+      const rows = (await fetchOData('QyApprovalEntry', {
         $filter:
           `Status eq '${odataString(String(req.params.status))}'` +
           ` and ApproverID eq '${odataString(authUser.userID)}'`,
-      })
-      res.json({ totalAll: count, isNotified: authUser.isNotified })
+        $top: 500,
+      })) as ODataRecord[] | null
+      const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
+      res.json({ totalAll: liveRows.length, isNotified: authUser.isNotified })
     }),
   )
 
@@ -1783,6 +1718,14 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const approvalFilter = (status: string) =>
         `Status eq '${status}' and ApproverID eq '${odataString(authUser.userID)}'`
+      const countLiveApprovalEntries = async (status: string) => {
+        const rows = (await fetchOData('QyApprovalEntry', {
+          $filter: approvalFilter(status),
+          $top: 500,
+        })) as ODataRecord[] | null
+        const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
+        return liveRows.length
+      }
       const listModules: SupportedFrontendModule[] = [
         'imprest',
         'imprestSurrender',
@@ -1797,9 +1740,9 @@ export function buildPortalApiRouter() {
         leaveApplications,
         moduleRows,
       ] = await Promise.all([
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Open') }),
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Approved') }),
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Rejected') }),
+        countLiveApprovalEntries('Open'),
+        countLiveApprovalEntries('Approved'),
+        countLiveApprovalEntries('Rejected'),
         fetchODataCount('QyHRLeaveApplications', {
           $filter: `UserID eq '${odataString(authUser.userID)}'`,
         }),
@@ -1881,17 +1824,12 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       if (!authUser.HOD) throw portalError('HOD access required', 403)
       const today = new Date().toISOString().slice(0, 10)
-      const staffRows = await fetchHodDepartmentStaff(authUser)
-      const staffNos = new Set(staffRows.map(employeeNoFromRow).filter(Boolean))
       const rows = (await fetchOData('QyAttendanceLedger', {
-        $filter: `Date eq ${today}`,
-      }).catch(() => fetchOData('QyAttendanceLedger').catch(() => [] as ODataRecord[]))) as ODataRecord[] | null
-      const todayRows = (Array.isArray(rows) ? rows : []).filter((row) => {
-        const rowDate = dateOnly(text(row, ['Date', 'AttendanceDate', 'PostingDate']))
-        const rowEmployeeNo = text(row, ['StaffNo', 'EmployeeNo', 'Employee_No'])
-        return rowDate === today && (!staffNos.size || staffNos.has(rowEmployeeNo))
-      })
-      res.json({ rows: todayRows.map((row) => attendanceRow(row, authUser)) })
+        $filter: authUser.department
+          ? `DepartmentCode eq '${odataString(authUser.department)}' and Date eq ${today}`
+          : `Date eq ${today}`,
+      })) as ODataRecord[] | null
+      res.json({ rows: (Array.isArray(rows) ? rows : []).map((row) => attendanceRow(row, authUser)) })
     }),
   )
 
@@ -1955,7 +1893,9 @@ export function buildPortalApiRouter() {
         }).catch(() => [] as ODataRecord[]),
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
+      const jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
       res.json({
+        jobTitle,
         sector: text(employee, ['Sector', 'GlobalDimension1Code']),
         division: text(employee, ['Division']),
         district: text(employee, ['District', 'GlobalDimension2Code']),
@@ -2305,7 +2245,7 @@ export function buildPortalApiRouter() {
       const rows = await fetchHodDepartmentStaff(authUser)
       res.json({
         rows: rows.map((row) => {
-          const employeeNo = employeeNoFromRow(row)
+          const employeeNo = text(row, ['No', 'EmployeeNo'])
           return {
             id: employeeNo,
             employeeNo,
@@ -2328,7 +2268,7 @@ export function buildPortalApiRouter() {
       const rows = await fetchHodDepartmentStaff(authUser)
       res.json({
         rows: rows.map((row) => {
-          const employeeNo = employeeNoFromRow(row)
+          const employeeNo = text(row, ['No', 'EmployeeNo'])
           return {
             id: employeeNo,
             employeeNo,
@@ -2348,11 +2288,17 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       if (!authUser.HOD) throw portalError('HOD access required', 403)
-      const employees = await fetchHodDepartmentStaff(authUser)
+      const department = odataString(authUser.department)
+      const employees = (await fetchOData('QyHREmployee', {
+        $filter:
+          `No ne '${odataString(authUser.employeeNo)}'` +
+          ` and Status eq 'Active'` +
+          (department ? ` and GlobalDimension1Code eq '${department}'` : ''),
+      }).catch(() => [])) as ODataRecord[]
 
       const rows = []
       for (const employee of Array.isArray(employees) ? employees : []) {
-        const employeeNo = employeeNoFromRow(employee)
+        const employeeNo = text(employee, ['No', 'EmployeeNo'])
         if (!employeeNo) continue
         const leave = await activeLeaveForEmployee(employeeNo)
         if (!leave) continue
@@ -2379,11 +2325,17 @@ export function buildPortalApiRouter() {
       if (!authUser.HOD) throw portalError('HOD access required', 403)
       const employeeNo = String(req.params.employeeNo ?? '').trim()
       if (!employeeNo) throw portalError('Employee number is required', 422)
-      const rows = await fetchHodDepartmentStaff(authUser)
-      const employee = rows.find((row) => employeeNoFromRow(row) === employeeNo) ?? null
+      const rows = (await fetchOData('QyHREmployee', {
+        $filter:
+          `No eq '${odataString(employeeNo)}'` +
+          ` and Status eq 'Active'` +
+          ` and DepartmentCode eq '${odataString(authUser.department)}'`,
+        $top: 1,
+      }).catch(() => [])) as ODataRecord[]
+      const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
       if (!employee) throw portalError('Employee details not found', 404)
       res.json({
-        employeeNo: employeeNoFromRow(employee),
+        employeeNo: text(employee, ['No', 'EmployeeNo']),
         firstName: text(employee, ['FirstName', 'First_Name']),
         middleName: text(employee, ['MiddleName', 'Middle_Name']),
         lastName: text(employee, ['LastName', 'Last_Name']),
@@ -2392,7 +2344,7 @@ export function buildPortalApiRouter() {
         idNumber: text(employee, ['IDNumber', 'ID_Number']),
         gender: text(employee, ['Gender']),
         contractType: text(employee, ['TypeofContract', 'Type_of_Contract']),
-        jobTitle: text(employee, ['JobTitle', 'Job_Title']),
+        jobTitle: await resolveEmployeeJobTitle(employee as never, text(employee, ['No', 'EmployeeNo'])),
         department: text(employee, ['DepartmentName', 'Department_Name'], authUser.departmentName),
         employmentDate: text(employee, ['EmploymentDate', 'DateOfJoin']),
       })
@@ -2424,86 +2376,43 @@ export function buildPortalApiRouter() {
 
       const leaveTypeList = (Array.isArray(leaveTypes) ? leaveTypes : [])
         .map((row) => ({
-          code: leaveTypeCode(row),
-          label: leaveTypeLabel(row, leaveTypeCode(row)),
-          days: number(row, ['Days', 'NoofDays', 'No_of_Days', 'AnnualEntitlement', 'Annual_Entitlement']),
-          employeeBalanceFallback: false,
+          code: text(row, ['Code']),
+          label: text(row, ['Description', 'Code']),
+          days: number(row, ['Days', 'NoofDays']),
         }))
         .filter((row) => row.code)
 
-      const ledgerTypeLabels = new Map<string, string>()
       const ledgerByEmployeeAndType = new Map<string, { additions: number; deductions: number }>()
       for (const row of Array.isArray(ledgerRows) ? ledgerRows : []) {
-        const employeeNo = leaveLedgerEmployeeNo(row)
-        const leaveType = leaveLedgerType(row)
+        const employeeNo = text(row, ['EmployeeNo', 'Employee_No'])
+        const leaveType = text(row, ['LeaveType', 'Leave_Type'])
         if (!employeeNo || !leaveType) continue
-        if (!ledgerTypeLabels.has(leaveType)) {
-          ledgerTypeLabels.set(leaveType, leaveTypeLabel(row, leaveType))
-        }
         const key = `${employeeNo}::${leaveType}`
         const totals = ledgerByEmployeeAndType.get(key) ?? { additions: 0, deductions: 0 }
-        const days = leaveLedgerDays(row)
+        const days = number(row, ['NoofDays', 'No_of_Days'])
         if (days < 0) totals.deductions += Math.abs(days)
         else totals.additions += days
         ledgerByEmployeeAndType.set(key, totals)
       }
 
-      if (leaveTypeList.length === 0) {
-        for (const [code, label] of ledgerTypeLabels) {
-          leaveTypeList.push({ code, label, days: 0, employeeBalanceFallback: false })
-        }
-      }
-
-      const hasEmployeeLeaveBalances = (Array.isArray(employees) ? employees : [])
-        .some((employee) => employeeLeaveBalance(employee) !== 0)
-      if (leaveTypeList.length === 0 && hasEmployeeLeaveBalances) {
-        leaveTypeList.push({
-          code: 'LEAVE_BALANCE',
-          label: 'Leave Balance',
-          days: 0,
-          employeeBalanceFallback: true,
-        })
-      }
-
       res.json(
         (Array.isArray(employees) ? employees : []).map((employee) => {
-          const employeeNo = employeeNoFromRow(employee)
-          const firstName = text(employee, ['FirstName', 'First_Name'])
-          const middleName = text(employee, ['MiddleName', 'Middle_Name'])
-          const lastName = text(employee, ['LastName', 'Last_Name'])
+          const employeeNo = text(employee, ['No', 'EmployeeNo'])
+          const firstName = text(employee, ['FirstName'])
+          const middleName = text(employee, ['MiddleName'])
+          const lastName = text(employee, ['LastName'])
           const fullName = text(employee, ['FullName', 'Name'], [firstName, middleName, lastName].filter(Boolean).join(' '))
-          const fallbackBalance = employeeLeaveBalance(employee)
           return {
             employeeNo,
             name: fullName,
-            department: text(employee, [
-              'Department',
-              'DepartmentName',
-              'Department_Name',
-              'DepartmentCode',
-              'Department_Code',
-              'GlobalDimension1Code',
-              'GlobalDimension2Code',
-              'ShortcutDimension2Code',
-            ]),
+            department: text(employee, ['Department', 'DepartmentName', 'GlobalDimension2Code', 'ShortcutDimension2Code']),
             leaveTypes: leaveTypeList.map((leaveType) => {
-              const employeeTypeKey = `${employeeNo}::${leaveType.code}`
-              const totals = ledgerByEmployeeAndType.get(employeeTypeKey) ?? {
+              const totals = ledgerByEmployeeAndType.get(`${employeeNo}::${leaveType.code}`) ?? {
                 additions: 0,
                 deductions: 0,
               }
-              const hasEmployeeTypeLedger = ledgerByEmployeeAndType.has(employeeTypeKey)
-              const useEmployeeBalance =
-                leaveType.employeeBalanceFallback ||
-                (!hasEmployeeTypeLedger && fallbackBalance !== 0 && (
-                  leaveType.code === '0001' ||
-                  leaveTypeList.length === 1 ||
-                  /annual|leave balance/i.test(leaveType.label)
-                ))
               const rawBalance =
-                useEmployeeBalance
-                  ? fallbackBalance
-                  : leaveType.code === '0001'
+                leaveType.code === '0001'
                   ? totals.additions - totals.deductions
                   : leaveType.days - (totals.deductions - totals.additions)
               return {

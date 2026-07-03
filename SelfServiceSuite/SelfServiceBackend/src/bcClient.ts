@@ -12,10 +12,11 @@ function authHeaders(): Record<string, string> {
 }
 
 function requestWithCurlNtlm(options: {
-  method: 'GET' | 'POST' | 'PATCH'
+  method: 'GET' | 'POST'
   url: string
   headers: Record<string, string>
   body?: string
+  timeoutMs?: number
 }) {
   return new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
     if (!config.BC_NAV_USER || !config.BC_NAV_PASSWORD) {
@@ -24,11 +25,14 @@ function requestWithCurlNtlm(options: {
     }
 
     const username = config.BC_DOMAIN ? `${config.BC_DOMAIN}\\${config.BC_NAV_USER}` : config.BC_NAV_USER
+    const timeoutSeconds = Math.max(1, Math.ceil((options.timeoutMs ?? config.BC_REQUEST_TIMEOUT_MS) / 1000))
     const args = [
       '--silent',
       '--show-error',
       '--location',
       '--ntlm',
+      '--max-time',
+      String(timeoutSeconds),
       '--user',
       `${username}:${config.BC_NAV_PASSWORD}`,
       '--write-out',
@@ -39,8 +43,8 @@ function requestWithCurlNtlm(options: {
       args.push('--header', `${key}: ${value}`)
     }
 
-    if (options.method === 'POST' || options.method === 'PATCH') {
-      args.push('--request', options.method)
+    if (options.method === 'POST') {
+      args.push('--request', 'POST')
       args.push('--data-binary', options.body ?? '')
     }
 
@@ -75,15 +79,6 @@ function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value : `${value}/`
 }
 
-function soapPageBaseUrl() {
-  const configured = config.BC_SOAP_PAGE_BASE_URL.trim()
-  if (/\/Page\/?$/i.test(configured)) return normalizeBaseUrl(configured)
-
-  const codeunitUrl = new URL(config.BC_SOAP_CODEUNIT_URL)
-  codeunitUrl.pathname = codeunitUrl.pathname.replace(/\/Codeunit\/[^/]+$/i, '/Page/')
-  return normalizeBaseUrl(codeunitUrl.toString())
-}
-
 function logTarget(value: URL | string) {
   const url = value instanceof URL ? value : new URL(value)
   return `${url.origin}${url.pathname}`
@@ -116,8 +111,12 @@ function toQueryString(query: Record<string, unknown>) {
  * Low-level OData GET. Returns the parsed JSON body as-is so callers can
  * read both `value` and `@odata.count` if they asked for `$count=true`.
  */
-export async function fetchODataRaw(serviceName: string, query: Record<string, unknown> = {}) {
-  const base = normalizeBaseUrl(config.BC_ODATA_BASE_URL)
+export async function fetchODataRaw(
+  serviceName: string,
+  query: Record<string, unknown> = {},
+  baseUrl: string = config.BC_ODATA_BASE_URL,
+) {
+  const base = normalizeBaseUrl(baseUrl)
   const url = new URL(serviceName, base)
   const qs = toQueryString(query)
   if (qs) url.search = qs
@@ -137,6 +136,7 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
         method: 'GET',
         url: url.toString(),
         headers: { Accept: 'application/json' },
+        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
       })
       statusCode = response.statusCode
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -161,6 +161,7 @@ export async function fetchODataRaw(serviceName: string, query: Record<string, u
         Accept: 'application/json',
         ...authHeaders(),
       },
+      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
     })
 
     statusCode = response.status
@@ -190,6 +191,65 @@ export async function fetchOData(serviceName: string, query: Record<string, unkn
   const data = await fetchODataRaw(serviceName, query)
   if (data && typeof data === 'object' && Array.isArray(data.value)) return data.value as ODataRecord[]
   return data
+}
+
+export async function fetchODataFromBase(
+  baseUrl: string,
+  serviceName: string,
+  query: Record<string, unknown> = {},
+) {
+  const data = await fetchODataRaw(serviceName, query, baseUrl)
+  if (data && typeof data === 'object' && Array.isArray(data.value)) return data.value as ODataRecord[]
+  return data
+}
+
+/** Fetch raw OData $metadata XML from a company OData base URL. */
+export async function fetchODataMetadata(baseUrl: string) {
+  const base = normalizeBaseUrl(baseUrl)
+  const url = new URL('$metadata', base).toString()
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'GET',
+    operation: '$metadata',
+    target: logTarget(url),
+    metadata: 'metadata',
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'GET',
+        url,
+        headers: { Accept: 'application/xml' },
+        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw new Error(`Business Central OData metadata ${response.statusCode}: ${response.body}`)
+      }
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return response.body
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/xml',
+        ...authHeaders(),
+      },
+      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
+    })
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw new Error(`Business Central OData metadata ${response.status}: ${text}`)
+    }
+    completeBcCall(call, response.status, responseBytes(text))
+    return text
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
 }
 
 export async function postOData(serviceName: string, payload: Record<string, unknown>) {
@@ -256,71 +316,6 @@ export async function postOData(serviceName: string, payload: Record<string, unk
   }
 }
 
-export async function patchOData(serviceName: string, payload: Record<string, unknown>) {
-  const base = normalizeBaseUrl(config.BC_ODATA_BASE_URL)
-  const url = /^https?:\/\//i.test(serviceName) ? new URL(serviceName) : new URL(serviceName, base)
-  const body = JSON.stringify(payload)
-  const headers = {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    'If-Match': '*',
-  }
-
-  const call = startBcCall({
-    protocol: 'OData',
-    method: 'PATCH',
-    operation: serviceName,
-    target: logTarget(url),
-    metadata: `bodyKeys=${Object.keys(payload).sort().join(',') || '-'}`,
-  })
-  let statusCode: number | undefined
-
-  try {
-    if (config.BC_AUTH_MODE === 'ntlm') {
-      const response = await requestWithCurlNtlm({
-        method: 'PATCH',
-        url: url.toString(),
-        headers,
-        body,
-      })
-      statusCode = response.statusCode
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Object.assign(
-          new Error(`Business Central OData ${response.statusCode}: ${response.body}`),
-          { status: response.statusCode === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
-        )
-      }
-      const data = response.body ? JSON.parse(response.body) : null
-      completeBcCall(call, response.statusCode, responseBytes(response.body))
-      return data as ODataRecord | null
-    }
-
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        ...headers,
-        ...authHeaders(),
-      },
-      body,
-    })
-
-    statusCode = response.status
-    const text = await response.text()
-    if (!response.ok) {
-      throw Object.assign(
-        new Error(`Business Central OData ${response.status}: ${text}`),
-        { status: response.status === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
-      )
-    }
-    const data = text ? JSON.parse(text) : null
-    completeBcCall(call, response.status, responseBytes(text))
-    return data as ODataRecord | null
-  } catch (error) {
-    failBcCall(call, error, statusCode)
-    throw error
-  }
-}
-
 /**
  * Returns the count of rows that would be produced by `query` against
  * `serviceName`. Equivalent to Laravel's `->count()` over the OData client.
@@ -361,21 +356,6 @@ function soapEnvelope(methodName: string, params: Record<string, unknown>) {
 </soap:Envelope>`
 }
 
-function soapPageEnvelope(namespace: string, methodName: string, recordTag: string, fields: Record<string, unknown>) {
-  const body = Object.entries(fields)
-    .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
-    .join('')
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <${methodName} xmlns="${namespace}">
-      <${recordTag}>${body}</${recordTag}>
-    </${methodName}>
-  </soap:Body>
-</soap:Envelope>`
-}
-
 function parseSoapReturnValue(xml: string) {
   const match = xml.match(/<return_value>([\s\S]*?)<\/return_value>/)
   if (!match) return null
@@ -396,49 +376,15 @@ function decodeXml(value: string) {
     .replaceAll('&amp;', '&')
 }
 
-function xmlTagName(value: string) {
-  const cleaned = value.replace(/[^A-Za-z0-9_.-]/g, '_')
-  return /^[A-Za-z_]/.test(cleaned) ? cleaned : `_${cleaned}`
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function parseSoapPageRecord(xml: string, recordTag: string) {
-  const tag = escapeRegex(recordTag)
-  const recordMatch =
-    xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i')) ??
-    xml.match(new RegExp(`<[^:>]+:${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/[^:>]+:${tag}>`, 'i'))
-  const block = recordMatch?.[1] ?? ''
-  const record: ODataRecord = {}
-  for (const match of block.matchAll(/<([A-Za-z_][\w.-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g)) {
-    const [, key, value] = match
-    if (!key || value.includes('<')) continue
-    record[key] = decodeXml(value.trim())
-  }
-  return record
-}
-
 export function soapFaultMessage(xml: string) {
   const match = xml.match(/<faultstring(?:\s[^>]*)?>([\s\S]*?)<\/faultstring>/i)
   return match ? decodeXml(match[1]!.trim()) : ''
 }
 
-export function friendlySoapFaultMessage(fault: string) {
-  const codeLengthMatch = fault.match(
-    /length of the string is\s+(\d+),\s*but it must be less than or equal to\s+20\s+characters\.\s*Value:\s*([\s\S]+)$/i,
-  )
-  if (codeLengthMatch) {
-    const length = codeLengthMatch[1]
-    const value = codeLengthMatch[2]!.trim()
-    return `Manual Business Central setup is required: "${value}" is ${length} characters, but the Business Central field allows max 20. This is usually an employee department, dimension, or responsibility-center code, not the form text. Change that BC code to 20 characters or less, for example "TRR", and keep the long text only as the description/name. Then retry.`
-  }
-
-  return /not supported by related approval workflow/i.test(fault)
+function soapFaultError(status: number, xml: string) {
+  const fault = soapFaultMessage(xml)
+  const friendlyFault = /not supported by related approval workflow/i.test(fault)
     ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting approval.'
-    : /Requesting Department must have a value/i.test(fault)
-      ? 'Requesting Department is missing on this purchase requisition. Ask HR to set a short department code (20 characters or less, for example HC) on the employee card, then save the requisition header again before adding lines.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
     : /can't be evaluated into type Boolean/i.test(fault)
@@ -451,14 +397,7 @@ export function friendlySoapFaultMessage(fault: string) {
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
-    : /no longer editable or it does not exist/i.test(fault)
-      ? 'The linked Business Central document is missing, already posted, or closed. For gate passes use a valid open/posted Store Issue, Transfer Order, or Asset Transfer number. For claims ensure the header is still Pending and has lines.'
       : fault
-}
-
-function soapFaultError(status: number, xml: string) {
-  const fault = soapFaultMessage(xml)
-  const friendlyFault = friendlySoapFaultMessage(fault)
   const message = friendlyFault
     ? `Business Central rejected the request: ${friendlyFault}`
     : `Business Central SOAP request failed with status ${status}`
@@ -525,65 +464,6 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
       returnValue: parseSoapReturnValue(xml),
       raw: xml,
     }
-  } catch (error) {
-    failBcCall(call, error, statusCode)
-    throw error
-  }
-}
-
-export async function createSoapPageRecord(serviceName: string, fields: Record<string, unknown>) {
-  const recordTag = xmlTagName(serviceName)
-  const pageNamespace = `urn:microsoft-dynamics-schemas/page/${serviceName.toLowerCase()}`
-  const body = soapPageEnvelope(pageNamespace, 'Create', recordTag, fields)
-  const pageUrl = new URL(serviceName, soapPageBaseUrl()).toString()
-  const headers = {
-    Accept: 'text/xml',
-    'Content-Type': 'text/xml; charset=utf-8',
-    SOAPAction: `${pageNamespace}:Create`,
-  }
-
-  const call = startBcCall({
-    protocol: 'SOAP',
-    method: 'POST',
-    operation: `${serviceName}.Create`,
-    target: logTarget(pageUrl),
-    metadata: `fieldKeys=${Object.keys(fields).sort().join(',') || '-'}`,
-  })
-  let statusCode: number | undefined
-
-  try {
-    if (config.BC_AUTH_MODE === 'ntlm') {
-      const response = await requestWithCurlNtlm({
-        method: 'POST',
-        url: pageUrl,
-        headers,
-        body,
-      })
-      statusCode = response.statusCode
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw soapFaultError(response.statusCode, response.body)
-      }
-      completeBcCall(call, response.statusCode, responseBytes(response.body))
-      return parseSoapPageRecord(response.body, recordTag)
-    }
-
-    const response = await fetch(pageUrl, {
-      method: 'POST',
-      headers: {
-        ...headers,
-        ...authHeaders(),
-      },
-      body,
-    })
-
-    statusCode = response.status
-    const xml = await response.text()
-    if (!response.ok) {
-      throw soapFaultError(response.status, xml)
-    }
-
-    completeBcCall(call, response.status, responseBytes(xml))
-    return parseSoapPageRecord(xml, recordTag)
   } catch (error) {
     failBcCall(call, error, statusCode)
     throw error

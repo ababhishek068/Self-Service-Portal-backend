@@ -33,6 +33,7 @@ export interface AssignedAsset {
 }
 
 export interface EmployeeProfileDetails {
+  jobTitle?: string
   sector: string
   division: string
   district: string

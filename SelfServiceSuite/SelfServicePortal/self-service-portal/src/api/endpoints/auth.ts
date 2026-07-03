@@ -8,6 +8,7 @@ import {
   setApiBaseUrl,
   setToken,
 } from '@/api/client/authClient'
+import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
 import { requireApplicationApiUrl, requireAuthApiUrl, requireBcApiUrl } from '@/api/requireBackend'
 import { deriveRoles } from '@/config/roles'
 import type { Employee } from '@/types/erp.types'
@@ -101,7 +102,19 @@ export async function loginRequest(
     password,
   })
   setToken(token)
-  return toEmployee(user)
+  const refreshed = await fetchCurrentUser()
+  let employee = refreshed ?? toEmployee(user)
+  if (!employee.jobTitle?.trim()) {
+    try {
+      const details = await getEmployeeProfileDetails()
+      if (details.jobTitle?.trim()) {
+        employee = { ...employee, jobTitle: details.jobTitle }
+      }
+    } catch {
+      /* profile details are optional */
+    }
+  }
+  return employee
 }
 
 export async function registerRequest(input: RegisterInput): Promise<Employee> {
@@ -157,7 +170,8 @@ export async function fetchCurrentUser(): Promise<Employee | null> {
   requireAuthApiUrl()
   if (!getToken()) return null
   try {
-    const { user } = await authGet<{ user: AuthUser }>('/api/auth/me')
+    const { user, token } = await authGet<{ user: AuthUser; token?: string }>('/api/auth/me')
+    if (token) setToken(token)
     return toEmployee(user)
   } catch {
     return null
