@@ -174,7 +174,9 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
 import {
   configuredJobTitleByEmployeeNo,
   fetchMergedEmployeeRecord,
+  pickPreferredUserSetupRow,
   resolveAuthUserJobTitle,
+  resolveEffectiveBcUserId,
   resolveEmployeeJobTitle,
   resolveEmployeeJobTitleByNo,
 } from './employeeProfile.js'
@@ -194,8 +196,14 @@ export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> 
   if (!jobTitle) {
     jobTitle = configuredJobTitleByEmployeeNo(user.employeeNo)
   }
-  if (!jobTitle) return user
-  return { ...user, jobTitle }
+  const userID = merged
+    ? resolveEffectiveBcUserId(user.userID, merged, user.employeeNo)
+    : resolveEffectiveBcUserId(user.userID, null, user.employeeNo)
+  return {
+    ...user,
+    userID: userID || user.userID,
+    jobTitle: jobTitle || user.jobTitle,
+  }
 }
 
 /** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
@@ -377,9 +385,10 @@ async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
   const rows = (await fetchOData('QyUserSetup', {
     $filter: `EmployeeNo eq '${odataString(staffNo)}'`,
-    $top: 1,
+    $top: 10,
   })) as BcUserSetup[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  if (!Array.isArray(rows) || rows.length === 0) return null
+  return pickPreferredUserSetupRow(rows)
 }
 
 async function isHeadOfDepartment(employeeNo: string) {
@@ -415,10 +424,11 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     .trim()
   const isCEO =
     employee.JobID === 'JOB_003' || config.CEO_OVERRIDE_EMPNOS.includes(employeeNo)
-  const userID = String(userSetup.UserID ?? '')
+  const setupUserId = String(userSetup.UserID ?? '')
+  const userID = resolveEffectiveBcUserId(setupUserId, employee as Record<string, unknown>, employeeNo)
   const [isHOD, hasEntries] = await Promise.all([
     isHeadOfDepartment(employeeNo),
-    hasApprovalEntries(userID),
+    hasApprovalEntries(userID || setupUserId),
   ])
   const roles = ['staff']
   if (isHOD) roles.push('hod')

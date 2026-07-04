@@ -1,5 +1,6 @@
 import type { ODataRecord } from './bcClient.js'
 import { fetchOData, odataString } from './bcClient.js'
+import { pickPreferredUserSetupRow } from './employeeProfile.js'
 import { resolveLeaveStatus } from './erpMappings.js'
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -190,12 +191,10 @@ export async function resolveLeaveApproverHint(
   if (employeeNo) {
     const userSetupRows = (await fetchOData('QyUserSetup', {
       $filter: `EmployeeNo eq '${odataString(employeeNo)}'`,
-      $top: 1,
+      $top: 10,
     }).catch(() => [])) as ODataRecord[] | null
-    const approverUserId = text(
-      Array.isArray(userSetupRows) ? userSetupRows[0] ?? {} : {},
-      ['ApproverID', 'Approver_ID'],
-    )
+    const userSetup = pickPreferredUserSetupRow(Array.isArray(userSetupRows) ? userSetupRows : [])
+    const approverUserId = text(userSetup ?? {}, ['ApproverID', 'Approver_ID'])
     if (approverUserId) {
       const approverName = await resolveApproverDisplayName(approverUserId)
       return { approverId: approverUserId, approverName: approverName || approverUserId }
@@ -250,6 +249,7 @@ export async function resolveLeaveApprovalStepsAsync(
   documentNo = '',
   context: LeaveApproverContext = {},
 ) {
+  const resolvedStatus = resolveLeaveStatus(row, approvalEntries)
   const base = resolveLeaveApprovalSteps(row, approvalEntries, documentNo)
   const needsBetterName = (steps: ReturnType<typeof mapApprovalSteps>) =>
     steps.length === 0 ||
@@ -261,6 +261,11 @@ export async function resolveLeaveApprovalStepsAsync(
     )
 
   if (!needsBetterName(base)) {
+    return enrichMappedApprovalSteps(base)
+  }
+
+  // Open/Draft leaves have no BC approval yet — do not show a fake "Pending Approval" step.
+  if (!['Pending Approval', 'Approved', 'Rejected'].includes(resolvedStatus)) {
     return enrichMappedApprovalSteps(base)
   }
 

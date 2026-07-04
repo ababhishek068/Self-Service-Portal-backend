@@ -24,14 +24,19 @@ import {
   isHalfDaySelection,
   halfDayOptionValue,
   formatBcSoapDate,
+  formatBcLeaveSoapDateTime,
+  formatBcSoapDateMdy,
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
+  bcLeaveDaysApplied,
   employeeLeaveMetrics,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
+  employeeLeaveWorkflowCodes,
+  leaveRowHasWorkflowCodes,
 } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
@@ -44,7 +49,7 @@ import {
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { inferEmployeeJobId, resolveEmployeeJobTitle } from './employeeProfile.js'
+import { inferEmployeeJobId, pickPreferredUserSetupRow, resolveEffectiveBcUserId, resolveEmployeeJobTitle, normalizeEmployeeNoForLookup } from './employeeProfile.js'
 import {
   documentStatusFromBc,
   mapRequest,
@@ -185,6 +190,18 @@ describe('halfDayRequiresAnnualLeave', () => {
   })
 })
 
+describe('bcLeaveDaysApplied', () => {
+  it('sends integer 1 to BC for half-day leave instead of 0.5', () => {
+    assert.equal(bcLeaveDaysApplied(0.5, '1'), 1)
+    assert.equal(bcLeaveDaysApplied(0.5, '2'), 1)
+  })
+
+  it('passes whole-day counts through as integers', () => {
+    assert.equal(bcLeaveDaysApplied(3, '0'), 3)
+    assert.equal(bcLeaveDaysApplied(1, '0'), 1)
+  })
+})
+
 describe('employeeLeaveMetrics', () => {
   const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
 
@@ -239,6 +256,15 @@ describe('resolveLeaveApprovalSteps', () => {
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
 
+  it('does not invent pending steps for Open leaves without BC approval entries', () => {
+    const steps = resolveLeaveApprovalSteps(
+      { ApplicationCode: 'LV00036', Status: 'Open', ApprovalStatus: '' },
+      [],
+      'LV00036',
+    )
+    assert.equal(steps.length, 0)
+  })
+
   it('discovers approver fields from leave header OData aliases', () => {
     const pendingSteps = resolveLeaveApprovalSteps(
       {
@@ -261,6 +287,51 @@ describe('normalizeLeaveStartDate', () => {
     assert.equal(normalizeLeaveStartDate('2026_06_22'), '2026-06-22')
     assert.equal(formatBcSoapDate('6/23/2026'), '2026-06-23')
     assert.equal(formatBcSoapDate('6/22/26'), '2026-06-22')
+  })
+
+  it('formats Laravel-style ISO timestamps for LeaveApplication SOAP', () => {
+    assert.equal(formatBcLeaveSoapDateTime('2026-07-22'), '2026-07-22T00:00:00.000Z')
+  })
+
+  it('formats return dates as M/D/YYYY for BC SOAP', () => {
+    assert.equal(formatBcSoapDateMdy('2026-07-24'), '7/24/2026')
+    assert.equal(formatBcSoapDateMdy('6/23/2026'), '6/23/2026')
+  })
+})
+
+describe('resolveEffectiveBcUserId', () => {
+  it('prefers configured BC user ID over QyUserSetup aliases', () => {
+    assert.equal(
+      resolveEffectiveBcUserId('HERMON.GETACHEW', { User_ID: 'HERMON.GETACHEW' }, 'ABH-114'),
+      'HERMON_GETACHEW',
+    )
+  })
+
+  it('treats dot and underscore BC user IDs as equivalent when unconfigured', () => {
+    assert.equal(
+      resolveEffectiveBcUserId('HERMON.GETACHEW', { User_ID: 'HERMON_GETACHEW' }, 'ABH-999'),
+      'HERMON_GETACHEW',
+    )
+  })
+
+  it('maps HERMON.GETACHEW session login to HERMON_GETACHEW even without employee map', () => {
+    assert.equal(resolveEffectiveBcUserId('HERMON.GETACHEW', null, ''), 'HERMON_GETACHEW')
+  })
+
+  it('normalizes ABH114 to ABH-114 for BC user lookup', () => {
+    assert.equal(normalizeEmployeeNoForLookup('ABH114'), 'ABH-114')
+    assert.equal(
+      resolveEffectiveBcUserId('HERMON.GETACHEW', null, 'ABH114'),
+      'HERMON_GETACHEW',
+    )
+  })
+
+  it('prefers HERMON_GETACHEW over ADMIN when both map to the same employee', () => {
+    const picked = pickPreferredUserSetupRow([
+      { UserID: 'ADMIN', EmployeeNo: 'ABH-114' },
+      { UserID: 'HERMON_GETACHEW', EmployeeNo: 'ABH-114' },
+    ])
+    assert.equal(picked?.UserID, 'HERMON_GETACHEW')
   })
 })
 
@@ -536,6 +607,10 @@ describe('mapRequest status', () => {
       'Pending Approval',
     )
     assert.equal(
+      resolveLeaveStatus({ Status: 'Pending Approval', ApprovalStatus: 'Open' }),
+      'Pending Approval',
+    )
+    assert.equal(
       resolveLeaveStatus(
         { Status: 'Open', ApprovalStatus: '' },
         [{ Status: 'Open', DocumentNo: 'LV00018' }],
@@ -756,5 +831,25 @@ describe('resolveEmployeeJobTitle', () => {
   it('does not treat long email local-parts as job codes', () => {
     assert.equal(inferEmployeeJobId({ EMail: 'tesfaye@abhpartners.com' }), '')
     assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
+  })
+})
+
+describe('employeeLeaveWorkflowCodes', () => {
+  it('reads department and division from employee card fields', () => {
+    assert.deepEqual(
+      employeeLeaveWorkflowCodes({
+        Department: 'IT',
+        Division: 'FINANCE AND ADMIN',
+      }),
+      { departmentCode: 'IT', divisionCode: 'FINANCE AND ADMIN' },
+    )
+  })
+
+  it('detects when leave header has workflow routing codes', () => {
+    assert.equal(
+      leaveRowHasWorkflowCodes({ DepartmentCode: 'IT', DivisionCode: 'FINANCE AND ADMIN' }),
+      true,
+    )
+    assert.equal(leaveRowHasWorkflowCodes({ DepartmentCode: 'IT' }), false)
   })
 })

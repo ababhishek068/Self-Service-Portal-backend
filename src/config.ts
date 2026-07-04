@@ -44,6 +44,22 @@ const jobTitleByEmpNoMap = z
     return map
   })
 
+const bcUserIdByEmpNoMap = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) => {
+    const map = new Map<string, string>()
+    for (const part of value.split(',')) {
+      const separator = part.indexOf(':')
+      if (separator <= 0) continue
+      const empNo = part.slice(0, separator).trim().toUpperCase()
+      const userId = part.slice(separator + 1).trim()
+      if (empNo && userId) map.set(empNo, userId)
+    }
+    return map
+  })
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
@@ -103,6 +119,8 @@ const envSchema = z.object({
   BC_JOB_TITLE_BY_CODE: jobTitleMap,
   /** Fallback job titles by employee number when BC/job-code lookup fails, e.g. ABH-029:Finance and Admin Director */
   BC_JOB_TITLE_BY_EMPNO: jobTitleByEmpNoMap,
+  /** BC User IDs by employee number when OData/QyUserSetup still show ADMIN, e.g. ABH-114:HERMON_GETACHEW */
+  BC_BC_USER_ID_BY_EMPNO: bcUserIdByEmpNoMap,
   /** Probe BC $metadata to discover extra OData pages (slow — off by default). */
   BC_DISCOVER_ODATA_SERVICES: z
     .string()

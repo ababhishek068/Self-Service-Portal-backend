@@ -8,7 +8,8 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-pending-diag2-full-offline.zip"
+BUILD_ID="leave-open-ui-fix-2026-07-04-v5"
+ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-open-ui-fix-v5-full-offline.zip"
 ABH_ENV="$ROOT/deploy/windows/host.env.abh-uat-ip.example"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
@@ -32,7 +33,7 @@ echo "==> Syncing latest builds into SelfServiceSuite..."
 rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy" "$BC/src"
 mkdir -p "$BC/dist" "$BC/public" "$BC/src" "$BC/logs"
 cp -R "$ROOT/dist/." "$BC/dist/"
-echo "leave-pending-diag2-2026-07-03" > "$BC/dist/BUILD_ID.txt"
+echo "$BUILD_ID" > "$BC/dist/BUILD_ID.txt"
 cp -R "$FRONTEND/dist/." "$BC/public/"
 rsync -a \
   --exclude '*.tmp' \
@@ -54,7 +55,7 @@ rsync -a \
 echo "==> Overlaying latest backend build + env files..."
 rsync -a \
   "$BC/dist/" "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/"
-echo "leave-pending-diag2-2026-07-03" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
+echo "$BUILD_ID" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
 rsync -a \
   "$BC/public/" "$STAGING/SelfServiceSuite/SelfServiceBackend/public/"
 rsync -a \
@@ -109,7 +110,8 @@ SUMMARY (${STAMP})
   and browser console (shows whether BC actually created an approval entry)
 - UI: background status reconcile after "Request Approval" is now SILENT — it no
   longer flashes the "Fetching data" loader every few seconds
-- UI: global progress indicator — top loading bar on every API call + a branded progress dialog for submits/cancels/approvals and slow Business Central history fetches
+- UI: modern loading — gradient top progress bar with shimmer, glass status pill with animated ring, improved skeleton loaders
+- Leave: workflow codes stamped from employee card (Division/Department) so BC LEAVE-IT workflow runs
 - Leave: status is now read 100% live from Business Central (no local cache) — Pending Approval reflects BC exactly
 - ENV: bundled .env uses ABH WS/Page OData on 7047 + BC_JOB_TITLE_BY_CODE=ITM:IT Manger
 - Profile: job title from Employee Card OData (7047 Page/) and job-code lookup — header shows IT Manger instead of STAFF

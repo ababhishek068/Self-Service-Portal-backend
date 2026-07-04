@@ -12,7 +12,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function requestWithCurlNtlm(options: {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PATCH'
   url: string
   headers: Record<string, string>
   body?: string
@@ -43,8 +43,8 @@ function requestWithCurlNtlm(options: {
       args.push('--header', `${key}: ${value}`)
     }
 
-    if (options.method === 'POST') {
-      args.push('--request', 'POST')
+    if (options.method === 'POST' || options.method === 'PATCH') {
+      args.push('--request', options.method)
       args.push('--data-binary', options.body ?? '')
     }
 
@@ -314,6 +314,81 @@ export async function postOData(serviceName: string, payload: Record<string, unk
     failBcCall(call, error, statusCode)
     throw error
   }
+}
+
+/** PATCH one OData entity on a specific base URL. */
+export async function patchODataFromBase(
+  baseUrl: string,
+  entityPath: string,
+  payload: Record<string, unknown>,
+) {
+  const base = normalizeBaseUrl(baseUrl)
+  const url = new URL(entityPath, base)
+  const body = JSON.stringify(payload)
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'If-Match': '*',
+  }
+
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'PATCH',
+    operation: entityPath,
+    target: logTarget(url),
+    metadata: `bodyKeys=${Object.keys(payload).sort().join(',') || '-'}`,
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'PATCH',
+        url: url.toString(),
+        headers,
+        body,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Object.assign(
+          new Error(`Business Central OData ${response.statusCode}: ${response.body}`),
+          { status: response.statusCode === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+        )
+      }
+      const data = response.body ? JSON.parse(response.body) : null
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return data as ODataRecord | null
+    }
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        ...headers,
+        ...authHeaders(),
+      },
+      body,
+    })
+
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(`Business Central OData ${response.status}: ${text}`),
+        { status: response.status === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
+      )
+    }
+    const data = text ? JSON.parse(text) : null
+    completeBcCall(call, response.status, responseBytes(text))
+    return data as ODataRecord | null
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
+}
+
+/** PATCH one OData entity, e.g. QyHRLeaveApplications(ApplicationCode='LV00029'). */
+export async function patchOData(entityPath: string, payload: Record<string, unknown>) {
+  return patchODataFromBase(config.BC_ODATA_BASE_URL, entityPath, payload)
 }
 
 /**

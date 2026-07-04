@@ -83,6 +83,73 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
   return fallback
 }
 
+const EMPLOYEE_BC_USER_ID_FIELDS = [
+  'Employee_User_ID',
+  'EmployeeUserID',
+  'Employee_UserID',
+  'User_ID',
+  'Portal_User_ID',
+  'PortalUserID',
+]
+
+/** Employee card BC login — may differ from QyUserSetup when portal SOAP runs as ADMIN. */
+export function employeeBcUserIdFromRecord(record: Record<string, unknown>) {
+  const fromCard = employeeFieldText(record, EMPLOYEE_BC_USER_ID_FIELDS)
+  if (fromCard) return fromCard
+  for (const [key, value] of Object.entries(record)) {
+    if (!value || typeof value !== 'string') continue
+    const normalized = key.toLowerCase().replace(/[_\s]/g, '')
+    if (normalized === 'employeeuserid' || normalized === 'portaluserid') {
+      return value.trim()
+    }
+  }
+  return ''
+}
+
+export function looksLikeServiceBcUserId(userID: string) {
+  const normalized = userID.trim().toUpperCase()
+  if (!normalized) return true
+  return ['ADMIN', 'SERVICE', 'SYSTEM', 'BCADMIN', 'SUPER', 'TAADMIN'].includes(normalized)
+}
+
+/** When several User Setup rows share one Employee No., ignore service accounts like ADMIN. */
+export function pickPreferredUserSetupRow<T extends { UserID?: string }>(rows: T[]): T | null {
+  if (!rows.length) return null
+  const nonService = rows.filter((row) => !looksLikeServiceBcUserId(String(row.UserID ?? '')))
+  return nonService[0] ?? rows[0] ?? null
+}
+
+/** BC user IDs differ by publish (HERMON_GETACHEW vs HERMON.GETACHEW) — compare loosely. */
+export function normalizeBcUserIdForMatch(userID: string) {
+  return userID.trim().toUpperCase().replace(/[._\\-]/g, '')
+}
+
+export function bcUserIdsEquivalent(left: string, right: string) {
+  const a = normalizeBcUserIdForMatch(left)
+  const b = normalizeBcUserIdForMatch(right)
+  return Boolean(a && b && a === b)
+}
+
+/** Prefer configured / employee-card login over QyUserSetup when setup points at a service account. */
+export function resolveEffectiveBcUserId(
+  sessionUserId: string,
+  employeeRow?: ODataRecord | null,
+  employeeNo?: string,
+) {
+  const fromEnv = employeeNo ? configuredBcUserIdByEmployeeNo(employeeNo) : ''
+  if (fromEnv) return fromEnv
+
+  const fromEmployee = employeeRow ? employeeBcUserIdFromRecord(employeeRow as Record<string, unknown>) : ''
+  const candidate = fromEmployee ? canonicalBcUserId(fromEmployee) : ''
+  if (candidate && looksLikeServiceBcUserId(sessionUserId)) return candidate
+  if (!sessionUserId.trim() && candidate) return candidate
+  if (candidate && bcUserIdsEquivalent(sessionUserId, candidate)) return candidate
+
+  const fromSession = canonicalBcUserId(sessionUserId)
+  if (fromSession && fromSession !== sessionUserId.trim()) return fromSession
+  return fromSession || candidate
+}
+
 function normalizeFieldKey(key: string) {
   return key.toLowerCase().replace(/[_\s]/g, '')
 }
@@ -136,6 +203,37 @@ export function configuredJobTitleByEmployeeNo(employeeNo: string) {
   const fromEnv = config.BC_JOB_TITLE_BY_EMPNO.get(no)
   if (fromEnv) return fromEnv
   return ABH_EMPLOYEE_JOB_TITLES[no] ?? ''
+}
+
+const ABH_EMPLOYEE_BC_USER_IDS: Record<string, string> = {
+  'ABH-114': 'HERMON_GETACHEW',
+}
+
+/** QyUserSetup aliases → canonical BC User ID used by approval workflows. */
+const BC_USER_ID_CANONICAL: Record<string, string> = {
+  HERMONGETACHEW: 'HERMON_GETACHEW',
+}
+
+export function normalizeEmployeeNoForLookup(employeeNo: string) {
+  const trimmed = employeeNo.trim().toUpperCase()
+  if (!trimmed) return ''
+  if (/^ABH-?\d+$/.test(trimmed.replace(/_/g, '-'))) {
+    return trimmed.replace(/_/g, '-').replace(/^ABH(\d)/, 'ABH-$1')
+  }
+  return trimmed.replace(/_/g, '-')
+}
+
+export function configuredBcUserIdByEmployeeNo(employeeNo: string) {
+  const no = normalizeEmployeeNoForLookup(employeeNo)
+  if (!no) return ''
+  const fromEnv = config.BC_BC_USER_ID_BY_EMPNO.get(no)
+  if (fromEnv) return fromEnv
+  return ABH_EMPLOYEE_BC_USER_IDS[no] ?? ''
+}
+
+export function canonicalBcUserId(userID: string) {
+  const key = normalizeBcUserIdForMatch(userID)
+  return BC_USER_ID_CANONICAL[key] ?? userID.trim()
 }
 
 function employeeEmail(record: Record<string, unknown>) {

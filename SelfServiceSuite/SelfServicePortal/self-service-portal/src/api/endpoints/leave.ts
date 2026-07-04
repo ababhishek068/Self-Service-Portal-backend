@@ -128,6 +128,9 @@ export interface SubmitLeaveInput {
   leaveType: string
   appliedDays: number
   startDate: string
+  /** From GetLeaveDates — sent to BC on create so Return Date is populated. */
+  endDate?: string
+  returnDate?: string
   isHalfDayLeave: '0' | '1' | '2'
   reliever?: string
   reason: string

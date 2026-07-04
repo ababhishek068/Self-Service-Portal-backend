@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2 } from 'lucide-react'
 import { useApiActivity } from '@/hooks/useApiActivity'
 
 export interface ProgressOptions {
@@ -38,6 +37,15 @@ const ProgressContext = createContext<ProgressContextValue | null>(null)
 const WRITE_DELAY_MS = 180
 const SLOW_READ_DELAY_MS = 800
 
+function ModernLoader() {
+  return (
+    <span
+      className="portal-loader-ring shrink-0 motion-reduce:animate-none"
+      aria-hidden
+    />
+  )
+}
+
 function TopProgressBar() {
   const { active } = useApiActivity()
   const [value, setValue] = useState(0)
@@ -59,15 +67,15 @@ function TopProgressBar() {
         hideTimer.current = null
       }
       setVisible(true)
-      setValue((current) => (current < 8 ? 8 : current))
+      setValue((current) => (current < 10 ? 10 : current))
       if (!trickle.current) {
         trickle.current = setInterval(() => {
           setValue((current) => {
-            if (current >= 92) return current
-            const remaining = 92 - current
-            return current + Math.max(0.5, remaining * 0.06)
+            if (current >= 94) return current
+            const remaining = 94 - current
+            return current + Math.max(0.45, remaining * 0.055)
           })
-        }, 240)
+        }, 220)
       }
     } else {
       stopTrickle()
@@ -75,7 +83,7 @@ function TopProgressBar() {
       hideTimer.current = setTimeout(() => {
         setVisible(false)
         setValue(0)
-      }, 380)
+      }, 420)
     }
 
     return stopTrickle
@@ -85,32 +93,16 @@ function TopProgressBar() {
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 top-0 z-[130] h-[3px]"
-      style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.35s ease' }}
+      className="pointer-events-none fixed inset-x-0 top-0 z-[130]"
+      style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
       aria-hidden
     >
-      <div
-        className="relative h-full origin-left"
-        style={{
-          width: `${value}%`,
-          transition: 'width 0.24s cubic-bezier(0.22, 1, 0.36, 1)',
-          background:
-            'linear-gradient(90deg, var(--portal-navy) 0%, #0a5cad 45%, var(--portal-orange) 100%)',
-          boxShadow: '0 0 10px var(--portal-glow-orange), 0 0 4px rgba(0, 51, 102, 0.4)',
-        }}
-      >
-        <span
-          className="absolute right-0 top-0 h-full w-24"
+      <div className="portal-progress-track">
+        <div
+          className="portal-progress-fill motion-reduce:!transition-none"
           style={{
-            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.85))',
-            filter: 'blur(1px)',
-          }}
-        />
-        <span
-          className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full"
-          style={{
-            background: 'var(--portal-orange)',
-            boxShadow: '0 0 12px 2px var(--portal-glow-orange)',
+            width: `${value}%`,
+            transition: value >= 100 ? 'width 0.32s cubic-bezier(0.22, 1, 0.36, 1)' : 'width 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         />
       </div>
@@ -118,34 +110,27 @@ function TopProgressBar() {
   )
 }
 
-/** Non-blocking status pill — sits in the corner; clicks pass through to the app. */
+/** Non-blocking status pill — glass card with gradient border; clicks pass through. */
 function BackgroundProgressPill({ title, message }: ProgressOptions) {
   return createPortal(
     <div
-      className="pointer-events-none fixed inset-x-3 bottom-20 z-[90] flex justify-end sm:inset-x-auto sm:bottom-6 sm:right-4 lg:bottom-8 portal-safe-pb"
+      className="pointer-events-none fixed inset-x-3 bottom-20 z-[90] flex justify-center sm:inset-x-auto sm:bottom-6 sm:right-5 lg:bottom-8 portal-safe-pb"
       aria-live="polite"
     >
       <div
         role="status"
-        className="animate-toast-in flex max-w-[min(92vw,20rem)] items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-[var(--portal-navy)]/8 backdrop-blur-md"
+        className="portal-progress-pill relative flex w-full max-w-[min(92vw,22rem)] items-center gap-3.5 overflow-hidden rounded-2xl px-4 py-3.5 backdrop-blur-xl sm:w-auto"
       >
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/10 to-[var(--portal-orange)]/15">
-          <Loader2 className="h-5 w-5 animate-spin text-[var(--portal-navy)] motion-reduce:animate-none" />
-          <span
-            className="absolute inset-0 rounded-full ring-2 ring-[var(--portal-orange)]/25"
-            style={{ animation: 'portal-glow-pulse 1.8s ease-in-out infinite' }}
-          />
-        </span>
-        <div className="min-w-0 text-left">
-          <p className="truncate text-sm font-semibold text-[var(--portal-navy)]">{title ?? 'Working…'}</p>
-          <p className="truncate text-xs text-slate-500">{message ?? 'You can keep using the portal'}</p>
+        <ModernLoader />
+        <div className="min-w-0 flex-1 text-left">
+          <p className="truncate text-sm font-semibold tracking-tight text-[var(--portal-navy)]">
+            {title ?? 'Working…'}
+          </p>
+          <p className="mt-0.5 truncate text-xs leading-relaxed text-slate-500">
+            {message ?? 'You can keep using the portal'}
+          </p>
+          <div className="portal-progress-bar-mini mt-2.5 w-full max-w-[12rem]" aria-hidden />
         </div>
-        <span
-          className="hidden h-8 w-1 shrink-0 rounded-full sm:block"
-          style={{
-            background: 'linear-gradient(180deg, var(--portal-navy), var(--portal-orange))',
-          }}
-        />
       </div>
     </div>,
     document.body,
@@ -185,8 +170,8 @@ function BackgroundProgressController({ manual }: { manual?: ProgressTask }) {
   const props: ProgressOptions = manual
     ? manual
     : autoWrite
-      ? { title: 'Working…', message: 'Saving your changes — keep browsing' }
-      : { title: 'Loading…', message: 'Fetching data — keep browsing' }
+      ? { title: 'Saving…', message: 'Your changes are being synced' }
+      : { title: 'Loading…', message: 'Fetching the latest data' }
 
   return <BackgroundProgressPill {...props} />
 }

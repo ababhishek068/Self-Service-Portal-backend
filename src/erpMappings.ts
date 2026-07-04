@@ -143,6 +143,12 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
     return 'Pending Approval'
   }
 
+  // BC leave headers often move Status to Pending Approval while ApprovalStatus stays Open.
+  const headerStatus = text(row, ['Status', 'DocumentStatus']).trim().toLowerCase()
+  if (headerStatus === 'pending approval' || headerStatus === 'pending') {
+    return 'Pending Approval'
+  }
+
   if (leaveSentForApproval(row)) return 'Pending Approval'
 
   if (leaveSentForApprovalFlag(row)) return 'Pending Approval'

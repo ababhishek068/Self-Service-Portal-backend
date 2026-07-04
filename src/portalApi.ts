@@ -370,6 +370,122 @@ function approvalQueueItem(row: ODataRecord) {
   }
 }
 
+function normalizedApprovalDocKey(value: string) {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+/** True when the leave application still exists in BC and was not cancelled/deleted. */
+async function leaveApprovalSourceIsLive(entry: ODataRecord) {
+  try {
+    const no = text(entry, ['DocumentNo', 'Document_No'])
+    if (!no) return false
+    const row = await fetchLeaveApplication(no, {}, entry)
+    if (!row) return false
+    const status = resolveLeaveStatus(row, [entry])
+    return status !== 'Cancelled' && status !== 'Rejected'
+  } catch {
+    return true
+  }
+}
+
+async function fetchExistingModuleDocumentNos(
+  module: SupportedFrontendModuleAlias,
+  documentNos: string[],
+) {
+  const existing = new Set<string>()
+  const spec = findFrontendModuleSpec(module)
+  if (!spec) return null
+
+  const unique = [...new Set(documentNos.map((no) => no.trim()).filter(Boolean))]
+  if (!unique.length) return existing
+
+  const headerKeys =
+    spec.module === 'gate-pass'
+      ? ['GatePassNo', 'Gate_Pass_No']
+      : spec.module === 'transport'
+        ? ['Transport_Requisition_No', 'No']
+        : spec.module === 'fuel' || spec.module === 'maintenance'
+          ? ['RequisitionNo', 'Requisition_No', 'No']
+          : [spec.headerKey ?? 'No', 'No', 'ApplicationNo', 'Application_No']
+
+  for (let offset = 0; offset < unique.length; offset += 10) {
+    const chunk = unique.slice(offset, offset + 10)
+    for (const key of headerKeys) {
+      const docFilter = chunk.map((no) => `${key} eq '${odataString(no)}'`).join(' or ')
+      const rows = (await fetchOData(spec.headerService, {
+        $filter: `(${docFilter})`,
+        $top: 500,
+      }).catch(() => [])) as ODataRecord[] | null
+      for (const row of Array.isArray(rows) ? rows : []) {
+        for (const field of headerKeys) {
+          const code = text(row, [field])
+          if (code) existing.add(normalizedApprovalDocKey(code))
+        }
+      }
+    }
+  }
+  return existing
+}
+
+function approvalSourceDocumentExists(
+  module: string,
+  documentNo: string,
+  existingByModule: Map<string, Set<string>>,
+) {
+  const existing = existingByModule.get(module)
+  if (!existing) return true
+
+  const candidates =
+    module === 'leave' ? leaveDocumentNoCandidates(documentNo) : [documentNo.trim()].filter(Boolean)
+  return candidates.some((candidate) => existing.has(normalizedApprovalDocKey(candidate)))
+}
+
+/** Hide approval rows whose underlying ERP document was deleted or cancelled. */
+async function filterApprovalEntriesWithExistingSource(rows: ODataRecord[]) {
+  if (!rows.length) return rows
+
+  const leaveRows: ODataRecord[] = []
+  const otherRows: ODataRecord[] = []
+  for (const row of rows) {
+    if (approvalQueueItem(row).module === 'leave') leaveRows.push(row)
+    else otherRows.push(row)
+  }
+
+  const liveLeaveRows = (
+    await Promise.all(
+      leaveRows.map(async (row) => ((await leaveApprovalSourceIsLive(row)) ? row : null)),
+    )
+  ).filter((row): row is ODataRecord => row !== null)
+
+  if (!otherRows.length) return liveLeaveRows
+
+  const grouped = new Map<string, string[]>()
+  for (const row of otherRows) {
+    const item = approvalQueueItem(row)
+    if (!item.requestNo) continue
+    const bucket = grouped.get(item.module) ?? []
+    bucket.push(item.requestNo)
+    grouped.set(item.module, bucket)
+  }
+
+  const existingByModule = new Map<string, Set<string>>()
+  await Promise.all(
+    [...grouped.entries()].map(async ([module, documentNos]) => {
+      if (!isSupportedModule(module)) return
+      const existing = await fetchExistingModuleDocumentNos(module, documentNos)
+      if (existing) existingByModule.set(module, existing)
+    }),
+  )
+
+  const liveOtherRows = otherRows.filter((row) => {
+    const item = approvalQueueItem(row)
+    if (!item.requestNo) return false
+    return approvalSourceDocumentExists(item.module, item.requestNo, existingByModule)
+  })
+
+  return [...liveLeaveRows, ...liveOtherRows]
+}
+
 function optionCode(value: string, labels: Record<string, string>) {
   const normalized = value.trim().toLowerCase()
   return /^\d+$/.test(normalized) ? normalized : labels[normalized] ?? value
@@ -585,18 +701,19 @@ async function fetchLeaveApplication(
   approvalEntry?: ODataRecord,
 ) {
   const candidates = leaveDocumentNoCandidates(no)
-  const keys = ['ApplicationCode', 'Application_Code', 'No', 'ApplicationNo']
+  // BC OData rejects $filter on fields not published on QyHRLeaveApplications (e.g. Application_Code).
+  const filterKeys = ['ApplicationCode', 'No', 'ApplicationNo']
 
   const query = async (filter: string) => {
     const rows = (await fetchOData('QyHRLeaveApplications', {
       $filter: filter,
       $top: 1,
-    })) as ODataRecord[] | null
+    }).catch(() => null)) as ODataRecord[] | null
     return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
   }
 
   for (const candidate of candidates) {
-    for (const key of keys) {
+    for (const key of filterKeys) {
       const row = await query(`${key} eq '${odataString(candidate)}'`)
       if (row) return row
     }
@@ -622,7 +739,7 @@ async function fetchLeaveApplication(
   ].filter(Boolean)
 
   for (const candidate of candidates) {
-    for (const key of keys) {
+    for (const key of filterKeys) {
       for (const scope of scopedFilters) {
         const row = await query(`${key} eq '${odataString(candidate)}' and ${scope}`)
         if (row) return row
@@ -1470,10 +1587,9 @@ export function buildPortalApiRouter() {
           ` and ApproverID eq '${odataString(authUser.userID)}'`,
         $top: 200,
       })) as ODataRecord[] | null
+      const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
       res.json({
-        rows: (Array.isArray(rows) ? rows : [])
-          .map(approvalQueueItem)
-          .filter((item) => item.requestNo),
+        rows: liveRows.map(approvalQueueItem).filter((item) => item.requestNo),
       })
     }),
   )
@@ -1580,12 +1696,14 @@ export function buildPortalApiRouter() {
     '/approvals/count/:type/:status',
     safe(async (req, res) => {
       const authUser = user(req)
-      const count = await fetchODataCount('QyApprovalEntry', {
+      const rows = (await fetchOData('QyApprovalEntry', {
         $filter:
           `Status eq '${odataString(String(req.params.status))}'` +
           ` and ApproverID eq '${odataString(authUser.userID)}'`,
-      })
-      res.json({ totalAll: count, isNotified: authUser.isNotified })
+        $top: 500,
+      })) as ODataRecord[] | null
+      const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
+      res.json({ totalAll: liveRows.length, isNotified: authUser.isNotified })
     }),
   )
 
@@ -1595,6 +1713,14 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const approvalFilter = (status: string) =>
         `Status eq '${status}' and ApproverID eq '${odataString(authUser.userID)}'`
+      const countLiveApprovalEntries = async (status: string) => {
+        const rows = (await fetchOData('QyApprovalEntry', {
+          $filter: approvalFilter(status),
+          $top: 500,
+        })) as ODataRecord[] | null
+        const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
+        return liveRows.length
+      }
       const listModules: SupportedFrontendModule[] = [
         'imprest',
         'imprestSurrender',
@@ -1609,9 +1735,9 @@ export function buildPortalApiRouter() {
         leaveApplications,
         moduleRows,
       ] = await Promise.all([
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Open') }),
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Approved') }),
-        fetchODataCount('QyApprovalEntry', { $filter: approvalFilter('Rejected') }),
+        countLiveApprovalEntries('Open'),
+        countLiveApprovalEntries('Approved'),
+        countLiveApprovalEntries('Rejected'),
         fetchODataCount('QyHRLeaveApplications', {
           $filter: `UserID eq '${odataString(authUser.userID)}'`,
         }),
