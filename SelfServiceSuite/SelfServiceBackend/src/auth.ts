@@ -40,6 +40,7 @@ export interface AuthUser {
   responsibleCenter: string
   permissionDepartments: string[]
   imprestNo: string
+  monthlySalaryBase?: number
   HOD: boolean
   CEO: boolean
   canApprove: boolean
@@ -173,6 +174,10 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
 
 import {
   configuredJobTitleByEmployeeNo,
+  employeeAccountNoFromRecord,
+  fetchEmployeeCustomerAccountNo,
+  fetchEmployeeRecordFast,
+  fetchEmployeeSalaryBase,
   fetchMergedEmployeeRecord,
   resolveAuthUserJobTitle,
   resolveEmployeeJobTitle,
@@ -181,8 +186,36 @@ import {
 
 export { resolveEmployeeJobTitle } from './employeeProfile.js'
 
-export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> {
+export type AuthProfileRefreshMode = 'fast' | 'full'
+
+/** Enrich session user from BC. Default `fast` — suitable for login and /me. */
+export async function refreshAuthUserProfile(
+  user: AuthUser,
+  mode: AuthProfileRefreshMode = 'fast',
+): Promise<AuthUser> {
+  if (mode === 'fast') {
+    const fast = await fetchEmployeeRecordFast(user.employeeNo)
+    const accountNumber = fast
+      ? employeeAccountNoFromRecord(fast)
+      : user.accountNumber || (await fetchEmployeeCustomerAccountNo(user.employeeNo))
+    let jobTitle = user.jobTitle
+    if (!jobTitle && fast) {
+      jobTitle =
+        (await resolveAuthUserJobTitle(fast, user.employeeNo, user.email ?? '')) ||
+        configuredJobTitleByEmployeeNo(user.employeeNo) ||
+        ''
+    }
+    return {
+      ...user,
+      ...(accountNumber ? { accountNumber, imprestNo: accountNumber } : {}),
+      ...(jobTitle ? { jobTitle } : {}),
+    }
+  }
+
   const merged = await fetchMergedEmployeeRecord(user.employeeNo)
+  const accountNumber = merged
+    ? employeeAccountNoFromRecord(merged)
+    : await fetchEmployeeCustomerAccountNo(user.employeeNo)
   let jobTitle = await resolveAuthUserJobTitle(
     merged ?? { No: user.employeeNo },
     user.employeeNo,
@@ -194,8 +227,13 @@ export async function refreshAuthUserProfile(user: AuthUser): Promise<AuthUser> 
   if (!jobTitle) {
     jobTitle = configuredJobTitleByEmployeeNo(user.employeeNo)
   }
-  if (!jobTitle) return user
-  return { ...user, jobTitle }
+  const monthlySalaryBase = await fetchEmployeeSalaryBase(user.employeeNo)
+  return {
+    ...user,
+    ...(accountNumber ? { accountNumber, imprestNo: accountNumber } : {}),
+    ...(jobTitle ? { jobTitle } : {}),
+    ...(monthlySalaryBase > 0 ? { monthlySalaryBase } : {}),
+  }
 }
 
 /** ESS encodes slashes in staff numbers as `__` in reset-password URLs. */
@@ -370,8 +408,13 @@ export function employeeResetTokenMatches(employee: BcEmployee, resetToken: stri
 }
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
-  const merged = await fetchMergedEmployeeRecord(staffNo)
-  return merged ? (merged as BcEmployee) : null
+  const fast = await fetchEmployeeRecordFast(staffNo)
+  if (!fast) return null
+  if (employeeAccountNoFromRecord(fast)) return fast as BcEmployee
+
+  const accountNumber = await fetchEmployeeCustomerAccountNo(staffNo)
+  if (!accountNumber) return fast as BcEmployee
+  return { ...fast, CustomerNo: accountNumber } as BcEmployee
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
@@ -424,7 +467,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
   const department = employee.GlobalDimension1Code ?? ''
-  const accountNumber = employee.CustomerNo ?? ''
+  const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
@@ -538,7 +581,13 @@ export async function authenticateBcUser(staffNo: string, password: string) {
   }
 
   const user = await buildAuthUser(employee, userSetup)
-  return refreshAuthUserProfile(user)
+  if (!user.imprestNo) {
+    const accountNumber = await fetchEmployeeCustomerAccountNo(user.employeeNo)
+    if (accountNumber) {
+      return { ...user, accountNumber, imprestNo: accountNumber }
+    }
+  }
+  return user
 }
 
 export function buildAuthRouter() {

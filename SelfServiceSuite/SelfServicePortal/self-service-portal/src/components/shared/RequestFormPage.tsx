@@ -110,11 +110,43 @@ interface RequestFormPageProps {
   onValuesChange?: (values: FieldValues, form: UseFormReturn<FieldValues>) => void | Promise<void>
 }
 
-function firstPathValue(source: unknown, paths: string[]) {
+function firstPathValue(source: unknown, paths: string[], format: DetailFieldConfig['format'] = 'text') {
   for (const path of paths) {
     const value = getPathValue(source, path)
-    if (value !== undefined && value !== null && String(value) !== '') return value
+    if (value === undefined || value === null || String(value) === '') continue
+    if (format === 'currency' && Number(value) === 0) continue
+    return value
   }
+  return undefined
+}
+
+function lineDetailValue(
+  line: Record<string, unknown>,
+  column: DetailFieldConfig,
+  requestAmount?: number,
+  detailSource?: unknown,
+) {
+  const direct = firstPathValue(line, column.paths, column.format)
+  if (direct !== undefined) return direct
+  if (column.format === 'currency') {
+    const percentage = Number(
+      firstPathValue(
+        line,
+        ['PercentageofSalary', 'PercentageOfSalary', 'Percentage_of_Salary', 'PercentageSalary'],
+        'percentage',
+      ) ?? 0,
+    )
+    const salaryBase = Number(
+      getPathValue(detailSource, 'payload.monthlySalaryBase') ??
+        getPathValue(detailSource, 'payload.Basic_Salary') ??
+        getPathValue(detailSource, 'payload.MonthlySalary') ??
+        0,
+    )
+    if (percentage > 0 && salaryBase > 0) {
+      return Math.round(((salaryBase * percentage) / 100) * 100) / 100
+    }
+  }
+  if (column.format === 'currency' && requestAmount && requestAmount > 0) return requestAmount
   return undefined
 }
 
@@ -546,7 +578,7 @@ export function RequestFormPage({
                     {detailFields ? detailFields.map((field) => (
                       <div key={field.label}>
                         <p className="text-xs text-slate-500">{field.label}</p>
-                        <div className="font-semibold">{renderDetailValue(firstPathValue(detailSource, field.paths), field.format)}</div>
+                        <div className="font-semibold">{renderDetailValue(firstPathValue(detailSource, field.paths, field.format), field.format)}</div>
                       </div>
                     )) : (
                       <>
@@ -589,7 +621,7 @@ export function RequestFormPage({
                             <tr key={String(line.id ?? line.lineNo ?? index)} className="border-b border-slate-100">
                               {detailLineColumns.map((column) => (
                                 <td key={column.label} className="px-2 py-2">
-                                  {renderDetailValue(firstPathValue(line, column.paths), column.format)}
+                                  {renderDetailValue(lineDetailValue(line, column, selected?.amount, detailSource), column.format)}
                                 </td>
                               ))}
                             </tr>
@@ -728,7 +760,9 @@ export function RequestFormPage({
         <Skeleton className="h-48 w-full" />
       ) : requestsQuery.isError ? (
         <div className="rounded border-l-4 border-red-500 bg-red-50 p-4 text-sm text-red-700">
-          Could not load requests. Check the selected backend and apply pending database migrations.
+          {requestsQuery.error instanceof Error
+            ? requestsQuery.error.message
+            : 'Could not load requests. Check the Business Central connection and try again.'}
         </div>
       ) : (
         <DataTable

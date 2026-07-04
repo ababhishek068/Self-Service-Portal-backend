@@ -109,6 +109,10 @@ const envSchema = z.object({
     .optional()
     .default('false')
     .transform((value) => value.toLowerCase() === 'true'),
+  /** Optional BC employee/payroll OData field name for monthly basic salary (HIJRA-specific). */
+  BC_SALARY_BASE_FIELD: z.string().optional().default(''),
+  /** Optional comma-separated OData service names to try first for employee salary lookup. */
+  BC_SALARY_LOOKUP_SERVICE: csvList,
   /** Per-request timeout for Business Central HTTP calls (milliseconds). */
   BC_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
   /** UAT parity with legacy ESS login where HOD menu is visible to all staff. */

@@ -1,4 +1,5 @@
 import type { ODataRecord } from './bcClient.js'
+import { EMPLOYEE_SALARY_BASE_FIELDS, employeeSalaryBaseFromRecord } from './employeeProfile.js'
 
 export const requestServices = {
   imprest: 'QyImprestHeader',
@@ -62,11 +63,140 @@ function bool(row: ODataRecord, keys: string[], fallback = true) {
   return ['true', '1', 'yes', 'active'].includes(value.toLowerCase())
 }
 
+const SALARY_ADVANCE_AMOUNT_KEYS = [
+  'Amount',
+  'amount',
+  'Amount_LCY',
+  'Advance_Amount',
+  'AdvanceAmount',
+  'Net_Amount',
+  'NetAmount',
+  'Salary_Amount',
+  'SalaryAmount',
+  'Line_Amount',
+  'LineAmount',
+  'Requested_Amount',
+  'RequestedAmount',
+  'TotalAmount',
+  'Total_Amount',
+]
+
+const SALARY_ADVANCE_PERCENTAGE_KEYS = [
+  'PercentageofSalary',
+  'PercentageOfSalary',
+  'Percentage_of_Salary',
+  'PercentageSalary',
+  'percentageSalary',
+  'Percentage_Salary',
+]
+
+const SALARY_ADVANCE_SALARY_BASE_KEYS = [
+  ...EMPLOYEE_SALARY_BASE_FIELDS,
+  'Staff_Salary',
+  'StaffSalary',
+  'Employee_Salary',
+  'EmployeeSalary',
+  'Monthly_Basic',
+  'MonthlyBasic',
+  'Current_Basic',
+  'CurrentBasic',
+  'Total_Salary',
+  'TotalSalary',
+  'Basic_Pay_Amount',
+  'BasicPayAmount',
+]
+
+function positiveSalaryBase(...rows: Array<ODataRecord | undefined>) {
+  for (const row of rows) {
+    if (!row) continue
+    const fromKnown = employeeSalaryBaseFromRecord(row)
+    if (fromKnown > 0) return fromKnown
+  }
+  return 0
+}
+
+function discoverPositiveNumericField(
+  row: ODataRecord,
+  keyPattern: RegExp,
+  excludePattern?: RegExp,
+) {
+  for (const [key, value] of Object.entries(row)) {
+    if (excludePattern?.test(key)) continue
+    if (!keyPattern.test(key)) continue
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return 0
+}
+
+export function resolveSalaryAdvancePercentage(line: ODataRecord, header?: ODataRecord) {
+  const fromLine = num(line, SALARY_ADVANCE_PERCENTAGE_KEYS, 0)
+  if (fromLine > 0) return fromLine
+  return header ? num(header, SALARY_ADVANCE_PERCENTAGE_KEYS, 0) : 0
+}
+
+/** Resolve salary advance amount from BC line/header fields, with percentage fallback. */
+export function resolveSalaryAdvanceAmount(line: ODataRecord, header?: ODataRecord) {
+  const direct = num(line, SALARY_ADVANCE_AMOUNT_KEYS, 0)
+  if (direct > 0) return direct
+
+  const discovered = discoverPositiveNumericField(line, /amount|advance/i, /percentage/i)
+  if (discovered > 0) return discovered
+
+  if (header) {
+    const headerAmount = num(header, SALARY_ADVANCE_AMOUNT_KEYS, 0)
+    if (headerAmount > 0) return headerAmount
+  }
+
+  const percentage = resolveSalaryAdvancePercentage(line, header)
+  if (percentage <= 0) return 0
+
+  const salaryBase =
+    positiveSalaryBase(line, header) ||
+    discoverPositiveNumericField(line, /salary|basic|gross|wage|pay/i, /percentage|advance/i) ||
+    (header
+      ? discoverPositiveNumericField(header, /salary|basic|gross|wage|pay/i, /percentage|advance/i)
+      : 0)
+
+  if (salaryBase <= 0) return 0
+  return Math.round(((salaryBase * percentage) / 100) * 100) / 100
+}
+
+export function injectSalaryAdvanceSalaryHint(header: ODataRecord, salaryBase: number) {
+  if (salaryBase <= 0) return header
+  const existing = positiveSalaryBase(header)
+  const base = existing > 0 ? existing : salaryBase
+  return {
+    ...header,
+    BasicSalary: base,
+    Basic_Salary: base,
+    MonthlySalary: base,
+    Monthly_Salary: base,
+  }
+}
+
+export function mapSalaryAdvanceLine(line: ODataRecord, header: ODataRecord) {
+  const amount = resolveSalaryAdvanceAmount(line, header)
+  if (amount <= 0) return line
+  return stampSalaryAdvanceLineAmount(line, amount)
+}
+
+function stampSalaryAdvanceLineAmount(line: ODataRecord, amount: number) {
+  return {
+    ...line,
+    resolvedAmount: amount,
+    Amount: amount,
+    amount,
+    AdvanceAmount: amount,
+    Advance_Amount: amount,
+  }
+}
+
 export function statusFromBc(raw: string) {
   const status = raw.trim().toLowerCase()
   if (status === 'pending approval') return 'Pending Approval'
-  // BC leave headers often keep Status/Open while ApprovalStatus is Pending.
-  if (status === 'pending') return 'Pending Approval'
+  // Finance modules (claims, imprest, salary advance, etc.) use BC Status=Pending before approval is requested.
+  if (status === 'pending') return 'Draft'
   if (status === 'open') return 'Open'
   if (status === 'draft') return 'Draft'
   if (status.includes('approve')) return 'Approved'
@@ -197,7 +327,7 @@ export function mapEmployee(row: ODataRecord) {
     jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),
     placeOfDuty: text(row, ['PlaceOfDuty', 'Place_of_Duty']),
-    accountNumber: text(row, ['AccountNumber', 'Account_No', 'CustomerNo']),
+    accountNumber: text(row, ['AccountNumber', 'Account_No', 'CustomerNo', 'Customer_Account_No', 'CustomerAccountNo']),
     managerEmployeeNo: text(row, ['ManagerNo', 'ManagerEmployeeNo', 'SupervisorNo']),
     leaveBalance: num(row, ['LeaveBalance', 'Leave_Balance'], 0),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
@@ -270,15 +400,23 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code', 'DistrictDepartmentCode']),
     departmentName: text(row, ['DepartmentName', 'Department_Name', 'DistrictDepartmentName']),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
-    amount: num(
-      row,
-      requestType === 'pettyCashReplenishment'
-        ? ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
-        : requestType === 'salaryAdvance'
-          ? ['Amount', 'AdvanceAmount', 'NetAmount']
-          : ['Amount', 'TotalAmount', 'NetAmount', 'Quantity'],
-      0,
-    ),
+    amount:
+      requestType === 'salaryAdvance'
+        ? resolveSalaryAdvanceAmount(
+            {
+              PercentageofSalary: num(row, SALARY_ADVANCE_PERCENTAGE_KEYS, 0),
+              PercentageOfSalary: num(row, SALARY_ADVANCE_PERCENTAGE_KEYS, 0),
+              Percentage_of_Salary: num(row, SALARY_ADVANCE_PERCENTAGE_KEYS, 0),
+            },
+            row,
+          )
+        : num(
+            row,
+            requestType === 'pettyCashReplenishment'
+              ? ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
+              : ['Amount', 'TotalAmount', 'NetAmount', 'Quantity'],
+            0,
+          ),
     sourceDocument: {
       documentNo: requestNo,
       erpEntity: moduleLabels[requestType],

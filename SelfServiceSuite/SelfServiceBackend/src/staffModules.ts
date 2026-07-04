@@ -10,6 +10,7 @@ import {
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
+import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance } from './employeeProfile.js'
 import { formatBcSoapDate } from './staff.js'
 import {
   canRequestApprovalForSpec,
@@ -503,15 +504,25 @@ const staffClaim: ModuleSpec = {
     cancel: 'CancelClaimRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      reqNo: no,
-      staffNo: user.employeeNo,
-      claimDescription:
+    saveHeader: async ({ req, user, no }) => {
+      const dims = await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
+        department: user.department,
+        branchCode: user.branchCode,
+      })
+      const claimDescription = String(
         req.body?.purpose ?? req.body?.claimDescription ?? req.body?.description ?? '',
-      claimDate: req.body?.claimDate ?? '',
-      myUserID: user.userID,
-    }),
+      ).trim()
+      const payload: Record<string, unknown> = {
+        action: no ? 'edit' : 'create',
+        reqNo: no,
+        staffNo: user.employeeNo,
+        claimDescription,
+        claimDate: formatBcSoapDate(String(req.body?.claimDate ?? '')),
+        myUserID: user.userID,
+      }
+      if (dims.departmentCode) payload.department = dims.departmentCode
+      return payload
+    },
     saveLine: ({ req, no }) => {
       const claimType = claimTypeCode(req.body?.claimType)
       const medical = isMedicalClaimType(claimType)
@@ -1133,6 +1144,29 @@ const training: ModuleSpec = {
   },
 }
 
+async function resolveSalaryAdvanceCustomerNo(
+  user: AuthUser,
+  body: Record<string, unknown>,
+) {
+  const fromBody = String(body.customerNo ?? body.accountNo ?? body.accountNumber ?? '').trim()
+  if (fromBody) return fromBody
+
+  const fromUser = String(user.imprestNo || user.accountNumber || '').trim()
+  if (fromUser) return fromUser
+
+  return fetchEmployeeCustomerAccountNo(user.employeeNo)
+}
+
+async function fetchSalaryAdvanceRows(spec: ModuleSpec, user: AuthUser) {
+  const customerNo = await resolveSalaryAdvanceCustomerNo(user, {})
+  if (!customerNo) return [] as ODataRecord[]
+
+  const fetched = await fetchOData(spec.headerService, {
+    $filter: `CustomerNo eq '${odataString(customerNo)}'`,
+  })
+  return Array.isArray(fetched) ? fetched : []
+}
+
 /**
  * Salary Advance — `App\Http\Controllers\SalaryAdvanceController`.
  */
@@ -1150,13 +1184,32 @@ const salaryAdvance: ModuleSpec = {
     cancel: 'FnSalaryAdvanceApprovalAction',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      myAction: no ? 'edit' : 'create',
-      recId: no ? String(req.body?.recId ?? '') : '',
-      staffNo: user.employeeNo,
-      purpose: req.body?.purpose ?? req.body?.reason ?? '',
-      percentageSalary: Number(req.body?.percentageSalary ?? 0),
-    }),
+    saveHeader: async ({ req, user, no }) => {
+      const fromBody = String(
+        req.body?.customerNo ?? req.body?.accountNo ?? req.body?.accountNumber ?? '',
+      ).trim()
+      const fromUser = String(user.imprestNo || user.accountNumber || '').trim()
+      const customerNo = fromBody || fromUser
+      if (!customerNo) {
+        const resolved = await fetchEmployeeCustomerAccountNo(user.employeeNo)
+        if (!resolved) {
+          throw Object.assign(
+            new Error(
+              'Your employee profile does not have a customer/account number in Business Central. Contact HR to update your employee record.',
+            ),
+            { status: 422 },
+          )
+        }
+      }
+      // Match ESS SOAP payload — BC derives customer/account from staffNo.
+      return {
+        myAction: no ? 'edit' : 'create',
+        recId: no ? String(req.body?.recId ?? '') : '',
+        staffNo: user.employeeNo,
+        purpose: req.body?.purpose ?? req.body?.reason ?? '',
+        percentageSalary: Number(req.body?.percentageSalary ?? 0),
+      }
+    },
     submit: ({ no }) => ({ docNo: no, action: 'request' }),
     cancel: ({ no }) => ({ docNo: no, action: 'cancel' }),
   },
@@ -1614,6 +1667,10 @@ export async function listPortalModuleRows(
   user: AuthUser,
   options: { gatePassSource?: GatePassSourceKey } = {},
 ) {
+  if (spec.module === 'salary-advance') {
+    return fetchSalaryAdvanceRows(spec, user)
+  }
+
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
     return fetchFuelMaintenanceRows(spec, user)
   }
@@ -1666,6 +1723,16 @@ export async function getPortalModuleDocument(
       return row
     }
     return null
+  }
+
+  if (spec.module === 'salary-advance') {
+    const customerNo = await resolveSalaryAdvanceCustomerNo(user, {})
+    if (!customerNo) return null
+    const rows = (await fetchOData(spec.headerService, {
+      $filter: `${headerKey} eq '${odataString(no)}' and CustomerNo eq '${odataString(customerNo)}'`,
+      $top: 1,
+    })) as ODataRecord[] | null
+    return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
   }
 
   const rows = (await fetchOData(spec.headerService, {
@@ -1974,8 +2041,10 @@ export async function submitPortalModuleRequest(
     const percentage = Number(
       header.PercentageofSalary ??
         header.PercentageOfSalary ??
+        header.Percentage_of_Salary ??
         lines[0]?.PercentageofSalary ??
         lines[0]?.PercentageOfSalary ??
+        lines[0]?.Percentage_of_Salary ??
         0,
     )
     const purpose = fieldText(header, ['Purpose', 'purpose'])
@@ -1984,7 +2053,7 @@ export async function submitPortalModuleRequest(
         status: 422,
       })
     }
-    if (!Array.isArray(lines) || lines.length === 0 || percentage <= 0) {
+    if (percentage <= 0) {
       throw Object.assign(
         new Error('Save the salary advance with a valid percentage before requesting approval.'),
         { status: 422 },

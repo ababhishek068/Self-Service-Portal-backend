@@ -21,6 +21,7 @@ import {
   mapApprovalSteps,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
+  resolveLeaveApprovalRouteAsync,
 } from './leaveApprovalSteps.js'
 import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
@@ -1516,6 +1517,19 @@ export function buildStaffRouter() {
           }
         }),
       })
+    }),
+  )
+
+  router.get(
+    '/leave/approval-route',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const steps = await resolveLeaveApprovalRouteAsync([], {
+        employeeNo: user.employeeNo,
+        userID: user.userID,
+        department: user.department,
+      })
+      res.json({ steps })
     }),
   )
 

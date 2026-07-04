@@ -44,6 +44,7 @@ export interface Employee extends BusinessCentralEntity {
   leaveBalance: number
   responsibleCenter: string
   permissionDepartments: string[]
+  monthlySalaryBase?: number
   gender?: string
   phoneNumber?: string
   /** Normalized RBAC roles resolved from the backend on login. */

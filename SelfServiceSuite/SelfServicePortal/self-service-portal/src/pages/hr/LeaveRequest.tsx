@@ -24,6 +24,7 @@ import {
   fetchRelievers,
   cancelLeaveRequest,
   fetchLeaveRequestDetail,
+  fetchLeaveApprovalRoute,
   getLeaveBalance,
   getLeaveDates,
   listLeaveRequests,
@@ -38,7 +39,6 @@ import {
   getModuleRequest,
 } from '@/api/endpoints/requestEndpoint'
 import type { PortalRequest } from '@/types/erp.types'
-import { useAuth } from '@/hooks/useAuth'
 import { env } from '@/config/env'
 import type { Attachment } from '@/types/erp.types'
 import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
@@ -65,37 +65,6 @@ function formatPretty(iso: string): string {
 function formatDays(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return DASH
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
-}
-
-function normalizeGender(gender: string | undefined | null): 'female' | 'male' | '' {
-  const g = String(gender ?? '').trim().toLowerCase()
-  if (!g) return ''
-  if (g === 'f' || g.startsWith('female') || g === 'woman') return 'female'
-  if (g === 'm' || g.startsWith('male') || g === 'man') return 'male'
-  return ''
-}
-
-function leaveTypeIsFemaleOnly(type: LeaveType): boolean {
-  const code = type.code.trim().toUpperCase()
-  const desc = type.description.trim().toLowerCase()
-  if (['MATERNITY', 'PRENATAL'].includes(code)) return true
-  return desc.includes('maternity') || desc.includes('prenatal')
-}
-
-function leaveTypeIsMaleOnly(type: LeaveType): boolean {
-  const code = type.code.trim().toUpperCase()
-  const desc = type.description.trim().toLowerCase()
-  if (code === 'PATERNITY') return true
-  return desc.includes('paternity')
-}
-
-function filterLeaveTypesByGender(types: LeaveType[], gender: string): LeaveType[] {
-  const g = normalizeGender(gender)
-  return types.filter((type) => {
-    if (leaveTypeIsFemaleOnly(type)) return g === 'female'
-    if (leaveTypeIsMaleOnly(type)) return g === 'male'
-    return true
-  })
 }
 
 function payloadValue(payload: Record<string, unknown>, keys: string[], fallback = DASH) {
@@ -203,12 +172,15 @@ async function syncLeaveStatusFromBc(
 }
 
 export function LeaveRequest() {
-  const { employee } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
   const progress = useProgress()
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
+  const approvalRouteQuery = useQuery({
+    queryKey: ['hr', 'leave-approval-route'],
+    queryFn: fetchLeaveApprovalRoute,
+  })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
   const [creationAttachmentStates, setCreationAttachmentStates] = useState<Record<string, FileUploadItemState>>({})
@@ -235,18 +207,16 @@ export function LeaveRequest() {
   const [relievers, setRelievers] = useState<Array<{ value: string; label: string }>>([])
   const [submittingForm, setSubmittingForm] = useState(false)
   const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating' | 'uploading' | 'approval'>('idle')
-
-  const gender = employee?.gender || ''
-  const availableTypes = filterLeaveTypesByGender(types, gender)
+  const availableTypes = types
 
   useEffect(() => {
     fetchLeaveTypes()
-      .then((fetched) => setTypes(filterLeaveTypesByGender(fetched, gender)))
+      .then(setTypes)
       .catch(() => setTypes([]))
     fetchRelievers()
       .then(setRelievers)
       .catch(() => setRelievers([]))
-  }, [gender])
+  }, [])
 
   const [appliedDays, setAppliedDays] = useState('')
   const [appliedHours, setAppliedHours] = useState('')
@@ -680,6 +650,10 @@ export function LeaveRequest() {
 
   const selected = detailQuery.data
   const selectedPayload = selected?.payload ?? {}
+  const detailApprovalSteps =
+    selected && selected.approvalSteps.length > 0
+      ? selected.approvalSteps
+      : (approvalRouteQuery.data ?? [])
   const selectedIsMutable = selected
     ? ['Open', 'Draft', 'Pending Approval'].includes(selected.status)
     : false
@@ -749,6 +723,12 @@ export function LeaveRequest() {
 
           {showSecondary ? (
             <div className="space-y-4 border-t border-slate-200 pt-4">
+              {approvalRouteQuery.data && approvalRouteQuery.data.length > 0 ? (
+                <section className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Expected approval route</h3>
+                  <ApprovalTimeline steps={approvalRouteQuery.data} />
+                </section>
+              ) : null}
               {balance <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   You have no available leave balance for this type. Contact HR if you believe this is incorrect.
@@ -1008,10 +988,10 @@ export function LeaveRequest() {
                   </div>
                 </dl>
 
-                {selected.approvalSteps.length > 0 ? (
+                {detailApprovalSteps.length > 0 ? (
                   <section>
                     <h3 className="mb-3 text-sm font-semibold text-slate-900">Approval workflow</h3>
-                    <ApprovalTimeline steps={selected.approvalSteps} />
+                    <ApprovalTimeline steps={detailApprovalSteps} />
                   </section>
                 ) : null}
 

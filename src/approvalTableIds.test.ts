@@ -19,7 +19,10 @@ import {
   portalApprovalEntryFilter,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
-import { resolveLeaveApprovalSteps } from './leaveApprovalSteps.js'
+import {
+  normalizeSequentialApprovalStatuses,
+  resolveLeaveApprovalSteps,
+} from './leaveApprovalSteps.js'
 import {
   isHalfDaySelection,
   halfDayOptionValue,
@@ -44,12 +47,14 @@ import {
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { inferEmployeeJobId, resolveEmployeeJobTitle } from './employeeProfile.js'
+import { inferEmployeeJobId, resolveEmployeeJobTitle, pickDimensionCodeFromRow } from './employeeProfile.js'
 import {
   documentStatusFromBc,
+  injectSalaryAdvanceSalaryHint,
   mapRequest,
   resolveLeaveStatus,
   leaveIsPendingInBc,
+  resolveSalaryAdvanceAmount,
 } from './erpMappings.js'
 import {
   bcDocumentStatus,
@@ -306,6 +311,37 @@ describe('isMedicalClaimType', () => {
 })
 
 describe('staffClaim saveLine params', () => {
+  it('maps long department names to dimension codes', () => {
+    assert.equal(
+      pickDimensionCodeFromRow(
+        { Code: 'TRR', Name: 'Total Reward and Recognition' },
+        'Total Reward and Recognition',
+      ),
+      'TRR',
+    )
+  })
+
+  it('builds claim header SOAP params with formatted date and department', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveHeader)
+    const payload = (await spec!.params!.saveHeader!({
+      req: {
+        body: { purpose: 'Travel refund', claimDate: '2026-07-04' },
+      },
+      user: {
+        employeeNo: 'E001',
+        userID: 'BEZA',
+        department: 'TRR',
+        branchCode: 'ADDIS',
+      },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.claimDescription, 'Travel refund')
+    assert.equal(payload.claimDate, '2026-07-04')
+    assert.equal(payload.staffNo, 'E001')
+    assert.equal(payload.myUserID, 'BEZA')
+  })
+
   it('sends hospital category 0 for non-medical claim types', () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
@@ -383,6 +419,17 @@ describe('mapApprovalSteps', () => {
     assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
+
+  it('does not show a later step as approved while an earlier step is still pending', () => {
+    const steps = normalizeSequentialApprovalStatuses(
+      mapApprovalSteps([
+        { EntryNo: 10, ApproverID: 'FIRST', ApproverName: 'Muhammed abdi', Status: 'Pending Approval', SequenceNo: 1 },
+        { EntryNo: 20, ApproverID: 'SECOND', ApproverName: 'Tekiya Ali Hassen', Status: 'Approved', SequenceNo: 2 },
+      ]),
+    )
+    assert.equal(steps[0]?.status, 'Pending Approval')
+    assert.equal(steps[1]?.status, 'Pending Approval')
+  })
 })
 
 describe('approvalModule', () => {
@@ -402,11 +449,15 @@ describe('salaryAdvance saveHeader params', () => {
       user: {
         employeeNo: 'E001',
         userID: 'USER1',
+        imprestNo: 'CUST-1001',
+        accountNumber: 'CUST-1001',
       } as AuthUser,
       no: '',
     })
     assert.equal(createParams.recId, '')
     assert.equal(createParams.myAction, 'create')
+    assert.equal(createParams.customerNo, undefined)
+    assert.equal(createParams.staffNo, 'E001')
 
     const editParams = await spec!.params!.saveHeader!({
       req: {
@@ -419,10 +470,13 @@ describe('salaryAdvance saveHeader params', () => {
       user: {
         employeeNo: 'E001',
         userID: 'USER1',
+        imprestNo: 'CUST-1001',
+        accountNumber: 'CUST-1001',
       } as AuthUser,
       no: 'A00523',
     })
     assert.equal(editParams.recId, '00000000-0000-0000-0000-000000000001')
+    assert.equal(editParams.customerNo, undefined)
     assert.equal(editParams.myAction, 'edit')
     assert.notEqual(editParams.recId, 'A00523')
   })
@@ -546,6 +600,54 @@ describe('mapRequest status', () => {
       resolveLeaveStatus({ Status: 'Open', ApprovalStatus: '', Sent_for_Approval: true }),
       'Pending Approval',
     )
+  })
+
+  it('maps staff claim BC Pending to Draft before approval is requested', () => {
+    const mapped = mapRequest(
+      {
+        No: '1522',
+        Status: 'Pending',
+        ClaimDescription: 'Travel reimbursement',
+      },
+      'staffClaim',
+    )
+    assert.equal(mapped.status, 'Draft')
+    assert.equal(
+      mapRequest({ No: '1522', Status: 'Pending Approval' }, 'staffClaim').status,
+      'Pending Approval',
+    )
+  })
+
+  it('derives salary advance amount from percentage and basic salary when BC amount is zero', () => {
+    assert.equal(
+      resolveSalaryAdvanceAmount(
+        { PercentageofSalary: 2, Amount: 0 },
+        { Basic_Salary: 50000 },
+      ),
+      1000,
+    )
+    assert.equal(
+      resolveSalaryAdvanceAmount({ Amount: 1500, PercentageofSalary: 2 }),
+      1500,
+    )
+  })
+
+  it('ignores zero BC salary fields and uses injected payroll salary instead', () => {
+    const header = injectSalaryAdvanceSalaryHint({ Basic_Salary: 0, MonthlySalary: 0 }, 48000)
+    assert.equal(
+      resolveSalaryAdvanceAmount({ PercentageofSalary: 2, Amount: 0 }, header),
+      960,
+    )
+  })
+
+  it('applies computed advance amount from salary base and percentage', async () => {
+    const { applySalaryAdvanceComputedAmount } = await import('./salaryAdvanceAmount.js')
+    const lines = applySalaryAdvanceComputedAmount(
+      [{ PercentageofSalary: 2, Amount: 0 }],
+      { Basic_Salary: 48000 },
+      48000,
+    )
+    assert.equal(lines[0]?.resolvedAmount, 960)
   })
 })
 

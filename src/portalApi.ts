@@ -11,7 +11,11 @@ import {
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
-import { resolveEmployeeJobTitleByNo } from './employeeProfile.js'
+import {
+  fetchEmployeeSalaryBase,
+  probeEmployeeSalarySources,
+  resolveEmployeeJobTitleByNo,
+} from './employeeProfile.js'
 import {
   approvalModuleFromEntry,
   approvalTableFilter,
@@ -28,7 +32,8 @@ import {
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
 } from './leaveApprovalSteps.js'
-import { documentStatusFromBc, mapItem, mapRequest, resolveLeaveStatus, statusFromBc, type PortalModuleKey } from './erpMappings.js'
+import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvanceAmount.js'
+import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, resolveLeaveStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
   createPortalModuleRequest,
@@ -677,6 +682,9 @@ export function mapModuleLines(
       ? rows.map(mapStoreLine)
       : rows.map(mapTransferLine)
   }
+  if (module === 'salaryAdvance') {
+    return rows.map((row) => mapSalaryAdvanceLine(row, header))
+  }
   return rows
 }
 
@@ -690,6 +698,19 @@ async function mappedModuleRows(
   const rows = await listPortalModuleRows(spec, authUser, {
     gatePassSource: options.gatePassSource,
   })
+  if (module === 'salaryAdvance') {
+    const salaryBase =
+      authUser.monthlySalaryBase && authUser.monthlySalaryBase > 0
+        ? authUser.monthlySalaryBase
+        : await fetchEmployeeSalaryBase(authUser.employeeNo)
+    const enrichedRows =
+      salaryBase > 0
+        ? rows.map((row) => injectSalaryAdvanceSalaryHint(row, salaryBase))
+        : rows
+    return enrichedRows
+      .map((row) => mapRequest(row, module as PortalModuleKey))
+      .filter((row) => true)
+  }
   return rows
     .map((row) => mapRequest(row, module as PortalModuleKey))
     .filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
@@ -958,7 +979,7 @@ async function resolveLeaveRequestDetail(
 async function requestDetail(
   id: string,
   authUser: AuthUser,
-  options: { allowMissingLeaveSource?: boolean; forApproval?: boolean } = {},
+  options: { allowMissingLeaveSource?: boolean; forApproval?: boolean; fast?: boolean } = {},
 ) {
   const { module, no } = parseRequestId(id)
   if (module === 'leave') {
@@ -985,11 +1006,51 @@ async function requestDetail(
       ? fetchDocumentAttachments(attachmentDocNo, spec.headerTableId).catch(() => [] as ODataRecord[])
       : Promise.resolve([] as ODataRecord[]),
   ])
-  const mapped = mapRequest(row, module as PortalModuleKey)
+  let headerForMapping: ODataRecord = row
+  let mappedLines = mapModuleLines(module, row, Array.isArray(lines) ? lines : [])
+  let enrichedSalaryBase = 0
+  let payloadRow: ODataRecord = row
+  if (module === 'salaryAdvance') {
+    const staffNo =
+      text(row, ['StaffNo', 'Staff_No', 'EmployeeNo', 'Employee_No']) || authUser.employeeNo
+    const customerNo =
+      text(row, ['CustomerNo', 'Customer_No']) ||
+      authUser.imprestNo ||
+      authUser.accountNumber ||
+      ''
+    const rawLines = Array.isArray(lines) ? lines : []
+    const enriched = await enrichSalaryAdvanceLines(row, rawLines, {
+      employeeNo: staffNo,
+      customerNo,
+      docNo: no,
+      monthlySalaryBase: authUser.monthlySalaryBase,
+      fast: options.fast,
+      skipSoap: options.fast,
+    })
+    headerForMapping = enriched.header
+    mappedLines = enriched.lines
+    enrichedSalaryBase = enriched.salaryBase
+    if (enriched.salaryBase > 0) {
+      payloadRow = { ...payloadRow, monthlySalaryBase: enriched.salaryBase }
+    }
+  }
+  const mapped = mapRequest(headerForMapping, module as PortalModuleKey)
+  const salaryAdvanceAmount =
+    module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
+  const displayAmount =
+    module === 'salaryAdvance'
+      ? salaryAdvanceAmount > 0
+        ? salaryAdvanceAmount
+        : mapped.amount
+      : salaryAdvanceAmount
   return {
     ...mapped,
+    ...(displayAmount > 0 ? { amount: displayAmount } : {}),
     payload: {
-      ...row,
+      ...payloadRow,
+      ...(module === 'salaryAdvance' && enrichedSalaryBase > 0
+        ? { monthlySalaryBase: enrichedSalaryBase }
+        : {}),
       ...(module === 'gatePass' && gatePassBinding
         ? {
             gatePassSource: gatePassBinding.source,
@@ -997,7 +1058,7 @@ async function requestDetail(
             gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
           }
         : {}),
-      lines: mapModuleLines(module, row, Array.isArray(lines) ? lines : []),
+      lines: mappedLines,
     },
     approvalSteps: resolveRequestApprovalSteps(approvers, row, mapped.status),
     attachments: mapAttachments(attachments),
@@ -1306,7 +1367,7 @@ export function buildPortalApiRouter() {
         )
       }
       const no = await createPortalModuleRequest(spec, user(req), req.body ?? {})
-      res.status(201).json(await requestDetail(`${module}-${no}`, user(req)))
+      res.status(201).json(await requestDetail(`${module}-${no}`, user(req), { fast: true }))
     }),
   )
 
@@ -1894,8 +1955,10 @@ export function buildPortalApiRouter() {
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
       const jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
+      const monthlySalaryBase = await fetchEmployeeSalaryBase(authUser.employeeNo)
       res.json({
         jobTitle,
+        monthlySalaryBase: monthlySalaryBase > 0 ? monthlySalaryBase : undefined,
         sector: text(employee, ['Sector', 'GlobalDimension1Code']),
         division: text(employee, ['Division']),
         district: text(employee, ['District', 'GlobalDimension2Code']),
@@ -1933,6 +1996,20 @@ export function buildPortalApiRouter() {
           status: text(row, ['Status'], 'Active'),
         })),
       })
+    }),
+  )
+
+  router.get(
+    '/debug/employee-salary',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const employeeNo =
+        typeof req.query.employeeNo === 'string' && req.query.employeeNo.trim()
+          ? req.query.employeeNo.trim()
+          : authUser.employeeNo
+      const customerNo = typeof req.query.customerNo === 'string' ? req.query.customerNo.trim() : ''
+      if (!employeeNo) throw portalError('employeeNo is required', 400)
+      res.json(await probeEmployeeSalarySources(employeeNo, { customerNo }))
     }),
   )
 

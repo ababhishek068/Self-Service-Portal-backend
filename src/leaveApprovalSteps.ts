@@ -47,6 +47,30 @@ export function mapApprovalSteps(value: unknown) {
     .sort((left, right) => left.sequenceNo - right.sequenceNo)
 }
 
+/**
+ * BC sometimes returns a later sequence as Approved while an earlier step is still
+ * pending. For sequential workflows, downstream steps must not appear complete
+ * until all prior steps are approved.
+ */
+export function normalizeSequentialApprovalStatuses(
+  steps: ReturnType<typeof mapApprovalSteps>,
+) {
+  const ordered = [...steps].sort((left, right) => left.sequenceNo - right.sequenceNo)
+  let priorStepsComplete = true
+  return ordered.map((step) => {
+    const completed = ['Approved', 'Submitted'].includes(step.status)
+    if (completed && !priorStepsComplete) {
+      return { ...step, status: 'Pending Approval' }
+    }
+    if (!completed) priorStepsComplete = false
+    return step
+  })
+}
+
+export function mapApprovalStepsWithSequence(value: unknown) {
+  return normalizeSequentialApprovalStatuses(mapApprovalSteps(value))
+}
+
 export function fallbackApprovalStepsFromHeader(row: ODataRecord, mappedStatus: string) {
   if (!['Pending Approval', 'Approved', 'Rejected'].includes(mappedStatus)) return []
 
@@ -130,7 +154,7 @@ export function resolveLeaveApprovalSteps(
   _documentNo = '',
 ) {
   const resolvedStatus = resolveLeaveStatus(row, approvalEntries)
-  const steps = mapApprovalSteps(approvalEntries)
+  const steps = mapApprovalStepsWithSequence(approvalEntries)
   if (steps.length > 0) return steps
 
   if (['Pending Approval', 'Approved', 'Rejected'].includes(resolvedStatus)) {
@@ -164,7 +188,102 @@ async function enrichMappedApprovalSteps(steps: ReturnType<typeof mapApprovalSte
     }
     enriched.push(step)
   }
-  return enriched
+  return normalizeSequentialApprovalStatuses(enriched)
+}
+
+async function resolveEmployeeNoFromApproverId(approverId: string): Promise<string> {
+  const trimmed = approverId.trim()
+  if (!trimmed) return ''
+
+  const employeeFilters = [
+    `No eq '${odataString(trimmed)}'`,
+    `EmployeeNo eq '${odataString(trimmed)}'`,
+    `UserID eq '${odataString(trimmed)}'`,
+  ]
+  for (const filter of employeeFilters) {
+    const rows = (await fetchOData('QyHREmployee', { $filter: filter, $top: 1 }).catch(
+      () => [],
+    )) as ODataRecord[] | null
+    if (Array.isArray(rows) && rows.length > 0) {
+      return text(rows[0]!, ['No', 'EmployeeNo', 'Employee_No'])
+    }
+  }
+
+  const userRows = (await fetchOData('QyUserSetup', {
+    $filter: `UserID eq '${odataString(trimmed)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  if (Array.isArray(userRows) && userRows.length > 0) {
+    return text(userRows[0]!, ['EmployeeNo', 'Employee_No'])
+  }
+
+  return trimmed
+}
+
+/** Walk the BC approver chain (User Setup / manager / HOD) for display before entries exist. */
+export async function resolveLeaveApprovalRouteAsync(
+  approvalEntries: ODataRecord[],
+  context: LeaveApproverContext & { leaveRow?: ODataRecord } = {},
+) {
+  const mapped = await enrichMappedApprovalSteps(mapApprovalSteps(approvalEntries))
+  if (
+    mapped.length > 1 ||
+    (mapped.length === 1 &&
+      mapped[0]!.actorName &&
+      mapped[0]!.actorName !== 'Awaiting approver assignment' &&
+      mapped[0]!.actorName !== mapped[0]!.actorEmployeeNo)
+  ) {
+    return mapped
+  }
+
+  const chain: ODataRecord[] = []
+  const seen = new Set<string>()
+  let employeeNo = String(context.employeeNo ?? '').trim()
+  const leaveRow = context.leaveRow ?? {}
+
+  for (let sequence = 1; sequence <= 8; sequence += 1) {
+    const hint = await resolveLeaveApproverHint(leaveRow, {
+      employeeNo,
+      userID: context.userID,
+      department: context.department,
+    })
+    const approverKey = String(hint.approverId || hint.approverName || '')
+      .trim()
+      .toLowerCase()
+    if (!approverKey || seen.has(approverKey)) break
+    seen.add(approverKey)
+    chain.push({
+      ApproverID: hint.approverId,
+      ApproverName: hint.approverName,
+      Status: 'Pending Approval',
+      SequenceNo: sequence,
+    })
+    const nextEmployeeNo = hint.approverId
+      ? await resolveEmployeeNoFromApproverId(hint.approverId)
+      : ''
+    if (!nextEmployeeNo || nextEmployeeNo === employeeNo) break
+    employeeNo = nextEmployeeNo
+  }
+
+  if (chain.length > 0) {
+    return normalizeSequentialApprovalStatuses(mapApprovalSteps(chain))
+  }
+
+  if (mapped.length > 0) return normalizeSequentialApprovalStatuses(mapped)
+
+  const hint = await resolveLeaveApproverHint(leaveRow, context)
+  if (hint.approverId || hint.approverName) {
+    return mapApprovalSteps([
+      {
+        ApproverID: hint.approverId,
+        ApproverName: hint.approverName,
+        Status: 'Pending Approval',
+        SequenceNo: 1,
+      },
+    ])
+  }
+
+  return []
 }
 
 export async function resolveLeaveApproverHint(
@@ -250,33 +369,32 @@ export async function resolveLeaveApprovalStepsAsync(
   documentNo = '',
   context: LeaveApproverContext = {},
 ) {
-  const base = resolveLeaveApprovalSteps(row, approvalEntries, documentNo)
-  const needsBetterName = (steps: ReturnType<typeof mapApprovalSteps>) =>
-    steps.length === 0 ||
-    steps.every(
+  if (approvalEntries.length > 0) {
+    const enriched = await enrichMappedApprovalSteps(mapApprovalSteps(approvalEntries))
+    const needsBetterName = enriched.every(
       (step) =>
         !step.actorName ||
         step.actorName === 'Awaiting approver assignment' ||
         (step.actorEmployeeNo && step.actorName === step.actorEmployeeNo),
     )
-
-  if (!needsBetterName(base)) {
-    return enrichMappedApprovalSteps(base)
+    if (!needsBetterName) return enriched
   }
 
-  const hint = await resolveLeaveApproverHint(row, context)
-  if (hint.approverId || hint.approverName) {
-    return mapApprovalSteps([
-      {
-        ApproverID: hint.approverId,
-        ApproverName: hint.approverName,
-        Status: 'Pending Approval',
-        SequenceNo: 1,
-      },
-    ])
-  }
+  const fallbackSteps = resolveLeaveApprovalSteps(row, approvalEntries, documentNo)
+  const entriesForRoute =
+    approvalEntries.length > 0
+      ? approvalEntries
+      : fallbackSteps.map((step, index) => ({
+          ApproverID: step.actorEmployeeNo,
+          ApproverName: step.actorName,
+          Status: step.status,
+          SequenceNo: step.sequenceNo ?? index + 1,
+        }))
 
-  return enrichMappedApprovalSteps(base)
+  return resolveLeaveApprovalRouteAsync(entriesForRoute, {
+    ...context,
+    leaveRow: row,
+  })
 }
 
 async function resolveApproverDisplayName(approverId: string): Promise<string> {

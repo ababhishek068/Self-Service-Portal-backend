@@ -236,6 +236,12 @@ export async function fetchLeaveSchedule(scope: 'self' | 'department' = 'departm
   return rows
 }
 
+export async function fetchLeaveApprovalRoute(): Promise<PortalRequest['approvalSteps']> {
+  requireAuthApiUrl()
+  const { steps } = await authGet<{ steps: PortalRequest['approvalSteps'] }>('/api/leave/approval-route')
+  return steps
+}
+
 export async function downloadLeaveStatement(
   leaveType: string,
   onProgress?: (progress: number) => void,

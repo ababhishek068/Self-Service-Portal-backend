@@ -8,7 +8,7 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-HIJRA-UAT-${STAMP}-latest-full-offline.zip"
+ZIP_NAME="SelfServiceSuite-HIJRA-UAT-${STAMP}-salary-advance-timeout-fix-offline.zip"
 DEPLOY_WIN="$ROOT/deploy/windows"
 HIJRA_ENV="$ROOT/deploy/windows/host.env.hijra-uat-ip.example"
 STAGING="$ROOT/.suite-bundle-staging"
@@ -105,7 +105,9 @@ SUMMARY (${STAMP})
 - Leave: status read live from Business Central (no local cache)
 - ENV: bundled .env is HIJRA UAT (BC 10.30.7.14 + portal http://10.30.4.23:4000)
 - Portal: HIJRA branding + module menu only (no ABH templates or modules)
-- Leave: duplicate-pending block is opt-in via VITE_BLOCK_DUPLICATE_PENDING_LEAVE (default off for HIJRA)
+- Leave: approver list and sequence shown on new request + application detail
+- Leave: gender-specific leave types filtered by Business Central (maternity / paternity)
+- HR: salary advance amount from payroll employee + computed line amount (not BC zero)
 - Leave: job title in header and reliever list; annual leave balance from BC OData
 - Leave: attachment upload; two-step create then request approval
 - Fuel, store requisition, transfer orders, work tickets, HOD pages, attendance MAC helper

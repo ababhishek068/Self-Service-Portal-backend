@@ -97,13 +97,13 @@ export async function loginRequest(
 ): Promise<Employee> {
   const baseUrl = provider === 'bc365' ? requireBcApiUrl() : requireApplicationApiUrl()
   setApiBaseUrl(baseUrl)
-  const { token, user } = await authPost<{ token: string; user: AuthUser }>('/api/auth/login', {
-    staffNo,
-    password,
-  })
+  const { token, user } = await authPost<{ token: string; user: AuthUser }>(
+    '/api/auth/login',
+    { staffNo, password },
+    { silent: true } as Parameters<typeof authPost>[2],
+  )
   setToken(token)
-  const refreshed = await fetchCurrentUser()
-  let employee = refreshed ?? toEmployee(user)
+  let employee = toEmployee(user)
   if (!employee.jobTitle?.trim()) {
     try {
       const details = await getEmployeeProfileDetails()
