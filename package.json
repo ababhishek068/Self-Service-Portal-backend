@@ -7,8 +7,10 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc",
-    "build:portal": "npm --prefix ../SelfServicePortal/self-service-portal run build:onprem && node scripts/copy-portal.mjs",
+    "build:portal": "npm --prefix SelfServiceSuite/SelfServicePortal/self-service-portal run build:onprem && PORTAL_PROJECT_DIR=SelfServiceSuite/SelfServicePortal/self-service-portal node scripts/copy-portal.mjs",
     "build:all": "npm run build && npm run build:portal",
+    "dry-run": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh",
+    "dry-run:dev": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh --dev",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/approvalTableIds.test.js"
   },
