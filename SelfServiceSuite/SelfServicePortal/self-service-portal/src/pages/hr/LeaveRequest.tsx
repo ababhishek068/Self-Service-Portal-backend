@@ -210,8 +210,9 @@ export function LeaveRequest() {
     enabled: Boolean(selectedRequestId),
   })
   const [leaveType, setLeaveType] = useState('')
-  const [entitlement, setEntitlement] = useState<number | null>(null)
-  const [balance, setBalance] = useState<number | null>(null)
+  const [allocatedDays, setAllocatedDays] = useState<number | null>(null)
+  const [currentLeaveBalance, setCurrentLeaveBalance] = useState<number | null>(null)
+  const [earnedLeaveDays, setEarnedLeaveDays] = useState<number | null>(null)
   const [isHourly, setIsHourly] = useState(false)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [types, setTypes] = useState<LeaveType[]>([])
@@ -243,8 +244,8 @@ export function LeaveRequest() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const showSecondary = leaveType !== '' && balance !== null && !balanceLoading
-  const canSubmit = showSecondary && balance > 0
+  const showSecondary = leaveType !== '' && !balanceLoading && currentLeaveBalance !== null
+  const canSubmit = showSecondary && currentLeaveBalance > 0
 
   useEffect(() => {
     setEndDate('')
@@ -257,17 +258,17 @@ export function LeaveRequest() {
     setError(null)
     setSuccess(null)
     if (!leaveType) {
-      setEntitlement(null)
-      setBalance(null)
+      setAllocatedDays(null)
+      setCurrentLeaveBalance(null)
+      setEarnedLeaveDays(null)
       return
     }
-    const type = types.find((t) => t.code === leaveType)
-    setEntitlement(type?.days ?? null)
     setBalanceLoading(true)
     getLeaveBalance(leaveType)
       .then((res) => {
-        setBalance(res.balance)
-        setEntitlement(res.entitlement ?? type?.days ?? null)
+        setAllocatedDays(res.allocatedDays)
+        setCurrentLeaveBalance(res.currentLeaveBalance ?? res.balance ?? null)
+        setEarnedLeaveDays(res.earnedLeaveDays)
         setIsHourly(res.isHourly)
       })
       .finally(() => setBalanceLoading(false))
@@ -287,8 +288,8 @@ export function LeaveRequest() {
     const starting = isHourly ? startDateTime : startDate
     if (!duration || !starting || !leaveType) return
 
-    if (entitlement !== null && duration > entitlement) {
-      setError(`The maximum number of days you can apply for is ${entitlement}`)
+    if (currentLeaveBalance !== null && duration > currentLeaveBalance) {
+      setError(`The maximum number of days you can apply for is ${formatDays(currentLeaveBalance)}`)
       return
     }
     if (isHourly && duration > 4) {
@@ -323,7 +324,7 @@ export function LeaveRequest() {
       .finally(() => {
         if (requestId === leaveDatesRequestId.current) setDatesLoading(false)
       })
-  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, entitlement])
+  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, currentLeaveBalance])
 
   useEffect(() => {
     if (halfDay === '1' || halfDay === '2') {
@@ -366,8 +367,8 @@ export function LeaveRequest() {
       setError('Please complete all required fields.')
       return
     }
-    if (balance !== null && submittedDays > balance) {
-      setError(`Insufficient leave balance. Available: ${formatDays(balance)} day(s).`)
+    if (currentLeaveBalance !== null && submittedDays > currentLeaveBalance) {
+      setError(`Insufficient leave balance. Current Leave Balance: ${formatDays(currentLeaveBalance)} day(s).`)
       return
     }
     if (!endDate || !returnDate) {
@@ -596,37 +597,60 @@ export function LeaveRequest() {
                 placeholder="--select--"
                 options={availableTypes.map((t) => ({
                   value: t.code,
-                  label: `${t.description} (Entitlement: ${formatDays(t.days)})`,
+                  label: t.description,
                 }))}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Leave Entitlement</Label>
-              <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                {entitlement !== null ? `${formatDays(entitlement)} days` : DASH}
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Available Days</Label>
-              <div className="flex h-10 items-center">
-                {balanceLoading ? (
-                  <Skeleton className="h-6 w-16" />
-                ) : balance !== null ? (
-                  <Badge variant="green" className="px-4 py-1 text-sm">
-                    {formatDays(balance)}
-                  </Badge>
-                ) : (
-                  <span className="text-sm text-slate-400">{DASH}</span>
-                )}
+          </div>
+
+          {leaveType ? (
+            <div className="grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-3 sm:gap-4">
+              <div className="space-y-1.5">
+                <Label>Allocated Days</Label>
+                <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                  {balanceLoading ? (
+                    <Skeleton className="h-6 w-16" />
+                  ) : allocatedDays !== null ? (
+                    formatDays(allocatedDays)
+                  ) : (
+                    DASH
+                  )}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Current Leave Balance</Label>
+                <div className="flex h-10 items-center">
+                  {balanceLoading ? (
+                    <Skeleton className="h-6 w-16" />
+                  ) : currentLeaveBalance !== null ? (
+                    <Badge variant="green" className="px-4 py-1 text-sm">
+                      {formatDays(currentLeaveBalance)}
+                    </Badge>
+                  ) : (
+                    <span className="text-sm text-slate-400">{DASH}</span>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Earned Leave Days</Label>
+                <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                  {balanceLoading ? (
+                    <Skeleton className="h-6 w-16" />
+                  ) : earnedLeaveDays !== null ? (
+                    formatDays(earnedLeaveDays)
+                  ) : (
+                    DASH
+                  )}
+                </p>
               </div>
             </div>
-          </div>
+          ) : null}
 
           {showSecondary ? (
             <div className="space-y-4 border-t border-slate-200 pt-4">
-              {balance <= 0 ? (
+              {currentLeaveBalance <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  You have no available leave balance for this type. Contact HR if you believe this is incorrect.
+                  Current Leave Balance is zero. Contact HR if you believe this is incorrect.
                 </div>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">

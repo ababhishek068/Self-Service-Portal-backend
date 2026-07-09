@@ -193,6 +193,7 @@ function configuredJobTitle(jobId: string) {
 }
 
 const ABH_EMPLOYEE_JOB_TITLES: Record<string, string> = {
+  'ABH-010': 'Media and IT Expert',
   'ABH-029': 'Finance and Admin Director',
   'ABH-114': 'IT Manger',
 }

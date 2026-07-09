@@ -130,16 +130,36 @@ export class AuthApiError extends Error implements NormalizedAuthError {
 
 authHttp.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
     const status = error.response?.status
-    const data = error.response?.data as { message?: string; code?: string } | undefined
+    let data = error.response?.data as { message?: string; code?: string } | Blob | string | undefined
+    if (data instanceof Blob) {
+      const text = await data.text().catch(() => '')
+      if (text) {
+        try {
+          data = JSON.parse(text) as { message?: string; code?: string }
+        } catch {
+          data = text
+        }
+      }
+    }
+    const message =
+      typeof data === 'string'
+        ? data
+        : data && 'message' in data
+          ? data.message
+          : undefined
+    const code =
+      data && typeof data !== 'string' && 'code' in data
+        ? data.code
+        : undefined
     // A rejected/expired token should not linger.
     if (status === 401) clearToken()
     return Promise.reject(
       new AuthApiError({
-        message: data?.message ?? error.message ?? 'Request failed',
+        message: message ?? error.message ?? 'Request failed',
         status,
-        code: data?.code,
+        code,
       }),
     )
   },

@@ -35,6 +35,11 @@ import {
   employeeLeaveMetrics,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
+  resolveLeaveBalance,
+  resolveLeaveCardBalances,
+  leaveCardBalancesFromRecord,
+  mergeLeaveCardBalances,
+  resolveNonAnnualLeaveBalance,
   employeeLeaveWorkflowCodes,
   leaveRowHasWorkflowCodes,
 } from './staff.js'
@@ -205,34 +210,99 @@ describe('bcLeaveDaysApplied', () => {
 describe('employeeLeaveMetrics', () => {
   const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
 
-  it('reads earned leave and annual balance fields from BC employee OData', () => {
+  it('reads BC employee card fields separately (not mixed)', () => {
     const metrics = employeeLeaveMetrics(
       {
-        EarnedLeaveDays: 16,
-        Annual_Leave_balance: 16,
+        Leave_Balance: 34.08,
+        EarnedLeaveDays: 34.46,
+        Annual_Leave_balance: 0,
       },
       user,
     )
-    assert.equal(metrics.earnedLeaveDays, 16)
-    assert.equal(metrics.leaveBalance, 16)
+    assert.equal(metrics.generalLeaveBalance, 34.08)
+    assert.equal(metrics.earnedLeaveDays, 34.46)
+    assert.equal(metrics.annualLeaveBalance, 0)
   })
 
   it('does not treat missing leave fields as zero', () => {
     const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
     assert.equal(metrics.earnedLeaveDays, null)
-    assert.equal(metrics.leaveBalance, null)
+    assert.equal(metrics.annualLeaveBalance, null)
+    assert.equal(metrics.generalLeaveBalance, null)
   })
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('prefers earned leave over ledger when BC exposes it', () => {
-    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
+  it('uses Annual Leave balance from BC, not earned or general leave balance', () => {
+    const metrics = {
+      generalLeaveBalance: 34.08,
+      earnedLeaveDays: 34.46,
+      annualLeaveBalance: 0,
+    }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 12), 0)
   })
 
-  it('falls back to ledger when employee card fields are absent', () => {
-    const metrics = { earnedLeaveDays: null, leaveBalance: null }
+  it('falls back to ledger when annual balance is absent on the employee card', () => {
+    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34, annualLeaveBalance: null }
     assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
+  })
+})
+
+describe('resolveAnnualLeaveEntitlement', () => {
+  it('uses earned leave days from BC before leave type policy days', () => {
+    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34.46, annualLeaveBalance: 0 }
+    assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 34.46)
+  })
+
+  it('falls back to leave type days when earned leave is absent', () => {
+    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
+    assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 16)
+  })
+})
+
+describe('resolveNonAnnualLeaveBalance', () => {
+  it('matches Laravel ledger formula for non-annual types', () => {
+    assert.equal(resolveNonAnnualLeaveBalance(10, 2, 5), 7)
+  })
+})
+
+describe('resolveLeaveBalance', () => {
+  it('uses policy days for ANNUAL when OData balance and ledger are empty (matches BC leave card)', () => {
+    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
+    const balance = resolveLeaveBalance({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0)
+    assert.equal(balance, 16)
+  })
+
+  it('respects Annual Leave balance on employee card for ANNUAL', () => {
+    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34, annualLeaveBalance: 0 }
+    const balance = resolveLeaveBalance({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0)
+    assert.equal(balance, 0)
+  })
+
+  it('uses ledger net for legacy 0001 code', () => {
+    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
+    const balance = resolveLeaveBalance({ Code: '0001' }, metrics, 16, 5, 2)
+    assert.equal(balance, 3)
+  })
+})
+
+describe('resolveLeaveCardBalances', () => {
+  it('prefers OData Current Leave Balance over computed values', () => {
+    const metrics = { generalLeaveBalance: null, earnedLeaveDays: 15.96, annualLeaveBalance: null }
+    const odata = { allocatedDays: 16, currentLeaveBalance: 16, earnedLeaveDays: 15.96 }
+    const card = resolveLeaveCardBalances({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0, odata)
+    assert.equal(card.allocatedDays, 16)
+    assert.equal(card.currentLeaveBalance, 16)
+    assert.equal(card.earnedLeaveDays, 15.96)
+  })
+
+  it('fills BC card fields when OData balance fields are absent', () => {
+    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
+    const empty = { allocatedDays: null, currentLeaveBalance: null, earnedLeaveDays: null }
+    const card = resolveLeaveCardBalances({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0, empty)
+    assert.equal(card.allocatedDays, 16)
+    assert.equal(card.currentLeaveBalance, 16)
+    assert.equal(card.earnedLeaveDays, 16)
   })
 })
 

@@ -89,6 +89,34 @@ function number(row: ODataRecord, keys: string[], fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+const PAYROLL_MONTH_NAMES = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+]
+
+function payrollMonthNumber(value: unknown) {
+  const raw = String(value ?? '').trim()
+  const numeric = Number(raw)
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 12) return numeric
+
+  const normalized = raw.toLowerCase()
+  const exact = PAYROLL_MONTH_NAMES.indexOf(normalized)
+  if (exact >= 0) return exact + 1
+
+  const short = PAYROLL_MONTH_NAMES.findIndex((month) => month.startsWith(normalized.slice(0, 3)))
+  return short >= 0 ? short + 1 : 0
+}
+
 function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
 }
@@ -1616,8 +1644,8 @@ export function buildPortalApiRouter() {
         res.json({
           ...source,
           status: queueItem.status,
-          makerEmployeeNo: queueItem.makerEmployeeNo || source.makerEmployeeNo,
-          makerName: queueItem.makerName || source.makerName,
+          makerEmployeeNo: source.makerEmployeeNo || queueItem.makerEmployeeNo,
+          makerName: source.makerName || queueItem.makerName,
           submittedAt: queueItem.submittedAt || source.submittedAt,
           approvalSteps: approvalSteps.length ? approvalSteps : source.approvalSteps,
         })
@@ -2154,8 +2182,11 @@ export function buildPortalApiRouter() {
       }).catch(() => [] as ODataRecord[])
       const periods = new Map<string, { year: number; month: string }>()
       for (const row of Array.isArray(rows) ? rows : []) {
-        const year = number(row, ['PeriodYear', 'Year'])
-        const month = text(row, ['PeriodMonth', 'Month', 'PeriodName'])
+        const year = number(row, ['PeriodYear', 'Period_Year', 'Year'])
+        const monthNo =
+          number(row, ['PeriodMonth', 'Period_Month', 'Month']) ||
+          payrollMonthNumber(text(row, ['PeriodMonth', 'Period_Month', 'Month', 'PeriodName', 'Period_Name']))
+        const month = monthNo ? String(monthNo) : ''
         if (year && month) periods.set(`${year}-${month}`, { year, month })
       }
       res.json({ rows: [...periods.values()] })
@@ -2166,8 +2197,8 @@ export function buildPortalApiRouter() {
     '/payroll/payslip/pdf',
     safe(async (req, res) => {
       const authUser = user(req)
-      const year = String(req.query.year ?? '')
-      const month = String(req.query.month ?? '')
+      const year = Number(req.query.year ?? 0)
+      const month = payrollMonthNumber(req.query.month)
       if (!year || !month) throw portalError('Payroll year and month are required', 422)
       const fileName = `${authUser.employeeNo.replaceAll('/', '_')}_ps.pdf`
       const result = await callSoapMethod('GeneratePayslip', {
@@ -2214,8 +2245,8 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       if (!authUser.CEO) throw portalError('CEO access required', 403)
-      const year = String(req.query.year ?? '')
-      const month = String(req.query.month ?? '')
+      const year = Number(req.query.year ?? 0)
+      const month = payrollMonthNumber(req.query.month)
       const postingGroup = String(req.query.postingGroup ?? '')
       if (!year || !month) throw portalError('Payroll year and month are required', 422)
       const fileName = `${year}-${month}_masterroll.pdf`

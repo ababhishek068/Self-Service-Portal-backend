@@ -44,6 +44,56 @@ function lineFieldLabel(key: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
+function numericValue(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function firstPayloadNumber(payload: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return numericValue(value)
+    }
+  }
+  return 0
+}
+
+function sumLineNumbers(lines: Record<string, unknown>[], keys: string[]) {
+  return lines.reduce((total, line) => {
+    for (const key of keys) {
+      const value = line[key]
+      if (value !== undefined && value !== null && String(value).trim() !== '') {
+        return total + numericValue(value)
+      }
+    }
+    return total
+  }, 0)
+}
+
+function approvalMetric(
+  requestType: string | undefined,
+  amount: number,
+  payload: Record<string, unknown>,
+  lines: Record<string, unknown>[],
+) {
+  if (requestType === 'storeRequisition') {
+    const quantity = sumLineNumbers(lines, ['quantityRequested', 'quantity', 'QuantityRequested', 'Quantity_Requested'])
+    return { label: 'Quantity requested', value: String(quantity || amount || 0) }
+  }
+  if (requestType === 'leave') {
+    const days = firstPayloadNumber(payload, ['daysApplied', 'DaysApplied', 'NoofDays', 'No_of_Days', 'NoOfDays'])
+    return { label: 'Days requested', value: String(days || amount || 0) }
+  }
+  if (requestType === 'transport') {
+    return { label: 'Passengers', value: String(lines.length || amount || 0) }
+  }
+  if (requestType === 'fuelRequest') {
+    return { label: 'Quantity', value: String(amount || 0) }
+  }
+  return { label: 'Amount', value: formatCurrency(amount) }
+}
+
 export function ApprovalDetail() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
@@ -72,6 +122,7 @@ export function ApprovalDetail() {
     ? (payload.lines as Record<string, unknown>[])
     : []
   const lineKeys = visibleLineKeys(lines)
+  const metric = request ? approvalMetric(request.requestType, request.amount, payload, lines) : null
 
   useEffect(() => {
     if (request && applicationReason) {
@@ -148,8 +199,8 @@ export function ApprovalDetail() {
                   <p className="font-medium text-slate-900">{request.makerName}</p>
                 </div>
                 <div className="rounded-md bg-slate-50 p-3">
-                  <p className="text-xs uppercase text-slate-500">Amount / quantity</p>
-                  <p className="font-medium text-slate-900">{formatCurrency(request.amount)}</p>
+                  <p className="text-xs uppercase text-slate-500">{metric?.label ?? 'Amount'}</p>
+                  <p className="font-medium text-slate-900">{metric?.value ?? formatCurrency(request.amount)}</p>
                 </div>
                 <div className="rounded-md bg-slate-50 p-3">
                   <p className="text-xs uppercase text-slate-500">Submitted</p>

@@ -203,48 +203,192 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
   if (!row) {
     const sessionBalance = Number(user.leaveBalance)
     return {
-      leaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
+      generalLeaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
+      annualLeaveBalance: null,
       earnedLeaveDays: null,
     }
   }
 
-  const leaveBalance =
+  const generalLeaveBalance =
+    fieldNumber(row, ['LeaveBalance', 'Leave_Balance']) ??
+    discoverLeaveFieldNumber(row, [
+      (key) => key === 'leavebalance',
+      (key) => key === 'currentleavebalance',
+    ])
+
+  const annualLeaveBalance =
     fieldNumber(row, [
-      'LeaveBalance',
-      'Leave_Balance',
       'AnnualLeaveBalance',
       'Annual_Leave_Balance',
       'Annual_Leave_balance',
       'AnnualLeavebalance',
     ]) ??
-    discoverLeaveFieldNumber(row, [
-      (key) => key === 'annualleavebalance',
-      (key) => key === 'leavebalance',
-    ])
+    discoverLeaveFieldNumber(row, [(key) => key.includes('annualleavebalance')])
 
   const earnedLeaveDays =
     fieldNumber(row, ['EarnedLeaveDays', 'Earned_Leave_Days', 'EarnedLeave', 'Earned_Leave']) ??
     discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
 
-  return { leaveBalance, earnedLeaveDays }
+  return { generalLeaveBalance, annualLeaveBalance, earnedLeaveDays }
 }
 
+/** Available annual leave — BC Employee Card "Annual Leave balance", then ledger net for legacy 0001 only. */
 export function resolveAnnualLeaveBalance(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   ledgerNet: number,
 ) {
-  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
-  if (metrics.leaveBalance !== null) return metrics.leaveBalance
+  if (metrics.annualLeaveBalance !== null) return metrics.annualLeaveBalance
   return ledgerNet
 }
 
+/**
+ * Mirrors Laravel ESS leave balance.
+ * - Code 0001: ledger net (additions − deductions), unless Annual Leave balance is on the employee card.
+ * - Other types (including ANNUAL): policy days minus net taken — matches BC leave application card.
+ */
+export function resolveLeaveBalance(
+  leaveTypeRow: ODataRecord | null | undefined,
+  metrics: ReturnType<typeof employeeLeaveMetrics>,
+  leaveTypeDays: number,
+  additions: number,
+  deductions: number,
+) {
+  const code = String(leaveTypeRow?.Code ?? '').trim()
+  const ledgerNet = additions - deductions
+
+  if (code === '0001') {
+    return resolveAnnualLeaveBalance(metrics, ledgerNet)
+  }
+
+  if (leaveTypeIsAnnual(leaveTypeRow) && metrics.annualLeaveBalance !== null) {
+    return metrics.annualLeaveBalance
+  }
+
+  return resolveNonAnnualLeaveBalance(leaveTypeDays, additions, deductions)
+}
+
+/** Annual entitlement/accrual — matches BC "Earned Leave Days", then leave type policy days. */
 export function resolveAnnualLeaveEntitlement(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   leaveTypeDays: number,
 ) {
   if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
-  if (metrics.leaveBalance !== null) return metrics.leaveBalance
   return leaveTypeDays
+}
+
+export function resolveNonAnnualLeaveBalance(
+  leaveTypeDays: number,
+  additions: number,
+  deductions: number,
+) {
+  const netTaken = deductions - additions
+  const balance = leaveTypeDays - netTaken
+  return balance >= 0 ? balance : 0
+}
+
+/** BC HR Leave Application card — Allocated Days, Current Leave Balance, Earned Leave Days. */
+export type LeaveCardBalances = {
+  allocatedDays: number | null
+  currentLeaveBalance: number | null
+  earnedLeaveDays: number | null
+}
+
+export function leaveCardBalancesFromRecord(row: ODataRecord | null | undefined): LeaveCardBalances {
+  if (!row) {
+    return { allocatedDays: null, currentLeaveBalance: null, earnedLeaveDays: null }
+  }
+
+  const allocatedDays =
+    fieldNumber(row, ['Allocated_Days', 'AllocatedDays', 'Allocated']) ??
+    discoverLeaveFieldNumber(row, [(key) => key === 'allocateddays'])
+
+  const currentLeaveBalance =
+    fieldNumber(row, [
+      'Current_Leave_Balance',
+      'CurrentLeaveBalance',
+      'Current_Leave_balance',
+      'LeaveBalance',
+      'Leave_Balance',
+    ]) ??
+    discoverLeaveFieldNumber(row, [
+      (key) => key === 'currentleavebalance',
+      (key) => key === 'leavebalance',
+    ])
+
+  const earnedLeaveDays =
+    fieldNumber(row, ['Earned_Leave_Days', 'EarnedLeaveDays', 'EarnedLeave', 'Earned_Leave']) ??
+    discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
+
+  return { allocatedDays, currentLeaveBalance, earnedLeaveDays }
+}
+
+export function mergeLeaveCardBalances(...sets: LeaveCardBalances[]): LeaveCardBalances {
+  const pick = (key: keyof LeaveCardBalances) => {
+    for (const set of sets) {
+      if (set[key] !== null) return set[key]
+    }
+    return null
+  }
+  return {
+    allocatedDays: pick('allocatedDays'),
+    currentLeaveBalance: pick('currentLeaveBalance'),
+    earnedLeaveDays: pick('earnedLeaveDays'),
+  }
+}
+
+/** Fill BC card balances from OData first, then the same rules BC uses when OData fields are absent. */
+export function resolveLeaveCardBalances(
+  leaveTypeRow: ODataRecord | null | undefined,
+  metrics: ReturnType<typeof employeeLeaveMetrics>,
+  leaveTypeDays: number,
+  additions: number,
+  deductions: number,
+  odataBalances: LeaveCardBalances,
+): LeaveCardBalances {
+  const computedCurrent = resolveLeaveBalance(
+    leaveTypeRow,
+    metrics,
+    leaveTypeDays,
+    additions,
+    deductions,
+  )
+  const earnedFallback =
+    metrics.earnedLeaveDays ??
+    odataBalances.earnedLeaveDays ??
+    (leaveTypeDays > 0 ? leaveTypeDays : null)
+
+  return {
+    allocatedDays: odataBalances.allocatedDays ?? (leaveTypeDays > 0 ? leaveTypeDays : null),
+    currentLeaveBalance:
+      odataBalances.currentLeaveBalance ??
+      (computedCurrent >= 0 ? roundLeaveValue(computedCurrent) : null),
+    earnedLeaveDays: earnedFallback !== null ? roundLeaveValue(earnedFallback) : null,
+  }
+}
+
+async function fetchLeaveApplicationBalanceRows(employeeNo: string, leaveTypeCode: string) {
+  const filter =
+    `EmployeeNo eq '${odataString(employeeNo)}'` +
+    ` and LeaveType eq '${odataString(leaveTypeCode)}'`
+  const options = { $filter: filter, $top: 10, $orderby: 'ApplicationDate desc' }
+  let rows = (await fetchOData('QyHRLeaveApplications', options).catch(() => null)) as
+    | ODataRecord[]
+    | null
+  if (!Array.isArray(rows) || rows.length === 0) {
+    rows = (await fetchOData('QyHRLeaveApplications', { $filter: filter, $top: 10 }).catch(
+      () => [],
+    )) as ODataRecord[] | null
+  }
+  return Array.isArray(rows) ? rows : []
+}
+
+async function fetchEmployeeLeaveMetricsRow(employeeNo: string) {
+  const [wsRow, cardRow] = await Promise.all([
+    fetchCurrentEmployeeRow(employeeNo),
+    fetchEmployeeForLeaveWorkflow(employeeNo),
+  ])
+  if (!wsRow && !cardRow) return null
+  return { ...(wsRow ?? {}), ...(cardRow ?? {}) }
 }
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
@@ -1989,7 +2133,7 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveType', {
           $filter: leaveTypesGenderFilter(user),
         }),
-        fetchCurrentEmployeeRow(user.employeeNo),
+        fetchEmployeeLeaveMetricsRow(user.employeeNo),
       ])
       const metrics = employeeLeaveMetrics(employeeRow, user)
       res.json({
@@ -2022,10 +2166,10 @@ export function buildStaffRouter() {
     '/leave/balance/:type',
     safe(async (req, res) => {
       const user = authUser(req)
-      const leaveTypeCode = req.params.type
+      const leaveTypeCode = String(req.params.type ?? '')
       const today = new Date().toISOString().slice(0, 10)
 
-      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
@@ -2040,13 +2184,13 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveLedger', {
           $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
         }) as Promise<ODataRecord[] | null>,
-        fetchCurrentEmployeeRow(user.employeeNo),
+        fetchEmployeeLeaveMetricsRow(user.employeeNo),
+        fetchLeaveApplicationBalanceRows(user.employeeNo, leaveTypeCode),
       ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
-      const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
       const metrics = employeeLeaveMetrics(employeeRow, user)
 
       let additions = 0
@@ -2061,19 +2205,28 @@ export function buildStaffRouter() {
         }
       }
 
-      const ledgerNet = additions - deductions
-      let leaveBalance = 0
-      if (isAnnual) {
-        leaveBalance = resolveAnnualLeaveBalance(metrics, ledgerNet)
-      } else {
-        leaveBalance = leaveTypeDays - (deductions - additions)
-      }
-      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
-      const entitlement = roundLeaveValue(
-        isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
+      const odataBalances = mergeLeaveCardBalances(
+        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
+        leaveCardBalancesFromRecord(employeeRow),
       )
+      const cardBalances = resolveLeaveCardBalances(
+        leaveTypeRow,
+        metrics,
+        leaveTypeDays,
+        additions,
+        deductions,
+        odataBalances,
+      )
+      const currentLeaveBalance = cardBalances.currentLeaveBalance ?? 0
 
-      res.json({ balance, entitlement, pendingCount, isHourly })
+      res.json({
+        allocatedDays: cardBalances.allocatedDays,
+        currentLeaveBalance: cardBalances.currentLeaveBalance,
+        earnedLeaveDays: cardBalances.earnedLeaveDays,
+        balance: currentLeaveBalance,
+        pendingCount,
+        isHourly,
+      })
     }),
   )
 

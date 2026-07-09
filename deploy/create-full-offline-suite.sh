@@ -8,8 +8,8 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-BUILD_ID="leave-open-ui-fix-2026-07-04-v5"
-ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-leave-open-ui-fix-v5-full-offline.zip"
+BUILD_ID="store-requisition-approval-2026-07-09-v1"
+ZIP_NAME="SelfServiceSuite-ABH-UAT-${STAMP}-store-requisition-approval-v1-full-offline.zip"
 ABH_ENV="$ROOT/deploy/windows/host.env.abh-uat-ip.example"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
@@ -97,9 +97,17 @@ Release date: ${STAMP}
 
 SUMMARY (${STAMP})
 ------------------
-- Leave: Pending Approval now shows reliably in the list — approvals are matched
-  both by document number AND by everything you submitted (sender side), so number
-  formatting differences in BC no longer hide a pending leave
+- Store Requisition: approval detail now shows a clear success/failure toast after
+  Approve/Reject instead of looking stuck after the BC call
+- Store Requisition: approval detail shows Quantity requested instead of ETB 0
+- Approvals: source document maker is preferred over BC approval sender when BC
+  has a real source document, so ADMIN does not overwrite maker details
+- Leave: form now shows the same three balances as the BC leave application card —
+  Allocated Days, Current Leave Balance, Earned Leave Days (removed portal-only
+  Entitlement / Available Days labels)
+- Leave: balance API reads BC OData leave-application fields first, then matches BC
+  card math when OData fields are missing (fixes 0 balance block when BC shows 16)
+- Leave: Open leaves no longer show a fake pending approver in the workflow stepper
 - Leave: fixed excessive Business Central calls after "Request Approval" — the
   sender-side lookup and status polling no longer repeat every second; approval
   responds faster and the page settles instead of fetching continuously

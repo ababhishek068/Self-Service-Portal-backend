@@ -10,8 +10,11 @@ export interface LeaveType {
 }
 
 export interface LeaveBalance {
+  allocatedDays: number | null
+  currentLeaveBalance: number | null
+  earnedLeaveDays: number | null
+  /** Same as currentLeaveBalance — used for submit validation. */
   balance: number
-  entitlement?: number
   pendingCount: number
   isHourly: boolean
 }

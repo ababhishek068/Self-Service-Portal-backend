@@ -118,6 +118,7 @@ function approvalOk(result: SoapResult) {
 function soapActionOk(spec: ModuleSpec, result: SoapResult) {
   if (
     spec.decideMode === 'submitCancelOnSameMethod' ||
+    spec.module === 'purchase-requisition' ||
     spec.module === 'salary-advance' ||
     spec.module === 'fuel' ||
     spec.module === 'maintenance'
