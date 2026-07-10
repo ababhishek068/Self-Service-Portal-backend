@@ -419,9 +419,7 @@ export function LeaveRequest() {
 
   const selected = detailQuery.data
   const selectedPayload = selected?.payload ?? {}
-  const selectedIsMutable = selected
-    ? ['Open', 'Draft', 'Pending Approval'].includes(selected.status)
-    : false
+  const selectedCanCancel = selected ? ['Open', 'Draft'].includes(selected.status) : false
   const selectedCanRequestApproval = selected
     ? ['Open', 'Draft'].includes(selected.status)
     : false
@@ -708,7 +706,7 @@ export function LeaveRequest() {
 
                 <section className="border-t border-slate-200 pt-4">
                   <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Attachments</h3>
-                  {selectedIsMutable ? (
+                  {selectedCanCancel ? (
                     <div className="mb-4 space-y-3 rounded-md border border-slate-200 p-3">
                       <FileUpload files={pendingAttachments} onChange={setPendingAttachments} />
                       <Button
@@ -741,7 +739,7 @@ export function LeaveRequest() {
                             >
                               Download
                             </Button>
-                            {selectedIsMutable ? (
+                            {selectedCanCancel ? (
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -762,7 +760,7 @@ export function LeaveRequest() {
                   )}
                 </section>
 
-                {selectedIsMutable ? (
+                {selectedCanRequestApproval || selectedCanCancel ? (
                   <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
                     {selectedCanRequestApproval ? (
                       <Button
@@ -773,14 +771,16 @@ export function LeaveRequest() {
                         {detailAction === 'approval' ? 'Requesting…' : 'Request Approval'}
                       </Button>
                     ) : null}
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      disabled={detailAction === 'cancel'}
-                      onClick={() => void cancelSelectedLeave()}
-                    >
-                      {detailAction === 'cancel' ? 'Cancelling…' : 'Cancel Application'}
-                    </Button>
+                    {selectedCanCancel ? (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        disabled={detailAction === 'cancel'}
+                        onClick={() => void cancelSelectedLeave()}
+                      >
+                        {detailAction === 'cancel' ? 'Cancelling…' : 'Cancel Application'}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
               </>

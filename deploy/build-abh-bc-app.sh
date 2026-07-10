@@ -21,7 +21,10 @@ OUT_APP="$OUT_DIR/${PUBLISHER}_${NAME}_${VERSION}.app"
 ALC=""
 for base in "$HOME/.vscode/extensions" "$HOME/.cursor/extensions"; do
   [[ -d "$base" ]] || continue
-  found="$(find "$base" -path "*microsoft.al-*" -name alc -type f 2>/dev/null | head -1)"
+  found="$(find "$base" \( -path "*microsoft.al-*" -o -path "*ms-dynamics-smb.al-*" \) -path "*/bin/darwin/alc" -type f 2>/dev/null | head -1)"
+  if [[ -z "$found" ]]; then
+    found="$(find "$base" \( -path "*microsoft.al-*" -o -path "*ms-dynamics-smb.al-*" \) -name alc -type f 2>/dev/null | head -1)"
+  fi
   if [[ -n "$found" ]]; then ALC="$found"; break; fi
 done
 
@@ -36,8 +39,23 @@ EOF
   exit 1
 fi
 
+ALC_DIR="$(cd "$(dirname "$ALC")" && pwd)"
+DEFAULT_ASSEMBLY_PROBING_PATHS="$ALC_DIR"
+for netfx_dir in \
+  /System/Volumes/Data/private/tmp/netfx-ref/build/.NETFramework/v4.8 \
+  /private/tmp/netfx-ref/build/.NETFramework/v4.8 \
+  /System/Volumes/Data/private/tmp/netfx40/pkg/build/.NETFramework/v4.0 \
+  /private/tmp/netfx40/pkg/build/.NETFramework/v4.0
+do
+  if [[ -d "$netfx_dir" ]]; then
+    DEFAULT_ASSEMBLY_PROBING_PATHS="$netfx_dir"
+    break
+  fi
+done
+ASSEMBLY_PROBING_PATHS="${ABH_AL_ASSEMBLY_PROBING_PATHS:-$DEFAULT_ASSEMBLY_PROBING_PATHS}"
+
 echo "Building $NAME $VERSION with $ALC"
-"$ALC" /project:"$AL_PROJECT" /packagecachepath:"$AL_PROJECT/.alpackages" /out:"$OUT_APP"
+"$ALC" /project:"$AL_PROJECT" /packagecachepath:"$AL_PROJECT/.alpackages" /assemblyprobingpaths:"$ASSEMBLY_PROBING_PATHS" /out:"$OUT_APP"
 
 echo "Built: $OUT_APP"
 echo "Deploy on BC server:"

@@ -4,6 +4,7 @@ import { callSoapMethod, fetchOData, fetchODataCount, fetchODataFromBase, odataS
 import { requireAuth } from './auth.js'
 import { config } from './config.js'
 import { derivePageODataBaseFromSoapCodeunit, fetchMergedEmployeeRecord, resolveEffectiveBcUserId } from './employeeProfile.js'
+import { decidePortalApproval } from './portalApproval.js'
 import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, approvalTableIdsFor, type ApprovalTableKey } from './approvalTableIds.js'
 import {
   findFrontendModuleSpec,
@@ -1018,12 +1019,23 @@ function leaveApprovalSoapCandidates(no: string, row?: ODataRecord | null) {
   return lvNumbers.length ? lvNumbers : values.slice(0, 1)
 }
 
-function soapCancelOk(value: unknown) {
+/** True only for explicit SOAP boolean success — never treat LV… document nos as cancel OK. */
+export function soapCancelOk(value: unknown) {
+  if (value === true || value === 1) return true
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
+  // LeaveApplication create/edit returns the application code (e.g. LV00029).
+  // That must NEVER count as a successful cancel/delete.
+  if (/^lv[\d_-]/i.test(raw) || /^[a-z]{2,}-?\d+/i.test(raw)) return false
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return normalized === 'true' || normalized === '1' || normalized === 'yes'
+}
+
+function leaveLooksCancelledOrGone(row: ODataRecord | null) {
+  if (!row) return true
+  const status = resolveLeaveStatus(row).toLowerCase()
+  return status === 'cancelled' || status === 'canceled' || status === 'rejected'
 }
 
 async function tryCancelLeaveSoap(
@@ -1032,40 +1044,50 @@ async function tryCancelLeaveSoap(
   row: ODataRecord,
   options: { cancelOnly?: boolean } = {},
 ) {
-  const paramSets: Record<string, unknown>[] = [
+  const wasOpen = leaveIsOpenInBc(row)
+  const paramSets: Record<string, unknown>[] = []
+
+  const leaveSoapBody = {
+    leaveNo: candidate,
+    employeeNo: user.employeeNo,
+    myUserID: user.userID,
+    daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
+    startDate: formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])),
+    endDate: formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])),
+    reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
+    reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
+    leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
+    isRequestLeaveAllowance: false,
+    isHalfDayLeave: false,
+    returnDate: formatBcSoapDate(fieldText(row, ['ReturnDate', 'Return_Date'])),
+  }
+
+  // BC 922+: CancelLeaveApplication and LeaveApplication cancel/delete.
+  paramSets.push(
     { requisitionNo: candidate, employeeNo: user.employeeNo },
     { requisitionNo: candidate, employeeNo: user.employeeNo, tableID: 50532 },
-    {
-      requisitionNo: candidate,
-      employeeNo: user.employeeNo,
-      myUserID: user.userID,
-      tableID: 50532,
-    },
-    { leaveNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID },
-  ]
+  )
 
-  if (leaveIsOpenInBc(row) && !options.cancelOnly) {
-    paramSets.unshift({
-      action: 'delete',
-      leaveNo: candidate,
-      employeeNo: user.employeeNo,
-      myUserID: user.userID,
-      daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
-      startDate: formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])),
-      endDate: formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])),
-      reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
-      reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
-      leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
-      isRequestLeaveAllowance: false,
-      isHalfDayLeave: false,
-    })
+  if (!options.cancelOnly) {
+    paramSets.push({ action: 'cancel', ...leaveSoapBody })
+    if (wasOpen) {
+      paramSets.push({ action: 'delete', ...leaveSoapBody })
+    }
   }
 
   for (const params of paramSets) {
     const method = 'action' in params ? 'LeaveApplication' : 'CancelLeaveApplication'
     try {
       const result = await callSoapMethod(method, params)
-      if (soapCancelOk(result.returnValue)) return true
+      if (!soapCancelOk(result.returnValue)) continue
+      // Confirm BC actually removed or cancelled the leave — never toast on SOAP alone.
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      const fresh = await fetchOwnedLeaveRow(user, candidate)
+      if (leaveLooksCancelledOrGone(fresh)) return true
+      // Pending cancel often reopens to Open — treat Open→Open after CancelLeave as failure
+      // unless the row disappeared. For CancelLeaveApplication on Pending, Open is OK if
+      // approval entries are gone and status is no longer Pending Approval.
+      if (!wasOpen && fresh && leaveIsOpenInBc(fresh)) return true
     } catch {
       // try the next BC parameter shape
     }
@@ -1086,27 +1108,9 @@ async function cancelLeaveApplicationInBc(
     }
   }
 
-  if (leaveIsOpenInBc(row)) {
-    for (const candidate of docCandidates) {
-      try {
-        const approval = await callSoapMethod('RequestLeaveApproval', {
-          requisitionNo: candidate,
-          employeeNo: user.employeeNo,
-          tableID: 50532,
-        })
-        if (!soapCancelOk(approval.returnValue)) continue
-        if (await tryCancelLeaveSoap(user, candidate, row, { cancelOnly: true })) {
-          return
-        }
-      } catch {
-        // try the next document number alias
-      }
-    }
-  }
-
   const message = leaveIsOpenInBc(row)
-    ? 'This leave draft could not be discarded. Verify the application in Business Central or contact support.'
-    : 'Leave application could not be cancelled.'
+    ? 'This leave draft could not be discarded in Business Central. Install the updated CuStaffPortal (LeaveApplication delete) or cancel it in BC.'
+    : 'Leave application could not be cancelled in Business Central. Check the approval workflow and try again.'
   throw Object.assign(new Error(message), { status: 422 })
 }
 
@@ -2038,21 +2042,53 @@ export function buildStaffRouter() {
             ? body.isApprove
             : String(body.isApprove ?? '').toLowerCase() === 'true'
 
-      const result = await callSoapMethod('DocumentApproval', {
-        entryNo: body.entryNo,
+      const employeeRow = await fetchMergedEmployeeRecord(user.employeeNo).catch(() => null)
+      const bcUserId = resolveEffectiveBcUserId(user.userID, employeeRow, user.employeeNo)
+      if (bcUserId && bcUserId !== user.userID && req.session.authUser) {
+        req.session.authUser = { ...req.session.authUser, userID: bcUserId }
+      }
+      const approverUserId = bcUserId || user.userID
+
+      let entry: ODataRecord | undefined
+      if (String(body.entryNo ?? '').trim()) {
+        const byEntry = (await fetchOData('QyApprovalEntry', {
+          $filter:
+            `EntryNo eq ${Number(body.entryNo)}` +
+            ` and DocumentNo eq '${odataString(body.docNo)}'` +
+            ` and ApproverID eq '${odataString(approverUserId)}'` +
+            ` and Status eq 'Open'`,
+          $top: 1,
+        }).catch(() => null)) as ODataRecord[] | null
+        entry = Array.isArray(byEntry) ? byEntry[0] : undefined
+      }
+      if (!entry) {
+        const byDoc = (await fetchOData('QyApprovalEntry', {
+          $filter:
+            `DocumentNo eq '${odataString(body.docNo)}'` +
+            ` and ApproverID eq '${odataString(approverUserId)}'` +
+            ` and Status eq 'Open'`,
+          $top: 1,
+        }).catch(() => null)) as ODataRecord[] | null
+        entry = Array.isArray(byDoc) ? byDoc[0] : undefined
+      }
+      if (!entry) {
+        res.status(404).json({ ok: false, message: 'Open approval entry not found' })
+        return
+      }
+
+      const decision = isApprove ? 'Approved' : 'Rejected'
+      const decided = await decidePortalApproval({
+        entry,
         docNo: body.docNo,
-        userID: user.userID,
-        isApprove,
+        approverUserId,
+        decision,
         comments: body.comment || body.comments || '',
       })
-
-      const ok = soapTruthy(result.returnValue)
       res.json({
-        ok,
-        message: ok
-          ? `Document ${body.docNo} has been ${(body.decision ?? (isApprove ? 'Approved' : 'Rejected')).toLowerCase()}`
-          : 'The approval action did not complete. Please try again.',
-        returnValue: result.returnValue,
+        ok: decided.ok,
+        message: `Document ${body.docNo} has been ${decision.toLowerCase()}`,
+        returnValue: true,
+        mode: decided.mode,
       })
     }),
   )
@@ -2591,12 +2627,36 @@ export function buildStaffRouter() {
         })
         return
       }
+      const wasOpen = leaveIsOpenInBc(row)
       await cancelLeaveApplicationInBc(user, body.no, row)
+
+      const fresh = await fetchOwnedLeaveRow(user, body.no)
+      if (wasOpen) {
+        // Open draft must be gone (deleted) after cancel.
+        if (fresh && !leaveLooksCancelledOrGone(fresh)) {
+          throw Object.assign(
+            new Error(
+              'Business Central still has this leave as Open. Cancel did not discard it — publish the updated CuStaffPortal LeaveApplication delete support.',
+            ),
+            { status: 502 },
+          )
+        }
+      } else if (fresh && resolveLeaveStatus(fresh) === 'Pending Approval') {
+        throw Object.assign(
+          new Error(
+            'Business Central still shows this leave as Pending Approval. Cancel did not complete.',
+          ),
+          { status: 502 },
+        )
+      }
+
       res.json({
         ok: true,
-        message: leaveIsOpenInBc(row)
+        message: wasOpen
           ? 'Leave application discarded successfully'
-          : 'Leave application cancelled successfully',
+          : fresh && leaveIsOpenInBc(fresh)
+            ? 'Leave approval cancelled — application returned to Open'
+            : 'Leave application cancelled successfully',
       })
     }),
   )

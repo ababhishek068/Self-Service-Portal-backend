@@ -1,7 +1,7 @@
 # Fix Mac-built BC .app on the SERVER. Run in Business Central Administration Shell.
 param(
-    [string]$SourceApp = "$env:USERPROFILE\Desktop\Erp\Technology Associates EA Ltd_BC24_TA App_1.0.2.917.app",
-    [string]$TargetVersion = "1.0.2.917"
+    [string]$SourceApp = "$env:USERPROFILE\Desktop\Erp\Technology Associates EA Ltd_BC24_TA App_1.0.2.920.app",
+    [string]$TargetVersion = "1.0.2.920"
 )
 
 $ErrorActionPreference = "Stop"

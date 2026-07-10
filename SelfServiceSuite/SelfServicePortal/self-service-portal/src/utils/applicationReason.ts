@@ -7,9 +7,14 @@ export function extractApplicationReason(
 
   const keys = [
     'reason',
+    'PostingDescription',
+    'Posting_Description',
+    'postingDescription',
     'description',
+    'Description',
     'justification',
     'purpose',
+    'Purpose',
     'issueDescription',
     'comments',
     'notes',
@@ -18,8 +23,14 @@ export function extractApplicationReason(
 
   for (const key of keys) {
     const value = payload[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'string' && value.trim()) {
+      const trimmed = value.trim()
+      // BC Document Type "Quote" is not an application reason.
+      if (/^quote$/i.test(trimmed)) continue
+      return trimmed
+    }
   }
 
-  return title?.trim() ?? ''
+  const fallback = title?.trim() ?? ''
+  return /^quote$/i.test(fallback) ? '' : fallback
 }

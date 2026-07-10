@@ -28,6 +28,7 @@ import {
   formatBcSoapDateMdy,
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
+  soapCancelOk,
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
@@ -351,6 +352,22 @@ describe('resolveLeaveApprovalSteps', () => {
   })
 })
 
+describe('soapCancelOk', () => {
+  it('accepts explicit boolean success only', () => {
+    assert.equal(soapCancelOk(true), true)
+    assert.equal(soapCancelOk('true'), true)
+    assert.equal(soapCancelOk('1'), true)
+    assert.equal(soapCancelOk(false), false)
+    assert.equal(soapCancelOk('false'), false)
+  })
+
+  it('never treats leave application numbers as cancel success', () => {
+    assert.equal(soapCancelOk('LV00029'), false)
+    assert.equal(soapCancelOk('LV-00001'), false)
+    assert.equal(soapCancelOk('ABH-PQ000012'), false)
+  })
+})
+
 describe('normalizeLeaveStartDate', () => {
   it('converts portal dates to yyyy-mm-dd for Business Central SOAP', () => {
     assert.equal(normalizeLeaveStartDate('2026-06-22'), '2026-06-22')
@@ -570,6 +587,18 @@ describe('salaryAdvance saveHeader params', () => {
 })
 
 describe('ESS request mutation contracts', () => {
+  it('wires purchase requisitions to Purchase Header table 38 and DocumentNo lines', () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec)
+    assert.equal(spec.headerTableId, 38)
+    assert.equal(spec.headerService, 'QyPurchaseHeader')
+    assert.equal(spec.lineHeaderField, 'DocumentNo')
+    assert.equal(spec.extraListFilter, undefined)
+    assert.ok(spec.postListFilter)
+    assert.equal(spec.postListFilter!({ DocApprovalType: 'Requisition', DocumentType: 'Quote' }), true)
+    assert.equal(spec.postListFilter!({ DocApprovalType: 'Purchase', DocumentType: 'Order' }), false)
+  })
+
   it('wires header edit and approval actions for every editable ESS module', () => {
     const modules = [
       'imprest',

@@ -261,8 +261,40 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'GatePassNo',
     'InterBankTransferNo',
   ])
-  const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
-  const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
+  const makerEmployeeNo = text(row, [
+    'EmployeeNo',
+    'StaffNo',
+    'RequesterID',
+    'Requested_By',
+    'AssignedUserID',
+    'Assigned_User_ID',
+    'UserID',
+  ])
+  // Prefer posting description over Document Type ("Quote") so purchase reqs don't title as Quote.
+  const title = text(
+    row,
+    requestType === 'purchaseRequisition'
+      ? [
+          'PostingDescription',
+          'Posting_Description',
+          'Purpose',
+          'Description',
+          'RequestDescription',
+          'Narration',
+          'Reason',
+          'Linkto',
+        ]
+      : [
+          'Purpose',
+          'Description',
+          'PostingDescription',
+          'RequestDescription',
+          'Narration',
+          'Reason',
+          'Linkto',
+        ],
+    moduleLabels[requestType],
+  )
   const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {

@@ -2,7 +2,7 @@
 # Fix Mac AL .app where perm/[Content_Types] was URL-encoded. Updates NAVX zip-size header.
 set -euo pipefail
 
-SRC="${1:-/Users/abhishekbehera/Desktop/Technology Associates EA Ltd_BC24_TA App_1.0.2.917.app}"
+SRC="${1:-/Users/abhishekbehera/Desktop/Technology Associates EA Ltd_BC24_TA App_1.0.2.920.app}"
 VERSION="${2:-$(python3 -c "import json; print(json.load(open('/Users/abhishekbehera/ABH_UAT_LIVE/app.json'))['version'])")}"
 OUT_DIR="${ABH_APP_OUT:-/Users/abhishekbehera/Desktop}"
 OUT="$OUT_DIR/Technology Associates EA Ltd_BC24_TA App_${VERSION}.app"

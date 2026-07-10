@@ -19,6 +19,9 @@ export function useApprovalDetail(id: string) {
     queryKey: ['approvals', 'detail', id],
     queryFn: () => getApprovalDetail(id),
     enabled: Boolean(id),
+    retry: 1,
+    // Avoid a blank page when the first load races BC OData after Request Approval.
+    refetchOnMount: 'always',
   })
 }
 

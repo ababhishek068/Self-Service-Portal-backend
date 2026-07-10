@@ -77,8 +77,14 @@ function approvalMetric(
   payload: Record<string, unknown>,
   lines: Record<string, unknown>[],
 ) {
-  if (requestType === 'storeRequisition') {
-    const quantity = sumLineNumbers(lines, ['quantityRequested', 'quantity', 'QuantityRequested', 'Quantity_Requested'])
+  if (requestType === 'storeRequisition' || requestType === 'purchaseRequisition') {
+    const quantity = sumLineNumbers(lines, [
+      'quantityRequested',
+      'quantity',
+      'QuantityRequested',
+      'Quantity_Requested',
+      'Quantity',
+    ])
     return { label: 'Quantity requested', value: String(quantity || amount || 0) }
   }
   if (requestType === 'leave') {
@@ -225,8 +231,11 @@ export function ApprovalDetail() {
                 <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                   <div>
-                    <p className="font-semibold">Source document is no longer published by Business Central</p>
-                    <p className="mt-1 text-amber-800">The approval entry and its audit trail are still available. Open entries can still be approved or rejected using the Business Central approval entry number.</p>
+                    <p className="font-semibold">Source document details could not be loaded from Business Central</p>
+                    <p className="mt-1 text-amber-800">
+                      The approval entry and timeline are still valid — this is not auto-approved.
+                      You can still Approve or Reject. For purchase requisitions, refresh after deploy if lines stay missing.
+                    </p>
                   </div>
                 </div>
               ) : null}

@@ -10,6 +10,7 @@ import {
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
+import { fetchMergedEmployeeRecord, resolveEffectiveBcUserId } from './employeeProfile.js'
 import { formatBcSoapDate } from './staff.js'
 import {
   canRequestApprovalForSpec,
@@ -721,12 +722,20 @@ const storeRequisition: ModuleSpec = {
 const purchaseRequisition: ModuleSpec = {
   module: 'purchase-requisition',
   headerService: 'QyPurchaseHeader',
-  headerTableId: 52121800,
+  // BC stores portal PQs as Purchase Header (table 38) Quotes with DocApprovalType=Requisition.
+  // Approval entries and attachments use Database::"Purchase Header" (= 38), not a custom table.
+  headerTableId: 38,
   ownerField: 'AssignedUserID',
   ownerSource: 'userID',
-  extraListFilter: `DocApprovalType eq 'Requisition'`,
+  // Prefer client-side filter: DocApprovalType is not always published on QyPurchaseHeader.
+  postListFilter: (row) => {
+    const docApproval = fieldText(row, ['DocApprovalType', 'Doc_Approval_Type'])
+    if (docApproval) return /^requisition$/i.test(docApproval)
+    const docType = fieldText(row, ['DocumentType', 'Document_Type'])
+    return !docType || /^quote$/i.test(docType)
+  },
   lineService: 'QyPurchaseLine',
-  lineHeaderField: 'Document_No_',
+  lineHeaderField: 'DocumentNo',
   soap: {
     saveHeader: 'PurchaseRequisitionHeader',
     saveLine: 'PurchaseRequisitionLine',
@@ -771,7 +780,7 @@ const purchaseRequisition: ModuleSpec = {
     submit: ({ user, no }) => ({
       reqNo: no,
       employeeNo: user.employeeNo,
-      tableID: 52121800,
+      tableID: 38,
     }),
     cancel: ({ user, no }) => ({
       requisitionNo: no,
@@ -1606,6 +1615,14 @@ function ownerValue(spec: ModuleSpec, user: AuthUser) {
   return user.userID
 }
 
+/** Prefer mapped BC login (e.g. HERMON_GETACHEW) over SOAP service account ADMIN. */
+async function withEffectiveBcUser(user: AuthUser): Promise<AuthUser> {
+  const employeeRow = await fetchMergedEmployeeRecord(user.employeeNo).catch(() => null)
+  const bcUserId = resolveEffectiveBcUserId(user.userID, employeeRow, user.employeeNo)
+  if (!bcUserId || bcUserId === user.userID) return user
+  return { ...user, userID: bcUserId }
+}
+
 function requestWithBody(body: Record<string, unknown>, params: Record<string, string> = {}) {
   return { body, params } as unknown as Request
 }
@@ -1669,6 +1686,27 @@ export async function getPortalModuleDocument(
     return null
   }
 
+  // Purchase requisitions are Purchase Header Quotes. Try Document Type + No first,
+  // then plain No — some QyPurchaseHeader pages require the composite key shape.
+  if (spec.module === 'purchase-requisition') {
+    const filters = [
+      `No eq '${odataString(no)}' and Document_Type eq 'Quote'`,
+      `No eq '${odataString(no)}' and DocumentType eq 'Quote'`,
+      `No eq '${odataString(no)}'`,
+    ]
+    for (const filter of filters) {
+      const rows = (await fetchOData(spec.headerService, {
+        $filter: `${filter}${ownerFilter}`,
+        $top: 1,
+      }).catch(() => null)) as ODataRecord[] | null
+      const row = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+      if (!row) continue
+      if (spec.postListFilter && !spec.postListFilter(row)) continue
+      return row
+    }
+    return null
+  }
+
   const rows = (await fetchOData(spec.headerService, {
     $filter: `${headerKey} eq '${odataString(no)}'${ownerFilter}`,
     $top: 1,
@@ -1714,10 +1752,17 @@ export async function listPortalModuleLines(
   const lineHeaderField = gatePassBinding?.lineHeaderField ?? spec.lineHeaderField
   const lineDocumentNo = gatePassBinding?.documentNo ?? no
   if (!lineService || !lineHeaderField) return []
-  const rows = await fetchOData(lineService, {
-    $filter: `${lineHeaderField} eq '${odataString(lineDocumentNo)}'`,
-  }).catch(() => [] as ODataRecord[])
-  return Array.isArray(rows) ? rows : []
+  const lineFieldCandidates =
+    spec.module === 'purchase-requisition'
+      ? [lineHeaderField, 'DocumentNo', 'Document_No', 'Document_No_', 'No']
+      : [lineHeaderField]
+  for (const field of [...new Set(lineFieldCandidates.filter(Boolean))]) {
+    const rows = await fetchOData(lineService, {
+      $filter: `${field} eq '${odataString(lineDocumentNo)}'`,
+    }).catch(() => null)
+    if (Array.isArray(rows)) return rows
+  }
+  return []
 }
 
 function lineHasContent(line: Record<string, unknown>) {
@@ -1766,12 +1811,15 @@ export async function createPortalModuleRequest(
   user: AuthUser,
   body: Record<string, unknown>,
 ) {
+  const effectiveUser =
+    spec.module === 'purchase-requisition' ? await withEffectiveBcUser(user) : user
+
   if (spec.module === 'gate-pass') {
-    const no = await createGatePassViaOData(spec, user, body)
+    const no = await createGatePassViaOData(spec, effectiveUser, body)
     if (body.submit === true && spec.soap.submit && spec.params?.submit) {
       const submitParams = await spec.params.submit({
         req: requestWithBody(body),
-        user,
+        user: effectiveUser,
         no,
       })
       const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
@@ -1801,14 +1849,14 @@ export async function createPortalModuleRequest(
   const headerKey = spec.headerKey ?? 'No'
   const existingNumbers = spec.headerReturnsBoolean
     ? new Set(
-        (await listPortalModuleRows(spec, user)).map((row) =>
+        (await listPortalModuleRows(spec, effectiveUser)).map((row) =>
           fieldText(row, [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No']),
         ),
       )
     : null
   const headerParams = await spec.params.saveHeader({
     req: headerRequest,
-    user,
+    user: effectiveUser,
     no: '',
   })
   const headerResult = await callSoapMethod(spec.soap.saveHeader, headerParams)
@@ -1822,7 +1870,7 @@ export async function createPortalModuleRequest(
     no = ''
     for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
-      const rows = await listPortalModuleRows(spec, user)
+      const rows = await listPortalModuleRows(spec, effectiveUser)
       const created = rows.find((row) => {
         const candidate = fieldText(row, [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No'])
         return candidate && !existingNumbers?.has(candidate)
@@ -1850,7 +1898,7 @@ export async function createPortalModuleRequest(
       }
       const lineParams = await spec.params.saveLine({
         req: requestWithBody(line),
-        user,
+        user: effectiveUser,
         no,
       })
       const lineResult = await callSoapMethod(spec.soap.saveLine, lineParams)
@@ -1897,11 +1945,11 @@ export async function createPortalModuleRequest(
   if (body.submit === true && spec.soap.submit && spec.params?.submit) {
     const submitParams = await spec.params.submit({
       req: requestWithBody(body),
-      user,
+      user: effectiveUser,
       no,
     })
     const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
-    if (!ok(submitResult)) {
+    if (!soapActionOk(spec, submitResult)) {
       throw Object.assign(
         new Error(`Business Central created ${no}, but approval submission failed`),
         { status: 502, documentNo: no },
@@ -1948,7 +1996,9 @@ export async function submitPortalModuleRequest(
       status: 501,
     })
   }
-  const header = await getPortalModuleDocument(spec, user, no, false)
+  const effectiveUser =
+    spec.module === 'purchase-requisition' ? await withEffectiveBcUser(user) : user
+  const header = await getPortalModuleDocument(spec, effectiveUser, no, false)
   if (!header) {
     throw Object.assign(new Error(`Business Central document ${no} was not found`), { status: 404 })
   }
@@ -1997,7 +2047,7 @@ export async function submitPortalModuleRequest(
     req: requestWithBody({
       transferNo: fieldText(document ?? {}, ['TransferNo', 'Transfer_No']),
     }),
-    user,
+    user: effectiveUser,
     no,
   })
   const result = await callSoapMethod(spec.soap.submit, params)

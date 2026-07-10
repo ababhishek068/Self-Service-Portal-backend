@@ -11,7 +11,12 @@ import {
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
-import { resolveEmployeeJobTitleByNo } from './employeeProfile.js'
+import {
+  fetchMergedEmployeeRecord,
+  resolveEffectiveBcUserId,
+  resolveEmployeeJobTitleByNo,
+} from './employeeProfile.js'
+import { decidePortalApproval } from './portalApproval.js'
 import {
   approvalModuleFromEntry,
   approvalTableFilter,
@@ -1001,18 +1006,39 @@ async function requestDetail(
   if (!row) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
   const attachmentDocNo = resolveAttachmentDocNo(spec, row, no)
   const gatePassBinding = module === 'gatePass' ? gatePassLineBinding(row, no) : null
+  // Purchase lines / attachments must not fail the whole approval detail — that used to
+  // surface as the yellow "source document no longer published" fallback.
   const [lines, approvers, attachments] = await Promise.all([
-    listPortalModuleLines(spec, row, no),
-    fetchPortalApprovalEntries(spec, no, row),
+    listPortalModuleLines(spec, row, no).catch(() => [] as ODataRecord[]),
+    fetchPortalApprovalEntries(spec, no, row).catch(() => [] as ODataRecord[]),
     spec.headerTableId > 0
       ? fetchDocumentAttachments(attachmentDocNo, spec.headerTableId).catch(() => [] as ODataRecord[])
       : Promise.resolve([] as ODataRecord[]),
   ])
   const mapped = mapRequest(row, module as PortalModuleKey)
+  const postingDescription = text(row, [
+    'PostingDescription',
+    'Posting_Description',
+    'Description',
+    'Purpose',
+    'Reason',
+  ])
   return {
     ...mapped,
+    title:
+      module === 'purchaseRequisition'
+        ? postingDescription || mapped.title || `Purchase Requisition ${no}`
+        : mapped.title,
+    makerEmployeeNo:
+      mapped.makerEmployeeNo ||
+      text(row, ['AssignedUserID', 'Assigned_User_ID', 'RequesterID', 'UserID']),
+    makerName:
+      mapped.makerName ||
+      text(row, ['AssignedUserID', 'Assigned_User_ID', 'RequesterName', 'UserID']),
     payload: {
       ...row,
+      sourceDocumentAvailable: true,
+      reason: postingDescription || text(row, ['reason']),
       ...(module === 'gatePass' && gatePassBinding
         ? {
             gatePassSource: gatePassBinding.source,
@@ -1693,12 +1719,22 @@ export function buildPortalApiRouter() {
     '/approvals/:id/decide',
     safe(async (req, res) => {
       const authUser = user(req)
+      const employeeRow = await fetchMergedEmployeeRecord(authUser.employeeNo).catch(() => null)
+      const bcUserId = resolveEffectiveBcUserId(authUser.userID, employeeRow, authUser.employeeNo)
+      if (bcUserId && bcUserId !== authUser.userID && req.session.authUser) {
+        req.session.authUser = { ...req.session.authUser, userID: bcUserId }
+      }
+      const approverUserId = bcUserId || authUser.userID
+
       const rawId = String(req.params.id)
-      const { requestId, no } = await resolveApprovalReference(rawId, authUser)
+      const { requestId, no } = await resolveApprovalReference(rawId, {
+        ...authUser,
+        userID: approverUserId,
+      })
       const entries = (await fetchOData('QyApprovalEntry', {
         $filter:
           `DocumentNo eq '${odataString(no)}'` +
-          ` and ApproverID eq '${odataString(authUser.userID)}'` +
+          ` and ApproverID eq '${odataString(approverUserId)}'` +
           ` and Status eq 'Open'`,
         $top: 1,
       })) as ODataRecord[] | null
@@ -1706,17 +1742,19 @@ export function buildPortalApiRouter() {
       if (!entry) throw portalError('Open approval entry not found', 404)
 
       const decision = req.body?.decision === 'Rejected' ? 'Rejected' : 'Approved'
-      const result = await callSoapMethod('DocumentApproval', {
-        entryNo: text(entry, ['EntryNo', 'Entry_No']),
+      await decidePortalApproval({
+        entry,
         docNo: no,
-        userID: authUser.userID,
-        isApprove: decision === 'Approved',
+        approverUserId,
+        decision,
         comments: String(req.body?.comment ?? ''),
       })
-      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
-        throw portalError(`Business Central did not mark ${no} as ${decision.toLowerCase()}`, 502)
-      }
-      res.json({ ...(await requestDetail(requestId, authUser, { forApproval: true }).catch(() => ({ id: requestId }))), status: decision })
+      res.json({
+        ...(await requestDetail(requestId, { ...authUser, userID: approverUserId }, { forApproval: true }).catch(() => ({
+          id: requestId,
+        }))),
+        status: decision,
+      })
     }),
   )
 

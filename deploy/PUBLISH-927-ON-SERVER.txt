@@ -1,0 +1,39 @@
+ABH UAT — publish BC24_TA App 1.0.2.927 (leave cancel + approve fixes)
+================================================================================
+Copy ONE file to server:
+  Technology Associates EA Ltd_BC24_TA App_1.0.2.927.app
+  → C:\Users\Administrator\Desktop\Erp\
+  Size MUST be 7,613,474 bytes (7,435 KB in Explorer)
+
+Built from 921 (last version that installed on this server) — NOT from 922/925.
+
+Run in Business Central Administration Shell AS ADMINISTRATOR:
+
+cd "$env:USERPROFILE\Desktop\Erp"
+
+# Step 0 — confirm file
+Get-Item ".\Technology Associates EA Ltd_BC24_TA App_1.0.2.927.app" | Format-List Name, Length
+
+# Step 1 — publish (NO SkipVerification first — shows real error if package bad)
+Publish-NAVApp -Path ".\Technology Associates EA Ltd_BC24_TA App_1.0.2.927.app" -ServerInstance BC240
+
+# If step 1 errors with signature/verification, retry with:
+# Publish-NAVApp -Path ".\Technology Associates EA Ltd_BC24_TA App_1.0.2.927.app" -ServerInstance BC240 -SkipVerification
+
+# Step 2 — confirm published
+Get-NAVAppInfo -ServerInstance BC240 -Name "BC24_TA App" -Publisher "Technology Associates EA Ltd" | Where-Object { $_.Version -eq [version]"1.0.2.927" } | Format-List Name, Version, IsPublished
+
+# Step 3 — upgrade tenant (921 already installed → use DataUpgrade, NOT fresh Install)
+Sync-NAVApp -ServerInstance BC240 -Tenant default -Name "BC24_TA App" -Publisher "Technology Associates EA Ltd" -Version 1.0.2.927
+Start-NAVAppDataUpgrade -ServerInstance BC240 -Tenant default -Name "BC24_TA App" -Publisher "Technology Associates EA Ltd" -Version 1.0.2.927
+
+Get-NAVAppInfo -ServerInstance BC240 -Tenant default -TenantSpecificProperties -Name "BC24_TA App" | Where-Object { $_.Version -eq [version]"1.0.2.927" } | Format-List Version, IsInstalled
+
+# Step 4 — BC web: Web Services → CuStaffPortal 50049 → Published = Yes
+
+TROUBLESHOOT — if Step 1 fails, test whether ANY repack works:
+  Publish-NAVApp -Path ".\Technology Associates EA Ltd_BC24_TA App_1.0.2.921.app" -ServerInstance BC240
+  (921 unchanged — if this also fails, problem is server/license not the file)
+
+If 921 publishes but 927 does not → run on server (builds 927 from 921 locally):
+  See install-abh-bc-925-server.ps1 + StaffPortalCodeunit.Codeunit.al in Desktop\Erp

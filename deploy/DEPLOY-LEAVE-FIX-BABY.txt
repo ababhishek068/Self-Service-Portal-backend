@@ -1,0 +1,67 @@
+# ABH UAT — Leave fix (Sick + Cancel) — BABY STEPS
+# Date: 2026-07-10 | Portal BUILD_ID: leave-fix-2026-07-10-v5 | BC target: 1.0.2.931
+
+You need TWO deploys:
+  A) Portal ZIP (you can do on AnyDesk)
+  B) BC AL compile (Felix — or VS Code AL on server)
+
+================================================================================
+PART A — PORTAL (you do this)
+================================================================================
+
+1. On Mac Desktop find:
+   SelfServiceSuite-ABH-UAT-2026-07-10-leave-fix-v5-full-offline.zip
+
+2. AnyDesk → server 146.161.102.7 → copy ZIP to server Desktop
+
+3. PowerShell AS ADMIN:
+
+   powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+
+4. Extract ZIP to C:\TA  (must be C:\TA\SelfServiceSuite\...)
+
+5. Start:
+
+   C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
+
+6. Browser: http://146.161.102.7:4000/api/health
+   Must show: leave-fix-2026-07-10-v5
+
+7. Ctrl+F5 on portal, log out, log in
+
+================================================================================
+PART B — BUSINESS CENTRAL (Felix OR AL on server)
+================================================================================
+
+WHY: Sick leave fails because BC checks HR Leave Allocation (often empty).
+     Cancel only toasts because BC 922 needs updated CuStaffPortal AL.
+
+FILE TO SEND FELIX:
+   deploy/StaffPortalCodeunit.Codeunit.al
+   (includes: sick leave balance fix + leave cancel delete/cancel)
+
+Felix compiles → Technology Associates EA Ltd_BC24_TA App_1.0.2.931.app
+
+On server (BC Administration Shell AS ADMIN):
+
+   cd $env:USERPROFILE\Desktop\Erp
+   Publish-NAVApp -Path ".\Technology Associates EA Ltd_BC24_TA App_1.0.2.931.app" -ServerInstance BC240 -SkipVerification
+   Sync-NAVApp -ServerInstance BC240 -Tenant default -Name "BC24_TA App" -Publisher "Technology Associates EA Ltd" -Version 1.0.2.931
+   Start-NAVAppDataUpgrade -ServerInstance BC240 -Tenant default -Name "BC24_TA App" -Publisher "Technology Associates EA Ltd" -Version 1.0.2.931
+
+8. BC → Web Services → CuStaffPortal (codeunit 50049) → Save
+
+================================================================================
+TEST
+================================================================================
+
+1. Sick leave: 1 day → should create (no "balance less than days applied")
+2. Pending leave → Cancel → row gone or back to Open (not fake toast)
+3. Open draft → Cancel → row deleted from list
+
+================================================================================
+DO NOT USE
+================================================================================
+
+- Mac-repacked .app files (925, 927, 928) — they do not publish on this server
+- Install-AbhBc928.ps1 unless Felix .app publish works from server build

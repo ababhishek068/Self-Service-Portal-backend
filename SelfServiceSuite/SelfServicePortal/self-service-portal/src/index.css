@@ -1240,6 +1240,55 @@ textarea {
   box-shadow: inset 3px 0 0 var(--portal-orange);
 }
 
+@keyframes portal-flow-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes portal-flow-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(25, 118, 210, 0.32),
+      0 10px 18px rgba(25, 118, 210, 0.14);
+  }
+  50% {
+    box-shadow:
+      0 0 0 7px rgba(25, 118, 210, 0),
+      0 10px 18px rgba(25, 118, 210, 0.2);
+  }
+}
+
+.portal-flow-step {
+  animation: portal-flow-step-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.portal-flow-rail {
+  background: linear-gradient(180deg, var(--portal-green-light), var(--portal-blue-action));
+  height: var(--portal-flow-progress);
+  transition:
+    width 0.45s ease,
+    height 0.45s ease;
+}
+
+.portal-flow-node-active {
+  animation: portal-flow-pulse 1.8s ease-in-out infinite;
+}
+
+@media (min-width: 640px) {
+  .portal-flow-rail {
+    background: linear-gradient(90deg, var(--portal-green-light), var(--portal-blue-action));
+    height: 0.125rem;
+    width: var(--portal-flow-progress);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -1264,7 +1313,9 @@ textarea {
   .portal-loader-ring,
   .portal-loader-dot,
   .portal-progress-bar-mini::after,
-  .portal-skeleton::after {
+  .portal-skeleton::after,
+  .portal-flow-step,
+  .portal-flow-node-active {
     animation: none !important;
   }
 

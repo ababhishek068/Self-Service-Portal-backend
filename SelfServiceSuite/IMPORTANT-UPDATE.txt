@@ -1,36 +1,34 @@
-SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
-================================================
+SELF SERVICE SUITE - ABH UAT FULL OFFLINE PACKAGE
+=================================================
 
-Release date: 2026-06-25
-See RELEASE-NOTES-2026-06-25.txt for per-module guidance and testing notes.
+Release: 2026-07-10 full-suite-v9
 
-SUMMARY
--------
-- Pending Approval status and Cancel on list/detail
-- Finance attachments: upload on Draft/Open only
-- Imprest lines: auto-calculated amount with manual entry fallback
-- Staff claims: medical amount and hospital category auto-fill
-- Petty cash replenishment detail fields (accounts and amounts)
-- Transfer order status correct after request approval
-- Vehicle Transfer: coming soon (disabled)
+WHAT IS INCLUDED
+----------------
+- Leave Requisition fixes
+- Leave draft creation now exits the New Leave Request form immediately
+- After creating a draft, the screen opens directly on the animated Review / Attachments page
+- The selected leave row stays visible above the detail card, matching the normal leave flow
+- Leave Requisition detail is now one page at a time: Draft, Review, Approval
+- Cancel button hidden after leave is sent for approval
+- Leave Application cancel support in BC app 1.0.2.933
+- Payslip module
+- Purchase Requisition module
+- Store Requisition module
+- Approval process fixes
+- ABH UAT env configured for 146.161.102.7 / BC240 / ABH_UAT_LIVE
 
-INSTALL / UPDATE ON CLIENT HOST
--------------------------------
-1. Stop services:
-   powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+INSTALL / UPDATE ON ABH SERVER
+------------------------------
+1. Stop current Self Service services.
+2. Backup existing C:\TA\SelfServiceSuite folder.
+3. Extract this ZIP to C:\TA so the folder is exactly C:\TA\SelfServiceSuite.
+4. Start the services again using the existing start script.
+5. Open http://146.161.102.7:4000 and press Ctrl+F5 once.
 
-2. Backup existing folder:
-   C:\TA\SelfServiceSuite -> C:\TA\SelfServiceSuite-backup
+BC APP
+------
+This package also includes:
+SelfServiceBackend\deploy\Technology Associates EA Ltd_BC24_TA App_1.0.2.933.app
 
-3. Extract this ZIP to C:\TA so the folder is exactly:
-   C:\TA\SelfServiceSuite
-
-4. Start all services:
-   C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
-
-5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
-
-If .env is ever missing, copy the template for YOUR client:
-   ABH:  SelfServiceBackend\deploy\windows\host.env.abh-uat.example
-   HIJRA: SelfServiceBackend\deploy\windows\host.env.hijra-uat.example
-   See SelfServiceBackend\deploy\windows\ENV-ON-NEW-HOST.txt
+Publish/sync/data-upgrade that BC app only if the server is not already on 1.0.2.933.

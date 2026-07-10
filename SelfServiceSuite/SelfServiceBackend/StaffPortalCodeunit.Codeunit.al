@@ -3062,80 +3062,10 @@ codeunit 50049 "Staff Portal Codeunit"
             LeaveApp."End Date" := Dt2Date(endDate);
 
         ApplyPortalReturnDate(LeaveApp, returnDate, LeaveApp."End Date");
-        if LeaveApp.Annual or LeaveApp.Mourning then
-            LeaveApp.Validate("Days Applied")
-        else
-            PortalValidateDaysApplied(LeaveApp);
+        LeaveApp.Validate("Days Applied");
         LeaveApp.Reliever := reliever;
         LeaveApp.Validate(Reliever);
         LeaveApp."Request Leave Allowance" := isRequestLeaveAllowance;
-    end;
-
-    /// Non-annual leave (sick, compassionate, etc.): BC table validation only counts HR Leave Allocation
-    /// rows. When HR has not posted allocation yet, fall back to Leave Types.Days so portal matches policy.
-    local procedure PortalValidateDaysApplied(var LeaveApp: Record "HR Leave Application")
-    var
-        HRLeaveCal: Record "HR Leave Calendar";
-        HRLeaveAlloc: Record "HR Leave Allocation";
-        LeaveTypes: Record "Leave Types";
-    begin
-        LeaveApp.TestField("Leave Type");
-
-        Clear(LeaveApp."Reimbursed Days");
-        Clear(LeaveApp."Allocated Days");
-        Clear(LeaveApp."Current Leave Balance");
-        Clear(LeaveApp."Current Total Leave Taken");
-
-        HRLeaveCal.Reset();
-        HRLeaveCal.SetRange(Current, true);
-        if not HRLeaveCal.FindFirst() then
-            Error('No Leave Calendar Exists');
-        if HRLeaveCal.Count > 1 then
-            Error('No active calendar exists');
-
-        HRLeaveAlloc.Reset();
-        HRLeaveAlloc.SetRange("No.", LeaveApp."Employee No.");
-        HRLeaveAlloc.SetRange("Entry Type", HRLeaveAlloc."Entry Type"::"Negative Adjustment");
-        HRLeaveAlloc.SetRange("Leave Type", LeaveApp."Leave Type");
-        HRLeaveAlloc.SetRange("Posting Type", HRLeaveAlloc."Posting Type"::Normal);
-        if HRLeaveAlloc.FindSet() then begin
-            HRLeaveAlloc.CalcSums("No. Of days");
-            LeaveApp."Current Total Leave Taken" := (HRLeaveAlloc."No. Of days") * -1;
-        end;
-
-        HRLeaveAlloc.Reset();
-        HRLeaveAlloc.SetRange("No.", LeaveApp."Employee No.");
-        HRLeaveAlloc.SetRange("Leave Type", LeaveApp."Leave Type");
-        HRLeaveAlloc.SetRange("Entry Type", HRLeaveAlloc."Entry Type"::"Positive Adjustment");
-        HRLeaveAlloc.SetRange("Posting Type", HRLeaveAlloc."Posting Type"::Reimbursement);
-        if HRLeaveAlloc.FindSet() then begin
-            HRLeaveAlloc.CalcSums("No. Of days");
-            LeaveApp."Reimbursed Days" := HRLeaveAlloc."No. Of days";
-        end;
-
-        HRLeaveAlloc.Reset();
-        HRLeaveAlloc.SetRange("No.", LeaveApp."Employee No.");
-        HRLeaveAlloc.SetRange("Entry Type", HRLeaveAlloc."Entry Type"::"Positive Adjustment");
-        HRLeaveAlloc.SetRange("Leave Type", LeaveApp."Leave Type");
-        HRLeaveAlloc.SetRange("Posting Type", HRLeaveAlloc."Posting Type"::Normal);
-        if HRLeaveAlloc.FindSet() then begin
-            HRLeaveAlloc.CalcSums("No. Of days");
-            LeaveApp."Allocated Days" := HRLeaveAlloc."No. Of days";
-        end;
-
-        if LeaveApp."Allocated Days" = 0 then begin
-            if LeaveTypes.Get(LeaveApp."Leave Type") then
-                if LeaveTypes.Days > 0 then
-                    LeaveApp."Allocated Days" := LeaveTypes.Days;
-        end;
-
-        LeaveApp."Current Leave Balance" :=
-            (LeaveApp."Allocated Days" + LeaveApp."Reimbursed Days") - LeaveApp."Current Total Leave Taken";
-
-        if LeaveApp."Current Leave Balance" < LeaveApp."Days Applied" then
-            Error('Your current leave balance is less than days applied');
-
-        LeaveApp."Application Date" := Today;
     end;
 
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
