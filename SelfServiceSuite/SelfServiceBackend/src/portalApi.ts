@@ -12,7 +12,7 @@ import {
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
 import {
-  fetchEmployeeSalaryBase,
+  fetchEmployeeSalaryBaseFast,
   probeEmployeeSalarySources,
   resolveEmployeeJobTitleByNo,
 } from './employeeProfile.js'
@@ -29,11 +29,18 @@ import {
   fallbackApprovalStepsFromHeader,
   leaveDocumentNoCandidates,
   mapApprovalSteps,
+  mapApprovalStepsWithSequence,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
 } from './leaveApprovalSteps.js'
 import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvanceAmount.js'
-import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, resolveLeaveStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
+import {
+  enrichFinanceHeaderFromEmployee,
+  enrichFinanceHeaderRow,
+  financeSessionHints,
+  isFinanceDetailModule,
+} from './financeRequestEnrichment.js'
+import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
   cancelPortalModuleRequest,
   createPortalModuleRequest,
@@ -98,6 +105,14 @@ function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
 }
 
+/**
+ * Deploy-tracking stamp. Bumped on every build of this file so the running
+ * version is visible in the portal (Profile page) and via GET /api/portal-build.
+ * If the Profile page shows an older stamp than expected, the deployed
+ * dist/portalApi.js is stale.
+ */
+export const PORTAL_API_BUILD = 'v7 — 2026-07-13 01:55 (gate pass source-document dropdowns)'
+
 interface LookupSpec {
   service: string
   valueKeys: string[]
@@ -106,6 +121,8 @@ interface LookupSpec {
   meta?: Record<string, string[]>
   match?: { keys: string[]; value: string }
   plainLabel?: boolean
+  /** Used when the primary service is not published/available in BC. */
+  fallback?: LookupSpec
 }
 
 const LOOKUP_SPECS: Record<string, LookupSpec> = {
@@ -237,16 +254,51 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     plainLabel: true,
   },
   departments: {
-    service: 'QyDimensionValues',
-    valueKeys: ['Code'],
-    labelKeys: ['Name', 'Code'],
-    match: { keys: ['AuxiliaryIndex1', 'Auxiliary_Index_1'], value: 'DEPART/DIST' },
+    // ERP parity: the Requesting Department field relates to the custom
+    // "Departments/Districts" table (50935) filtered to level = Department —
+    // NOT the raw dimension values. Requires page 51479 "Departments List"
+    // published as web service "PgDepartmentsList" in BC.
+    service: 'PgDepartmentsList',
+    valueKeys: ['Department_Code', 'DepartmentCode', 'Code'],
+    labelKeys: ['Department_Name', 'DepartmentName', 'Name', 'Department_Code'],
+    filter: `level eq 'Department'`,
     plainLabel: true,
+    fallback: {
+      service: 'QyDimensionValues',
+      valueKeys: ['Code'],
+      labelKeys: ['Name', 'Code'],
+      match: { keys: ['AuxiliaryIndex1', 'Auxiliary_Index_1'], value: 'DEPART/DIST' },
+      plainLabel: true,
+    },
   },
   'posted-receipts': {
     service: 'PgPostedReceipts',
     valueKeys: ['No'],
     labelKeys: ['ReceivedFrom', 'No'],
+  },
+  // Gate Pass source-document dropdowns: only offer documents BC will actually
+  // accept (the table's own TableRelation restricts "Transfer No" the same way).
+  'gate-pass-store-issue': {
+    service: 'QyStoreRequisitionHeader',
+    valueKeys: ['No'],
+    labelKeys: ['RequestDescription'],
+    filter: `Status eq 'Posted'`,
+  },
+  'gate-pass-transfer-order': {
+    // Requires query 50126 "Gate Pass Transfer Shipments" published as web
+    // service "QyGatePassTransferShipments" (v1.0.2.372).
+    service: 'QyGatePassTransferShipments',
+    valueKeys: ['No'],
+    labelKeys: ['TransferfromCode'],
+    filter: `GatePassNo eq ''`,
+  },
+  'gate-pass-asset-transfer': {
+    // Requires query 50127 "Gate Pass Asset Transfers" published as web
+    // service "QyGatePassAssetTransfers" (v1.0.2.372).
+    service: 'QyGatePassAssetTransfers',
+    valueKeys: ['No'],
+    labelKeys: ['AssetDescription'],
+    filter: `Status eq 'Approved'`,
   },
 }
 
@@ -295,11 +347,61 @@ function parseRequestId(id: string) {
   return { module, no: trimmed.slice(module.length + 1) }
 }
 
+/**
+ * BC approval workflows do not always stamp `Approver ID` with the same User ID
+ * the portal logs in with — a user can have more than one User Setup record, or
+ * the workflow recorded the approver under an alternate id. That mismatch is why
+ * an Open entry can fail to appear in the approver's queue even though the
+ * document detail shows them as the pending approver. Resolve every identity that
+ * belongs to this employee so the same person matches their entries across ALL
+ * modules (list, count, dashboard, open and decide).
+ */
+const approverIdCandidateCache = new Map<string, { ids: string[]; at: number }>()
+
+async function approverIdCandidates(authUser: AuthUser): Promise<string[]> {
+  const ids = new Set<string>()
+  const add = (value: unknown) => {
+    const trimmed = String(value ?? '').trim()
+    if (trimmed) ids.add(trimmed)
+  }
+  add(authUser.userID)
+  add(authUser.employeeNo)
+
+  const cacheKey = `${authUser.userID}|${authUser.employeeNo}`
+  const cached = approverIdCandidateCache.get(cacheKey)
+  if (cached && Date.now() - cached.at < 5 * 60_000) {
+    for (const id of cached.ids) add(id)
+    return [...ids]
+  }
+
+  if (authUser.employeeNo) {
+    const rows = (await fetchOData('QyUserSetup', {
+      $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
+      $top: 50,
+    }).catch(() => [])) as ODataRecord[] | null
+    for (const row of Array.isArray(rows) ? rows : []) {
+      add(text(row, ['UserID', 'User_ID']))
+      add(text(row, ['SalespersonCode', 'Salespers_Purch_Code', 'SalespersPurchCode', 'ApproverID']))
+    }
+  }
+
+  const resolved = [...ids]
+  approverIdCandidateCache.set(cacheKey, { ids: resolved, at: Date.now() })
+  return resolved
+}
+
+/** OData `(ApproverID eq 'a' or ApproverID eq 'b' ...)` clause for every identity. */
+function approverIdFilterClause(ids: string[]): string {
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+  if (!unique.length) return `ApproverID eq ''`
+  if (unique.length === 1) return `ApproverID eq '${odataString(unique[0]!)}'`
+  return `(${unique.map((id) => `ApproverID eq '${odataString(id)}'`).join(' or ')})`
+}
+
 async function fetchApproverEntriesForDocument(no: string, authUser: AuthUser) {
+  const clause = approverIdFilterClause(await approverIdCandidates(authUser))
   const rows = (await fetchOData('QyApprovalEntry', {
-    $filter:
-      `DocumentNo eq '${odataString(no)}'` +
-      ` and ApproverID eq '${odataString(authUser.userID)}'`,
+    $filter: `DocumentNo eq '${odataString(no)}' and ${clause}`,
   })) as ODataRecord[] | null
   return Array.isArray(rows) ? rows : []
 }
@@ -454,11 +556,21 @@ function approvalSourceDocumentExists(
   existingByModule: Map<string, Set<string>>,
 ) {
   const existing = existingByModule.get(module)
-  if (!existing) return true
+  // Fail open: no set, or an all-empty set (a lookup miss for the whole module,
+  // not proof every source was deleted) must not hide a live pending entry.
+  if (!existing || existing.size === 0) return true
 
   const candidates =
     module === 'leave' ? leaveDocumentNoCandidates(documentNo) : [documentNo.trim()].filter(Boolean)
-  return candidates.some((candidate) => existing.has(normalizedApprovalDocKey(candidate)))
+  const found = candidates.some((candidate) => existing.has(normalizedApprovalDocKey(candidate)))
+  if (found) return true
+
+  // Only LEAVE has a reliable 1:1 header lookup, so only leave may hide a "source
+  // deleted" entry. For every other module the header service / table-38
+  // purchase-vs-store classification is not reliable enough to *hide* a live
+  // pending approval — dropping them silently removes real work from the queue
+  // (this is what hid Purchase/Store requisitions from approvers). Keep them.
+  return module !== 'leave'
 }
 
 /**
@@ -702,7 +814,7 @@ async function mappedModuleRows(
     const salaryBase =
       authUser.monthlySalaryBase && authUser.monthlySalaryBase > 0
         ? authUser.monthlySalaryBase
-        : await fetchEmployeeSalaryBase(authUser.employeeNo)
+        : await fetchEmployeeSalaryBaseFast(authUser.employeeNo)
     const enrichedRows =
       salaryBase > 0
         ? rows.map((row) => injectSalaryAdvanceSalaryHint(row, salaryBase))
@@ -711,8 +823,29 @@ async function mappedModuleRows(
       .map((row) => mapRequest(row, module as PortalModuleKey))
       .filter((row) => true)
   }
+  if (isFinanceDetailModule(module)) {
+    const hints = financeSessionHints(authUser)
+    return rows
+      .map((row) => {
+        const mapped = mapRequest(
+          enrichFinanceHeaderRow(module as PortalModuleKey, row, hints),
+          module as PortalModuleKey,
+        )
+        return {
+          ...mapped,
+          status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+        }
+      })
+      .filter((row) => true)
+  }
   return rows
-    .map((row) => mapRequest(row, module as PortalModuleKey))
+    .map((row) => {
+      const mapped = mapRequest(row, module as PortalModuleKey)
+      return {
+        ...mapped,
+        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+      }
+    })
     .filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
 }
 
@@ -1010,6 +1143,15 @@ async function requestDetail(
   let mappedLines = mapModuleLines(module, row, Array.isArray(lines) ? lines : [])
   let enrichedSalaryBase = 0
   let payloadRow: ODataRecord = row
+  if (isFinanceDetailModule(module)) {
+    headerForMapping = await enrichFinanceHeaderFromEmployee(
+      module as PortalModuleKey,
+      row,
+      authUser,
+      mappedLines,
+    )
+    payloadRow = headerForMapping
+  }
   if (module === 'salaryAdvance') {
     const staffNo =
       text(row, ['StaffNo', 'Staff_No', 'EmployeeNo', 'Employee_No']) || authUser.employeeNo
@@ -1024,8 +1166,8 @@ async function requestDetail(
       customerNo,
       docNo: no,
       monthlySalaryBase: authUser.monthlySalaryBase,
-      fast: options.fast,
-      skipSoap: options.fast,
+      fast: true,
+      skipSoap: true,
     })
     headerForMapping = enriched.header
     mappedLines = enriched.lines
@@ -1035,6 +1177,7 @@ async function requestDetail(
     }
   }
   const mapped = mapRequest(headerForMapping, module as PortalModuleKey)
+  const resolvedStatus = resolveModuleRequestStatus(headerForMapping, module as PortalModuleKey, approvers)
   const salaryAdvanceAmount =
     module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
   const displayAmount =
@@ -1045,6 +1188,7 @@ async function requestDetail(
       : salaryAdvanceAmount
   return {
     ...mapped,
+    status: resolvedStatus,
     ...(displayAmount > 0 ? { amount: displayAmount } : {}),
     payload: {
       ...payloadRow,
@@ -1060,7 +1204,7 @@ async function requestDetail(
         : {}),
       lines: mappedLines,
     },
-    approvalSteps: resolveRequestApprovalSteps(approvers, row, mapped.status),
+    approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
     attachments: mapAttachments(attachments),
   }
 }
@@ -1077,7 +1221,9 @@ function resolveRequestApprovalSteps(
   ) {
     return []
   }
-  const steps = mapApprovalSteps(approvers)
+  // Sequential clamp: a later step (e.g. ADMIN auto-approving its own future
+  // step) must not show "Approved" while an earlier step is still pending.
+  const steps = mapApprovalStepsWithSequence(approvers)
   return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
 }
 
@@ -1295,17 +1441,37 @@ function attendanceRow(row: ODataRecord, authUser: AuthUser) {
 
 export function buildPortalApiRouter() {
   const router = Router()
+
+  // Version stamp for deploy tracking — before auth so it can be checked
+  // from a browser/curl without logging in.
+  router.get('/portal-build', (_req, res) => {
+    res.json({ portalApiBuild: PORTAL_API_BUILD, time: new Date().toISOString() })
+  })
+
   router.use(requireAuth)
 
   router.get(
     '/lookups/:catalog',
     safe(async (req, res) => {
       const catalog = String(req.params.catalog)
-      const spec = LOOKUP_SPECS[catalog]
+      let spec = LOOKUP_SPECS[catalog]
       if (!spec) throw portalError(`Unsupported lookup catalog: ${catalog}`, 404)
-      const rows = await fetchOData(spec.service, {
-        ...(spec.filter ? { $filter: spec.filter } : {}),
-      })
+      let rows: unknown
+      try {
+        rows = await fetchOData(spec.service, {
+          ...(spec.filter ? { $filter: spec.filter } : {}),
+        })
+        if (spec.fallback && (!Array.isArray(rows) || rows.length === 0)) {
+          throw new Error('empty primary lookup')
+        }
+      } catch (error) {
+        // Primary service missing/unpublished in this BC tenant — use the fallback.
+        if (!spec.fallback) throw error
+        spec = spec.fallback
+        rows = await fetchOData(spec.service, {
+          ...(spec.filter ? { $filter: spec.filter } : {}),
+        })
+      }
       res.json({
         rows: (Array.isArray(rows) ? rows : [])
           .filter((row) => lookupMatches(row, spec))
@@ -1647,11 +1813,10 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const type = typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'pending'
       const status = type === 'approved' ? 'Approved' : type === 'rejected' ? 'Rejected' : 'Open'
+      const clause = approverIdFilterClause(await approverIdCandidates(authUser))
       const rows = (await fetchOData('QyApprovalEntry', {
-        $filter:
-          `Status eq '${status}'` +
-          ` and ApproverID eq '${odataString(authUser.userID)}'`,
-        $top: 200,
+        $filter: `Status eq '${status}' and ${clause}`,
+        $top: 1000,
       })) as ODataRecord[] | null
       const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
       res.json({
@@ -1670,7 +1835,7 @@ export function buildPortalApiRouter() {
       if (!entry) throw portalError('Approval entry not found', 404)
 
       const queueItem = approvalQueueItem(entry)
-      const approvalSteps = mapApprovalSteps(entryRows)
+      const approvalSteps = mapApprovalStepsWithSequence(entryRows)
       const source =
         module === 'leave'
           ? await resolveLeaveRequestDetail(requestId, authUser, {
@@ -1733,10 +1898,11 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const rawId = String(req.params.id)
       const { requestId, no } = await resolveApprovalReference(rawId, authUser)
+      const clause = approverIdFilterClause(await approverIdCandidates(authUser))
       const entries = (await fetchOData('QyApprovalEntry', {
         $filter:
           `DocumentNo eq '${odataString(no)}'` +
-          ` and ApproverID eq '${odataString(authUser.userID)}'` +
+          ` and ${clause}` +
           ` and Status eq 'Open'`,
         $top: 1,
       })) as ODataRecord[] | null
@@ -1744,10 +1910,14 @@ export function buildPortalApiRouter() {
       if (!entry) throw portalError('Open approval entry not found', 404)
 
       const decision = req.body?.decision === 'Rejected' ? 'Rejected' : 'Approved'
+      // Approve/reject as the identity BC actually recorded on the entry — it can
+      // differ from the login User ID (see approverIdCandidates), and BC rejects
+      // the action if the userID does not own the open entry.
+      const entryApproverId = text(entry, ['ApproverID']) || authUser.userID
       const result = await callSoapMethod('DocumentApproval', {
         entryNo: text(entry, ['EntryNo', 'Entry_No']),
         docNo: no,
-        userID: authUser.userID,
+        userID: entryApproverId,
         isApprove: decision === 'Approved',
         comments: String(req.body?.comment ?? ''),
       })
@@ -1762,11 +1932,10 @@ export function buildPortalApiRouter() {
     '/approvals/count/:type/:status',
     safe(async (req, res) => {
       const authUser = user(req)
+      const clause = approverIdFilterClause(await approverIdCandidates(authUser))
       const rows = (await fetchOData('QyApprovalEntry', {
-        $filter:
-          `Status eq '${odataString(String(req.params.status))}'` +
-          ` and ApproverID eq '${odataString(authUser.userID)}'`,
-        $top: 500,
+        $filter: `Status eq '${odataString(String(req.params.status))}' and ${clause}`,
+        $top: 1000,
       })) as ODataRecord[] | null
       const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
       res.json({ totalAll: liveRows.length, isNotified: authUser.isNotified })
@@ -1777,12 +1946,12 @@ export function buildPortalApiRouter() {
     '/dashboard/summary',
     safe(async (req, res) => {
       const authUser = user(req)
-      const approvalFilter = (status: string) =>
-        `Status eq '${status}' and ApproverID eq '${odataString(authUser.userID)}'`
+      const approverClause = approverIdFilterClause(await approverIdCandidates(authUser))
+      const approvalFilter = (status: string) => `Status eq '${status}' and ${approverClause}`
       const countLiveApprovalEntries = async (status: string) => {
         const rows = (await fetchOData('QyApprovalEntry', {
           $filter: approvalFilter(status),
-          $top: 500,
+          $top: 1000,
         })) as ODataRecord[] | null
         const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
         return liveRows.length
@@ -1954,11 +2123,11 @@ export function buildPortalApiRouter() {
         }).catch(() => [] as ODataRecord[]),
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
-      const jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
-      const monthlySalaryBase = await fetchEmployeeSalaryBase(authUser.employeeNo)
+      const jobTitle =
+        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'], authUser.jobTitle) ||
+        (await resolveEmployeeJobTitleByNo(authUser.employeeNo))
       res.json({
         jobTitle,
-        monthlySalaryBase: monthlySalaryBase > 0 ? monthlySalaryBase : undefined,
         sector: text(employee, ['Sector', 'GlobalDimension1Code']),
         division: text(employee, ['Division']),
         district: text(employee, ['District', 'GlobalDimension2Code']),

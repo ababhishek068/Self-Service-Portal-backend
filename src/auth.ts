@@ -408,13 +408,11 @@ export function employeeResetTokenMatches(employee: BcEmployee, resetToken: stri
 }
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
-  const fast = await fetchEmployeeRecordFast(staffNo)
-  if (!fast) return null
-  if (employeeAccountNoFromRecord(fast)) return fast as BcEmployee
-
-  const accountNumber = await fetchEmployeeCustomerAccountNo(staffNo)
-  if (!accountNumber) return fast as BcEmployee
-  return { ...fast, CustomerNo: accountNumber } as BcEmployee
+  const rows = (await fetchOData('QyHREmployee', {
+    $filter: `No eq '${odataString(staffNo)}'`,
+    $top: 1,
+  })) as BcEmployee[] | null
+  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
@@ -471,17 +469,8 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
-  let jobTitle = await resolveAuthUserJobTitle(
-    employee as Record<string, unknown>,
-    employeeNo,
-    email,
-  )
-  if (!jobTitle) {
-    jobTitle = await resolveEmployeeJobTitleByNo(employeeNo)
-  }
-  if (!jobTitle) {
-    jobTitle = configuredJobTitleByEmployeeNo(employeeNo)
-  }
+  const jobTitle =
+    employee.JobTitle || configuredJobTitleByEmployeeNo(employeeNo) || employee.JobID || ''
 
   return {
     employeeNo,
@@ -762,24 +751,12 @@ export function buildAuthRouter() {
     })
   })
 
-  router.get('/me', requireAuth, async (req, res, next) => {
-    try {
-      const user = await refreshAuthUserProfile(req.session.authUser!)
-      req.session.authUser = user
-      res.json({ user, token: signAuthToken(user) })
-    } catch (error) {
-      next(error)
-    }
+  router.get('/me', requireAuth, (req, res) => {
+    res.json({ user: req.session.authUser })
   })
 
-  router.get('/auth/me', requireAuth, async (req, res, next) => {
-    try {
-      const user = await refreshAuthUserProfile(req.session.authUser!)
-      req.session.authUser = user
-      res.json({ user, token: signAuthToken(user) })
-    } catch (error) {
-      next(error)
-    }
+  router.get('/auth/me', requireAuth, (req, res) => {
+    res.json({ user: req.session.authUser })
   })
 
   router.post('/auth/logout', requireAuth, (_req, res) => {

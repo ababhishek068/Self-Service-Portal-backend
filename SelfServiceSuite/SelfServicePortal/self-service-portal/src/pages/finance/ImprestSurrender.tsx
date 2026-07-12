@@ -118,14 +118,52 @@ export function ImprestSurrender() {
       }}
       detailFields={[
         { label: 'Surrender No.', paths: ['request.requestNo'] },
-        { label: 'Imprest No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No'] },
+        {
+          label: 'Surrender Date',
+          paths: ['payload.SurrenderDate', 'payload.Surrender_Date', 'payload.DateCreated', 'request.createdAt'],
+          format: 'date',
+        },
+        { label: 'Imprest No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No', 'payload.ImprestNo'] },
         { label: 'Purpose', paths: ['payload.Purpose', 'request.title'] },
-        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
-        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
-        { label: 'Employee Grade', paths: ['payload.EmployeeGrade', 'payload.JobGrade'] },
-        { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
-        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
-        { label: 'Imprest Amount', paths: ['payload.TotalNetAmount', 'payload.Amount', 'request.amount'], format: 'currency' },
+        {
+          label: 'Department',
+          paths: [
+            'request.departmentName',
+            'request.departmentCode',
+            'payload.DepartmentName',
+            'payload.Department',
+            'payload.GlobalDimension1Code',
+          ],
+        },
+        {
+          label: 'Responsibility Center',
+          paths: [
+            'request.responsibleCenter',
+            'payload.ResponsibilityCenter',
+            'payload.Responsibility_Center',
+            'payload.JobTitle',
+            'payload.Job_Title',
+          ],
+        },
+        { label: 'Employee Grade', paths: ['payload.EmployeeGrade', 'payload.JobGrade', 'payload.Job_Grade'] },
+        {
+          label: 'Place of Duty',
+          paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.Place_of_Duty', 'payload.DutyArea'],
+        },
+        {
+          label: 'Employee Account',
+          paths: [
+            'payload.EmployeeAccountNo',
+            'payload.Employee_Account_No',
+            'payload.CustomerNo',
+            'payload.ImprestNo',
+          ],
+        },
+        {
+          label: 'Imprest Amount',
+          paths: ['payload.TotalNetAmount', 'payload.Total_Net_Amount', 'payload.Amount', 'request.amount'],
+          format: 'currency',
+        },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{

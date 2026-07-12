@@ -450,7 +450,7 @@ export function soapFaultMessage(xml: string) {
 function soapFaultError(status: number, xml: string) {
   const fault = soapFaultMessage(xml)
   const friendlyFault = /not supported by related approval workflow/i.test(fault)
-    ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting approval.'
+    ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting or cancelling approval.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
     : /can't be evaluated into type Boolean/i.test(fault)

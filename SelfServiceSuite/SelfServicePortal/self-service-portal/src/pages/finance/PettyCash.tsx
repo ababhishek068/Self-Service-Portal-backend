@@ -32,10 +32,40 @@ export function PettyCash() {
         { label: 'Request No.', paths: ['request.requestNo'] },
         { label: 'Needed By Date', paths: ['payload.Needed_By_Date', 'payload.RequiredDate', 'payload.Required_Date'], format: 'date' },
         { label: 'Description', paths: ['payload.Posting_Description', 'payload.PostingDescription', 'payload.Narration'] },
-        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
-        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
-        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
-        { label: 'Total Net Amount', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
+        {
+          label: 'Department',
+          paths: [
+            'request.departmentName',
+            'request.departmentCode',
+            'payload.DepartmentName',
+            'payload.Department',
+            'payload.GlobalDimension1Code',
+          ],
+        },
+        {
+          label: 'Responsibility Center',
+          paths: [
+            'request.responsibleCenter',
+            'payload.ResponsibilityCenter',
+            'payload.Responsibility_Center',
+            'payload.JobTitle',
+            'payload.Job_Title',
+          ],
+        },
+        {
+          label: 'Employee Account',
+          paths: [
+            'payload.EmployeeAccountNo',
+            'payload.Employee_Account_No',
+            'payload.CustomerNo',
+            'payload.ImprestNo',
+          ],
+        },
+        {
+          label: 'Total Net Amount',
+          paths: ['payload.TotalNetAmount', 'payload.Total_Net_Amount', 'request.amount'],
+          format: 'currency',
+        },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{

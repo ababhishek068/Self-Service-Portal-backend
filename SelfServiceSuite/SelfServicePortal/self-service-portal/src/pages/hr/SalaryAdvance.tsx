@@ -34,7 +34,6 @@ export function SalaryAdvance() {
         { label: 'Type', paths: ['AdvanceType', 'Advance_Type'] },
         { label: 'Purpose', paths: ['Purpose', 'purpose'] },
         { label: 'Percentage of Salary', paths: ['PercentageofSalary', 'PercentageOfSalary', 'Percentage_of_Salary'], format: 'percentage' },
-        { label: 'Amount', paths: ['resolvedAmount', 'Amount', 'amount', 'AdvanceAmount', 'Advance_Amount', 'NetAmount', 'Amount_LCY'], format: 'currency' },
       ]}
       hideDetailAttachments
     />

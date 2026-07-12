@@ -139,13 +139,46 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       ]}
       detailFields={[
         { label: 'Claim No.', paths: ['request.requestNo'] },
-        { label: 'Claim Date', paths: ['payload.ClaimDate', 'payload.Claim_Date'], format: 'date' },
+        { label: 'Claim Date', paths: ['payload.ClaimDate', 'payload.Claim_Date', 'request.createdAt'], format: 'date' },
         { label: 'Purpose', paths: ['payload.ClaimDescription', 'payload.Claim_Description', 'payload.Purpose'] },
-        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
-        { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
-        { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
-        { label: 'Employee Account', paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.ImprestNo'] },
-        { label: 'Total Net Amount', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
+        {
+          label: 'Department',
+          paths: [
+            'request.departmentName',
+            'request.departmentCode',
+            'payload.DepartmentName',
+            'payload.Department',
+            'payload.GlobalDimension1Code',
+          ],
+        },
+        {
+          label: 'Responsibility Center',
+          paths: [
+            'request.responsibleCenter',
+            'payload.ResponsibilityCenter',
+            'payload.Responsibility_Center',
+            'payload.JobTitle',
+            'payload.Job_Title',
+          ],
+        },
+        {
+          label: 'Place of Duty',
+          paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.Place_of_Duty', 'payload.DutyArea'],
+        },
+        {
+          label: 'Employee Account',
+          paths: [
+            'payload.EmployeeAccountNo',
+            'payload.Employee_Account_No',
+            'payload.CustomerNo',
+            'payload.ImprestNo',
+          ],
+        },
+        {
+          label: 'Total Net Amount',
+          paths: ['payload.TotalNetAmount', 'payload.Total_Net_Amount', 'request.amount'],
+          format: 'currency',
+        },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{

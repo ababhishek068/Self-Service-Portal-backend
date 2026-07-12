@@ -8,14 +8,21 @@ BC="$SUITE/SelfServiceBackend"
 PORTAL="$SUITE/SelfServicePortal"
 FRONTEND="$PORTAL/self-service-portal"
 STAMP="$(date +%Y-%m-%d)"
-ZIP_NAME="SelfServiceSuite-HIJRA-UAT-${STAMP}-salary-advance-timeout-fix-offline.zip"
+BUILD_ID="hijra-uat-v7-gate-pass-dropdowns-${STAMP}"
+ZIP_NAME="SelfServiceSuite-HIJRA-UAT-${STAMP}-v7-gate-pass-dropdowns-offline.zip"
 DEPLOY_WIN="$ROOT/deploy/windows"
-HIJRA_ENV="$ROOT/deploy/windows/host.env.hijra-uat-ip.example"
+HIJRA_ENV="$ROOT/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat-ip.example"
+FINAL_CHECKLIST="$ROOT/HIJRA-UAT-FINAL-FIX-CHECKLIST-2026-07-10.md"
 STAGING="$ROOT/.suite-bundle-staging"
 OUTPUT="$ROOT/$ZIP_NAME"
 
 if [[ ! -d "$REFERENCE" ]]; then
   echo "ERROR: Reference bundle missing at $REFERENCE"
+  exit 1
+fi
+
+if [[ ! -f "$FINAL_CHECKLIST" ]]; then
+  echo "ERROR: Final checklist missing at $FINAL_CHECKLIST"
   exit 1
 fi
 
@@ -33,7 +40,7 @@ echo "==> Syncing latest builds into SelfServiceSuite..."
 rm -rf "$BC/dist" "$BC/public" "$BC/deploy/deploy" "$BC/src"
 mkdir -p "$BC/dist" "$BC/public" "$BC/src" "$BC/logs"
 cp -R "$ROOT/dist/." "$BC/dist/"
-echo "api-loading-${STAMP}" > "$BC/dist/BUILD_ID.txt"
+echo "$BUILD_ID" > "$BC/dist/BUILD_ID.txt"
 cp -R "$FRONTEND/dist/." "$BC/public/"
 rsync -a \
   --exclude '*.tmp' \
@@ -55,7 +62,7 @@ rsync -a \
 echo "==> Overlaying latest backend build + env files..."
 rsync -a \
   "$BC/dist/" "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/"
-echo "api-loading-${STAMP}" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
+echo "$BUILD_ID" > "$STAGING/SelfServiceSuite/SelfServiceBackend/dist/BUILD_ID.txt"
 rsync -a \
   "$BC/public/" "$STAGING/SelfServiceSuite/SelfServiceBackend/public/"
 rsync -a \
@@ -63,14 +70,27 @@ rsync -a \
 cp "$BC/package.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package.json"
 cp "$BC/package-lock.json" "$STAGING/SelfServiceSuite/SelfServiceBackend/package-lock.json"
 if [[ ! -f "$HIJRA_ENV" ]]; then
-  echo "ERROR: HIJRA env template missing at $HIJRA_ENV"
+  echo "ERROR: Working HIJRA UAT env missing at $HIJRA_ENV"
   exit 1
 fi
-cp "$HIJRA_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
-cp "$HIJRA_ENV" "$BC/.env"
+if ! grep -q '^BC_NAV_PASSWORD=.' "$HIJRA_ENV" || grep -Eq '^BC_NAV_PASSWORD=(CHANGE_ME_ON_SERVER|REPLACE-WITH)' "$HIJRA_ENV"; then
+  echo "ERROR: Working HIJRA UAT env does not contain the configured BC service password"
+  exit 1
+fi
+awk '
+  !/^(HOST|CORS_ORIGIN|PORTAL_STATIC_DIR|BC_DISCOVER_ODATA_SERVICES|BC_SALARY_BASE_FIELD|BC_SALARY_LOOKUP_SERVICE)=/
+' "$HIJRA_ENV" | sed 's/erp-app-uat/10.30.7.14/g' > "$STAGING/SelfServiceSuite/SelfServiceBackend/.env"
+cat >> "$STAGING/SelfServiceSuite/SelfServiceBackend/.env" <<EOF
+HOST=0.0.0.0
+CORS_ORIGIN=http://10.30.4.23:4000
+PORTAL_STATIC_DIR=public
+BC_DISCOVER_ODATA_SERVICES=false
+BC_SALARY_BASE_FIELD=Basic_Pay
+BC_SALARY_LOOKUP_SERVICE=
+EOF
 cp "$DEPLOY_WIN/host.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/.env.example"
 cp "$DEPLOY_WIN/host.env.hijra-uat.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat.example"
-cp "$HIJRA_ENV" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat-ip.example"
+cp "$DEPLOY_WIN/host.env.hijra-uat-ip.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.hijra-uat-ip.example"
 cp "$DEPLOY_WIN/host.env.example" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/host.env.example"
 cp "$DEPLOY_WIN/ENV-ON-NEW-HOST.txt" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/ENV-ON-NEW-HOST.txt"
 cp "$DEPLOY_WIN/prepare-host-env.bat" "$STAGING/SelfServiceSuite/SelfServiceBackend/deploy/windows/prepare-host-env.bat"
@@ -90,6 +110,8 @@ mkdir -p \
   "$STAGING/SelfServiceSuite/SelfServiceBackend/logs" \
   "$STAGING/SelfServiceSuite/SelfServicePortal/server/logs"
 
+cp "$FINAL_CHECKLIST" "$STAGING/SelfServiceSuite/HIJRA-UAT-FINAL-FIX-CHECKLIST-2026-07-10.md"
+
 cat > "$STAGING/SelfServiceSuite/IMPORTANT-UPDATE.txt" <<EOF
 SELF SERVICE SUITE - FULL OFFLINE CLIENT PACKAGE
 ================================================
@@ -103,7 +125,12 @@ SUMMARY (${STAMP})
 - Leave: Pending Approval shows reliably in the list — approvals matched by document number and sender side
 - Leave: reduced excessive BC calls after Request Approval
 - Leave: status read live from Business Central (no local cache)
-- ENV: bundled .env is HIJRA UAT (BC 10.30.7.14 + portal http://10.30.4.23:4000)
+- Login: restored the previous QyHREmployee authentication lookup
+- ENV: restored the previous working HIJRA UAT basic-auth/IP configuration exactly
+- Performance: session restore no longer calls BC; sign-in no longer blocks on full profile loading
+- Performance: normal salary pages use one QyHREmployee lookup instead of broad service probing
+- Salary Advance: amount is hidden from the detail line display
+- AL/BC changes are published separately on the BC server (not shipped in this portal bundle)
 - Portal: HIJRA branding + module menu only (no ABH templates or modules)
 - Leave: approver list and sequence shown on new request + application detail
 - Leave: gender-specific leave types filtered by Business Central (maternity / paternity)

@@ -8,7 +8,6 @@ import {
   setApiBaseUrl,
   setToken,
 } from '@/api/client/authClient'
-import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
 import { requireApplicationApiUrl, requireAuthApiUrl, requireBcApiUrl } from '@/api/requireBackend'
 import { deriveRoles } from '@/config/roles'
 import type { Employee } from '@/types/erp.types'
@@ -103,18 +102,7 @@ export async function loginRequest(
     { silent: true } as Parameters<typeof authPost>[2],
   )
   setToken(token)
-  let employee = toEmployee(user)
-  if (!employee.jobTitle?.trim()) {
-    try {
-      const details = await getEmployeeProfileDetails()
-      if (details.jobTitle?.trim()) {
-        employee = { ...employee, jobTitle: details.jobTitle }
-      }
-    } catch {
-      /* profile details are optional */
-    }
-  }
-  return employee
+  return toEmployee(user)
 }
 
 export async function registerRequest(input: RegisterInput): Promise<Employee> {

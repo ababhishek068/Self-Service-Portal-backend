@@ -171,6 +171,9 @@ export const imprestSurrenderHeaderSchema = z.object({
 export const storeHeaderSchema = z.object({
   dateRequired: workingDateField,
   description: z.string().min(3, 'Request description is required'),
+  // Optional until AL 1.0.2.360 is published; the backend omits it when blank
+  // so older AL builds keep working.
+  issuingStore: optionalText,
 })
 
 export const storeLineSchema = z
@@ -232,12 +235,14 @@ export const transportPassengerLineSchema = z.object({
 export const purchaseHeaderSchema = z.object({
   dateNeeded: workingDateField,
   description: z.string().min(3, 'Description is required'),
+  requestingDepartment: optionalText,
 })
 
 export const purchaseLineSchema = z.object({
   itemNo: z.string().min(1, 'Item number is required'),
   location: optionalText,
   reasonForRequest: z.string().min(3, 'Reason for request is required'),
+  specification: optionalText,
   quantity: quantityField,
   type: z.string().min(1, 'Type is required'),
 })

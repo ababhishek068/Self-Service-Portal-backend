@@ -2,9 +2,16 @@ import { createGatePass, gatePassSources, listGatePasses, type GatePassSource } 
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import type { DataTableColumn } from '@/components/shared/DataTable'
+import { useLookupOptions } from '@/hooks/useLookupOptions'
 import { gatePassSchema } from '@/schemas/requestSchemas'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatDate } from '@/utils/formatters'
+
+const GATE_PASS_LOOKUP_CATALOG: Record<GatePassSource, string> = {
+  storeIssue: 'gate-pass-store-issue',
+  transferOrder: 'gate-pass-transfer-order',
+  assetTransfer: 'gate-pass-asset-transfer',
+}
 
 function todayInputValue() {
   const now = new Date()
@@ -28,6 +35,7 @@ export function GatePass({ source }: { source: GatePassSource }) {
       : source === 'assetTransfer'
         ? 'Asset Transfer No.'
         : 'Transfer No.'
+  const sourceDocuments = useLookupOptions(GATE_PASS_LOOKUP_CATALOG[source])
   const listColumns: DataTableColumn<PortalRequest>[] = [
     { id: 'number', header: 'No.', cell: (row) => row.requestNo },
     {
@@ -82,8 +90,9 @@ export function GatePass({ source }: { source: GatePassSource }) {
         {
           name: 'sourceDocumentNo',
           label: sourceDocumentLabel,
-          type: 'text',
-          placeholder: `Enter ${sourceDocumentLabel.toLowerCase()}`,
+          type: 'select',
+          options: sourceDocuments.options,
+          placeholder: `Select ${sourceDocumentLabel.toLowerCase()}`,
         },
         { name: 'dateOut', label: 'Date Out', type: 'date' },
         { name: 'timeOut', label: 'Time Out', type: 'text', placeholder: 'HH:MM' },

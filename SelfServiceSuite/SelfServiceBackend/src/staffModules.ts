@@ -4,7 +4,6 @@ import {
   callSoapMethod,
   fetchOData,
   odataString,
-  postOData,
   type ODataRecord,
 } from './bcClient.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
@@ -252,16 +251,6 @@ export function gatePassLineBinding(row: ODataRecord, fallbackNo: string) {
   }
 }
 
-function cleanODataPayload(payload: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(payload).filter(([, value]) => {
-      if (value === undefined || value === null) return false
-      if (typeof value === 'string' && value.trim() === '') return false
-      return true
-    }),
-  )
-}
-
 function normalizeBcTime(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -270,68 +259,25 @@ function normalizeBcTime(value: unknown) {
   return raw
 }
 
-function gatePassDocumentNo(row: ODataRecord) {
-  return fieldText(row, ['GatePassNo', 'Gate_Pass_No'])
-}
-
-async function createGatePassViaOData(
-  spec: ModuleSpec,
-  user: AuthUser,
-  body: Record<string, unknown>,
-) {
-  const source = gatePassSourceFromQuery(
-    body.gatePassSource ?? body.source ?? body.linkTo ?? body.Linkto,
-  )
-  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
-  const sourceDocumentNo = fieldText(body, [
-    'sourceDocumentNo',
-    'transferNo',
-    'TransferNo',
-    'Transfer_No',
-  ])
-  if (!sourceDocumentNo) {
-    throw Object.assign(new Error(`${sourceSpec.linkTo} document number is required`), {
-      status: 422,
-    })
+/**
+ * `RequestGatePassApproval`/`CancelGatePassApproval` key on both Gate Pass No.
+ * and Transfer No — but submit/cancel calls from the portal only carry the
+ * request id, never the source document number. Look it up from BC instead of
+ * relying on a request body field that is never populated.
+ */
+async function gatePassTransferNo(no: string): Promise<string> {
+  try {
+    const rows = (await fetchOData('QyGatePass', {
+      $filter: `GatePassNo eq '${odataString(no)}'`,
+      $top: 1,
+    })) as ODataRecord[] | null
+    if (Array.isArray(rows) && rows[0]) {
+      return fieldText(rows[0], ['TransferNo', 'Transfer_No'])
+    }
+  } catch {
+    // fall through to blank — the SOAP call will surface a clear BC error
   }
-
-  const beforeRows = await listPortalModuleRows(spec, user, { gatePassSource: source }).catch(
-    () => [] as ODataRecord[],
-  )
-  const beforeNumbers = new Set(beforeRows.map(gatePassDocumentNo).filter(Boolean))
-  const payload = cleanODataPayload({
-    GatePassNo: body.gatePassNo ?? body.gatePassNumber,
-    Linkto: sourceSpec.linkTo,
-    TransferNo: sourceDocumentNo,
-    DateOut: body.dateOut ?? body.issueDate,
-    TimeOut: normalizeBcTime(body.timeOut),
-    Description: body.description ?? body.reason,
-    Comment: body.comment,
-    FromLocation: body.fromLocation ?? body.from,
-    ToLocation: body.toLocation ?? body.to ?? body.destination,
-    EmployeeNo: user.employeeNo,
-  })
-
-  const created = await postOData(spec.headerService, payload)
-  let no = created ? gatePassDocumentNo(created) : ''
-  for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
-    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
-    const rows = await listPortalModuleRows(spec, user, { gatePassSource: source })
-    const row = rows.find((candidate) => {
-      const candidateNo = gatePassDocumentNo(candidate)
-      if (!candidateNo || beforeNumbers.has(candidateNo)) return false
-      const transferNo = fieldText(candidate, ['TransferNo', 'Transfer_No'])
-      return !transferNo || transferNo === sourceDocumentNo
-    })
-    no = row ? gatePassDocumentNo(row) : ''
-  }
-  if (!no) {
-    throw Object.assign(
-      new Error('Business Central created the gate pass but did not return Gate Pass No.'),
-      { status: 502 },
-    )
-  }
-  return no
+  return ''
 }
 
 function storeLineTypeCode(value: unknown) {
@@ -690,19 +636,44 @@ const storeRequisition: ModuleSpec = {
         req.body?.justification ??
         '',
       requestDate: req.body?.dateRequired ?? req.body?.requestDate ?? '',
+      // Header-level Issuing Store (BC Store Requisition Header UP parity).
+      // AL 1.0.2.361+ declares the parameter, so it must always be present —
+      // omitting it makes BC fail with "Parameter ... is null!". Blank keeps
+      // the AL default (the parameter is only applied when non-empty).
+      issuingStore: String(
+        req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '',
+      ).trim(),
     }),
-    saveLine: ({ req, no }) => ({
-      action: req.body?.action ?? 'create',
-      reqNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      type: storeLineTypeCode(req.body?.type),
-      itemNo: req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '',
-      quantity:
-        storeLineTypeCode(req.body?.type) === 1
-          ? Number(req.body?.quantity ?? 0)
-          : 0,
-      location: req.body?.issuingStore ?? req.body?.location ?? '',
-    }),
+    saveLine: async ({ req, no }) => {
+      // ERP parity: BC's Store Requisition lines subform links lines to the
+      // HEADER's Issuing Store — a line saved with a different store becomes
+      // invisible on the BC page. Prefer the header's store for every line;
+      // fall back to the line's own value for pre-.361 headers without one.
+      let headerStore = ''
+      try {
+        const rows = (await fetchOData('QyStoreRequisitionHeader', {
+          $filter: `No eq '${odataString(no)}'`,
+          $top: 1,
+        })) as ODataRecord[] | null
+        if (Array.isArray(rows) && rows[0]) {
+          headerStore = fieldText(rows[0], ['IssuingStore', 'Issuing_Store'])
+        }
+      } catch {
+        // keep the line-level value
+      }
+      return {
+        action: req.body?.action ?? 'create',
+        reqNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        type: storeLineTypeCode(req.body?.type),
+        itemNo: req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '',
+        quantity:
+          storeLineTypeCode(req.body?.type) === 1
+            ? Number(req.body?.quantity ?? 0)
+            : 0,
+        location: headerStore || (req.body?.issuingStore ?? req.body?.location ?? ''),
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -757,6 +728,14 @@ const purchaseRequisition: ModuleSpec = {
       myUserId: user.userID,
       orderDate:
         req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
+      // Requesting Department picked in the portal (BC dimension code, e.g.
+      // FACILTY/HC). Blank keeps the AL default of the employee's own
+      // department dimension. AL 1.0.2.361+ declares the parameter, so it
+      // must always be present — omitting it makes BC fail with
+      // "Parameter requestingDepartment ... is null!".
+      requestingDepartment: String(
+        req.body?.requestingDepartment ?? req.body?.departmentCode ?? '',
+      ).trim(),
     }),
     saveLine: ({ req, no }) => ({
       action: req.body?.action ?? 'create',
@@ -773,6 +752,13 @@ const purchaseRequisition: ModuleSpec = {
         req.body?.description ??
         req.body?.specification ??
         '',
+      // R4: free-text specification the requestor types for FA/Service/Item
+      // lines; AL writes it to Purchase Line "Description" (overriding the
+      // value auto-filled from Validate("No.")) when non-blank. AL 1.0.2.361+
+      // declares the parameter, so it must always be present.
+      specification: String(
+        req.body?.specification ?? req.body?.itemDescription ?? '',
+      ).trim(),
     }),
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
@@ -786,7 +772,7 @@ const purchaseRequisition: ModuleSpec = {
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
-      tableID: 38,
+      tableID: 52121800,
     }),
   },
 }
@@ -1232,19 +1218,48 @@ const gatePass: ModuleSpec = {
   lineService: 'QyStoreRequisitionLines',
   lineHeaderField: 'RequistionNo',
   soap: {
+    saveHeader: 'GatePassHeader',
     submit: 'RequestGatePassApproval',
     cancel: 'CancelGatePassApproval',
   },
   params: {
-    submit: ({ req, user, no }) => ({
+    saveHeader: ({ req, user }) => {
+      const source = gatePassSourceFromQuery(
+        req.body?.gatePassSource ?? req.body?.source ?? req.body?.linkTo ?? req.body?.Linkto,
+      )
+      const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+      const sourceDocumentNo = fieldText(req.body ?? {}, [
+        'sourceDocumentNo',
+        'transferNo',
+        'TransferNo',
+        'Transfer_No',
+      ])
+      if (!sourceDocumentNo) {
+        throw Object.assign(new Error(`${sourceSpec.linkTo} document number is required`), {
+          status: 422,
+        })
+      }
+      return {
+        myUserID: user.userID,
+        gpLinkTo: sourceSpec.linkTo,
+        gpTransferNo: sourceDocumentNo,
+        gpDateOut: req.body?.dateOut ?? req.body?.issueDate ?? '',
+        gpTimeOut: normalizeBcTime(req.body?.timeOut),
+        gpDescription: req.body?.description ?? req.body?.reason ?? '',
+        gpFromLocation: req.body?.fromLocation ?? req.body?.from ?? '',
+        gpToLocation: req.body?.toLocation ?? req.body?.to ?? req.body?.destination ?? '',
+        gpComment: req.body?.comment ?? '',
+      }
+    },
+    submit: async ({ user, no }) => ({
       gatePassNo: no,
-      transferNo: req.body?.transferNo ?? '',
+      transferNo: await gatePassTransferNo(no),
       tableID: 50296,
       employeeNo: user.employeeNo,
     }),
-    cancel: ({ req, user, no }) => ({
+    cancel: async ({ user, no }) => ({
       gatePassNo: no,
-      transferNo: req.body?.transferNo ?? '',
+      transferNo: await gatePassTransferNo(no),
       tableID: 50296,
       employeeNo: user.employeeNo,
     }),
@@ -1832,25 +1847,6 @@ export async function createPortalModuleRequest(
   user: AuthUser,
   body: Record<string, unknown>,
 ) {
-  if (spec.module === 'gate-pass') {
-    const no = await createGatePassViaOData(spec, user, body)
-    if (body.submit === true && spec.soap.submit && spec.params?.submit) {
-      const submitParams = await spec.params.submit({
-        req: requestWithBody(body),
-        user,
-        no,
-      })
-      const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
-      if (!soapActionOk(spec, submitResult)) {
-        throw Object.assign(
-          new Error(`Business Central created ${no}, but approval submission failed`),
-          { status: 502, documentNo: no },
-        )
-      }
-    }
-    return no
-  }
-
   if (!spec.soap.saveHeader || !spec.params?.saveHeader) {
     throw Object.assign(new Error(`${spec.module} creation is not supported by Business Central`), {
       status: 501,
@@ -1865,12 +1861,18 @@ export async function createPortalModuleRequest(
         : body
   const headerRequest = requestWithBody(headerBody)
   const headerKey = spec.headerKey ?? 'No'
+  const numberAliases = [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No']
+  // Boolean-return creates (transport, fuel) return only true/false, so we detect the new
+  // document by diffing rows before/after. Combine the owner-scoped read (keeps module-specific
+  // logic, e.g. fuel) with an UNSCOPED read: BC may stamp the owner field with the employee's BC
+  // User ID, which can differ from the portal session user, so an owner-only read can miss it.
+  const readbackRows = async (): Promise<ODataRecord[]> => {
+    const scoped = await listPortalModuleRows(spec, user)
+    const fetched = await fetchOData(spec.headerService, {})
+    return [...scoped, ...(Array.isArray(fetched) ? fetched : [])]
+  }
   const existingNumbers = spec.headerReturnsBoolean
-    ? new Set(
-        (await listPortalModuleRows(spec, user)).map((row) =>
-          fieldText(row, [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No']),
-        ),
-      )
+    ? new Set((await readbackRows()).map((row) => fieldText(row, numberAliases)))
     : null
   const headerParams = await spec.params.saveHeader({
     req: headerRequest,
@@ -1886,16 +1888,13 @@ export async function createPortalModuleRequest(
   let no = String(headerResult.returnValue ?? '').trim()
   if (spec.headerReturnsBoolean) {
     no = ''
-    for (let attempt = 0; attempt < 4 && !no; attempt += 1) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250))
-      const rows = await listPortalModuleRows(spec, user)
-      const created = rows.find((row) => {
-        const candidate = fieldText(row, [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No'])
+    for (let attempt = 0; attempt < 6 && !no; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 300))
+      const created = (await readbackRows()).find((row) => {
+        const candidate = fieldText(row, numberAliases)
         return candidate && !existingNumbers?.has(candidate)
       })
-      no = created
-        ? fieldText(created, [headerKey, 'No', 'RequisitionNo', 'Transport_Requisition_No'])
-        : ''
+      no = created ? fieldText(created, numberAliases) : ''
     }
   }
   if (!no) {

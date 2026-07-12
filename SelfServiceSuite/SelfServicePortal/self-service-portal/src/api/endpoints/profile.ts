@@ -32,3 +32,9 @@ export async function downloadEmployeeAttachment(attachment: Attachment): Promis
   link.remove()
   URL.revokeObjectURL(url)
 }
+
+/** Deploy tracking: which backend portalApi build is running (unauthenticated). */
+export async function getPortalBuild(): Promise<{ portalApiBuild: string; time: string }> {
+  requireAuthApiUrl()
+  return authGet<{ portalApiBuild: string; time: string }>('/api/portal-build')
+}

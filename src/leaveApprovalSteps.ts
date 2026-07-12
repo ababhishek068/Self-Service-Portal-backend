@@ -56,13 +56,24 @@ export function normalizeSequentialApprovalStatuses(
   steps: ReturnType<typeof mapApprovalSteps>,
 ) {
   const ordered = [...steps].sort((left, right) => left.sequenceNo - right.sequenceNo)
-  let priorStepsComplete = true
+  // Steps sharing a sequence number are PARALLEL approvers (e.g. two seq-1
+  // members of a workflow user group) — one approving must not be clamped
+  // because its sibling is still pending. Only clamp a step when an EARLIER
+  // sequence group is incomplete.
+  let priorSequencesComplete = true
+  let currentSequence: number | undefined
+  let currentSequenceComplete = true
   return ordered.map((step) => {
+    if (step.sequenceNo !== currentSequence) {
+      priorSequencesComplete = priorSequencesComplete && currentSequenceComplete
+      currentSequence = step.sequenceNo
+      currentSequenceComplete = true
+    }
     const completed = ['Approved', 'Submitted'].includes(step.status)
-    if (completed && !priorStepsComplete) {
+    if (!completed) currentSequenceComplete = false
+    if (completed && !priorSequencesComplete) {
       return { ...step, status: 'Pending Approval' }
     }
-    if (!completed) priorStepsComplete = false
     return step
   })
 }

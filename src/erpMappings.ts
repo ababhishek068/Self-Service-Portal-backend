@@ -215,6 +215,74 @@ export function documentStatusFromBc(row: ODataRecord, requestType: PortalModule
   return text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])
 }
 
+const OPEN_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
+  'storeRequisition',
+  'purchaseRequisition',
+  'transport',
+  'training',
+  'fuelRequest',
+  'maintenance',
+  'gatePass',
+])
+
+function approvalEntryStatus(entry: ODataRecord) {
+  return text(entry, ['Status']).trim().toLowerCase()
+}
+
+function hasActiveApprovalEntries(entries: ODataRecord[]) {
+  return entries.some((entry) => {
+    const status = approvalEntryStatus(entry)
+    return status === 'open' || status === 'pending' || status === 'created' || status.includes('pending')
+  })
+}
+
+/** True when BC shows the document has entered the approval workflow. */
+export function documentSentForApproval(row: ODataRecord) {
+  for (const key of ['Sent_for_Approval', 'SentForApproval', 'Sent_For_Approval']) {
+    const value = row[key]
+    if (value === true || value === 1) return true
+    if (typeof value === 'string' && ['true', '1', 'yes'].includes(value.trim().toLowerCase())) return true
+  }
+  const sentAt = text(row, [
+    'DateTimeSentforApproval',
+    'Date_Time_Sent_for_Approval',
+    'DateTimeSentForApproval',
+  ])
+  return Boolean(sentAt && !sentAt.startsWith('0001-01-01'))
+}
+
+/**
+ * Purchase/store/transport headers often stay Status=Open while QyApprovalEntry rows exist.
+ * Promote to Pending Approval so cancel + approval history work like ESS.
+ */
+export function resolveModuleRequestStatus(
+  row: ODataRecord,
+  requestType: PortalModuleKey,
+  approvalEntries: ODataRecord[] = [],
+) {
+  const base = statusFromBc(documentStatusFromBc(row, requestType))
+  if (!OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)) return base
+
+  if (approvalEntries.some((entry) => approvalEntryStatus(entry) === 'rejected') || base === 'Rejected') {
+    return 'Rejected'
+  }
+  if (
+    base === 'Approved' ||
+    (approvalEntries.length > 0 &&
+      approvalEntries.every((entry) => approvalEntryStatus(entry) === 'approved'))
+  ) {
+    return 'Approved'
+  }
+  if (
+    base === 'Pending Approval' ||
+    hasActiveApprovalEntries(approvalEntries) ||
+    documentSentForApproval(row)
+  ) {
+    return 'Pending Approval'
+  }
+  return base
+}
+
 export function leaveSentForApproval(row: ODataRecord) {
   const sentAt = text(row, [
     'DateTimeSentforApproval',
@@ -414,7 +482,7 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
             row,
             requestType === 'pettyCashReplenishment'
               ? ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
-              : ['Amount', 'TotalAmount', 'NetAmount', 'Quantity'],
+              : ['Amount', 'TotalAmount', 'NetAmount', 'TotalNetAmount', 'Total_Net_Amount', 'Quantity'],
             0,
           ),
     sourceDocument: {
