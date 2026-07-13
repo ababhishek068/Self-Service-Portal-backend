@@ -3,16 +3,15 @@ import { LogOut, Menu, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useLayout } from '@/hooks/useLayout'
 import { useAuth } from '@/hooks/useAuth'
-import { usePermissions } from '@/hooks/usePermissions'
 import { brand } from '@/config/brand'
 
 export function Topbar() {
   const { pageTitle, toggleSidebar, sidebarOpen, toggleMobileNav, mobileNavOpen } = useLayout()
   const { employee, logout } = useAuth()
-  const { primaryRoleShortLabel } = usePermissions()
   const displayName = employee?.displayName?.split(' ')[0] ?? 'User'
-  const profileSubtitle = employee?.jobTitle?.trim() || primaryRoleShortLabel
-  const subtitleUsesJobTitle = Boolean(employee?.jobTitle?.trim())
+  const rawJobTitle = employee?.jobTitle?.trim() ?? ''
+  const profileSubtitle = rawJobTitle.toLowerCase() === 'staff' ? '' : rawJobTitle
+  const subtitleUsesJobTitle = Boolean(profileSubtitle)
   const [loggingOut, setLoggingOut] = useState(false)
 
   const handleLogout = async () => {
@@ -86,14 +85,16 @@ export function Topbar() {
           </div>
           <div className="hidden flex-col leading-tight md:flex">
             <span className="text-sm font-medium text-slate-800">{displayName}</span>
-            <span
-              className={`max-w-[12rem] truncate text-[10px] font-semibold tracking-wide text-[var(--portal-orange)] ${
-                subtitleUsesJobTitle ? 'normal-case' : 'uppercase'
-              }`}
-              title={profileSubtitle}
-            >
-              {profileSubtitle}
-            </span>
+            {profileSubtitle ? (
+              <span
+                className={`max-w-[12rem] truncate text-[10px] font-semibold tracking-wide text-[var(--portal-orange)] ${
+                  subtitleUsesJobTitle ? 'normal-case' : 'uppercase'
+                }`}
+                title={profileSubtitle}
+              >
+                {profileSubtitle}
+              </span>
+            ) : null}
           </div>
           <Button
             type="button"

@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!cancelled) setEmployee(user)
           return
         }
-        if (!user.jobTitle?.trim()) {
+        if (!user.jobTitle?.trim() || user.jobTitle.trim().toLowerCase() === 'staff') {
           try {
             const details = await getEmployeeProfileDetails()
             if (details.jobTitle?.trim()) {
@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null)
     try {
       let next = await loginRequest(staffNo, password, provider)
-      if (!next.jobTitle?.trim()) {
+      if (!next.jobTitle?.trim() || next.jobTitle.trim().toLowerCase() === 'staff') {
         try {
           const details = await getEmployeeProfileDetails()
           if (details.jobTitle?.trim()) {

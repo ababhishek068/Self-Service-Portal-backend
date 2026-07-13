@@ -24,7 +24,6 @@ import {
   fetchRelievers,
   cancelLeaveRequest,
   fetchLeaveRequestDetail,
-  fetchLeaveApprovalRoute,
   getLeaveBalance,
   getLeaveDates,
   listLeaveRequests,
@@ -177,10 +176,6 @@ export function LeaveRequest() {
   const confirm = useConfirm()
   const progress = useProgress()
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
-  const approvalRouteQuery = useQuery({
-    queryKey: ['hr', 'leave-approval-route'],
-    queryFn: fetchLeaveApprovalRoute,
-  })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
   const [creationAttachmentStates, setCreationAttachmentStates] = useState<Record<string, FileUploadItemState>>({})
@@ -658,10 +653,7 @@ export function LeaveRequest() {
 
   const selected = detailQuery.data
   const selectedPayload = selected?.payload ?? {}
-  const detailApprovalSteps =
-    selected && selected.approvalSteps.length > 0
-      ? selected.approvalSteps
-      : (approvalRouteQuery.data ?? [])
+  const detailApprovalSteps = selected?.approvalSteps ?? []
   const selectedIsMutable = selected
     ? ['Open', 'Draft', 'Pending Approval'].includes(selected.status)
     : false
@@ -740,12 +732,6 @@ export function LeaveRequest() {
 
           {showSecondary ? (
             <div className="space-y-4 border-t border-slate-200 pt-4">
-              {approvalRouteQuery.data && approvalRouteQuery.data.length > 0 ? (
-                <section className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Expected approval route</h3>
-                  <ApprovalTimeline steps={approvalRouteQuery.data} />
-                </section>
-              ) : null}
               {applicationLimit !== null && applicationLimit <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   Business Central currently allows no days for this leave type. The Employee Card balance and earned leave are shown above for reference.

@@ -105,7 +105,7 @@ export async function loginRequest(
   setToken(token)
   const refreshed = await fetchCurrentUser()
   let employee = refreshed ?? toEmployee(user)
-  if (!employee.jobTitle?.trim()) {
+  if (!employee.jobTitle?.trim() || employee.jobTitle.trim().toLowerCase() === 'staff') {
     try {
       const details = await getEmployeeProfileDetails()
       if (details.jobTitle?.trim()) {

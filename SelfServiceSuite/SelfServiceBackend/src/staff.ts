@@ -1604,7 +1604,7 @@ export function buildStaffRouter() {
       res.json({
         balance,
         entitlement,
-        earnedLeaveDays: isAnnual ? metrics.earnedLeaveDays : null,
+        earnedLeaveDays: metrics.earnedLeaveDays,
         applicationLimit,
         pendingCount,
         isHourly,

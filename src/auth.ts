@@ -239,7 +239,7 @@ export async function refreshAuthUserProfile(
   return {
     ...user,
     ...(accountNumber ? { accountNumber, imprestNo: accountNumber } : {}),
-    ...(jobTitle ? { jobTitle } : {}),
+    jobTitle: jobTitle || '',
     ...(monthlySalaryBase > 0 ? { monthlySalaryBase } : {}),
   }
 }

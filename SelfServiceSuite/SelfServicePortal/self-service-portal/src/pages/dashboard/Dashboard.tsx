@@ -126,7 +126,7 @@ const tiles: DashboardTile[] = [
 
 export function Dashboard() {
   const { employee, isAuthenticated, bootstrapped } = useAuth()
-  const { has, canApprove, primaryRoleLabel, capabilitySummary, quickLinks } = usePermissions()
+  const { has, canApprove, capabilitySummary, quickLinks } = usePermissions()
   const apiBase = resolveApiBaseUrl()
   const canFetchSummary =
     bootstrapped && isAuthenticated && Boolean(apiBase) && Boolean(getToken())
@@ -136,7 +136,8 @@ export function Dashboard() {
     enabled: canFetchSummary,
   })
   const firstName = employee?.displayName?.split(' ')[0] ?? 'there'
-  const profileSubtitle = employee?.jobTitle?.trim() || primaryRoleLabel
+  const rawJobTitle = employee?.jobTitle?.trim() ?? ''
+  const profileSubtitle = rawJobTitle.toLowerCase() === 'staff' ? '' : rawJobTitle
   const data = summary.data ?? null
   const tileValues = (data ?? {}) as Record<string, number | undefined>
   const summaryError =
@@ -196,13 +197,11 @@ export function Dashboard() {
                 </p>
                 <p className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
                   Hi {firstName}
-                  <span
-                    className={`rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white backdrop-blur ${
-                      employee?.jobTitle?.trim() ? 'normal-case' : 'uppercase'
-                    }`}
-                  >
-                    {profileSubtitle}
-                  </span>
+                  {profileSubtitle ? (
+                    <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold normal-case tracking-wide text-white backdrop-blur">
+                      {profileSubtitle}
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-xs text-white/70 sm:text-sm">
                   Welcome to the {brand.product} — {new Date().getFullYear()} Summary
