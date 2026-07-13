@@ -223,17 +223,31 @@ describe('employeeLeaveMetrics', () => {
     assert.equal(metrics.earnedLeaveDays, null)
     assert.equal(metrics.leaveBalance, null)
   })
+
+  it('uses annual balance and never the generic employee leave balance', () => {
+    const metrics = employeeLeaveMetrics(
+      { LeaveBalance: -2.68, AnnualLeaveBalance: 18.32, EarnedLeaveDays: -1.44 },
+      user,
+    )
+    assert.equal(metrics.leaveBalance, 18.32)
+    assert.equal(metrics.earnedLeaveDays, -1.44)
+  })
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('prefers earned leave over ledger when BC exposes it', () => {
-    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
+  it('uses the employee annual balance instead of earned days', () => {
+    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 18.32)
   })
 
   it('falls back to ledger when employee card fields are absent', () => {
     const metrics = { earnedLeaveDays: null, leaveBalance: null }
     assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
+  })
+
+  it('keeps leave-type entitlement separate from the current balance', () => {
+    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32 }
+    assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 16)
   })
 })
 

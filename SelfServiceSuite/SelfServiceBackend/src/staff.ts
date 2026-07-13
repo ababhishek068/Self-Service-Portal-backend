@@ -187,8 +187,6 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
 
   const leaveBalance =
     fieldNumber(row, [
-      'LeaveBalance',
-      'Leave_Balance',
       'AnnualLeaveBalance',
       'Annual_Leave_Balance',
       'Annual_Leave_balance',
@@ -196,7 +194,6 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
     ]) ??
     discoverLeaveFieldNumber(row, [
       (key) => key === 'annualleavebalance',
-      (key) => key === 'leavebalance',
     ])
 
   const earnedLeaveDays =
@@ -210,7 +207,6 @@ export function resolveAnnualLeaveBalance(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   ledgerNet: number,
 ) {
-  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
   if (metrics.leaveBalance !== null) return metrics.leaveBalance
   return ledgerNet
 }
@@ -219,9 +215,9 @@ export function resolveAnnualLeaveEntitlement(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   leaveTypeDays: number,
 ) {
-  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
+  if (Number.isFinite(leaveTypeDays) && leaveTypeDays > 0) return leaveTypeDays
   if (metrics.leaveBalance !== null) return metrics.leaveBalance
-  return leaveTypeDays
+  return 0
 }
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
