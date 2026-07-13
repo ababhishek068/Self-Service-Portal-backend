@@ -55,7 +55,7 @@ const envSchema = z.object({
     .string()
     .url()
     .optional()
-    .default("http://erp-app-uat:2447/BC240/ODataV4/Company('HIJRA%20BANK')/"),
+    .default('http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Page/'),
   /** Optional WS/Page OData base (Employee Card). Auto-derived from BC_SOAP_CODEUNIT_URL when empty. */
   BC_ODATA_PAGE_BASE_URL: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
@@ -67,8 +67,8 @@ const envSchema = z.object({
   BC_NAV_USER: z.string().optional().default(''),
   BC_NAV_PASSWORD: z.string().optional().default(''),
 
-  SESSION_SECRET: z.string().min(1).default('hijra-self-service-dev-secret-change-me'),
-  JWT_SECRET: z.string().min(32).default('hijra-self-service-jwt-dev-secret-change-me'),
+  SESSION_SECRET: z.string().min(1).default('abh-self-service-dev-secret-change-me'),
+  JWT_SECRET: z.string().min(32).default('abh-self-service-jwt-dev-secret-change-me'),
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 8),
   LOG_API_REQUESTS: z
     .string()
@@ -109,7 +109,7 @@ const envSchema = z.object({
     .optional()
     .default('false')
     .transform((value) => value.toLowerCase() === 'true'),
-  /** Optional BC employee/payroll OData field name for monthly basic salary (HIJRA-specific). */
+  /** Optional BC employee/payroll OData field name for monthly basic salary. */
   BC_SALARY_BASE_FIELD: z.string().optional().default(''),
   /** Optional comma-separated OData service names to try first for employee salary lookup. */
   BC_SALARY_LOOKUP_SERVICE: csvList,

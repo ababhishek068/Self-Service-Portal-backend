@@ -45,8 +45,7 @@ export interface NavItem {
 }
 
 /**
- * HIJRA Bank UAT navigation — matches the ESS / self-service scope for Hijra.
- * ABH-only modules (e.g. Leave Planner) are intentionally omitted.
+ * ABH UAT navigation — matches the Technology Associates ESS scope.
  */
 export const navigationMenu: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: Gauge },
