@@ -177,6 +177,21 @@ function roundLeaveValue(value: number) {
   return Math.round(value * 100) / 100
 }
 
+export function parseEmployeeLeaveBalancesReturn(value: unknown): ODataRecord | null {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+
+  const parsed: ODataRecord = {}
+  for (const part of raw.split('#')) {
+    const separator = part.indexOf('=')
+    if (separator <= 0) continue
+    const key = part.slice(0, separator).trim()
+    const numeric = Number(part.slice(separator + 1).trim().replaceAll(',', ''))
+    if (key && Number.isFinite(numeric)) parsed[key] = numeric
+  }
+  return Object.keys(parsed).length > 0 ? parsed : null
+}
+
 export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
   if (!row) {
     const sessionBalance = Number(user.leaveBalance)
@@ -1566,11 +1581,20 @@ export function buildStaffRouter() {
         fetchCurrentEmployeeRow(user.employeeNo),
       ])
 
+      const soapEmployeeBalances = await callSoapMethod('FnGetEmployeeLeaveBalances', {
+        employeeNo: user.employeeNo,
+      })
+        .then((result) => parseEmployeeLeaveBalancesReturn(result.returnValue))
+        .catch(() => null)
+
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
       const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
-      const metrics = employeeLeaveMetrics(employeeRow, user)
+      const metrics = employeeLeaveMetrics(
+        soapEmployeeBalances ? { ...(employeeRow ?? {}), ...soapEmployeeBalances } : employeeRow,
+        user,
+      )
 
       let additions = 0
       let deductions = 0

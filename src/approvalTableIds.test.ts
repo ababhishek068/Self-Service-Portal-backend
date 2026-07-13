@@ -35,6 +35,7 @@ import {
   employeeLeaveMetrics,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
+  parseEmployeeLeaveBalancesReturn,
 } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
@@ -234,6 +235,22 @@ describe('employeeLeaveMetrics', () => {
     assert.equal(metrics.leaveBalance, 18.32)
     assert.equal(metrics.employeeCardLeaveBalance, -2.68)
     assert.equal(metrics.earnedLeaveDays, -1.44)
+  })
+})
+
+describe('parseEmployeeLeaveBalancesReturn', () => {
+  it('parses the live Employee Card values returned by the BC SOAP codeunit', () => {
+    assert.deepEqual(
+      parseEmployeeLeaveBalancesReturn(
+        'LeaveBalance=-2.68#EarnedLeaveDays=-1.44#AnnualLeaveBalance=18.32#CarryForward=0',
+      ),
+      {
+        LeaveBalance: -2.68,
+        EarnedLeaveDays: -1.44,
+        AnnualLeaveBalance: 18.32,
+        CarryForward: 0,
+      },
+    )
   })
 })
 
