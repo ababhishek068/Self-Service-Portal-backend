@@ -200,6 +200,7 @@ export function LeaveRequest() {
   const [leaveType, setLeaveType] = useState('')
   const [entitlement, setEntitlement] = useState<number | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
+  const [earnedLeaveDays, setEarnedLeaveDays] = useState<number | null>(null)
   const [isHourly, setIsHourly] = useState(false)
   const [pendingDuplicate, setPendingDuplicate] = useState(false)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -248,15 +249,18 @@ export function LeaveRequest() {
     if (!leaveType) {
       setEntitlement(null)
       setBalance(null)
+      setEarnedLeaveDays(null)
       return
     }
     const type = types.find((t) => t.code === leaveType)
     setEntitlement(type?.days ?? null)
+    setEarnedLeaveDays(null)
     setBalanceLoading(true)
     getLeaveBalance(leaveType)
       .then((res) => {
         setBalance(res.balance)
         setEntitlement(res.entitlement ?? type?.days ?? null)
+        setEarnedLeaveDays(res.earnedLeaveDays ?? null)
         setIsHourly(res.isHourly)
         setPendingDuplicate(res.pendingCount > 0)
         if (env.BLOCK_DUPLICATE_PENDING_LEAVE && res.pendingCount > 0) {
@@ -688,7 +692,7 @@ export function LeaveRequest() {
             </div>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
             <div className="space-y-1.5">
               <Label htmlFor="leaveType">Leave Type</Label>
               <Select
@@ -721,6 +725,12 @@ export function LeaveRequest() {
                   <span className="text-sm text-slate-400">{DASH}</span>
                 )}
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Earned Leave Days</Label>
+              <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                {earnedLeaveDays !== null ? formatDays(earnedLeaveDays) : DASH}
+              </p>
             </div>
           </div>
 

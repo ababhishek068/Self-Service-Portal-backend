@@ -12,6 +12,7 @@ export interface LeaveType {
 export interface LeaveBalance {
   balance: number
   entitlement?: number
+  earnedLeaveDays?: number | null
   pendingCount: number
   isHourly: boolean
 }
