@@ -741,6 +741,17 @@ body.portal-api-blocking #root {
     box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Searchable selects render their result list outside the field. Leave the
+   ABH request card open so the list is not clipped while the compact first
+   step is displayed. The header keeps the card's rounded top corners. */
+.portal-form-card.portal-form-card--select-overflow {
+  overflow: visible;
+}
+
+.portal-form-card--select-overflow > .portal-form-card-header {
+  border-radius: 0.625rem 0.625rem 0 0;
+}
+
 .portal-form-card:hover {
   transform: translateY(-2px);
   box-shadow:

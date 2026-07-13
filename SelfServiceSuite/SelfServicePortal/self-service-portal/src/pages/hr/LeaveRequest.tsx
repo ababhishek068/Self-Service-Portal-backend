@@ -670,7 +670,10 @@ export function LeaveRequest() {
       showPageHeading={false}
       actions={<PortalNewButton label="New Request" onClick={resetForm} />}
     >
-      <form onSubmit={handleSubmit} className="portal-form-card animate-page-in mx-auto w-full max-w-5xl">
+      <form
+        onSubmit={handleSubmit}
+        className="portal-form-card portal-form-card--select-overflow animate-page-in w-full"
+      >
         <div className="portal-form-card-header relative px-4 py-3 text-center text-sm font-semibold tracking-wide text-white sm:text-base">
           New Leave Request
         </div>
