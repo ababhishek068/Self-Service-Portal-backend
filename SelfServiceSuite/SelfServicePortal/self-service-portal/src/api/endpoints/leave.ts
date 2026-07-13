@@ -10,11 +10,8 @@ export interface LeaveType {
 }
 
 export interface LeaveBalance {
-  allocatedDays: number | null
-  currentLeaveBalance: number | null
-  earnedLeaveDays: number | null
-  /** Same as currentLeaveBalance — used for submit validation. */
   balance: number
+  entitlement?: number
   pendingCount: number
   isHourly: boolean
 }
@@ -131,9 +128,6 @@ export interface SubmitLeaveInput {
   leaveType: string
   appliedDays: number
   startDate: string
-  /** From GetLeaveDates — sent to BC on create so Return Date is populated. */
-  endDate?: string
-  returnDate?: string
   isHalfDayLeave: '0' | '1' | '2'
   reliever?: string
   reason: string
@@ -240,6 +234,12 @@ export async function fetchLeaveSchedule(scope: 'self' | 'department' = 'departm
     params: { scope },
   })
   return rows
+}
+
+export async function fetchLeaveApprovalRoute(): Promise<PortalRequest['approvalSteps']> {
+  requireAuthApiUrl()
+  const { steps } = await authGet<{ steps: PortalRequest['approvalSteps'] }>('/api/leave/approval-route')
+  return steps
 }
 
 export async function downloadLeaveStatement(

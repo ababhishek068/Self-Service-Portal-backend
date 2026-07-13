@@ -34,7 +34,7 @@ export function HodEmployeeDetail() {
       description="Department employee profile."
       actions={(
         <Button asChild variant="outline">
-          <Link to="/hod/department-staff">Back to Department Staff</Link>
+          <Link to="/hod/team-requests">Back to Department Staff</Link>
         </Button>
       )}
     >

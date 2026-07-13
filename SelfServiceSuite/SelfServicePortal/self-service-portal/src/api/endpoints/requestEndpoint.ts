@@ -19,7 +19,11 @@ export async function getModuleRequest(_config: EndpointConfig, id: string) {
 
 export async function createModuleRequest(config: EndpointConfig, payload: Record<string, unknown>) {
   requireAuthApiUrl()
-  return authPost<PortalRequest>('/api/requests', { ...payload, module: config.module })
+  return authPost<PortalRequest>(
+    '/api/requests',
+    { ...payload, module: config.module },
+    { timeout: 45000 } as Parameters<typeof authPost>[2],
+  )
 }
 
 export async function cancelModuleRequest(_config: EndpointConfig, id: string) {

@@ -16,7 +16,7 @@ export function Performance() {
   const query = useQuery({ queryKey: ['hr', 'performance'], queryFn: listPerformanceReviews })
 
   return (
-    <PageWrapper title="Competency List">
+    <PageWrapper title="Performance">
       <DataTable
         rows={query.data ?? []}
         columns={columns}

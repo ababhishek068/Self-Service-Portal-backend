@@ -6,11 +6,11 @@
  */
 export const brand = {
   /** Full legal company name shown in headers and footers. */
-  company: 'Technology Associates EA Limited',
+  company: 'Hijra Bank',
   /** Shorter form for tight spaces. */
-  companyShort: 'Technology Associates',
+  companyShort: 'Hijra Bank',
   /** Monogram used inside the circular logo badge. */
-  monogram: 'TA',
+  monogram: 'HB',
   /** Product name. */
   product: 'Self Service Portal',
   /** Product name without the "Portal" suffix (used in the sidebar). */

@@ -5,11 +5,17 @@ const config = { module: 'salaryAdvance' as const, entity: 'selfServiceSalaryAdv
 
 export const listSalaryAdvanceRequests = () => listModuleRequests(config)
 
-export const createSalaryAdvanceRequest = (payload: SalaryAdvanceForm) =>
+export const createSalaryAdvanceRequest = (
+  payload: SalaryAdvanceForm,
+  employeeAccountNumber = '',
+) =>
   createModuleRequest(config, {
     ...payload,
     title: `Salary advance - ${payload.purpose.slice(0, 40)}`,
     amount: 0,
+    ...(employeeAccountNumber
+      ? { customerNo: employeeAccountNumber, accountNo: employeeAccountNumber }
+      : {}),
   })
 
 export const cancelSalaryAdvanceRequest = (id: string) => cancelModuleRequest(config, id)

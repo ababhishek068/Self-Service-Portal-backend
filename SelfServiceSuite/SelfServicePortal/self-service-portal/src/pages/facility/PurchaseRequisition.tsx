@@ -13,6 +13,12 @@ export function PurchaseRequisition() {
   const items = useLookupOptions('items')
   const assets = useLookupOptions('assets')
   const services = useLookupOptions('services')
+  const departments = useLookupOptions('departments')
+  // Mirror the BC lookup which lists department CODES (FACILTY, HC, OUT, ...).
+  const departmentOptions = departments.options.map((option) => ({
+    value: option.value,
+    label: option.label && option.label !== option.value ? `${option.value} — ${option.label}` : option.value,
+  }))
 
   return (
     <MultiStepRequestPage
@@ -24,7 +30,7 @@ export function PurchaseRequisition() {
       listRequests={() => listModuleRequests(module)}
       newButtonLabel="New Request"
       headerSchema={purchaseHeaderSchema}
-      headerDefaults={{ dateNeeded: today, description: '' }}
+      headerDefaults={{ dateNeeded: today, description: '', requestingDepartment: '' }}
       buildHeaderPayload={(values) => ({
         ...values,
         orderDate: values.dateNeeded,
@@ -34,13 +40,20 @@ export function PurchaseRequisition() {
       })}
       headerFields={[
         { name: 'dateNeeded', label: 'Needed By Date', type: 'date', valuePaths: ['Needed_By_Date', 'OrderDate', 'Order_Date'] },
+        {
+          name: 'requestingDepartment',
+          label: 'Requesting Department',
+          type: 'select',
+          options: departmentOptions,
+          valuePaths: ['RequestingDepartment', 'Requesting_Department', 'ShortcutDimension1Code'],
+        },
         { name: 'description', label: 'Description', type: 'textarea', valuePaths: ['Posting_Description', 'PostingDescription'] },
       ]}
       detailFields={[
         { label: 'Requisition No.', paths: ['request.requestNo'] },
         { label: 'Needed By Date', paths: ['payload.Needed_By_Date', 'payload.OrderDate', 'payload.Order_Date'], format: 'date' },
         { label: 'Description', paths: ['payload.Posting_Description', 'payload.PostingDescription'] },
-        { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
+        { label: 'Department', paths: ['payload.RequestingDepartment', 'payload.Requesting_Department', 'request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
         { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
@@ -48,7 +61,7 @@ export function PurchaseRequisition() {
         label: 'Purchase Lines',
         addLabel: 'New Line',
         schema: purchaseLineSchema,
-        defaultValues: { itemNo: '', location: '', reasonForRequest: '', quantity: 1, type: '2' },
+        defaultValues: { itemNo: '', location: '', reasonForRequest: '', specification: '', quantity: 1, type: '2' },
         buildLinePayload: (values) => ({
           ...values,
           whereNeeded: values.location,
@@ -67,6 +80,7 @@ export function PurchaseRequisition() {
           },
           { name: 'location', label: 'Location (optional)', type: 'select', options: locations.options },
           { name: 'quantity', label: 'Quantity', type: 'number' },
+          { name: 'specification', label: 'Specification', type: 'textarea' },
           { name: 'reasonForRequest', label: 'Reason for Request', type: 'textarea' },
         ],
         columns: [

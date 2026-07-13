@@ -5,20 +5,26 @@ import { formatDateTime } from '@/utils/formatters'
 import type { ApprovalStep } from '@/types/erp.types'
 
 export function ApprovalTimeline({ steps }: { steps: ApprovalStep[] }) {
+  const ordered = [...steps].sort((left, right) => (left.sequenceNo ?? 0) - (right.sequenceNo ?? 0))
+
   return (
     <ol className="space-y-4">
-      {steps.map((step, index) => {
+      {ordered.map((step, index) => {
         const isDone = ['Approved', 'Submitted'].includes(step.status)
         const isCurrent = step.status === 'Pending Approval'
         const Icon = isDone ? CheckCircle2 : isCurrent ? CircleDashed : Circle
+        const sequence = step.sequenceNo ?? index + 1
         return (
           <li key={step.id} className="flex gap-3">
             <div className="flex flex-col items-center">
               <Icon className={cn('h-5 w-5', isDone ? 'text-emerald-600' : isCurrent ? 'text-amber-600' : 'text-slate-300')} />
-              {index < steps.length - 1 ? <span className="mt-2 h-full w-px bg-slate-200" /> : null}
+              {index < ordered.length - 1 ? <span className="mt-2 h-full w-px bg-slate-200" /> : null}
             </div>
             <div className="min-w-0 flex-1 pb-3">
               <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                  Step {sequence}
+                </span>
                 <p className="font-medium text-slate-900">{step.actorName}</p>
                 <StatusBadge status={step.status} />
               </div>

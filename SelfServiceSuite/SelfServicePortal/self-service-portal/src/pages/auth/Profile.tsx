@@ -17,6 +17,7 @@ import {
 import {
   downloadEmployeeAttachment,
   getEmployeeProfileDetails,
+  getPortalBuild,
   listEmployeeAttachments,
 } from '@/api/endpoints/profile'
 import { PageWrapper } from '@/components/layout/PageWrapper'
@@ -98,6 +99,8 @@ export function Profile() {
     queryKey: ['profile', 'attachments'],
     queryFn: listEmployeeAttachments,
   })
+  // Deploy tracking: shows which backend build is actually running.
+  const buildQuery = useQuery({ queryKey: ['portal-build'], queryFn: getPortalBuild })
   const profile = profileQuery.data
 
   if (profileQuery.isLoading) {
@@ -329,6 +332,11 @@ export function Profile() {
             </section>
           ) : null}
         </div>
+
+        {/* Deploy tracking: shows which backend build is actually running. */}
+        <p className="pt-1 text-center text-xs text-slate-400">
+          Portal build: {buildQuery.data?.portalApiBuild ?? '(endpoint not available — old backend)'}
+        </p>
       </div>
     </PageWrapper>
   )

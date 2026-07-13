@@ -1,8 +1,11 @@
 import { createSalaryAdvanceRequest, listSalaryAdvanceRequests } from '@/api/endpoints/salaryAdvance'
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
+import { useEmployeeDefaults } from '@/hooks/useEmployeeDefaults'
 import { salaryAdvanceSchema, type SalaryAdvanceForm } from '@/schemas/requestSchemas'
 
 export function SalaryAdvance() {
+  const { employeeAccountNumber } = useEmployeeDefaults()
+
   return (
     <RequestFormPage
       title="Salary Advance"
@@ -10,7 +13,9 @@ export function SalaryAdvance() {
       schema={salaryAdvanceSchema}
       queryKey={['hr', 'salary-advance']}
       listRequests={listSalaryAdvanceRequests}
-      createRequest={(values) => createSalaryAdvanceRequest(values as SalaryAdvanceForm)}
+      createRequest={(values) =>
+        createSalaryAdvanceRequest(values as SalaryAdvanceForm, employeeAccountNumber)
+      }
       moduleConfig={{ module: 'salaryAdvance', entity: 'selfServiceSalaryAdvanceRequests' }}
       defaultValues={{ purpose: '', percentageSalary: 0 }}
       fields={[
@@ -29,7 +34,6 @@ export function SalaryAdvance() {
         { label: 'Type', paths: ['AdvanceType', 'Advance_Type'] },
         { label: 'Purpose', paths: ['Purpose', 'purpose'] },
         { label: 'Percentage of Salary', paths: ['PercentageofSalary', 'PercentageOfSalary', 'Percentage_of_Salary'], format: 'percentage' },
-        { label: 'Amount', paths: ['Amount', 'amount'], format: 'currency' },
       ]}
       hideDetailAttachments
     />

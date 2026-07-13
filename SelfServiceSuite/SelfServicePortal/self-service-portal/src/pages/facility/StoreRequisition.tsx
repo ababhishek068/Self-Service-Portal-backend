@@ -26,7 +26,7 @@ export function StoreRequisition() {
       newButtonLabel="New Request"
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={storeHeaderSchema}
-      headerDefaults={{ dateRequired: today, description: '' }}
+      headerDefaults={{ dateRequired: today, description: '', issuingStore: '' }}
       buildHeaderPayload={(values) => ({
         ...values,
         requestDate: values.dateRequired,
@@ -35,11 +35,13 @@ export function StoreRequisition() {
       })}
       headerFields={[
         { name: 'dateRequired', label: 'Date Required', type: 'date', valuePaths: ['RequiredDate', 'Required_Date', 'RequestDate'] },
+        { name: 'issuingStore', label: 'Issuing Store', type: 'select', options: locations.options, valuePaths: ['IssuingStore', 'Issuing_Store'] },
         { name: 'description', label: 'Request Description', type: 'textarea', valuePaths: ['RequestDescription', 'Request_Description'] },
       ]}
       detailFields={[
         { label: 'Requisition No.', paths: ['request.requestNo'] },
         { label: 'Date Required', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
+        { label: 'Issuing Store', paths: ['payload.IssuingStore', 'payload.Issuing_Store'] },
         { label: 'Description', paths: ['payload.RequestDescription', 'payload.Request_Description'] },
         { label: 'Department', paths: ['request.departmentName', 'request.departmentCode', 'payload.ShortcutDimension2Code'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },

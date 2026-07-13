@@ -26,7 +26,6 @@ import { Dashboard } from '@/pages/dashboard/Dashboard'
 import { Documents } from '@/pages/downloads/Documents'
 import { FuelRequest } from '@/pages/facility/FuelRequest'
 import { GatePass } from '@/pages/facility/GatePass'
-import { MaintenanceRequest } from '@/pages/facility/MaintenanceRequest'
 import { PurchaseRequisition } from '@/pages/facility/PurchaseRequisition'
 import { StoreRequisition } from '@/pages/facility/StoreRequisition'
 import { TransferOrder } from '@/pages/facility/TransferOrder'
@@ -43,8 +42,6 @@ import { HodEmployeeDetail } from '@/pages/hod/HodEmployeeDetail'
 import { StaffOnLeave } from '@/pages/hod/StaffOnLeave'
 import { Attendance } from '@/pages/hr/Attendance'
 import { DocumentRequisition } from '@/pages/hr/DocumentRequisition'
-import { HrComingSoon } from '@/pages/hr/HrComingSoon'
-import { LeavePlanner } from '@/pages/hr/LeavePlanner'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
 import { LeaveStatement } from '@/pages/hr/LeaveStatement'
 import { OvertimeRequest } from '@/pages/hr/OvertimeRequest'
@@ -63,8 +60,20 @@ function ProtectedLayout() {
   const { isAuthenticated, bootstrapped } = useAuth()
   if (!bootstrapped) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-slate-600">
-        Restoring your session…
+      <div className="portal-blocking-overlay fixed inset-0 z-[200] flex items-center justify-center bg-[var(--portal-content-bg)]">
+        <div className="portal-blocking-card animate-toast-in relative w-full max-w-xs rounded-2xl border border-white/60 bg-white px-6 py-7 text-center shadow-xl ring-1 ring-[var(--portal-navy)]/10">
+          <div className="relative mx-auto mb-4 flex h-14 w-14 items-center justify-center">
+            <span
+              className="absolute inset-0 rounded-full border-2 border-[var(--portal-navy)]/15"
+              style={{ animation: 'portal-blocking-spin 2.4s linear infinite' }}
+            />
+            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/8 to-[var(--portal-orange)]/12 text-sm font-semibold text-[var(--portal-navy)]">
+              SSP
+            </span>
+          </div>
+          <p className="text-sm font-semibold text-[var(--portal-navy)]">Restoring your session…</p>
+          <p className="mt-1 text-xs text-slate-500">Connecting to the portal</p>
+        </div>
       </div>
     )
   }
@@ -104,7 +113,6 @@ export default function App() {
         <Route path="facility/purchase-requisition" element={<PurchaseRequisition />} />
         <Route path="facility/fuel-request" element={<FuelRequest />} />
         <Route path="facility/transport-request" element={<TransportRequest />} />
-        <Route path="facility/maintenance-request" element={<MaintenanceRequest />} />
         <Route path="facility/transfer-order" element={<TransferOrder />} />
         <Route path="facility/work-tickets" element={<WorkTickets />} />
         <Route path="facility/gate-pass" element={<Navigate to="/facility/gate-pass/store-requisition" replace />} />
@@ -113,7 +121,6 @@ export default function App() {
         <Route path="facility/gate-pass/asset-transfer" element={<GatePass source="assetTransfer" />} />
         <Route path="facility/vehicle-transfer" element={<VehicleTransfer />} />
         <Route path="hr/leave-request" element={<LeaveRequest />} />
-        <Route path="hr/leave-planner" element={<LeavePlanner />} />
         <Route path="hr/leave-statement" element={<LeaveStatement />} />
         <Route path="hr/attendance" element={<Attendance />} />
         <Route path="hr/performance" element={<Performance />} />
@@ -121,24 +128,6 @@ export default function App() {
         <Route path="hr/payslip" element={<Payslip />} />
         <Route path="hr/salary-advance" element={<SalaryAdvance />} />
         <Route path="hr/document-requisition" element={<DocumentRequisition />} />
-        <Route
-          path="hr/employee-resignation"
-          element={(
-            <HrComingSoon
-              title="Employee Resignation"
-              description="Submit and track resignation requests through approval."
-            />
-          )}
-        />
-        <Route
-          path="hr/employee-transfer"
-          element={(
-            <HrComingSoon
-              title="Employee Transfer"
-              description="Request internal department or location transfers."
-            />
-          )}
-        />
         <Route path="hr/overtime-request" element={<OvertimeRequest />} />
         <Route path="hr/travel-request" element={<TravelRequest />} />
         <Route path="approvals" element={<PendingApprovals />} />
@@ -146,8 +135,8 @@ export default function App() {
         <Route path="approvals/rejected" element={<RejectedDocuments />} />
         <Route path="approvals/:id" element={<ApprovalDetail />} />
         <Route path="ceo/master-roll" element={<RoleRoute roles={['ceo']}><MasterRoll /></RoleRoute>} />
-        <Route path="hod/team-requests" element={<Navigate to="/hod/department-staff" replace />} />
-        <Route path="hod/department-staff" element={<RoleRoute roles={['hod']}><HodTeamRequests /></RoleRoute>} />
+        <Route path="hod/department-staff" element={<Navigate to="/hod/team-requests" replace />} />
+        <Route path="hod/team-requests" element={<RoleRoute roles={['hod']}><HodTeamRequests /></RoleRoute>} />
         <Route path="hod/employee/:employeeNo" element={<RoleRoute roles={['hod']}><HodEmployeeDetail /></RoleRoute>} />
         <Route path="hod/staff-on-leave" element={<RoleRoute roles={['hod']}><StaffOnLeave /></RoleRoute>} />
         <Route path="downloads/documents" element={<Documents />} />

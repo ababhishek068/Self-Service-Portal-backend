@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
+import { FileUpload, type FileUploadItemState } from '@/components/shared/FileUpload'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -10,6 +11,7 @@ import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useProgress } from '@/components/feedback/ProgressProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
+import { RequestProgress } from '@/components/shared/RequestProgress'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -22,11 +24,13 @@ import {
   fetchRelievers,
   cancelLeaveRequest,
   fetchLeaveRequestDetail,
+  fetchLeaveApprovalRoute,
   getLeaveBalance,
   getLeaveDates,
   listLeaveRequests,
   requestLeaveApproval,
   submitLeaveRequest,
+  uploadLeaveDocumentAttachment,
   type LeaveListRow,
   type LeaveType,
 } from '@/api/endpoints/leave'
@@ -35,7 +39,8 @@ import {
   getModuleRequest,
 } from '@/api/endpoints/requestEndpoint'
 import type { PortalRequest } from '@/types/erp.types'
-import { useAuth } from '@/hooks/useAuth'
+import { env } from '@/config/env'
+import type { Attachment } from '@/types/erp.types'
 import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
 
 const DASH = '—'
@@ -48,56 +53,18 @@ const halfDayOptions = [
 
 type HalfDayValue = (typeof halfDayOptions)[number]['value']
 
-/** Normalize BC / portal date strings for HTML date inputs and API submit. */
-function toDateInputValue(value: string): string {
-  if (!value) return ''
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
-  const mdY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim())
-  if (mdY) {
-    const [, month, day, year] = mdY
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-  }
+function formatPretty(iso: string): string {
+  if (!iso) return ''
   try {
-    return format(parseISO(value), 'yyyy-MM-dd')
+    return format(parseISO(iso), 'd MMM yyyy')
   } catch {
-    return value
+    return iso
   }
 }
 
 function formatDays(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return DASH
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
-}
-
-function normalizeGender(gender: string | undefined | null): 'female' | 'male' | '' {
-  const g = String(gender ?? '').trim().toLowerCase()
-  if (!g) return ''
-  if (g === 'f' || g.startsWith('female') || g === 'woman') return 'female'
-  if (g === 'm' || g.startsWith('male') || g === 'man') return 'male'
-  return ''
-}
-
-function leaveTypeIsFemaleOnly(type: LeaveType): boolean {
-  const code = type.code.trim().toUpperCase()
-  const desc = type.description.trim().toLowerCase()
-  if (['MATERNITY', 'PRENATAL'].includes(code)) return true
-  return desc.includes('maternity') || desc.includes('prenatal')
-}
-
-function leaveTypeIsMaleOnly(type: LeaveType): boolean {
-  const code = type.code.trim().toUpperCase()
-  const desc = type.description.trim().toLowerCase()
-  if (code === 'PATERNITY') return true
-  return desc.includes('paternity')
-}
-
-function filterLeaveTypesByGender(types: LeaveType[], gender: string): LeaveType[] {
-  const g = normalizeGender(gender)
-  return types.filter((type) => {
-    if (leaveTypeIsFemaleOnly(type)) return g === 'female'
-    if (leaveTypeIsMaleOnly(type)) return g === 'male'
-    return true
-  })
 }
 
 function payloadValue(payload: Record<string, unknown>, keys: string[], fallback = DASH) {
@@ -137,22 +104,42 @@ function resolveCreatedLeaveDocumentNo(result: {
   return ''
 }
 
-function isSickLeavePayload(payload: Record<string, unknown>): boolean {
-  const code = payloadValue(payload, ['LeaveTypeCode', 'Leave_Type_Code', 'leaveTypeCode'], '').toUpperCase()
-  const type = payloadValue(payload, ['LeaveType', 'Leave_Type', 'leaveType'], '').toUpperCase()
-  return code === 'SICK' || type === 'SICK' || type.includes('SICK')
-}
-
-type LeaveFlowStep = 'draft' | 'review' | 'approval'
-
-const leaveFlowSteps: Array<{ id: LeaveFlowStep; label: string }> = [
-  { id: 'draft', label: 'Draft' },
-  { id: 'review', label: 'Review' },
-  { id: 'approval', label: 'Approval' },
-]
-
-function leaveStatusIsSubmitted(status: string): boolean {
-  return ['Pending Approval', 'Submitted', 'Approved', 'Rejected', 'Cancelled', 'Canceled', 'Posted'].includes(status)
+async function uploadLeaveAttachments(
+  documentNo: string,
+  files: Attachment[],
+  onFileState?: (fileId: string, state: FileUploadItemState) => void,
+) {
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 900 * attempt))
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 800))
+      }
+      for (const file of files) {
+        if (!file.contentBase64) {
+          throw new Error(`${file.fileName} could not be read. Please re-select the file.`)
+        }
+        onFileState?.(file.id, 'uploading')
+        await uploadLeaveDocumentAttachment(documentNo, {
+          fileName: file.fileName,
+          fileType: file.fileType,
+          size: file.size,
+          contentBase64: file.contentBase64,
+          description: file.description || 'Leave Attachment',
+        })
+        onFileState?.(file.id, 'success')
+      }
+      return
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error('Attachment upload failed.')
+      for (const file of files) {
+        onFileState?.(file.id, 'error')
+      }
+    }
+  }
+  throw lastError ?? new Error('Attachment upload failed.')
 }
 
 async function syncLeaveStatusFromBc(
@@ -160,54 +147,43 @@ async function syncLeaveStatusFromBc(
   requestId: string,
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
-  const delaysMs = [0, 1500, 2000, 2500, 3000, 3500]
-  for (const delay of delaysMs) {
-    if (delay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay))
-    }
+  // Gentle background reconcile: a handful of checks spaced out, not a
+  // rapid poll. The backend already confirms pending before responding, so
+  // this only covers the case where BC is still catching up.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 4000))
     try {
       const detail = await fetchLeaveRequestDetail(requestNo, { silent: true })
-      queryClient.setQueryData(['hr', 'leave-detail', requestId], detail)
-      patchLeaveListRow(queryClient, requestNo, detail.status)
       if (['Pending Approval', 'Approved'].includes(detail.status)) {
-        await queryClient.refetchQueries({ queryKey: ['hr', 'leave-list'] })
+        queryClient.setQueryData(['hr', 'leave-detail', requestId], detail)
+        queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+          (rows ?? []).map((row) =>
+            row.ApplicationCode === requestNo ? { ...row, Status: detail.status } : row,
+          ),
+        )
         return
       }
     } catch {
-      // BC may still be catching up
+      // keep polling until BC reflects the approval
     }
   }
-  await queryClient.refetchQueries({ queryKey: ['hr', 'leave-list'] })
-  await queryClient.refetchQueries({ queryKey: ['hr', 'leave-detail', requestId] })
-}
-
-function patchLeaveListRow(
-  queryClient: ReturnType<typeof useQueryClient>,
-  applicationCode: string,
-  status: string,
-) {
-  queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (current) => {
-    if (!current?.length) return current
-    const key = applicationCode.trim().toUpperCase()
-    let changed = false
-    const next = current.map((row) => {
-      if (row.ApplicationCode.trim().toUpperCase() !== key) return row
-      changed = true
-      return { ...row, Status: status }
-    })
-    return changed ? next : current
-  })
+  void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
+  void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-detail', requestId] })
 }
 
 export function LeaveRequest() {
-  const { employee } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
   const progress = useProgress()
   const leaveListQuery = useQuery({ queryKey: ['hr', 'leave-list'], queryFn: listLeaveRequests })
+  const approvalRouteQuery = useQuery({
+    queryKey: ['hr', 'leave-approval-route'],
+    queryFn: fetchLeaveApprovalRoute,
+  })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
-  const [leaveFlowStep, setLeaveFlowStep] = useState<LeaveFlowStep>('review')
+  const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
+  const [creationAttachmentStates, setCreationAttachmentStates] = useState<Record<string, FileUploadItemState>>({})
   const [detailAction, setDetailAction] = useState<string | null>(null)
   const detailQuery = useQuery({
     queryKey: ['hr', 'leave-detail', selectedRequestId],
@@ -222,26 +198,25 @@ export function LeaveRequest() {
     enabled: Boolean(selectedRequestId),
   })
   const [leaveType, setLeaveType] = useState('')
-  const [allocatedDays, setAllocatedDays] = useState<number | null>(null)
-  const [currentLeaveBalance, setCurrentLeaveBalance] = useState<number | null>(null)
-  const [earnedLeaveDays, setEarnedLeaveDays] = useState<number | null>(null)
+  const [entitlement, setEntitlement] = useState<number | null>(null)
+  const [balance, setBalance] = useState<number | null>(null)
   const [isHourly, setIsHourly] = useState(false)
+  const [pendingDuplicate, setPendingDuplicate] = useState(false)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [types, setTypes] = useState<LeaveType[]>([])
   const [relievers, setRelievers] = useState<Array<{ value: string; label: string }>>([])
   const [submittingForm, setSubmittingForm] = useState(false)
-
-  const gender = employee?.gender || ''
-  const availableTypes = filterLeaveTypesByGender(types, gender)
+  const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating' | 'uploading' | 'approval'>('idle')
+  const availableTypes = types
 
   useEffect(() => {
     fetchLeaveTypes()
-      .then((fetched) => setTypes(filterLeaveTypesByGender(fetched, gender)))
+      .then(setTypes)
       .catch(() => setTypes([]))
     fetchRelievers()
       .then(setRelievers)
       .catch(() => setRelievers([]))
-  }, [gender])
+  }, [])
 
   const [appliedDays, setAppliedDays] = useState('')
   const [appliedHours, setAppliedHours] = useState('')
@@ -256,8 +231,9 @@ export function LeaveRequest() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const showSecondary = leaveType !== '' && !balanceLoading && currentLeaveBalance !== null
-  const canSubmit = showSecondary && currentLeaveBalance > 0
+  const duplicatePendingBlocked = env.BLOCK_DUPLICATE_PENDING_LEAVE && pendingDuplicate
+  const showSecondary = leaveType !== '' && balance !== null && !duplicatePendingBlocked && !balanceLoading
+  const canSubmit = showSecondary && balance > 0
 
   useEffect(() => {
     setEndDate('')
@@ -270,24 +246,29 @@ export function LeaveRequest() {
     setError(null)
     setSuccess(null)
     if (!leaveType) {
-      setAllocatedDays(null)
-      setCurrentLeaveBalance(null)
-      setEarnedLeaveDays(null)
+      setEntitlement(null)
+      setBalance(null)
       return
     }
+    const type = types.find((t) => t.code === leaveType)
+    setEntitlement(type?.days ?? null)
     setBalanceLoading(true)
     getLeaveBalance(leaveType)
       .then((res) => {
-        setAllocatedDays(res.allocatedDays)
-        setCurrentLeaveBalance(res.currentLeaveBalance ?? res.balance ?? null)
-        setEarnedLeaveDays(res.earnedLeaveDays)
+        setBalance(res.balance)
+        setEntitlement(res.entitlement ?? type?.days ?? null)
         setIsHourly(res.isHourly)
+        setPendingDuplicate(res.pendingCount > 0)
+        if (env.BLOCK_DUPLICATE_PENDING_LEAVE && res.pendingCount > 0) {
+          setError(
+            'You cannot apply a new leave while there is another one of the same type that is pending approval.',
+          )
+        }
       })
       .finally(() => setBalanceLoading(false))
   }, [leaveType])
 
   const leaveDatesRequestId = useRef(0)
-  const detailCardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setEndDate('')
@@ -301,8 +282,8 @@ export function LeaveRequest() {
     const starting = isHourly ? startDateTime : startDate
     if (!duration || !starting || !leaveType) return
 
-    if (currentLeaveBalance !== null && duration > currentLeaveBalance) {
-      setError(`The maximum number of days you can apply for is ${formatDays(currentLeaveBalance)}`)
+    if (entitlement !== null && duration > entitlement) {
+      setError(`The maximum number of days you can apply for is ${entitlement}`)
       return
     }
     if (isHourly && duration > 4) {
@@ -337,15 +318,7 @@ export function LeaveRequest() {
       .finally(() => {
         if (requestId === leaveDatesRequestId.current) setDatesLoading(false)
       })
-  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, currentLeaveBalance])
-
-  useEffect(() => {
-    if (!selectedRequestId) return
-    const timer = window.setTimeout(() => {
-      detailCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 50)
-    return () => window.clearTimeout(timer)
-  }, [selectedRequestId, leaveFlowStep])
+  }, [appliedDays, appliedHours, startDate, startDateTime, halfDay, leaveType, isHourly, entitlement])
 
   useEffect(() => {
     if (halfDay === '1' || halfDay === '2') {
@@ -353,7 +326,7 @@ export function LeaveRequest() {
     }
   }, [halfDay])
 
-  const clearLeaveFormFields = () => {
+  const resetForm = () => {
     setLeaveType('')
     setAppliedDays('')
     setAppliedHours('')
@@ -364,14 +337,10 @@ export function LeaveRequest() {
     setReturnDate('')
     setReliever('')
     setReason('')
+    setCreationAttachments([])
+    setCreationAttachmentStates({})
     setError(null)
     setSuccess(null)
-  }
-
-  const resetForm = () => {
-    setSelectedRequestId(null)
-    setLeaveFlowStep('draft')
-    clearLeaveFormFields()
   }
 
   const leaveColumns: DataTableColumn<LeaveListRow>[] = [
@@ -394,33 +363,42 @@ export function LeaveRequest() {
       setError('Please complete all required fields.')
       return
     }
-    if (currentLeaveBalance !== null && submittedDays > currentLeaveBalance) {
-      setError(`Insufficient leave balance. Current Leave Balance: ${formatDays(currentLeaveBalance)} day(s).`)
+    if (leaveType === 'SICK' && creationAttachments.length === 0) {
+      setError('A supporting attachment is required for sick leave.')
       return
     }
-    if (!endDate || !returnDate) {
-      setError('End date and return date must be calculated before submitting. Check start date and applied days.')
+    if (creationAttachments.some((file) => file.size > 10_000_000)) {
+      setError('Leave attachments cannot exceed 10 MB each.')
+      return
+    }
+    if (balance !== null && submittedDays > balance) {
+      setError(`Insufficient leave balance. Available: ${formatDays(balance)} day(s).`)
       return
     }
     const confirmed = await confirm({
       title: 'Create leave application',
       message:
-        'Save this leave as a draft? You can review it below and click Request Approval when ready.',
-      confirmLabel: 'Create draft',
+        creationAttachments.length > 0
+          ? 'Create this leave application and upload the selected file(s)? You can then request approval below.'
+          : 'Create this leave application as a draft? You can then request approval below.',
+      confirmLabel: 'Create application',
     })
     if (!confirmed) return
     setSubmittingForm(true)
+    setSubmitPhase('creating')
+    setCreationAttachmentStates({})
+    const hasAttachments = creationAttachments.length > 0
     const progressId = progress.show({
       title: 'Creating leave application…',
-      message: 'Saving your draft — you can keep browsing',
+      message: 'Saving your request — please wait.',
+      blocking: true,
     })
     try {
+      // Step 1 — always create the draft first. Approval is a separate, explicit step.
       const result = await submitLeaveRequest({
         leaveType,
         appliedDays: submittedDays,
         startDate: submittedStartDate,
-        endDate: toDateInputValue(endDate) || endDate,
-        returnDate: toDateInputValue(returnDate) || returnDate,
         isHalfDayLeave: halfDay,
         reliever,
         reason,
@@ -431,15 +409,34 @@ export function LeaveRequest() {
         const createdRequestId = documentNo
           ? `leave-${documentNo}`
           : resolveCreatedLeaveRequestId(result)
+        let attachmentError = ''
         const finalStatus = result.request?.status ?? 'Open'
 
-        await queryClient.refetchQueries({ queryKey: ['dashboard'] })
-        await queryClient.refetchQueries({ queryKey: ['hr', 'leave-list'] })
-        await queryClient.refetchQueries({ queryKey: ['hr', 'leave-schedule'] })
+        // Step 2 — upload selected attachments onto the freshly created draft (BC needs the document no first).
+        if (hasAttachments) {
+          try {
+            if (!documentNo) {
+              throw new Error('The document number was not returned. Refresh the list and open the latest application.')
+            }
+            setSubmitPhase('uploading')
+            progress.update(progressId, {
+              title: 'Uploading attachments…',
+              message: 'Sending your files — please wait.',
+            })
+            await uploadLeaveAttachments(documentNo, creationAttachments, (fileId, state) => {
+              setCreationAttachmentStates((current) => ({ ...current, [fileId]: state }))
+            })
+          } catch (err: unknown) {
+            attachmentError = err instanceof Error ? err.message : 'Attachment upload failed.'
+          }
+        }
+
+        await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-schedule'] })
 
         if (createdRequestId && documentNo) {
           setSelectedRequestId(createdRequestId)
-          setLeaveFlowStep('review')
           let detail: PortalRequest | null = null
           for (let attempt = 0; attempt < 4; attempt += 1) {
             try {
@@ -459,18 +456,24 @@ export function LeaveRequest() {
           }
         }
 
-        if (createdRequestId && documentNo) {
-          clearLeaveFormFields()
-          setSuccess(null)
-        } else {
-          setSuccess(result.message)
-        }
+        setSuccess(
+          attachmentError
+            ? 'Leave application created, but the attachment could not be uploaded. Open it below, retry the upload, then click Request Approval.'
+            : documentNo
+              ? hasAttachments
+                ? 'Leave application created and attachment uploaded. Review it below, then click Request Approval.'
+                : 'Leave application created as a draft. Review it below, then click Request Approval.'
+              : result.message,
+        )
         setError(null)
         toast.success(
-          documentNo
-            ? `Draft ${documentNo} created. Send it for approval.`
-            : result.message ?? 'Leave application saved.',
+          attachmentError
+            ? 'Leave created, but attachment upload failed.'
+            : documentNo
+              ? 'Leave application created. Click Request Approval below.'
+              : result.message ?? 'Leave application processed.',
         )
+        if (attachmentError) toast.error(attachmentError, 'Attachment not uploaded')
       } else {
         setError(result.message ?? 'Submission failed.')
         toast.error(result.message ?? 'Submission failed.', 'Leave not submitted')
@@ -481,6 +484,7 @@ export function LeaveRequest() {
     } finally {
       progress.hide(progressId)
       setSubmittingForm(false)
+      setSubmitPhase('idle')
     }
   }
 
@@ -503,17 +507,16 @@ export function LeaveRequest() {
     setDetailAction('cancel')
     const progressId = progress.show({
       title: 'Cancelling leave…',
-      message: 'Updating your request — you can keep browsing',
+      message: 'Updating your request — please wait.',
+      blocking: true,
     })
     try {
       const result = await cancelLeaveRequest(selected.requestNo)
       if (!result.ok) throw new Error(result.message || 'Leave cancellation failed')
-      setSelectedRequestId(null)
       await refreshLeave()
       toast.success(result.message || 'Leave application cancelled')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Leave cancellation failed', 'Cancel failed')
-      await refreshLeave()
     } finally {
       progress.hide(progressId)
       setDetailAction(null)
@@ -523,15 +526,6 @@ export function LeaveRequest() {
   const requestSelectedLeaveApproval = async () => {
     const selected = detailQuery.data
     if (!selected) return
-    const payload = selected.payload ?? {}
-    if (isSickLeavePayload(payload) && selected.attachments.length === 0) {
-      setLeaveFlowStep('review')
-      toast.error(
-        'Sick leave requires a supporting document. Use the Attachments section below to upload one, then request approval.',
-        'Attachment required',
-      )
-      return
-    }
     const confirmed = await confirm({
       title: 'Request leave approval',
       message: `Send leave application ${selected.requestNo} for approval?`,
@@ -541,44 +535,111 @@ export function LeaveRequest() {
     setDetailAction('approval')
     const progressId = progress.show({
       title: 'Sending for approval…',
-      message: 'Submitting your request — you can keep browsing',
+      message: 'Submitting your request — please wait.',
+      blocking: true,
     })
     try {
       const result = await requestLeaveApproval(selected.requestNo)
       if (!result.ok) throw new Error(result.message || 'Approval request failed')
-      if (!result.confirmedInBc) {
-        throw new Error(
-          result.message ||
-            'Business Central did not confirm pending approval. The leave is still Open.',
+      const confirmed =
+        result.confirmedInBc ?? ['Pending Approval', 'Approved'].includes(result.status ?? '')
+      if (!confirmed && result.diagnostic) {
+        // Ground-truth from BC so we can tell a workflow issue (senderAll=0)
+        // apart from a detection issue (senderAll>0 but no match for this leave).
+        console.warn(
+          `[leave-approval] ${selected.requestNo}: BC returned "${result.diagnostic.soapReturnValue}" ` +
+            `but no pending entry detected. senderAll=${result.diagnostic.senderAll} ` +
+            `byDoc=${result.diagnostic.byDoc} senderMatches=${result.diagnostic.senderMatches} ` +
+            `headerStatus="${result.diagnostic.headerStatus}"`,
+          result.diagnostic.senderDocs,
         )
       }
-      if (result.diagnostic) {
-        console.warn(
-          `[leave-approval] ${selected.requestNo}: soap="${result.diagnostic.soapReturnValue}" ` +
-            `confirmedInBc=${result.confirmedInBc} status=${result.status} ` +
-            `byDoc=${result.diagnostic.byDoc} senderAll=${result.diagnostic.senderAll}`,
-          result.diagnostic,
+      const nextStatus =
+        confirmed && result.status && result.status !== 'Open'
+          ? result.status
+          : confirmed
+            ? 'Pending Approval'
+            : selected.status
+      const nextApprovalSteps =
+        result.approvalSteps && result.approvalSteps.length > 0
+          ? result.approvalSteps
+          : selected.approvalSteps.length > 0
+            ? selected.approvalSteps
+            : confirmed
+              ? [
+                  {
+                    id: 'pending-approval',
+                    actorName: 'Awaiting approver assignment',
+                    role: 'Approver',
+                    status: 'Pending Approval',
+                    timestamp: new Date().toISOString(),
+                    sequenceNo: 1,
+                  },
+                ]
+              : selected.approvalSteps
+      queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
+        ...selected,
+        status: nextStatus,
+        approvalSteps: nextApprovalSteps,
+      })
+      if (confirmed) {
+        queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+          (rows ?? []).map((row) =>
+            row.ApplicationCode === selected.requestNo ? { ...row, Status: nextStatus } : row,
+          ),
         )
       }
       toast.success(result.message || 'Leave application sent for approval')
-      setLeaveFlowStep('approval')
-
-      const nextStatus = result.status === 'Pending Approval' ? 'Pending Approval' : result.status
-      if (nextStatus && nextStatus !== 'Open') {
-        patchLeaveListRow(queryClient, selected.requestNo, nextStatus)
+      if (!confirmed) {
+        void syncLeaveStatusFromBc(selected.requestNo, selected.id, queryClient)
       }
-
-      await queryClient.refetchQueries({ queryKey: ['hr', 'leave-list'] })
-      await queryClient.refetchQueries({ queryKey: ['hr', 'leave-detail', selected.id] })
-
       try {
         const detail = await fetchLeaveRequestDetail(selected.requestNo)
-        queryClient.setQueryData(['hr', 'leave-detail', selected.id], detail)
-        patchLeaveListRow(queryClient, selected.requestNo, detail.status)
+        const mergedApprovalSteps =
+          detail.approvalSteps.length > 0
+            ? detail.approvalSteps.map((step, index) => {
+                const previous = nextApprovalSteps[index]
+                if (
+                  previous &&
+                  previous.actorName &&
+                  previous.actorName !== 'Awaiting approver assignment' &&
+                  (!step.actorName ||
+                    step.actorName === 'Awaiting approver assignment' ||
+                    step.actorName === step.actorEmployeeNo)
+                ) {
+                  return {
+                    ...step,
+                    actorName: previous.actorName,
+                    actorEmployeeNo: step.actorEmployeeNo || ('actorEmployeeNo' in previous ? previous.actorEmployeeNo : undefined),
+                  }
+                }
+                return step
+              })
+            : nextApprovalSteps
+        const detailStatus = ['Pending Approval', 'Approved'].includes(detail.status)
+          ? detail.status
+          : nextStatus
+        queryClient.setQueryData(['hr', 'leave-detail', selected.id], {
+          ...detail,
+          status: detailStatus,
+          approvalSteps: mergedApprovalSteps,
+          approverName:
+            detail.approverName ||
+            mergedApprovalSteps[0]?.actorName ||
+            selected.approverName ||
+            '',
+        })
+        if (['Pending Approval', 'Approved'].includes(detail.status)) {
+          queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+            (rows ?? []).map((row) =>
+              row.ApplicationCode === selected.requestNo ? { ...row, Status: detail.status } : row,
+            ),
+          )
+        }
       } catch {
-        // BC may still be catching up
+        // keep cached state when detail refresh fails
       }
-      void syncLeaveStatusFromBc(selected.requestNo, selected.id, queryClient)
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Approval request failed', 'Approval not requested')
     } finally {
@@ -589,19 +650,19 @@ export function LeaveRequest() {
 
   const selected = detailQuery.data
   const selectedPayload = selected?.payload ?? {}
-  const selectedCanCancel = selected ? ['Open', 'Draft'].includes(selected.status) : false
+  const detailApprovalSteps =
+    selected && selected.approvalSteps.length > 0
+      ? selected.approvalSteps
+      : (approvalRouteQuery.data ?? [])
+  const selectedIsMutable = selected
+    ? ['Open', 'Draft', 'Pending Approval'].includes(selected.status)
+    : false
   const selectedCanRequestApproval = selected
     ? ['Open', 'Draft'].includes(selected.status) &&
       !selected.approvalSteps.some((step) =>
         ['Pending Approval', 'Submitted', 'Approved'].includes(step.status),
       )
     : false
-  const approvalBlockedByAttachment = selected
-    ? isSickLeavePayload(selectedPayload) && selected.attachments.length === 0
-    : false
-  const activeLeaveFlowStep = selected && leaveStatusIsSubmitted(selected.status) && leaveFlowStep === 'draft'
-    ? 'approval'
-    : leaveFlowStep
 
   return (
     <PageWrapper
@@ -609,7 +670,6 @@ export function LeaveRequest() {
       showPageHeading={false}
       actions={<PortalNewButton label="New Request" onClick={resetForm} />}
     >
-      {!selectedRequestId ? (
       <form onSubmit={handleSubmit} className="portal-form-card animate-page-in mx-auto w-full max-w-5xl">
         <div className="portal-form-card-header relative px-4 py-3 text-center text-sm font-semibold tracking-wide text-white sm:text-base">
           New Leave Request
@@ -635,60 +695,43 @@ export function LeaveRequest() {
                 placeholder="--select--"
                 options={availableTypes.map((t) => ({
                   value: t.code,
-                  label: t.description,
+                  label: `${t.description} (Entitlement: ${formatDays(t.days)})`,
                 }))}
               />
             </div>
-          </div>
-
-          {leaveType ? (
-            <div className="grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-3 sm:gap-4">
-              <div className="space-y-1.5">
-                <Label>Allocated Days</Label>
-                <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                  {balanceLoading ? (
-                    <Skeleton className="h-6 w-16" />
-                  ) : allocatedDays !== null ? (
-                    formatDays(allocatedDays)
-                  ) : (
-                    DASH
-                  )}
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Current Leave Balance</Label>
-                <div className="flex h-10 items-center">
-                  {balanceLoading ? (
-                    <Skeleton className="h-6 w-16" />
-                  ) : currentLeaveBalance !== null ? (
-                    <Badge variant="green" className="px-4 py-1 text-sm">
-                      {formatDays(currentLeaveBalance)}
-                    </Badge>
-                  ) : (
-                    <span className="text-sm text-slate-400">{DASH}</span>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Earned Leave Days</Label>
-                <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                  {balanceLoading ? (
-                    <Skeleton className="h-6 w-16" />
-                  ) : earnedLeaveDays !== null ? (
-                    formatDays(earnedLeaveDays)
-                  ) : (
-                    DASH
-                  )}
-                </p>
+            <div className="space-y-1.5">
+              <Label>Leave Entitlement</Label>
+              <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                {entitlement !== null ? `${formatDays(entitlement)} days` : DASH}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Available Days</Label>
+              <div className="flex h-10 items-center">
+                {balanceLoading ? (
+                  <Skeleton className="h-6 w-16" />
+                ) : balance !== null ? (
+                  <Badge variant="green" className="px-4 py-1 text-sm">
+                    {formatDays(balance)}
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-slate-400">{DASH}</span>
+                )}
               </div>
             </div>
-          ) : null}
+          </div>
 
           {showSecondary ? (
             <div className="space-y-4 border-t border-slate-200 pt-4">
-              {currentLeaveBalance <= 0 ? (
+              {approvalRouteQuery.data && approvalRouteQuery.data.length > 0 ? (
+                <section className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-slate-900">Expected approval route</h3>
+                  <ApprovalTimeline steps={approvalRouteQuery.data} />
+                </section>
+              ) : null}
+              {balance <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Current Leave Balance is zero. Contact HR if you believe this is incorrect.
+                  You have no available leave balance for this type. Contact HR if you believe this is incorrect.
                 </div>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
@@ -761,28 +804,16 @@ export function LeaveRequest() {
                   </p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="endDate">End Date</Label>
-                  <Input
-                    id="endDate"
-                    type="date"
-                    readOnly
-                    tabIndex={-1}
-                    className="bg-slate-50"
-                    value={toDateInputValue(endDate)}
-                    placeholder={datesLoading ? 'Calculating…' : undefined}
-                  />
+                  <Label>End Date</Label>
+                  <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                    {datesLoading ? <Skeleton className="h-5 w-32" /> : endDate ? formatPretty(endDate) : DASH}
+                  </p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="returnDate">Return Date</Label>
-                  <Input
-                    id="returnDate"
-                    type="date"
-                    readOnly
-                    tabIndex={-1}
-                    className="bg-slate-50"
-                    value={toDateInputValue(returnDate)}
-                    placeholder={datesLoading ? 'Calculating…' : undefined}
-                  />
+                  <Label>Return Date</Label>
+                  <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
+                    {datesLoading ? <Skeleton className="h-5 w-32" /> : returnDate ? formatPretty(returnDate) : DASH}
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="reliever">Reliever</Label>
@@ -807,6 +838,42 @@ export function LeaveRequest() {
                 />
               </div>
 
+              <div className="space-y-3 rounded-xl border-l-4 border-orange-500 bg-orange-50 p-4 text-sm text-orange-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold">
+                    Leave Attachments{leaveType === 'SICK' ? ' (Required)' : ' (Optional)'}
+                  </p>
+                  {creationAttachments.length > 0 ? (
+                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                      {creationAttachments.length} file{creationAttachments.length === 1 ? '' : 's'} selected
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-xs text-orange-800/90">
+                  {creationAttachments.length > 0
+                    ? 'Selected files are listed below. They upload to Business Central right after the draft is created. You then click Request Approval below.'
+                    : 'Choose your files first — they appear here immediately, then upload automatically once the draft is created.'}
+                </p>
+                <FileUpload
+                  files={creationAttachments}
+                  onChange={(files) => {
+                    setCreationAttachments(files)
+                    setCreationAttachmentStates({})
+                  }}
+                  hideHeader
+                  hideEmptyState
+                  compactWhenHasFiles
+                  fileStates={creationAttachmentStates}
+                  emptyHint="No files selected yet. Choose PDF, DOC, DOCX, JPG, or PNG up to 10 MB each."
+                />
+                {submitPhase === 'uploading' ? (
+                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                    Uploading selected file(s) to the leave draft…
+                  </p>
+                ) : null}
+                <p className="text-xs text-orange-800/90">Maximum 10 MB per file for leave attachments.</p>
+              </div>
+
               <div className="flex justify-center pt-2">
                 <Button
                   type="submit"
@@ -814,25 +881,29 @@ export function LeaveRequest() {
                   className="min-w-[180px] rounded-full"
                   disabled={submittingForm || !canSubmit}
                 >
-                  {submittingForm ? 'Creating draft…' : 'Create Leave Application'}
+                  {submitPhase === 'creating'
+                    ? 'Creating draft…'
+                    : submitPhase === 'uploading'
+                      ? 'Uploading attachments…'
+                      : submittingForm
+                        ? 'Saving…'
+                        : 'Create Leave Application'}
                 </Button>
               </div>
             </div>
           ) : null}
         </div>
       </form>
-      ) : null}
 
-      <div className={selectedRequestId ? 'mt-0' : 'mt-6'}>
+      <div className="mt-6">
         <h2 className="portal-page-title mb-3 text-base font-semibold">My Leave Applications</h2>
         <DataTable
           rows={leaveListQuery.data ?? []}
           columns={leaveColumns}
           getRowId={(row) => row.ApplicationCode}
-          selectedRowId={selected?.requestNo ?? selectedRequestId?.replace(/^leave-/i, '')}
+          selectedRowId={selected?.requestNo}
           onRowClick={(row) => {
             setSelectedRequestId(`leave-${row.ApplicationCode}`)
-            setLeaveFlowStep(leaveStatusIsSubmitted(row.Status) ? 'approval' : 'review')
           }}
           compact
           emptyTitle="No leave applications yet."
@@ -840,7 +911,7 @@ export function LeaveRequest() {
       </div>
 
       {selectedRequestId ? (
-        <div ref={detailCardRef} className="portal-form-card animate-page-in mt-6 overflow-hidden">
+        <div className="portal-form-card mt-6 overflow-hidden">
           <div className="portal-form-card-header flex items-center justify-between gap-3 px-4 py-3 text-white">
             <h2 className="font-semibold">Leave Application Details</h2>
             <Button
@@ -849,7 +920,6 @@ export function LeaveRequest() {
               size="sm"
               onClick={() => {
                 setSelectedRequestId(null)
-                setLeaveFlowStep('review')
               }}
             >
               Close
@@ -864,202 +934,108 @@ export function LeaveRequest() {
               </p>
             ) : (
               <>
-                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:grid-cols-3">
-                  {leaveFlowSteps.map((step, index) => {
-                    const active = activeLeaveFlowStep === step.id
-                    return (
-                      <button
-                        key={step.id}
-                        type="button"
-                        onClick={() => setLeaveFlowStep(step.id)}
-                        className={`rounded-md px-3 py-2 text-left text-sm font-semibold transition sm:text-center ${
-                          active
-                            ? 'bg-white text-[var(--portal-navy)] shadow-sm'
-                            : 'text-slate-500 hover:bg-white/70 hover:text-[var(--portal-navy)]'
-                        }`}
-                      >
-                        <span className="mr-2 text-xs text-slate-400">0{index + 1}</span>
-                        {step.label}
-                      </button>
-                    )
-                  })}
+                <RequestProgress status={selected.status} />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500">Application No.</p>
+                    <p className="font-semibold text-slate-900">{selected.requestNo}</p>
+                  </div>
+                  <StatusBadge status={selected.status} />
                 </div>
 
-                {activeLeaveFlowStep === 'draft' ? (
-                  <section className="animate-page-in-subtle space-y-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-slate-500">Application No.</p>
-                        <p className="font-semibold text-slate-900">{selected.requestNo}</p>
-                      </div>
-                      <StatusBadge status={selected.status} />
-                    </div>
-                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3">
-                      <p className="text-sm font-semibold text-emerald-800">Draft saved in Business Central</p>
-                      <p className="mt-1 text-xs text-emerald-700">
-                        {payloadValue(selectedPayload, ['LeaveType', 'Leave_Type', 'leaveTypeDescription', 'leaveType'])} · {payloadValue(selectedPayload, ['DaysApplied', 'Days_Applied', 'appliedDays'])} day(s)
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setLeaveFlowStep('review')}>
-                        Review Details
-                      </Button>
-                      {selectedCanRequestApproval ? (
-                        <Button type="button" onClick={() => setLeaveFlowStep('approval')}>
-                          Go to Approval
-                        </Button>
-                      ) : null}
-                    </div>
+                <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <dt className="text-xs text-slate-500">Leave Type</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['LeaveType', 'Leave_Type', 'leaveTypeDescription', 'leaveType'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Days Applied</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['DaysApplied', 'Days_Applied', 'appliedDays'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Start Date</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['StartDate', 'Start_Date', 'startDate'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">End Date</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['EndDate', 'End_Date', 'endDate'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Return Date</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['ReturnDate', 'Return_Date', 'returnDate'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Reliever</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['RelieverName', 'Reliever_Name', 'Reliever'])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-slate-500">Reason</dt>
+                    <dd className="text-sm font-medium">
+                      {payloadValue(selectedPayload, ['Reason', 'reason'])}
+                    </dd>
+                  </div>
+                </dl>
+
+                {detailApprovalSteps.length > 0 ? (
+                  <section>
+                    <h3 className="mb-3 text-sm font-semibold text-slate-900">Approval workflow</h3>
+                    <ApprovalTimeline steps={detailApprovalSteps} />
                   </section>
                 ) : null}
 
-                {activeLeaveFlowStep === 'review' ? (
-                  <section className="animate-page-in-subtle space-y-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-slate-500">Application No.</p>
-                        <p className="font-semibold text-slate-900">{selected.requestNo}</p>
-                      </div>
-                      <StatusBadge status={selected.status} />
-                    </div>
+                <RequestAttachments
+                  requestId={selected.id}
+                  attachments={selected.attachments}
+                  canUpload={canUploadRequestAttachments(selected.status)}
+                  canDelete={canDeleteRequestItems(selected.status)}
+                  onUpdated={async (request) => {
+                    queryClient.setQueryData(['hr', 'leave-detail', selected.id], request)
+                    try {
+                      const detail = await fetchLeaveRequestDetail(selected.requestNo)
+                      queryClient.setQueryData(['hr', 'leave-detail', selected.id], detail)
+                    } catch {
+                      // keep portal request payload when staff detail refresh fails
+                    }
+                    void refreshLeave()
+                  }}
+                />
 
-                    <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      <div>
-                        <dt className="text-xs text-slate-500">Leave Type</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['LeaveType', 'Leave_Type', 'leaveTypeDescription', 'leaveType'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">Days Applied</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['DaysApplied', 'Days_Applied', 'appliedDays'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">Start Date</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['StartDate', 'Start_Date', 'startDate'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">End Date</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['EndDate', 'End_Date', 'endDate'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">Return Date</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['ReturnDate', 'Return_Date', 'returnDate'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">Reliever</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['RelieverName', 'Reliever_Name', 'Reliever'])}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">Reason</dt>
-                        <dd className="text-sm font-medium">
-                          {payloadValue(selectedPayload, ['Reason', 'reason'])}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    <RequestAttachments
-                      requestId={selected.id}
-                      attachments={selected.attachments}
-                      canUpload={canUploadRequestAttachments(selected.status)}
-                      canDelete={canDeleteRequestItems(selected.status)}
-                      onUpdated={async () => {
-                        void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-detail', selected.id] })
-                        void queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
-                        try {
-                          const detail = await fetchLeaveRequestDetail(selected.requestNo)
-                          queryClient.setQueryData(['hr', 'leave-detail', selected.id], detail)
-                        } catch {
-                          // detail query will refetch from BC
-                        }
-                      }}
-                    />
-
-                    <div className="flex flex-wrap justify-between gap-2 border-t border-slate-200 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setLeaveFlowStep('draft')}>
-                        Back
+                {selectedIsMutable ? (
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+                    {selectedCanRequestApproval ? (
+                      <Button
+                        type="button"
+                        disabled={detailAction === 'approval'}
+                        onClick={() => void requestSelectedLeaveApproval()}
+                      >
+                        {detailAction === 'approval' ? 'Requesting…' : 'Request Approval'}
                       </Button>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {selectedCanCancel ? (
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            disabled={detailAction === 'cancel'}
-                            onClick={() => void cancelSelectedLeave()}
-                          >
-                            {detailAction === 'cancel' ? 'Cancelling…' : 'Discard Application'}
-                          </Button>
-                        ) : null}
-                        <Button type="button" onClick={() => setLeaveFlowStep('approval')}>
-                          Continue to Approval
-                        </Button>
-                      </div>
-                    </div>
-                  </section>
-                ) : null}
-
-                {activeLeaveFlowStep === 'approval' ? (
-                  <section className="animate-page-in-subtle space-y-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-slate-500">Application No.</p>
-                        <p className="font-semibold text-slate-900">{selected.requestNo}</p>
-                      </div>
-                      <StatusBadge status={selected.status} />
-                    </div>
-
-                    {selected.approvalSteps.length > 0 ? (
-                      <section>
-                        <h3 className="mb-3 text-sm font-semibold text-slate-900">Approval workflow</h3>
-                        <ApprovalTimeline steps={selected.approvalSteps} />
-                      </section>
-                    ) : (
-                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-                        <p className="text-sm font-semibold text-[var(--portal-navy)]">Ready for approval</p>
-                        <p className="mt-1 text-xs text-slate-600">
-                          {payloadValue(selectedPayload, ['LeaveType', 'Leave_Type', 'leaveTypeDescription', 'leaveType'])} · {payloadValue(selectedPayload, ['StartDate', 'Start_Date', 'startDate'])}
-                        </p>
-                      </div>
-                    )}
-
-                    {approvalBlockedByAttachment ? (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                        Sick leave requires a supporting attachment before approval.
-                      </div>
                     ) : null}
-
-                    <div className="flex flex-wrap justify-between gap-2 border-t border-slate-200 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setLeaveFlowStep('review')}>
-                        Review Details
-                      </Button>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {approvalBlockedByAttachment ? (
-                          <Button type="button" onClick={() => setLeaveFlowStep('review')}>
-                            Add Attachment
-                          </Button>
-                        ) : null}
-                        {selectedCanRequestApproval ? (
-                          <Button
-                            type="button"
-                            disabled={detailAction === 'approval' || approvalBlockedByAttachment}
-                            onClick={() => void requestSelectedLeaveApproval()}
-                          >
-                            {detailAction === 'approval' ? 'Sending…' : 'Send for Approval'}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </section>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={detailAction === 'cancel'}
+                      onClick={() => void cancelSelectedLeave()}
+                    >
+                      {detailAction === 'cancel'
+                        ? 'Cancelling…'
+                        : selectedCanRequestApproval
+                          ? 'Discard Application'
+                          : 'Cancel Application'}
+                    </Button>
+                  </div>
                 ) : null}
               </>
             )}

@@ -1,6 +1,6 @@
 import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
-import { env } from '@/config/env'
 import { trackAxiosActivity } from '@/lib/apiActivity'
+import { env } from '@/config/env'
 
 /**
  * HTTP client for "our backend" (Node/Express) — way #2 login.
@@ -91,12 +91,11 @@ export function clearToken(): void {
 
 export const authHttp: AxiosInstance = axios.create({
   baseURL: env.AUTH_API_URL || '',
-  timeout: 45000,
+  timeout: 20000,
   headers: { Accept: 'application/json' },
 })
 
-// Register first so it settles the global activity counter using the raw
-// AxiosError (which carries `config`) before the error is normalized below.
+// Register first so every request/response is tracked before other interceptors run.
 trackAxiosActivity(authHttp)
 
 authHttp.interceptors.request.use((config) => {
@@ -130,36 +129,16 @@ export class AuthApiError extends Error implements NormalizedAuthError {
 
 authHttp.interceptors.response.use(
   (response) => response,
-  async (error: AxiosError) => {
+  (error: AxiosError) => {
     const status = error.response?.status
-    let data = error.response?.data as { message?: string; code?: string } | Blob | string | undefined
-    if (data instanceof Blob) {
-      const text = await data.text().catch(() => '')
-      if (text) {
-        try {
-          data = JSON.parse(text) as { message?: string; code?: string }
-        } catch {
-          data = text
-        }
-      }
-    }
-    const message =
-      typeof data === 'string'
-        ? data
-        : data && 'message' in data
-          ? data.message
-          : undefined
-    const code =
-      data && typeof data !== 'string' && 'code' in data
-        ? data.code
-        : undefined
+    const data = error.response?.data as { message?: string; code?: string } | undefined
     // A rejected/expired token should not linger.
     if (status === 401) clearToken()
     return Promise.reject(
       new AuthApiError({
-        message: message ?? error.message ?? 'Request failed',
+        message: data?.message ?? error.message ?? 'Request failed',
         status,
-        code,
+        code: data?.code,
       }),
     )
   },

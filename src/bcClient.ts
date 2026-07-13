@@ -43,8 +43,11 @@ function requestWithCurlNtlm(options: {
       args.push('--header', `${key}: ${value}`)
     }
 
-    if (options.method === 'POST' || options.method === 'PATCH') {
-      args.push('--request', options.method)
+    if (options.method === 'POST') {
+      args.push('--request', 'POST')
+      args.push('--data-binary', options.body ?? '')
+    } else if (options.method === 'PATCH') {
+      args.push('--request', 'PATCH')
       args.push('--data-binary', options.body ?? '')
     }
 
@@ -203,6 +206,69 @@ export async function fetchODataFromBase(
   return data
 }
 
+/** PATCH a single OData entity by primary key (e.g. employee No). */
+export async function patchODataRecord(
+  baseUrl: string,
+  serviceName: string,
+  key: string,
+  body: Record<string, unknown>,
+) {
+  const base = normalizeBaseUrl(baseUrl)
+  const url = `${base}${serviceName}('${odataString(key)}')`
+  const json = JSON.stringify(body)
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'If-Match': '*',
+  }
+
+  const call = startBcCall({
+    protocol: 'OData',
+    method: 'PATCH',
+    operation: serviceName,
+    target: logTarget(url),
+    metadata: `key=${key}`,
+  })
+  let statusCode: number | undefined
+
+  try {
+    if (config.BC_AUTH_MODE === 'ntlm') {
+      const response = await requestWithCurlNtlm({
+        method: 'PATCH',
+        url,
+        headers,
+        body: json,
+        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
+      })
+      statusCode = response.statusCode
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw new Error(`Business Central OData ${response.statusCode}: ${response.body}`)
+      }
+      completeBcCall(call, response.statusCode, responseBytes(response.body))
+      return
+    }
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        ...headers,
+        ...authHeaders(),
+      },
+      body: json,
+      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
+    })
+    statusCode = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      throw new Error(`Business Central OData ${response.status}: ${text}`)
+    }
+    completeBcCall(call, response.status, responseBytes(text))
+  } catch (error) {
+    failBcCall(call, error, statusCode)
+    throw error
+  }
+}
+
 /** Fetch raw OData $metadata XML from a company OData base URL. */
 export async function fetchODataMetadata(baseUrl: string) {
   const base = normalizeBaseUrl(baseUrl)
@@ -316,81 +382,6 @@ export async function postOData(serviceName: string, payload: Record<string, unk
   }
 }
 
-/** PATCH one OData entity on a specific base URL. */
-export async function patchODataFromBase(
-  baseUrl: string,
-  entityPath: string,
-  payload: Record<string, unknown>,
-) {
-  const base = normalizeBaseUrl(baseUrl)
-  const url = new URL(entityPath, base)
-  const body = JSON.stringify(payload)
-  const headers = {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-    'If-Match': '*',
-  }
-
-  const call = startBcCall({
-    protocol: 'OData',
-    method: 'PATCH',
-    operation: entityPath,
-    target: logTarget(url),
-    metadata: `bodyKeys=${Object.keys(payload).sort().join(',') || '-'}`,
-  })
-  let statusCode: number | undefined
-
-  try {
-    if (config.BC_AUTH_MODE === 'ntlm') {
-      const response = await requestWithCurlNtlm({
-        method: 'PATCH',
-        url: url.toString(),
-        headers,
-        body,
-      })
-      statusCode = response.statusCode
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Object.assign(
-          new Error(`Business Central OData ${response.statusCode}: ${response.body}`),
-          { status: response.statusCode === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
-        )
-      }
-      const data = response.body ? JSON.parse(response.body) : null
-      completeBcCall(call, response.statusCode, responseBytes(response.body))
-      return data as ODataRecord | null
-    }
-
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        ...headers,
-        ...authHeaders(),
-      },
-      body,
-    })
-
-    statusCode = response.status
-    const text = await response.text()
-    if (!response.ok) {
-      throw Object.assign(
-        new Error(`Business Central OData ${response.status}: ${text}`),
-        { status: response.status === 401 ? 502 : 422, code: 'BC_ODATA_VALIDATION' },
-      )
-    }
-    const data = text ? JSON.parse(text) : null
-    completeBcCall(call, response.status, responseBytes(text))
-    return data as ODataRecord | null
-  } catch (error) {
-    failBcCall(call, error, statusCode)
-    throw error
-  }
-}
-
-/** PATCH one OData entity, e.g. QyHRLeaveApplications(ApplicationCode='LV00029'). */
-export async function patchOData(entityPath: string, payload: Record<string, unknown>) {
-  return patchODataFromBase(config.BC_ODATA_BASE_URL, entityPath, payload)
-}
-
 /**
  * Returns the count of rows that would be produced by `query` against
  * `serviceName`. Equivalent to Laravel's `->count()` over the OData client.
@@ -459,7 +450,7 @@ export function soapFaultMessage(xml: string) {
 function soapFaultError(status: number, xml: string) {
   const fault = soapFaultMessage(xml)
   const friendlyFault = /not supported by related approval workflow/i.test(fault)
-    ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting approval.'
+    ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting or cancelling approval.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
     : /can't be evaluated into type Boolean/i.test(fault)
@@ -468,6 +459,15 @@ function soapFaultError(status: number, xml: string) {
       ? 'Half-day leave is only allowed for annual leave. Choose Annual Leave or set half day to Normal.'
     : /Related table or record for attached file was not found/i.test(fault)
       ? 'Business Central does not support attachments on this document type. Attach files only on imprest, staff claim, or petty cash requests.'
+    : /length of the string is (\d+), but it must be less than or equal to (\d+)/i.test(fault)
+      ? (() => {
+          const match = fault.match(
+            /length of the string is (\d+), but it must be less than or equal to (\d+).*Value:\s*(.+)$/i,
+          )
+          const max = match?.[2] ?? '20'
+          const value = match?.[3]?.trim() ?? 'that value'
+          return `A value from your employee profile is too long for Business Central (${value}). Ask HR to shorten the department or dimension code to ${max} characters or less.`
+        })()
     : /Parameter hospitalCategory.*is null/i.test(fault)
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)

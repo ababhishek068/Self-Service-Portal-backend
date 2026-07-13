@@ -1,10 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { callSoapMethod, fetchOData, fetchODataCount, fetchODataFromBase, odataString, patchOData, patchODataFromBase, type ODataRecord } from './bcClient.js'
+import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth } from './auth.js'
-import { config } from './config.js'
-import { derivePageODataBaseFromSoapCodeunit, fetchMergedEmployeeRecord, resolveEffectiveBcUserId } from './employeeProfile.js'
-import { decidePortalApproval } from './portalApproval.js'
 import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, approvalTableIdsFor, type ApprovalTableKey } from './approvalTableIds.js'
 import {
   findFrontendModuleSpec,
@@ -24,8 +21,10 @@ import {
   mapApprovalSteps,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
+  resolveLeaveApprovalRouteAsync,
 } from './leaveApprovalSteps.js'
 import { logDiagnostic } from './requestLogger.js'
+import { config } from './config.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -79,29 +78,13 @@ function authUser(req: Request) {
   return user
 }
 
-/** SOAP success for send-for-approval — only explicit boolean success (matches Laravel ESS). */
-function soapRequestApprovalOk(value: unknown) {
+/** SOAP success for send-for-approval — only explicit true values, not BC error text. */
+function soapApprovalOk(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return ['true', '1', 'yes', 'y'].includes(normalized)
-}
-
-/** BC sometimes echoes the leave number without running approval — that is not success. */
-function soapLeaveApprovalDocEcho(value: unknown) {
-  return /^lv\d+/i.test(String(value ?? '').trim())
-}
-
-function leaveApprovalSoapFailureMessage(returnValue: string) {
-  const raw = String(returnValue ?? '').trim()
-  if (soapLeaveApprovalDocEcho(raw)) {
-    return `Business Central did not start approval (returned "${raw}" instead of true). Open the leave in BC and use Send Approval Request, or contact IT if this keeps happening.`
-  }
-  if (raw) {
-    return `Leave application could not be sent for approval (${raw}).`
-  }
-  return 'Leave application could not be sent for approval.'
 }
 
 /** Map BC SOAP `<return_value>` strings into a JS boolean. */
@@ -113,13 +96,13 @@ function soapTruthy(value: string | null | undefined) {
 }
 
 /** Leave create/update should not treat arbitrary BC error text as success. */
-export function soapLeaveActionOk(value: unknown) {
+function soapLeaveActionOk(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   if (['true', '1', 'yes'].includes(normalized)) return true
-  if (/^lv-?\d+/i.test(raw)) return true
+  if (/^lv\d+/i.test(raw)) return true
   return /^[a-z]{1,6}\d{2,}$/i.test(raw)
 }
 
@@ -148,13 +131,6 @@ export function leaveTypeIsAnnual(row: ODataRecord | null | undefined) {
 
 export function halfDayRequiresAnnualLeave(value: string) {
   return halfDayOptionValue(value) !== 0
-}
-
-/** BC LeaveApplication SOAP expects Integer days; half-day uses 1 + isHalfDayLeave flag. */
-export function bcLeaveDaysApplied(appliedDays: number, halfDayLeave: string) {
-  if (halfDayRequiresAnnualLeave(halfDayLeave)) return 1
-  const rounded = Math.round(appliedDays)
-  return rounded > 0 ? rounded : 1
 }
 
 function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback = '') {
@@ -204,210 +180,48 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
   if (!row) {
     const sessionBalance = Number(user.leaveBalance)
     return {
-      generalLeaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
-      annualLeaveBalance: null,
+      leaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
       earnedLeaveDays: null,
     }
   }
 
-  const generalLeaveBalance =
-    fieldNumber(row, ['LeaveBalance', 'Leave_Balance']) ??
-    discoverLeaveFieldNumber(row, [
-      (key) => key === 'leavebalance',
-      (key) => key === 'currentleavebalance',
-    ])
-
-  const annualLeaveBalance =
+  const leaveBalance =
     fieldNumber(row, [
+      'LeaveBalance',
+      'Leave_Balance',
       'AnnualLeaveBalance',
       'Annual_Leave_Balance',
       'Annual_Leave_balance',
       'AnnualLeavebalance',
     ]) ??
-    discoverLeaveFieldNumber(row, [(key) => key.includes('annualleavebalance')])
+    discoverLeaveFieldNumber(row, [
+      (key) => key === 'annualleavebalance',
+      (key) => key === 'leavebalance',
+    ])
 
   const earnedLeaveDays =
     fieldNumber(row, ['EarnedLeaveDays', 'Earned_Leave_Days', 'EarnedLeave', 'Earned_Leave']) ??
     discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
 
-  return { generalLeaveBalance, annualLeaveBalance, earnedLeaveDays }
+  return { leaveBalance, earnedLeaveDays }
 }
 
-/** Available annual leave — BC Employee Card "Annual Leave balance", then ledger net for legacy 0001 only. */
 export function resolveAnnualLeaveBalance(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   ledgerNet: number,
 ) {
-  if (metrics.annualLeaveBalance !== null) return metrics.annualLeaveBalance
+  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
+  if (metrics.leaveBalance !== null) return metrics.leaveBalance
   return ledgerNet
 }
 
-/**
- * Mirrors Laravel ESS leave balance.
- * - Code 0001: ledger net (additions − deductions), unless Annual Leave balance is on the employee card.
- * - Other types (including ANNUAL): policy days minus net taken — matches BC leave application card.
- */
-export function resolveLeaveBalance(
-  leaveTypeRow: ODataRecord | null | undefined,
-  metrics: ReturnType<typeof employeeLeaveMetrics>,
-  leaveTypeDays: number,
-  additions: number,
-  deductions: number,
-) {
-  const code = String(leaveTypeRow?.Code ?? '').trim()
-  const ledgerNet = additions - deductions
-
-  if (code === '0001') {
-    return resolveAnnualLeaveBalance(metrics, ledgerNet)
-  }
-
-  if (leaveTypeIsAnnual(leaveTypeRow) && metrics.annualLeaveBalance !== null) {
-    return metrics.annualLeaveBalance
-  }
-
-  return resolveNonAnnualLeaveBalance(leaveTypeDays, additions, deductions)
-}
-
-/** Annual entitlement/accrual — matches BC "Earned Leave Days", then leave type policy days. */
 export function resolveAnnualLeaveEntitlement(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   leaveTypeDays: number,
 ) {
   if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
+  if (metrics.leaveBalance !== null) return metrics.leaveBalance
   return leaveTypeDays
-}
-
-export function resolveNonAnnualLeaveBalance(
-  leaveTypeDays: number,
-  additions: number,
-  deductions: number,
-) {
-  const netTaken = deductions - additions
-  const balance = leaveTypeDays - netTaken
-  return balance >= 0 ? balance : 0
-}
-
-/** BC HR Leave Application card — Allocated Days, Current Leave Balance, Earned Leave Days. */
-export type LeaveCardBalances = {
-  allocatedDays: number | null
-  currentLeaveBalance: number | null
-  earnedLeaveDays: number | null
-}
-
-/** Staff Portal SOAP response sourced directly from the live BC employee card. */
-export function parseEmployeeLeaveBalancesReturn(rawValue: unknown): LeaveCardBalances {
-  const values = new Map<string, number>()
-  for (const segment of String(rawValue ?? '').split('#')) {
-    const separator = segment.indexOf('=')
-    if (separator < 1) continue
-    const key = segment.slice(0, separator).trim().toLowerCase()
-    const value = Number(segment.slice(separator + 1).trim())
-    if (Number.isFinite(value)) values.set(key, value)
-  }
-
-  return {
-    allocatedDays: null,
-    currentLeaveBalance: values.get('leavebalance') ?? null,
-    earnedLeaveDays: values.get('earnedleavedays') ?? null,
-  }
-}
-
-export function leaveCardBalancesFromRecord(row: ODataRecord | null | undefined): LeaveCardBalances {
-  if (!row) {
-    return { allocatedDays: null, currentLeaveBalance: null, earnedLeaveDays: null }
-  }
-
-  const allocatedDays =
-    fieldNumber(row, ['Allocated_Days', 'AllocatedDays', 'Allocated']) ??
-    discoverLeaveFieldNumber(row, [(key) => key === 'allocateddays'])
-
-  const currentLeaveBalance =
-    fieldNumber(row, [
-      'Current_Leave_Balance',
-      'CurrentLeaveBalance',
-      'Current_Leave_balance',
-      'LeaveBalance',
-      'Leave_Balance',
-    ]) ??
-    discoverLeaveFieldNumber(row, [
-      (key) => key === 'currentleavebalance',
-      (key) => key === 'leavebalance',
-    ])
-
-  const earnedLeaveDays =
-    fieldNumber(row, ['Earned_Leave_Days', 'EarnedLeaveDays', 'EarnedLeave', 'Earned_Leave']) ??
-    discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
-
-  return { allocatedDays, currentLeaveBalance, earnedLeaveDays }
-}
-
-export function mergeLeaveCardBalances(...sets: LeaveCardBalances[]): LeaveCardBalances {
-  const pick = (key: keyof LeaveCardBalances) => {
-    for (const set of sets) {
-      if (set[key] !== null) return set[key]
-    }
-    return null
-  }
-  return {
-    allocatedDays: pick('allocatedDays'),
-    currentLeaveBalance: pick('currentLeaveBalance'),
-    earnedLeaveDays: pick('earnedLeaveDays'),
-  }
-}
-
-/** Fill BC card balances from OData first, then the same rules BC uses when OData fields are absent. */
-export function resolveLeaveCardBalances(
-  leaveTypeRow: ODataRecord | null | undefined,
-  metrics: ReturnType<typeof employeeLeaveMetrics>,
-  leaveTypeDays: number,
-  additions: number,
-  deductions: number,
-  odataBalances: LeaveCardBalances,
-): LeaveCardBalances {
-  const computedCurrent = resolveLeaveBalance(
-    leaveTypeRow,
-    metrics,
-    leaveTypeDays,
-    additions,
-    deductions,
-  )
-  const earnedFallback =
-    metrics.earnedLeaveDays ??
-    odataBalances.earnedLeaveDays ??
-    (leaveTypeDays > 0 ? leaveTypeDays : null)
-
-  return {
-    allocatedDays: odataBalances.allocatedDays ?? (leaveTypeDays > 0 ? leaveTypeDays : null),
-    currentLeaveBalance:
-      odataBalances.currentLeaveBalance ??
-      (computedCurrent >= 0 ? roundLeaveValue(computedCurrent) : null),
-    earnedLeaveDays: earnedFallback !== null ? roundLeaveValue(earnedFallback) : null,
-  }
-}
-
-async function fetchLeaveApplicationBalanceRows(employeeNo: string, leaveTypeCode: string) {
-  const filter =
-    `EmployeeNo eq '${odataString(employeeNo)}'` +
-    ` and LeaveType eq '${odataString(leaveTypeCode)}'`
-  const options = { $filter: filter, $top: 10, $orderby: 'ApplicationDate desc' }
-  let rows = (await fetchOData('QyHRLeaveApplications', options).catch(() => null)) as
-    | ODataRecord[]
-    | null
-  if (!Array.isArray(rows) || rows.length === 0) {
-    rows = (await fetchOData('QyHRLeaveApplications', { $filter: filter, $top: 10 }).catch(
-      () => [],
-    )) as ODataRecord[] | null
-  }
-  return Array.isArray(rows) ? rows : []
-}
-
-async function fetchEmployeeLeaveMetricsRow(employeeNo: string) {
-  const [wsRow, cardRow] = await Promise.all([
-    fetchCurrentEmployeeRow(employeeNo),
-    fetchEmployeeForLeaveWorkflow(employeeNo),
-  ])
-  if (!wsRow && !cardRow) return null
-  return { ...(wsRow ?? {}), ...(cardRow ?? {}) }
 }
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
@@ -416,40 +230,6 @@ async function fetchCurrentEmployeeRow(employeeNo: string) {
     $top: 1,
   }).catch(() => [])) as ODataRecord[] | null
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
-}
-
-/** Employee card (Page OData) exposes Department/Division; WS QyHREmployee often does not. */
-async function fetchEmployeeForLeaveWorkflow(employeeNo: string): Promise<ODataRecord | null> {
-  const trimmed = employeeNo.trim()
-  if (!trimmed) return null
-
-  const filter = `No eq '${odataString(trimmed)}'`
-  const pageServices = ['Employee_Card', 'EmployeeCard', 'QyHREmployeeCard', 'HREmployeeCard']
-  const bases = [
-    config.BC_ODATA_PAGE_BASE_URL,
-    config.BC_SOAP_PAGE_BASE_URL,
-    derivePageODataBaseFromSoapCodeunit(config.BC_SOAP_CODEUNIT_URL),
-    config.BC_ODATA_BASE_URL,
-  ]
-    .filter((base): base is string => Boolean(base))
-    .map((base) => (base.endsWith('/') ? base : `${base}/`))
-
-  let merged: ODataRecord | null = null
-  for (const base of [...new Set(bases)]) {
-    for (const service of pageServices) {
-      const rows = (await fetchODataFromBase(base, service, { $filter: filter, $top: 1 }).catch(
-        () => null,
-      )) as ODataRecord[] | null
-      if (!Array.isArray(rows) || rows.length === 0) continue
-      const hit = rows[0] as ODataRecord
-      merged = merged ? (Object.assign({}, merged, hit) as ODataRecord) : hit
-      const codes = employeeLeaveWorkflowCodes(merged)
-      if (codes.departmentCode && codes.divisionCode) return merged
-    }
-  }
-  if (merged) return merged
-
-  return (await fetchMergedEmployeeRecord(trimmed)) ?? fetchCurrentEmployeeRow(trimmed)
 }
 
 function likelyActiveEmployee(row: ODataRecord) {
@@ -668,17 +448,11 @@ function dedupeApprovalEntryList(...lists: ODataRecord[][]) {
  * approval entries by SenderID/ApproverID, so this reliably surfaces pending
  * items even when a per-DocumentNo lookup misses due to number formatting.
  */
-async function fetchLeaveApprovalEntriesForSender(
-  user: ReturnType<typeof authUser>,
-  extraUserIds: string[] = [],
-) {
-  const userIds = [
-    ...new Set([user.userID, ...extraUserIds].map((value) => value.trim()).filter(Boolean)),
+async function fetchLeaveApprovalEntriesForSender(user: ReturnType<typeof authUser>) {
+  const senderFilters = [
+    `SenderID eq '${odataString(user.userID)}'`,
+    `UserID eq '${odataString(user.userID)}'`,
   ]
-  const senderFilters = userIds.flatMap((userId) => [
-    `SenderID eq '${odataString(userId)}'`,
-    `UserID eq '${odataString(userId)}'`,
-  ])
   const seen = new Set<string>()
   const collected: ODataRecord[] = []
   for (const senderFilter of senderFilters) {
@@ -753,10 +527,9 @@ function leaveApprovalEntriesForDocument(
 async function findLeaveApprovalEntriesBySender(
   documentNo: string,
   user: ReturnType<typeof authUser>,
-  extraUserIds: string[] = [],
 ) {
   const senderIndex = indexLeaveApprovalEntriesByNo(
-    await fetchLeaveApprovalEntriesForSender(user, extraUserIds),
+    await fetchLeaveApprovalEntriesForSender(user),
   )
   return senderIndex.get(normalizedLeaveKey(documentNo)) ?? []
 }
@@ -890,7 +663,6 @@ function submittedLeaveScore(row: ODataRecord, body: {
   appliedDays: number
   startDate: string
   reason: string
-  isHalfDayLeave?: string
 }, endDate: string) {
   let score = 0
   if (fieldText(row, ['LeaveType', 'Leave_Type']) === body.leaveType) score += 4
@@ -898,11 +670,7 @@ function submittedLeaveScore(row: ODataRecord, body: {
   if (sameBcDate(fieldText(row, ['EndDate', 'End_Date']), endDate)) score += 2
 
   const days = fieldNumber(row, ['DaysApplied', 'Days_Applied'])
-  const expectedDays = bcLeaveDaysApplied(
-    body.appliedDays,
-    body.isHalfDayLeave ?? '0',
-  )
-  if (days !== null && (Math.abs(days - body.appliedDays) < 0.001 || days === expectedDays)) score += 3
+  if (days !== null && Math.abs(days - body.appliedDays) < 0.001) score += 3
 
   const reason = fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason', 'Purpose', 'Description'])
     .trim()
@@ -923,7 +691,6 @@ async function resolveSubmittedLeaveNo(
     startDate: string
     reason: string
     requisitionNo: string
-    isHalfDayLeave?: string
   },
   endDate: string,
   rawReturnValue: unknown,
@@ -979,7 +746,6 @@ async function pollSubmittedLeaveNo(
     startDate: string
     reason: string
     requisitionNo: string
-    isHalfDayLeave?: string
   },
   endDate: string,
   rawReturnValue: unknown,
@@ -1027,33 +793,12 @@ function expandLeaveCancelDocumentNos(no: string, row: ODataRecord) {
   return [...values]
 }
 
-/** RequestLeaveApproval must use the full BC application code (e.g. LV00027), not numeric aliases. */
-function leaveApprovalSoapCandidates(no: string, row?: ODataRecord | null) {
-  const docNo = row
-    ? fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no).trim()
-    : no.trim()
-  const values = [...new Set([docNo, no.trim()].filter(Boolean))]
-  const lvNumbers = values.filter((value) => /^lv\d/i.test(value))
-  return lvNumbers.length ? lvNumbers : values.slice(0, 1)
-}
-
-/** True only for explicit SOAP boolean success — never treat LV… document nos as cancel OK. */
-export function soapCancelOk(value: unknown) {
-  if (value === true || value === 1) return true
+function soapCancelOk(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
-  // LeaveApplication create/edit returns the application code (e.g. LV00029).
-  // That must NEVER count as a successful cancel/delete.
-  if (/^lv[\d_-]/i.test(raw) || /^[a-z]{2,}-?\d+/i.test(raw)) return false
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   return normalized === 'true' || normalized === '1' || normalized === 'yes'
-}
-
-function leaveLooksCancelledOrGone(row: ODataRecord | null) {
-  if (!row) return true
-  const status = resolveLeaveStatus(row).toLowerCase()
-  return status === 'cancelled' || status === 'canceled' || status === 'rejected'
 }
 
 async function tryCancelLeaveSoap(
@@ -1062,50 +807,40 @@ async function tryCancelLeaveSoap(
   row: ODataRecord,
   options: { cancelOnly?: boolean } = {},
 ) {
-  const wasOpen = leaveIsOpenInBc(row)
-  const paramSets: Record<string, unknown>[] = []
-
-  const leaveSoapBody = {
-    leaveNo: candidate,
-    employeeNo: user.employeeNo,
-    myUserID: user.userID,
-    daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
-    startDate: formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])),
-    endDate: formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])),
-    reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
-    reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
-    leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
-    isRequestLeaveAllowance: false,
-    isHalfDayLeave: false,
-    returnDate: formatBcSoapDate(fieldText(row, ['ReturnDate', 'Return_Date'])),
-  }
-
-  // BC 922+: CancelLeaveApplication and LeaveApplication cancel/delete.
-  paramSets.push(
+  const paramSets: Record<string, unknown>[] = [
     { requisitionNo: candidate, employeeNo: user.employeeNo },
     { requisitionNo: candidate, employeeNo: user.employeeNo, tableID: 50532 },
-  )
+    {
+      requisitionNo: candidate,
+      employeeNo: user.employeeNo,
+      myUserID: user.userID,
+      tableID: 50532,
+    },
+    { leaveNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID },
+  ]
 
-  if (!options.cancelOnly) {
-    paramSets.push({ action: 'cancel', ...leaveSoapBody })
-    if (wasOpen) {
-      paramSets.push({ action: 'delete', ...leaveSoapBody })
-    }
+  if (leaveIsOpenInBc(row) && !options.cancelOnly) {
+    paramSets.unshift({
+      action: 'delete',
+      leaveNo: candidate,
+      employeeNo: user.employeeNo,
+      myUserID: user.userID,
+      daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
+      startDate: formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])),
+      endDate: formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])),
+      reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
+      reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
+      leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
+      isRequestLeaveAllowance: false,
+      isHalfDayLeave: false,
+    })
   }
 
   for (const params of paramSets) {
     const method = 'action' in params ? 'LeaveApplication' : 'CancelLeaveApplication'
     try {
       const result = await callSoapMethod(method, params)
-      if (!soapCancelOk(result.returnValue)) continue
-      // Confirm BC actually removed or cancelled the leave — never toast on SOAP alone.
-      await new Promise((resolve) => setTimeout(resolve, 250))
-      const fresh = await fetchOwnedLeaveRow(user, candidate)
-      if (leaveLooksCancelledOrGone(fresh)) return true
-      // Pending cancel often reopens to Open — treat Open→Open after CancelLeave as failure
-      // unless the row disappeared. For CancelLeaveApplication on Pending, Open is OK if
-      // approval entries are gone and status is no longer Pending Approval.
-      if (!wasOpen && fresh && leaveIsOpenInBc(fresh)) return true
+      if (soapCancelOk(result.returnValue)) return true
     } catch {
       // try the next BC parameter shape
     }
@@ -1126,9 +861,27 @@ async function cancelLeaveApplicationInBc(
     }
   }
 
+  if (leaveIsOpenInBc(row)) {
+    for (const candidate of docCandidates) {
+      try {
+        const approval = await callSoapMethod('RequestLeaveApproval', {
+          requisitionNo: candidate,
+          employeeNo: user.employeeNo,
+          tableID: 50532,
+        })
+        if (!soapCancelOk(approval.returnValue)) continue
+        if (await tryCancelLeaveSoap(user, candidate, row, { cancelOnly: true })) {
+          return
+        }
+      } catch {
+        // try the next document number alias
+      }
+    }
+  }
+
   const message = leaveIsOpenInBc(row)
-    ? 'This leave draft could not be discarded in Business Central. Install the updated CuStaffPortal (LeaveApplication delete) or cancel it in BC.'
-    : 'Leave application could not be cancelled in Business Central. Check the approval workflow and try again.'
+    ? 'This leave draft could not be discarded. Verify the application in Business Central or contact support.'
+    : 'Leave application could not be cancelled.'
   throw Object.assign(new Error(message), { status: 422 })
 }
 
@@ -1136,6 +889,7 @@ async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string)
   const filters = [
     `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
     `ApplicationCode eq '${odataString(no)}' and UserID eq '${odataString(user.userID)}'`,
+    `Application_Code eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
     `ApplicationCode eq '${odataString(no)}'`,
     `No eq '${odataString(no)}'`,
   ]
@@ -1147,393 +901,6 @@ async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string)
     if (Array.isArray(rows) && rows.length > 0) return rows[0]!
   }
   return null
-}
-
-/** Division + department on the leave header — required for BC workflow routing (LEAVE-IT, etc.). */
-export function employeeLeaveWorkflowCodes(row: ODataRecord) {
-  let departmentCode = fieldText(row, ['DepartmentCode', 'Department_Code', 'Department']).trim()
-  let divisionCode = fieldText(row, ['DivisionCode', 'Division_Code', 'Division']).trim()
-  if (!departmentCode) departmentCode = fieldText(row, ['GlobalDimension1Code']).trim()
-  if (!divisionCode) divisionCode = fieldText(row, ['GlobalDimension2Code']).trim()
-
-  if (!departmentCode || !divisionCode) {
-    for (const [key, value] of Object.entries(row)) {
-      if (value === undefined || value === null || !String(value).trim()) continue
-      const normalized = key.toLowerCase().replace(/[_\s]/g, '')
-      if (
-        !departmentCode &&
-        (normalized === 'department' ||
-          normalized === 'departmentcode' ||
-          normalized.endsWith('departmentcode'))
-      ) {
-        departmentCode = String(value).trim()
-      }
-      if (
-        !divisionCode &&
-        (normalized === 'division' ||
-          normalized === 'divisioncode' ||
-          normalized.endsWith('divisioncode'))
-      ) {
-        divisionCode = String(value).trim()
-      }
-    }
-  }
-
-  return { departmentCode, divisionCode }
-}
-
-export function leaveRowHasWorkflowCodes(row: ODataRecord) {
-  const codes = employeeLeaveWorkflowCodes(row)
-  return Boolean(codes.departmentCode && codes.divisionCode)
-}
-
-function leaveWorkflowSoapParams(codes: { departmentCode: string; divisionCode: string }) {
-  if (!codes.departmentCode || !codes.divisionCode) return {}
-  return {
-    departmentCode: codes.departmentCode,
-    divisionCode: codes.divisionCode,
-  }
-}
-
-function leaveWorkflowSoapParamVariants(codes: { departmentCode: string; divisionCode: string }) {
-  if (!codes.departmentCode || !codes.divisionCode) return [] as Record<string, unknown>[]
-  return [
-    { departmentCode: codes.departmentCode, divisionCode: codes.divisionCode },
-    { DepartmentCode: codes.departmentCode, DivisionCode: codes.divisionCode },
-    { Department_Code: codes.departmentCode, Division_Code: codes.divisionCode },
-  ]
-}
-
-function leaveWorkflowODataPayloadVariants(codes: { departmentCode: string; divisionCode: string }) {
-  if (!codes.departmentCode || !codes.divisionCode) return [] as Record<string, unknown>[]
-  const { departmentCode, divisionCode } = codes
-  return [
-    { Department: departmentCode, Division: divisionCode },
-    { Department_Code: departmentCode, Division_Code: divisionCode },
-    { DepartmentCode: departmentCode, DivisionCode: divisionCode },
-    { GlobalDimension1Code: departmentCode, GlobalDimension2Code: divisionCode },
-  ]
-}
-
-function leaveWorkflowODataEntityPaths(documentNo: string) {
-  const escaped = odataString(documentNo)
-  return [
-    `QyHRLeaveApplications(ApplicationCode='${escaped}')`,
-    `QyHRLeaveApplications(No='${escaped}')`,
-  ]
-}
-
-/** OData PATCH fallback when LeaveApplication SOAP edit does not persist workflow codes. */
-async function stampLeaveWorkflowCodesViaOData(
-  user: ReturnType<typeof authUser>,
-  documentNo: string,
-  employeeRow?: ODataRecord | null,
-) {
-  const employee = employeeRow ?? (await fetchEmployeeForLeaveWorkflow(user.employeeNo))
-  if (!employee) return false
-  const codes = employeeLeaveWorkflowCodes(employee)
-  if (!codes.departmentCode || !codes.divisionCode) return false
-
-  for (const entityPath of leaveWorkflowODataEntityPaths(documentNo).slice(0, 1)) {
-    for (const payload of leaveWorkflowODataPayloadVariants(codes).slice(0, 2)) {
-      try {
-        await patchOData(entityPath, payload)
-      } catch {
-        // Field names differ per BC publish — try the next shape.
-      }
-    }
-  }
-  const refreshed = await fetchOwnedLeaveRow(user, documentNo)
-  return Boolean(refreshed && leaveRowHasWorkflowCodes(refreshed))
-}
-
-/** Copy employee division/department onto the leave so BC approval workflows can match. */
-async function stampLeaveWorkflowCodes(
-  user: ReturnType<typeof authUser>,
-  documentNo: string,
-  employeeRow?: ODataRecord | null,
-) {
-  const employee = employeeRow ?? (await fetchEmployeeForLeaveWorkflow(user.employeeNo))
-  if (!employee) return false
-  const codes = employeeLeaveWorkflowCodes(employee)
-  if (!codes.departmentCode || !codes.divisionCode) return false
-
-  const existing = await fetchOwnedLeaveRow(user, documentNo)
-  if (existing && leaveRowHasWorkflowCodes(existing)) return true
-
-  const paramSets = leaveWorkflowSoapParamVariants(codes).map((variant) => ({
-    action: 'edit',
-    leaveNo: documentNo,
-    employeeNo: user.employeeNo,
-    myUserID: resolveEffectiveBcUserId(user.userID, employee, user.employeeNo),
-    ...variant,
-  }))
-
-  for (const params of paramSets) {
-    try {
-      const result = await callSoapMethod('LeaveApplication', params)
-      const raw = String(result.returnValue ?? '').trim()
-      if (soapLeaveActionOk(result.returnValue) || raw === documentNo || raw.toLowerCase() === 'true') {
-        const refreshed = await fetchOwnedLeaveRow(user, documentNo)
-        if (refreshed && leaveRowHasWorkflowCodes(refreshed)) return true
-      }
-    } catch {
-      // BC may accept only one parameter naming shape — try the next.
-    }
-  }
-
-  return stampLeaveWorkflowCodesViaOData(user, documentNo, employee)
-}
-
-function leaveReturnDateInvalid(row: ODataRecord) {
-  const raw = fieldText(row, ['ReturnDate', 'Return_Date']).trim()
-  return !raw || raw.startsWith('0001-01-01')
-}
-
-async function resolveLeaveReturnDateForRow(
-  user: ReturnType<typeof authUser>,
-  row: ODataRecord,
-) {
-  const leaveType = fieldText(row, ['LeaveType', 'Leave_Type'])
-  const start = fieldText(row, ['StartDate', 'Start_Date'])
-  const end = fieldText(row, ['EndDate', 'End_Date'])
-  const days = fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 1
-  const resolved = await resolveLeaveDatesFromBc(user, leaveType, days, start, '0')
-  let returnDate = formatBcSoapDate(resolved.returnDate || nextWorkingDayIso(resolved.endDate || end))
-  if (returnDate && !returnDate.startsWith('0001')) return returnDate
-
-  const startIso = formatBcSoapDate(start)
-  const endIso = formatBcSoapDate(resolved.endDate || end)
-  if (startIso && endIso) {
-    try {
-      const fnResult = await callSoapMethod('FnGetLeaveDetails', {
-        empNo: user.employeeNo,
-        startDate: startIso,
-        endDate: endIso,
-        leaveType,
-      })
-      const raw = String(fnResult.returnValue ?? '').trim()
-      if (raw) {
-        const segment = raw.split('##')[0]?.trim() ?? raw.split('#')[0]?.trim() ?? raw
-        returnDate = formatBcSoapDate(segment)
-        if (returnDate && !returnDate.startsWith('0001')) return returnDate
-      }
-    } catch {
-      // FnGetLeaveDetails is optional on some BC builds.
-    }
-  }
-
-  return formatBcSoapDate(nextWorkingDayIso(endIso)) || ''
-}
-
-async function patchLeaveReturnDateInBc(
-  user: ReturnType<typeof authUser>,
-  documentNo: string,
-  row: ODataRecord,
-  bcUserId: string,
-  returnDate: string,
-) {
-  const leaveType = fieldText(row, ['LeaveType', 'Leave_Type'])
-  const start = fieldText(row, ['StartDate', 'Start_Date'])
-  const end = fieldText(row, ['EndDate', 'End_Date'])
-  const days = fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 1
-  const startIso = formatBcLeaveSoapDateTime(start)
-  const endIso = formatBcLeaveSoapDateTime(end)
-  const returnIso = formatBcLeaveSoapDateTime(returnDate)
-  const returnPlain = formatBcSoapDate(returnDate)
-  const returnFields = leaveSoapReturnDateFields(returnDate)
-
-  const soapVariants: Record<string, unknown>[] = [
-    {
-      action: 'edit',
-      leaveNo: documentNo,
-      employeeNo: user.employeeNo,
-      myUserID: bcUserId,
-      daysApplied: days,
-      startDate: startIso || formatBcSoapDate(start),
-      endDate: endIso || formatBcSoapDate(end),
-      ...returnFields,
-      reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
-      reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
-      leaveType,
-      isRequestLeaveAllowance: false,
-      isHalfDayLeave: false,
-    },
-    {
-      action: 'edit',
-      leaveNo: documentNo,
-      employeeNo: user.employeeNo,
-      myUserID: bcUserId,
-      daysApplied: days,
-      startDate: formatBcSoapDate(start),
-      endDate: formatBcSoapDate(end),
-      ...returnFields,
-      reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
-      reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
-      leaveType,
-      isRequestLeaveAllowance: false,
-      isHalfDayLeave: false,
-    },
-  ]
-
-  for (const params of soapVariants) {
-    try {
-      const result = await callSoapMethod('LeaveApplication', params)
-      const raw = String(result.returnValue ?? '').trim()
-      if (soapLeaveActionOk(result.returnValue) || raw === documentNo || raw.toLowerCase() === 'true') {
-        const refreshed = await fetchOwnedLeaveRow(user, documentNo)
-        if (refreshed && !leaveReturnDateInvalid(refreshed)) return refreshed
-      }
-    } catch {
-      // BC may accept only one parameter naming shape — try the next.
-    }
-  }
-
-  const odataBases = [
-    config.BC_ODATA_BASE_URL,
-    config.BC_ODATA_PAGE_BASE_URL,
-    config.BC_SOAP_PAGE_BASE_URL,
-  ].filter((base): base is string => Boolean(base))
-    .filter((base, index, list) => list.indexOf(base) === index)
-
-  for (const entityPath of leaveWorkflowODataEntityPaths(documentNo)) {
-    for (const payload of [
-      { ReturnDate: returnPlain },
-      { Return_Date: returnPlain },
-      { ReturnDate: returnIso },
-      { Return_Date: returnIso },
-    ]) {
-      for (const base of odataBases) {
-        try {
-          await patchODataFromBase(base, entityPath, payload)
-          const refreshed = await fetchOwnedLeaveRow(user, documentNo)
-          if (refreshed && !leaveReturnDateInvalid(refreshed)) return refreshed
-        } catch {
-          // Field names or OData base differ per BC publish.
-        }
-      }
-    }
-  }
-
-  return (await fetchOwnedLeaveRow(user, documentNo)) ?? row
-}
-
-/** BC workflows reject leaves with blank / 0001-01-01 return dates — fix before approval. */
-async function ensureLeaveDatesBeforeApproval(
-  user: ReturnType<typeof authUser>,
-  documentNo: string,
-  row: ODataRecord,
-  bcUserId: string,
-) {
-  if (!leaveReturnDateInvalid(row)) return row
-
-  const returnDate = await resolveLeaveReturnDateForRow(user, row)
-  if (!returnDate || returnDate.startsWith('0001')) {
-    logDiagnostic(
-      `[leave-dates] no=${logSafe(documentNo)} could not resolve return date`,
-    )
-    return row
-  }
-
-  return patchLeaveReturnDateInBc(user, documentNo, row, bcUserId, returnDate)
-}
-
-/** Re-attach employee + workflow context on older Open leaves before approval (fixes ADMIN-created drafts). */
-async function prepareLeaveForApproval(
-  user: ReturnType<typeof authUser>,
-  documentNo: string,
-  bcUserId: string,
-  employeeRow?: ODataRecord | null,
-) {
-  const employee = employeeRow ?? (await fetchEmployeeForLeaveWorkflow(user.employeeNo))
-  let row = await fetchOwnedLeaveRow(user, documentNo)
-  if (!row) return null
-
-  const codes = employee ? employeeLeaveWorkflowCodes(employee) : { departmentCode: '', divisionCode: '' }
-
-  const endDate = formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date']))
-  let returnDate = formatBcSoapDate(fieldText(row, ['ReturnDate', 'Return_Date']))
-  if (leaveReturnDateInvalid(row)) {
-    returnDate = await resolveLeaveReturnDateForRow(user, row)
-    if (returnDate && !returnDate.startsWith('0001')) {
-      row = await patchLeaveReturnDateInBc(user, documentNo, row, bcUserId, returnDate)
-    }
-  }
-  const editParams: Record<string, unknown> = {
-    action: 'edit',
-    leaveNo: documentNo,
-    employeeNo: user.employeeNo,
-    myUserID: bcUserId,
-    daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
-    startDate: formatBcLeaveSoapDateTime(fieldText(row, ['StartDate', 'Start_Date'])),
-    endDate: formatBcLeaveSoapDateTime(endDate),
-    ...(returnDate ? { returnDate, ReturnDate: returnDate } : {}),
-    reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
-    reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
-    leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
-    isRequestLeaveAllowance: false,
-    isHalfDayLeave: false,
-    ...leaveWorkflowSoapParams(codes),
-  }
-
-  try {
-    const result = await callSoapMethod('LeaveApplication', editParams)
-    const raw = String(result.returnValue ?? '').trim()
-    if (!soapLeaveActionOk(result.returnValue) && raw !== documentNo && raw.toLowerCase() !== 'true') {
-      logDiagnostic(
-        `[leave-approval] prepare edit no=${logSafe(documentNo)} return=${logSafe(raw)}`,
-      )
-    }
-  } catch (error) {
-    logDiagnostic(
-      `[leave-approval] prepare edit failed no=${logSafe(documentNo)} err=${logSafe(error instanceof Error ? error.message : String(error))}`,
-    )
-  }
-
-  if (codes.departmentCode && codes.divisionCode) {
-    await stampLeaveWorkflowCodesViaOData(user, documentNo, employee).catch(() => false)
-  }
-
-  return (await fetchOwnedLeaveRow(user, documentNo)) ?? row
-}
-
-const LEAVE_ATTACHMENT_TABLE_ID = 50532
-
-function leaveAttachmentDocKey(row: ODataRecord) {
-  return normalizedLeaveKey(
-    fieldText(row, ['No', 'DocumentNo', 'Document_No', 'Document_No_']),
-  )
-}
-
-function leaveAttachmentBelongsToDocument(row: ODataRecord, docNo: string) {
-  const tableId = Number(row.TableID ?? row.Table_ID ?? 0)
-  if (tableId !== LEAVE_ATTACHMENT_TABLE_ID) return false
-  const target = normalizedLeaveKey(docNo)
-  if (!target) return false
-  return leaveAttachmentDocKey(row) === target
-}
-
-/** Read leave attachments from BC only when TableID and document no both match. */
-async function fetchLeaveDocumentAttachments(docNo: string) {
-  const escaped = odataString(docNo)
-  const tableId = LEAVE_ATTACHMENT_TABLE_ID
-  const filters = [
-    `No eq '${escaped}' and TableID eq ${tableId}`,
-    `No eq '${escaped}' and Table_ID eq ${tableId}`,
-    `DocumentNo eq '${escaped}' and TableID eq ${tableId}`,
-    `DocumentNo eq '${escaped}' and Table_ID eq ${tableId}`,
-    `Document_No eq '${escaped}' and TableID eq ${tableId}`,
-    `Document_No eq '${escaped}' and Table_ID eq ${tableId}`,
-  ]
-  for (const filter of filters) {
-    const rows = (await fetchOData('QyDocumentAttachments', { $filter: filter }).catch(
-      () => null,
-    )) as ODataRecord[] | null
-    if (!Array.isArray(rows) || rows.length === 0) continue
-    const matched = rows.filter((row) => leaveAttachmentBelongsToDocument(row, docNo))
-    if (matched.length > 0) return matched
-  }
-  return []
 }
 
 function mapLeaveAttachmentsSimple(rows: ODataRecord[]) {
@@ -1601,36 +968,6 @@ async function buildLeavePortalDetail(
     },
     approvalSteps,
     attachments: mapLeaveAttachmentsSimple(attachments),
-  }
-}
-
-/** Laravel LeaveApplication SOAP uses ISO-8601 timestamps, not plain yyyy-mm-dd. */
-export function formatBcLeaveSoapDateTime(value: string) {
-  const iso = formatBcSoapDate(value)
-  if (!iso || iso.startsWith('0001')) return ''
-  return `${iso}T00:00:00.000Z`
-}
-
-/** BC GetLeaveDates often returns M/D/YYYY — use that shape when writing Return Date. */
-export function formatBcSoapDateMdy(value: string) {
-  const iso = formatBcSoapDate(value)
-  if (!iso || iso.startsWith('0001')) return ''
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  if (!match) return iso
-  const [, year, month, day] = match
-  return `${Number(month)}/${Number(day)}/${year}`
-}
-
-function leaveSoapReturnDateFields(returnDate: string) {
-  const plain = formatBcSoapDate(returnDate)
-  if (!plain || plain.startsWith('0001')) return {}
-  const iso = formatBcLeaveSoapDateTime(plain)
-  const mdy = formatBcSoapDateMdy(plain)
-  return {
-    returnDate: iso || plain,
-    ReturnDate: plain,
-    Return_Date: plain,
-    return_Date: mdy || plain,
   }
 }
 
@@ -1766,12 +1103,11 @@ async function resolveLeaveDatesFromBc(
 ) {
   const start = normalizeLeaveStartDate(startDate)
   const half = halfDayOptionValue(halfDay)
-  const bcDays = bcLeaveDaysApplied(noOfDays, halfDay)
   const attempts: Array<Record<string, unknown>> = [
     {
       empNo: user.employeeNo,
       leaveType,
-      noOfDays: bcDays,
+      noOfDays,
       startDate: start,
       whetherIsHalfDay: half,
     },
@@ -1782,10 +1118,19 @@ async function resolveLeaveDatesFromBc(
     attempts.push({
       empNo: user.employeeNo,
       leaveType,
-      noOfDays: bcDays,
+      noOfDays,
       startDate: start,
       whetherIsHalfDay: isHalfDaySelection(halfDay),
     })
+    if (noOfDays < 1) {
+      attempts.push({
+        empNo: user.employeeNo,
+        leaveType,
+        noOfDays: 1,
+        startDate: start,
+        whetherIsHalfDay: half,
+      })
+    }
   }
 
   for (const params of attempts) {
@@ -2060,53 +1405,21 @@ export function buildStaffRouter() {
             ? body.isApprove
             : String(body.isApprove ?? '').toLowerCase() === 'true'
 
-      const employeeRow = await fetchMergedEmployeeRecord(user.employeeNo).catch(() => null)
-      const bcUserId = resolveEffectiveBcUserId(user.userID, employeeRow, user.employeeNo)
-      if (bcUserId && bcUserId !== user.userID && req.session.authUser) {
-        req.session.authUser = { ...req.session.authUser, userID: bcUserId }
-      }
-      const approverUserId = bcUserId || user.userID
-
-      let entry: ODataRecord | undefined
-      if (String(body.entryNo ?? '').trim()) {
-        const byEntry = (await fetchOData('QyApprovalEntry', {
-          $filter:
-            `EntryNo eq ${Number(body.entryNo)}` +
-            ` and DocumentNo eq '${odataString(body.docNo)}'` +
-            ` and ApproverID eq '${odataString(approverUserId)}'` +
-            ` and Status eq 'Open'`,
-          $top: 1,
-        }).catch(() => null)) as ODataRecord[] | null
-        entry = Array.isArray(byEntry) ? byEntry[0] : undefined
-      }
-      if (!entry) {
-        const byDoc = (await fetchOData('QyApprovalEntry', {
-          $filter:
-            `DocumentNo eq '${odataString(body.docNo)}'` +
-            ` and ApproverID eq '${odataString(approverUserId)}'` +
-            ` and Status eq 'Open'`,
-          $top: 1,
-        }).catch(() => null)) as ODataRecord[] | null
-        entry = Array.isArray(byDoc) ? byDoc[0] : undefined
-      }
-      if (!entry) {
-        res.status(404).json({ ok: false, message: 'Open approval entry not found' })
-        return
-      }
-
-      const decision = isApprove ? 'Approved' : 'Rejected'
-      const decided = await decidePortalApproval({
-        entry,
+      const result = await callSoapMethod('DocumentApproval', {
+        entryNo: body.entryNo,
         docNo: body.docNo,
-        approverUserId,
-        decision,
+        userID: user.userID,
+        isApprove,
         comments: body.comment || body.comments || '',
       })
+
+      const ok = soapTruthy(result.returnValue)
       res.json({
-        ok: decided.ok,
-        message: `Document ${body.docNo} has been ${decision.toLowerCase()}`,
-        returnValue: true,
-        mode: decided.mode,
+        ok,
+        message: ok
+          ? `Document ${body.docNo} has been ${(body.decision ?? (isApprove ? 'Approved' : 'Rejected')).toLowerCase()}`
+          : 'The approval action did not complete. Please try again.',
+        returnValue: result.returnValue,
       })
     }),
   )
@@ -2187,7 +1500,7 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveType', {
           $filter: leaveTypesGenderFilter(user),
         }),
-        fetchEmployeeLeaveMetricsRow(user.employeeNo),
+        fetchCurrentEmployeeRow(user.employeeNo),
       ])
       const metrics = employeeLeaveMetrics(employeeRow, user)
       res.json({
@@ -2208,6 +1521,19 @@ export function buildStaffRouter() {
   )
 
   router.get(
+    '/leave/approval-route',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const steps = await resolveLeaveApprovalRouteAsync([], {
+        employeeNo: user.employeeNo,
+        userID: user.userID,
+        department: user.department,
+      })
+      res.json({ steps })
+    }),
+  )
+
+  router.get(
     '/leave/relievers',
     safe(async (req, res) => {
       const user = authUser(req)
@@ -2220,10 +1546,10 @@ export function buildStaffRouter() {
     '/leave/balance/:type',
     safe(async (req, res) => {
       const user = authUser(req)
-      const leaveTypeCode = String(req.params.type ?? '')
+      const leaveTypeCode = req.params.type
       const today = new Date().toISOString().slice(0, 10)
 
-      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows, soapBalanceResult] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
@@ -2238,14 +1564,13 @@ export function buildStaffRouter() {
         fetchOData('QyHRLeaveLedger', {
           $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
         }) as Promise<ODataRecord[] | null>,
-        fetchEmployeeLeaveMetricsRow(user.employeeNo),
-        fetchLeaveApplicationBalanceRows(user.employeeNo, leaveTypeCode),
-        callSoapMethod('FnGetEmployeeLeaveBalances', { employeeNo: user.employeeNo }).catch(() => null),
+        fetchCurrentEmployeeRow(user.employeeNo),
       ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
       const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
+      const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
       const metrics = employeeLeaveMetrics(employeeRow, user)
 
       let additions = 0
@@ -2260,29 +1585,19 @@ export function buildStaffRouter() {
         }
       }
 
-      const odataBalances = mergeLeaveCardBalances(
-        parseEmployeeLeaveBalancesReturn(soapBalanceResult?.returnValue),
-        leaveCardBalancesFromRecord(employeeRow),
-        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
+      const ledgerNet = additions - deductions
+      let leaveBalance = 0
+      if (isAnnual) {
+        leaveBalance = resolveAnnualLeaveBalance(metrics, ledgerNet)
+      } else {
+        leaveBalance = leaveTypeDays - (deductions - additions)
+      }
+      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
+      const entitlement = roundLeaveValue(
+        isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
       )
-      const cardBalances = resolveLeaveCardBalances(
-        leaveTypeRow,
-        metrics,
-        leaveTypeDays,
-        additions,
-        deductions,
-        odataBalances,
-      )
-      const currentLeaveBalance = cardBalances.currentLeaveBalance ?? 0
 
-      res.json({
-        allocatedDays: cardBalances.allocatedDays,
-        currentLeaveBalance: cardBalances.currentLeaveBalance,
-        earnedLeaveDays: cardBalances.earnedLeaveDays,
-        balance: currentLeaveBalance,
-        pendingCount,
-        isHourly,
-      })
+      res.json({ balance, entitlement, pendingCount, isHourly })
     }),
   )
 
@@ -2353,14 +1668,16 @@ export function buildStaffRouter() {
       }
       const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
       const approvalEntries = await loadLeaveApprovalEntries(applicationCode, true, user)
-      const attachments = await fetchLeaveDocumentAttachments(applicationCode)
+      const attachments = (await fetchOData('QyDocumentAttachments', {
+        $filter: `No eq '${odataString(applicationCode)}' and TableID eq 50532`,
+      }).catch(() => [])) as ODataRecord[] | null
       res.json(
         await buildLeavePortalDetail(
           row,
           applicationCode,
           user,
           approvalEntries,
-          attachments,
+          Array.isArray(attachments) ? attachments : [],
         ),
       )
     }),
@@ -2451,12 +1768,14 @@ export function buildStaffRouter() {
         return
       }
 
-      await uploadPortalAttachment(LEAVE_ATTACHMENT_TABLE_ID, no, req.body ?? {})
-      const attachments = await fetchLeaveDocumentAttachments(no)
+      await uploadPortalAttachment(50532, no, req.body ?? {})
+      const attachments = (await fetchOData('QyDocumentAttachments', {
+        $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
+      }).catch(() => [])) as ODataRecord[] | null
 
       res.status(201).json({
         ok: true,
-        attachments: mapLeaveAttachmentsSimple(attachments),
+        attachments: mapLeaveAttachmentsSimple(Array.isArray(attachments) ? attachments : []),
       })
     }),
   )
@@ -2478,7 +1797,9 @@ export function buildStaffRouter() {
         fetchOData('QyApprovalEntry', {
           $filter: `DocumentNo eq '${odataString(applicationCode)}'`,
         }),
-        fetchLeaveDocumentAttachments(applicationCode),
+        fetchOData('QyDocumentAttachments', {
+          $filter: `No eq '${odataString(applicationCode)}' and TableID eq 50532`,
+        }).catch(() => []),
       ])
 
       res.json({ requisition: row, approvers, attachments })
@@ -2499,8 +1820,6 @@ export function buildStaffRouter() {
           reason: z.string().min(1),
           requisitionNo: z.string().optional().default(''),
           requestApproval: z.boolean().optional().default(true),
-          endDate: z.string().optional().default(''),
-          returnDate: z.string().optional().default(''),
         })
         .parse(req.body)
 
@@ -2523,14 +1842,13 @@ export function buildStaffRouter() {
       }
 
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
-      const dateResult = await resolveLeaveDatesFromBc(
+      const { endDate } = await resolveLeaveDatesFromBc(
         user,
         body.leaveType,
         body.appliedDays,
         body.startDate,
         body.isHalfDayLeave,
       )
-      const { endDate, returnDate } = dateResult
       if (!endDate) {
         res.status(422).json({
           ok: false,
@@ -2539,61 +1857,38 @@ export function buildStaffRouter() {
         return
       }
 
-      const resolvedEndDate = formatBcSoapDate(body.endDate || endDate)
-      const resolvedReturnDate = formatBcSoapDate(
-        body.returnDate || returnDate || nextWorkingDayIso(resolvedEndDate),
-      )
-
-      const employeeRow = await fetchEmployeeForLeaveWorkflow(user.employeeNo)
-      const bcUserId = resolveEffectiveBcUserId(user.userID, employeeRow, user.employeeNo)
-      const workflowCodes = employeeRow ? employeeLeaveWorkflowCodes(employeeRow) : { departmentCode: '', divisionCode: '' }
-      const formattedStart = formatBcLeaveSoapDateTime(body.startDate)
-      const formattedEnd = formatBcLeaveSoapDateTime(resolvedEndDate)
-      const returnFields = leaveSoapReturnDateFields(resolvedReturnDate)
-
       const result = await callSoapMethod('LeaveApplication', {
         action,
         leaveNo: body.requisitionNo,
         employeeNo: user.employeeNo,
-        daysApplied: bcLeaveDaysApplied(body.appliedDays, body.isHalfDayLeave),
-        startDate: formattedStart || formatBcSoapDate(body.startDate),
-        endDate: formattedEnd || resolvedEndDate,
-        ...returnFields,
+        daysApplied: body.appliedDays,
+        startDate: formatBcSoapDate(body.startDate),
+        endDate: formatBcSoapDate(endDate),
         reason: body.reason,
         reliever: body.reliever,
-        myUserID: bcUserId,
+        myUserID: user.userID,
         leaveType: body.leaveType,
         isRequestLeaveAllowance: false,
         // LeaveApplication declares this as Boolean; GetLeaveDates uses 0/1/2 separately.
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
-        ...leaveWorkflowSoapParams(workflowCodes),
       })
 
       const soapOk = soapLeaveActionOk(result.returnValue)
       const documentNo =
         soapOk && action === 'create'
-          ? await pollSubmittedLeaveNo(user, body, resolvedEndDate, result.returnValue).catch(() => '')
+          ? await pollSubmittedLeaveNo(user, body, endDate, result.returnValue).catch(() => '')
           : soapOk
             ? body.requisitionNo || submittedLeaveNoFromReturn(result.returnValue)
             : ''
-
-      if (documentNo && action === 'create') {
-        await stampLeaveWorkflowCodes(user, documentNo, employeeRow)
-        const createdRow = await fetchOwnedLeaveRow(user, documentNo)
-        if (createdRow) {
-          await ensureLeaveDatesBeforeApproval(user, documentNo, createdRow, bcUserId).catch(() => null)
-        }
-      }
 
       let status = 'Open'
       if (documentNo && action === 'create' && body.requestApproval !== false) {
         const approvalResult = await callSoapMethod('RequestLeaveApproval', {
           requisitionNo: documentNo,
           employeeNo: user.employeeNo,
-          myUserID: bcUserId,
           tableID: 50532,
         })
-        if (soapRequestApprovalOk(approvalResult.returnValue)) {
+        if (soapApprovalOk(approvalResult.returnValue)) {
           const wait = await waitForLeavePendingInBc(user, documentNo)
           if (wait.confirmed) {
             status = resolveLeaveStatus(wait.row ?? {}, wait.approvalEntries)
@@ -2603,12 +1898,6 @@ export function buildStaffRouter() {
       }
 
       const ok = action === 'create' ? Boolean(soapOk && documentNo) : soapOk
-
-      if (!ok) {
-        console.error(
-          `[leave-${action}] BC reported failure — employeeNo=${user.employeeNo} returnValue=${JSON.stringify(result.returnValue)}`,
-        )
-      }
 
       res.json({
         ok,
@@ -2653,36 +1942,12 @@ export function buildStaffRouter() {
         })
         return
       }
-      const wasOpen = leaveIsOpenInBc(row)
       await cancelLeaveApplicationInBc(user, body.no, row)
-
-      const fresh = await fetchOwnedLeaveRow(user, body.no)
-      if (wasOpen) {
-        // Open draft must be gone (deleted) after cancel.
-        if (fresh && !leaveLooksCancelledOrGone(fresh)) {
-          throw Object.assign(
-            new Error(
-              'Business Central still has this leave as Open. Cancel did not discard it — publish the updated CuStaffPortal LeaveApplication delete support.',
-            ),
-            { status: 502 },
-          )
-        }
-      } else if (fresh && resolveLeaveStatus(fresh) === 'Pending Approval') {
-        throw Object.assign(
-          new Error(
-            'Business Central still shows this leave as Pending Approval. Cancel did not complete.',
-          ),
-          { status: 502 },
-        )
-      }
-
       res.json({
         ok: true,
-        message: wasOpen
+        message: leaveIsOpenInBc(row)
           ? 'Leave application discarded successfully'
-          : fresh && leaveIsOpenInBc(fresh)
-            ? 'Leave approval cancelled — application returned to Open'
-            : 'Leave application cancelled successfully',
+          : 'Leave application cancelled successfully',
       })
     }),
   )
@@ -2778,81 +2043,31 @@ export function buildStaffRouter() {
 async function tryRequestLeaveApproval(
   user: ReturnType<typeof authUser>,
   candidates: string[],
-  bcUserId: string,
 ) {
-  let lastReturnValue = ''
   let lastMessage = ''
-  let sawSoapTrue = false
   for (const candidate of candidates) {
-    const requisitionNo = candidate.trim()
-    if (!requisitionNo) continue
-
-    // Laravel ESS first — myUserID second (some BC builds return true without running workflow when myUserID is wrong).
     const paramSets: Record<string, unknown>[] = [
-      { requisitionNo, employeeNo: user.employeeNo, tableID: 50532 },
+      { requisitionNo: candidate, employeeNo: user.employeeNo, tableID: 50532 },
+      { requisitionNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID, tableID: 50532 },
+      { requisitionNo: candidate, employeeNo: user.employeeNo },
+      { leaveNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID, tableID: 50532 },
     ]
-    if (bcUserId) {
-      paramSets.push({
-        requisitionNo,
-        employeeNo: user.employeeNo,
-        myUserID: bcUserId,
-        tableID: 50532,
-      })
-    }
-
     for (const params of paramSets) {
       try {
         const result = await callSoapMethod('RequestLeaveApproval', params)
         const raw = String(result.returnValue ?? '').trim()
-        lastReturnValue = raw
-        if (soapLeaveApprovalDocEcho(raw)) {
-          lastMessage = leaveApprovalSoapFailureMessage(raw)
-          continue
+        if (soapApprovalOk(result.returnValue)) {
+          return { ok: true as const, candidate, returnValue: raw }
         }
-        if (!soapRequestApprovalOk(result.returnValue)) {
-          if (raw) lastMessage = leaveApprovalSoapFailureMessage(raw)
-          continue
-        }
-        sawSoapTrue = true
-        const wait = await waitForLeavePendingInBc(user, requisitionNo, null, {
-          maxAttempts: 10,
-          intervalMs: 1000,
-          bcUserId,
-        })
-        if (wait.confirmed) {
-          return {
-            ok: true as const,
-            candidate: requisitionNo,
-            returnValue: raw,
-            row: wait.row,
-            approvalEntries: wait.approvalEntries,
-          }
-        }
-        lastMessage =
-          `Business Central returned success but the leave is still Open (BC user ${bcUserId || 'unknown'}). ` +
-          'Check Return Date is not blank in BC, then retry. If it still fails, use Send Approval Request in BC.'
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Leave application could not be sent for approval.'
-        if (!/requisitionNo.*null/i.test(message)) {
-          lastMessage = message
-        }
+        if (raw) lastMessage = raw
+      } catch {
+        // try the next BC parameter shape
       }
-    }
-  }
-  if (sawSoapTrue) {
-    return {
-      ok: false as const,
-      returnValue: lastReturnValue,
-      message:
-        lastMessage ||
-        'Business Central did not confirm pending approval. The leave is still Open — try Send Approval Request in BC or contact IT.',
     }
   }
   return {
     ok: false as const,
-    returnValue: lastReturnValue,
-    message: lastMessage || leaveApprovalSoapFailureMessage(lastReturnValue),
+    message: lastMessage || 'Leave application could not be sent for approval.',
   }
 }
 
@@ -2860,45 +2075,35 @@ async function waitForLeavePendingInBc(
   user: ReturnType<typeof authUser>,
   documentNo: string,
   row?: ODataRecord | null,
-  options: { maxAttempts?: number; intervalMs?: number; bcUserId?: string } = {},
 ) {
-  const maxAttempts = options.maxAttempts ?? 5
-  const intervalMs = options.intervalMs ?? 800
-  const senderExtras = options.bcUserId ? [options.bcUserId] : []
   const candidates = row
     ? expandLeaveCancelDocumentNos(documentNo, row)
     : [...leaveDocumentNoCandidates(documentNo)]
 
+  // Bounded, non-nested poll: each attempt does ONE cheap by-document query.
+  // ~6.4s worst case, comfortably under the frontend request timeout.
   let currentRow: ODataRecord | null = row ?? null
-  let senderIndex = indexLeaveApprovalEntriesByNo(
-    await fetchLeaveApprovalEntriesForSender(user, senderExtras),
-  )
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      await new Promise((resolve) => setTimeout(resolve, 800))
     }
     currentRow = (await fetchOwnedLeaveRow(user, documentNo)) ?? currentRow
     const byDoc = leaveApprovalEntriesForDocument(
       await fetchLeaveApprovalEntriesByDocumentNos(candidates),
       documentNo,
     )
-    if (attempt === maxAttempts - 1) {
-      senderIndex = indexLeaveApprovalEntriesByNo(
-        await fetchLeaveApprovalEntriesForSender(user, senderExtras),
-      )
-    }
-    const senderMatches = senderIndex.get(normalizedLeaveKey(documentNo)) ?? []
-    const approvalEntries = dedupeApprovalEntryList(byDoc, senderMatches)
-    if ((currentRow && leaveIsPendingInBc(currentRow, approvalEntries)) || approvalEntries.length > 0) {
+    if ((currentRow && leaveIsPendingInBc(currentRow, byDoc)) || byDoc.length > 0) {
       return {
         row: currentRow,
-        approvalEntries: await enrichLeaveApprovalEntries(approvalEntries),
+        approvalEntries: await enrichLeaveApprovalEntries(byDoc),
         confirmed: true,
       }
     }
   }
 
-  const senderMatches = await findLeaveApprovalEntriesBySender(documentNo, user, senderExtras)
+  // Single sender-side fallback (not per attempt) to catch DocumentNo
+  // formatting differences without fanning out into a query burst.
+  const senderMatches = await findLeaveApprovalEntriesBySender(documentNo, user)
   if (senderMatches.length > 0) {
     return {
       row: currentRow,
@@ -2951,95 +2156,81 @@ async function waitForLeavePendingInBc(
         return
       }
 
-      const employeeRow = await fetchEmployeeForLeaveWorkflow(user.employeeNo)
-      const bcUserId = resolveEffectiveBcUserId(user.userID, employeeRow, user.employeeNo)
-      if (bcUserId && bcUserId !== user.userID && req.session.authUser) {
-        req.session.authUser = { ...req.session.authUser, userID: bcUserId }
-      }
-      let workingRow = row
-
-      workingRow =
-        (await ensureLeaveDatesBeforeApproval(user, body.no, workingRow, bcUserId)) ?? workingRow
-      workingRow =
-        (await prepareLeaveForApproval(user, body.no, bcUserId, employeeRow)) ?? workingRow
-      await stampLeaveWorkflowCodes(user, body.no, employeeRow).catch(() => false)
-      workingRow = (await fetchOwnedLeaveRow(user, body.no)) ?? workingRow
-
-      const candidates = leaveApprovalSoapCandidates(body.no, workingRow)
-      const soap = await tryRequestLeaveApproval(user, candidates, bcUserId)
+      const candidates = expandLeaveCancelDocumentNos(body.no, row)
+      const soap = await tryRequestLeaveApproval(user, candidates)
       if (!soap.ok) {
-        const diagnostic = await buildLeaveApprovalDiagnostic(user, body.no, workingRow, soap.returnValue)
-        logDiagnostic(
-          `[leave-approval] no=${logSafe(body.no)} sessionUser=${logSafe(user.userID)} bcUser=${logSafe(bcUserId)} soap=${logSafe(soap.returnValue)} confirmed=false byDoc=${diagnostic.byDoc} senderMatch=${diagnostic.senderMatches} hdrStatus=${logSafe(diagnostic.headerStatus)}`,
-        )
-        logDiagnostic(
-          `[leave-approval] senderDocs=${logSafe(JSON.stringify(diagnostic.senderDocs), 2000)}`,
-        )
-        res.json({
-          ok: false,
-          message: soap.message,
-          bcUserId,
-          diagnostic: {
-            soapReturnValue: diagnostic.soapReturnValue,
-            byDoc: diagnostic.byDoc,
-            senderMatches: diagnostic.senderMatches,
-            headerStatus: diagnostic.headerStatus,
-          },
-        })
+        res.json({ ok: false, message: soap.message })
         return
       }
 
-      let freshRow = (await fetchOwnedLeaveRow(user, body.no)) ?? soap.row ?? workingRow
-      let freshEntries =
-        soap.approvalEntries?.length
-          ? soap.approvalEntries
-          : leaveApprovalEntriesForDocument(
-              await fetchLeaveApprovalEntriesByDocumentNos(expandLeaveCancelDocumentNos(body.no, freshRow)),
-              body.no,
-            )
-      const finalStatus = resolveLeaveStatus(freshRow, freshEntries)
-      logDiagnostic(
-        `[leave-approval] no=${logSafe(body.no)} sessionUser=${logSafe(user.userID)} bcUser=${logSafe(bcUserId)} soap=${logSafe(soap.returnValue)} confirmed=true status=${finalStatus}`,
-      )
+      const wait = await waitForLeavePendingInBc(user, body.no, row)
 
-      const approvalSteps = await resolveLeaveApprovalStepsAsync(
-        freshRow,
-        freshEntries,
+      // Ground-truth snapshot for this explicit action (low volume — one per
+      // click). Reveals whether BC actually created an approval entry.
+      const diagnostic = await buildLeaveApprovalDiagnostic(
+        user,
         body.no,
-        {
-          employeeNo: user.employeeNo,
-          userID: bcUserId,
-          department: user.department,
-        },
+        wait.row ?? row,
+        soap.returnValue,
       )
+      logDiagnostic(
+        `[leave-approval] no=${logSafe(body.no)} user=${logSafe(user.userID)} soap=${logSafe(diagnostic.soapReturnValue)} confirmed=${wait.confirmed} byDoc=${diagnostic.byDoc} senderAll=${diagnostic.senderAll} senderMatch=${diagnostic.senderMatches} hdrStatus=${logSafe(diagnostic.headerStatus)}`,
+      )
+      if (!wait.confirmed) {
+        logDiagnostic(
+          `[leave-approval] senderDocs=${logSafe(JSON.stringify(diagnostic.senderDocs), 2000)}`,
+        )
+      }
+      const approvalSteps = wait.row
+        ? await resolveLeaveApprovalStepsAsync(wait.row, wait.approvalEntries, body.no, {
+            employeeNo: user.employeeNo,
+            userID: user.userID,
+            department: user.department,
+          })
+        : mapApprovalSteps(wait.approvalEntries)
+      const resolvedStatus = wait.row
+        ? resolveLeaveStatus(wait.row, wait.approvalEntries)
+        : wait.confirmed
+          ? 'Pending Approval'
+          : 'Open'
 
-      if (!approvalSteps.length) {
-        const fallbackSteps = mapApprovalSteps([
-          {
-            Status: 'Pending Approval',
-            SequenceNo: 1,
-            ApproverName: 'Awaiting approver assignment',
-            Comment: 'Submitted for approval',
-          },
-        ])
+      if (!approvalSteps.length && wait.confirmed) {
+        const fallbackSteps = wait.row
+          ? await resolveLeaveApprovalStepsAsync(wait.row, [], body.no, {
+              employeeNo: user.employeeNo,
+              userID: user.userID,
+              department: user.department,
+            })
+          : mapApprovalSteps([
+              {
+                Status: 'Pending Approval',
+                SequenceNo: 1,
+                ApproverName: 'Awaiting approver assignment',
+                Comment: 'Submitted for approval',
+              },
+            ])
         res.json({
           ok: true,
           confirmedInBc: true,
           message: 'Leave application sent for approval successfully',
-          status: finalStatus === 'Open' ? 'Pending Approval' : finalStatus,
+          status: resolvedStatus === 'Open' ? 'Pending Approval' : resolvedStatus,
           requestId: `leave-${body.no}`,
           approvalSteps: fallbackSteps,
+          diagnostic,
         })
         return
       }
 
       res.json({
         ok: true,
-        confirmedInBc: true,
-        message: 'Leave application sent for approval successfully',
-        status: finalStatus,
+        confirmedInBc: wait.confirmed,
+        message: wait.confirmed
+          ? 'Leave application sent for approval successfully'
+          : 'Leave application sent for approval. Status will update shortly — refresh in a few seconds if it still shows Open.',
+        status: resolvedStatus,
         requestId: `leave-${body.no}`,
         approvalSteps,
+        diagnostic,
       })
     }),
   )

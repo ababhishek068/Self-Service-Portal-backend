@@ -1,7 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import type { PortalRole } from '@/config/roles'
 import {
-  ArrowRightLeft,
   BadgeCheck,
   Banknote,
   BarChart3,
@@ -20,7 +19,6 @@ import {
   Home,
   KeyRound,
   Landmark,
-  LogOut,
   PackageCheck,
   Plane,
   ReceiptText,
@@ -47,9 +45,8 @@ export interface NavItem {
 }
 
 /**
- * Navigation reflects the ESS portal module structure. Order, labels and
- * grouping are kept in sync with the ERP self-service scope so users have a
- * consistent mental model across the system.
+ * HIJRA Bank UAT navigation — matches the ESS / self-service scope for Hijra.
+ * ABH-only modules (e.g. Leave Planner) are intentionally omitted.
  */
 export const navigationMenu: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: Gauge },
@@ -61,7 +58,7 @@ export const navigationMenu: NavItem[] = [
       { label: 'Leave Planner', path: '/hr/leave-planner', icon: CalendarDays },
       { label: 'Leave Statement', path: '/hr/leave-statement', icon: ReceiptText },
       { label: 'Attendance', path: '/hr/attendance', icon: UsersRound },
-      { label: 'Competency', path: '/hr/performance', icon: BarChart3 },
+      { label: 'Performance', path: '/hr/performance', icon: BarChart3 },
       { label: 'Training Request', path: '/hr/training-request', icon: FileText },
       { label: 'Payslip', path: '/hr/payslip', icon: Wallet },
       { label: 'Salary Advance', path: '/hr/salary-advance', icon: Banknote },
@@ -69,18 +66,6 @@ export const navigationMenu: NavItem[] = [
         label: 'Document Requisition',
         path: '/hr/document-requisition',
         icon: FileText,
-        underConstruction: true,
-      },
-      {
-        label: 'Employee Resignation',
-        path: '/hr/employee-resignation',
-        icon: LogOut,
-        underConstruction: true,
-      },
-      {
-        label: 'Employee Transfer',
-        path: '/hr/employee-transfer',
-        icon: ArrowRightLeft,
         underConstruction: true,
       },
     ],
@@ -113,7 +98,6 @@ export const navigationMenu: NavItem[] = [
       { label: 'Store Requisition', path: '/facility/store-requisition', icon: Store },
       { label: 'Transport Requisition', path: '/facility/transport-request', icon: Car },
       { label: 'Fuel Requisition', path: '/facility/fuel-request', icon: Fuel },
-      { label: 'Maintenance Request', path: '/facility/maintenance-request', icon: Building2 },
       { label: 'Work Tickets', path: '/facility/work-tickets', icon: Ticket },
       { label: 'Transfer Orders', path: '/facility/transfer-order', icon: PackageCheck },
       {
@@ -144,7 +128,7 @@ export const navigationMenu: NavItem[] = [
     icon: UsersRound,
     roles: ['hod'],
     children: [
-      { label: 'Department Staff', path: '/hod/department-staff', icon: UsersRound },
+      { label: 'Department Staff', path: '/hod/team-requests', icon: UsersRound },
       { label: 'Staff on Leave', path: '/hod/staff-on-leave', icon: Plane },
     ],
   },

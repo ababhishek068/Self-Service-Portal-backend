@@ -3138,6 +3138,8 @@ codeunit 50049 "Staff Portal Codeunit"
         HRLeaveCal: Record "HR Leave Calendar";
         HRLeaveAlloc: Record "HR Leave Allocation";
         LeaveTypes: Record "Leave Types";
+        HREmployee: Record "HR-Employee";
+        IsAnnualLeave: Boolean;
     begin
         LeaveApp.TestField("Leave Type");
 
@@ -3183,14 +3185,25 @@ codeunit 50049 "Staff Portal Codeunit"
             LeaveApp."Allocated Days" := HRLeaveAlloc."No. Of days";
         end;
 
-        if LeaveApp."Allocated Days" = 0 then begin
-            if LeaveTypes.Get(LeaveApp."Leave Type") then
-                if LeaveTypes.Days > 0 then
-                    LeaveApp."Allocated Days" := LeaveTypes.Days;
+        if LeaveTypes.Get(LeaveApp."Leave Type") then begin
+            IsAnnualLeave := LeaveTypes.Annual or
+                (UpperCase(LeaveTypes.Code) = 'ANNUAL') or
+                (StrPos(UpperCase(LeaveTypes.Description), 'ANNUAL') > 0);
+            if (LeaveApp."Allocated Days" = 0) and (LeaveTypes.Days > 0) then
+                LeaveApp."Allocated Days" := LeaveTypes.Days;
         end;
 
-        LeaveApp."Current Leave Balance" :=
-            (LeaveApp."Allocated Days" + LeaveApp."Reimbursed Days") - LeaveApp."Current Total Leave Taken";
+        // Annual leave must use the same authoritative employee-card balance returned to
+        // the self-service portal. Do not recalculate it from differently posted ledger rows.
+        if IsAnnualLeave then begin
+            if not HREmployee.Get(LeaveApp."Employee No.") then
+                Error('Employee %1 was not found.', LeaveApp."Employee No.");
+            HREmployee.CalcFields("Annual Leave balance");
+            LeaveApp."Current Leave Balance" := HREmployee."Annual Leave balance";
+            LeaveApp."Earned Leave Days" := HREmployee."Earned Leave Days";
+        end else
+            LeaveApp."Current Leave Balance" :=
+                (LeaveApp."Allocated Days" + LeaveApp."Reimbursed Days") - LeaveApp."Current Total Leave Taken";
 
         if LeaveApp."Current Leave Balance" < LeaveApp."Days Applied" then
             Error('Your current leave balance is less than days applied');

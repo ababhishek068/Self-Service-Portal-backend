@@ -236,6 +236,39 @@ textarea {
   }
 }
 
+@keyframes portal-blocking-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes portal-blocking-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.portal-blocking-shimmer-bar {
+  background: linear-gradient(90deg, transparent, var(--portal-orange), var(--portal-navy), transparent);
+  animation: portal-blocking-shimmer 1.4s ease-in-out infinite;
+}
+
+body.portal-api-blocking #root {
+  pointer-events: none;
+  user-select: none;
+}
+
+.portal-blocking-overlay {
+  pointer-events: auto;
+  touch-action: none;
+}
+
 @keyframes portal-float {
   0%,
   100% {

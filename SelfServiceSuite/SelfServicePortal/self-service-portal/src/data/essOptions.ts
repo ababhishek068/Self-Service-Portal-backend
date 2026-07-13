@@ -10,11 +10,11 @@ export const claimTypeOptions = [
   { label: 'Other Claim', value: 'OTHER' },
 ]
 
-/** ESS hospital categories: 1 = Government, 2 = Private, 3 = Online. */
+/** ESS hospital categories: 1 = Govt, 2 = Non Govt, 3 = Outline/Online. */
 export const hospitalCategoryOptions = [
-  { label: 'Government', value: '1' },
-  { label: 'Private', value: '2' },
-  { label: 'Online', value: '3' },
+  { label: 'Govt', value: '1' },
+  { label: 'Non Govt', value: '2' },
+  { label: 'Outline', value: '3' },
 ]
 
 /** Petty cash line types (ReceiptPaymentTypes G/L Account, Payment). */

@@ -26,15 +26,47 @@ const hiddenLineFields = new Set([
   'systemmodifiedat',
   'systemmodifiedby',
   'odataetag',
+  'lineno',
+  'select',
 ])
+
+/** BC uses 0001-01-01 as its "blank" date — treat it as empty. */
+const ZERO_DATE = /^0001-01-01/
+
+function isBlankLineValue(value: unknown) {
+  if (value === undefined || value === null) return true
+  if (typeof value === 'boolean') return value === false
+  const text = String(value).trim()
+  return !text || ZERO_DATE.test(text)
+}
 
 function visibleLineKeys(lines: Record<string, unknown>[]) {
   const first = lines[0] ?? {}
   return Object.keys(first).filter((key) => {
     const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase()
     if (hiddenLineFields.has(normalized) || normalized.startsWith('system')) return false
-    return lines.some((line) => line[key] !== undefined && line[key] !== null && String(line[key]).trim() !== '')
+    // Hide columns that carry no information on any line (blank, zero-date, false).
+    return lines.some((line) => !isBlankLineValue(line[key]))
   })
+}
+
+function formatLineValue(value: unknown) {
+  if (value === undefined || value === null) return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  const text = String(value).trim()
+  if (!text || ZERO_DATE.test(text)) return '—'
+  if (/^\d{4}-\d{2}-\d{2}(T|$)/.test(text)) {
+    const parsed = new Date(text)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    }
+  }
+  return text
+}
+
+function isNumericLineValue(value: unknown) {
+  if (typeof value === 'number') return true
+  return typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())
 }
 
 function lineFieldLabel(key: string) {
@@ -187,8 +219,8 @@ export function ApprovalDetail() {
       {detail.isLoading || !request ? (
         <Skeleton className="h-96" />
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-          <Card>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <Card className="min-w-0">
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -243,12 +275,17 @@ export function ApprovalDetail() {
               {lines.length && lineKeys.length ? (
                 <div className="border-t border-slate-200 pt-4">
                   <p className="mb-2 text-sm font-semibold text-slate-900">Document lines</p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-slate-200 text-xs text-slate-500">
+                  <div className="overflow-x-auto rounded-md border border-slate-200">
+                    <table className="min-w-full border-collapse text-left text-sm">
+                      <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                           {lineKeys.map((key) => (
-                            <th key={key} className="px-2 py-2">
+                            <th
+                              key={key}
+                              className={`whitespace-nowrap px-3 py-2 font-semibold align-middle ${
+                                lines.every((line) => isBlankLineValue(line[key]) || isNumericLineValue(line[key])) ? 'text-right' : 'text-left'
+                              }`}
+                            >
                               {lineFieldLabel(key)}
                             </th>
                           ))}
@@ -256,9 +293,16 @@ export function ApprovalDetail() {
                       </thead>
                       <tbody>
                         {lines.map((line, index) => (
-                          <tr key={String(line.id ?? line.lineNo ?? index)} className="border-b border-slate-100">
+                          <tr key={String(line.id ?? line.lineNo ?? index)} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/60">
                             {lineKeys.map((key) => (
-                              <td key={key} className="px-2 py-2">{String(line[key] ?? '')}</td>
+                              <td
+                                key={key}
+                                className={`whitespace-nowrap px-3 py-2 align-middle tabular-nums ${
+                                  lines.every((row) => isBlankLineValue(row[key]) || isNumericLineValue(row[key])) ? 'text-right' : 'text-left'
+                                }`}
+                              >
+                                {formatLineValue(line[key])}
+                              </td>
                             ))}
                           </tr>
                         ))}
@@ -319,7 +363,7 @@ export function ApprovalDetail() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="min-w-0">
             <CardHeader>
               <CardTitle>Maker/checker timeline</CardTitle>
               <CardDescription>Audit trail with timestamps.</CardDescription>

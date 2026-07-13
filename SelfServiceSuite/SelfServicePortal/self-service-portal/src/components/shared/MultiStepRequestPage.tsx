@@ -514,16 +514,29 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const selected = detailQuery.data
   const editable = selected ? isEditableRequestStatus(selected.status) : false
   const submittable = selected
-    ? canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
+    ? editable && canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
     : false
   const cancelStatuses = config.cancelStatuses ?? ['Pending Approval']
   const supportsAttachments =
     config.supportsAttachments ?? PORTAL_ATTACHMENT_MODULES.has(config.module.module)
-  const canReceiveStoreLines = selected?.status === 'Posted' && config.module.module === 'storeRequisition'
+  // ERP parity: a store line is receivable once the store has issued more than
+  // the requestor has confirmed received — regardless of header status label.
+  const storeLineIsReceivable = (row: Record<string, unknown>) =>
+    Number(row.quantityIssued ?? 0) > Number(row.quantityReceived ?? 0)
+  const selectedPayloadLines = Array.isArray((selected?.payload as Record<string, unknown> | undefined)?.lines)
+    ? (((selected?.payload as Record<string, unknown>).lines) as Record<string, unknown>[])
+    : []
+  const canReceiveStoreLines =
+    config.module.module === 'storeRequisition' &&
+    (selected?.status === 'Posted' || selectedPayloadLines.some(storeLineIsReceivable))
 
   const beginReceiveLine = (line: Record<string, unknown>) => {
     setReceiveLine(line)
-    setReceiveQuantity(String(line.quantityToReceive ?? line.quantityIssued ?? line.quantity ?? ''))
+    // Default to the outstanding quantity: issued minus already received.
+    const outstanding = Number(line.quantityIssued ?? 0) - Number(line.quantityReceived ?? 0)
+    setReceiveQuantity(
+      String(outstanding > 0 ? outstanding : line.quantityToReceive ?? line.quantityIssued ?? line.quantity ?? ''),
+    )
     setReceiveReason(String(line.reason ?? ''))
   }
 
@@ -552,9 +565,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const postStoreReceipt = async () => {
     if (!selected) return
     const yes = await confirm({
-      title: 'Post to receive',
-      message: 'Post this store requisition receipt in Business Central?',
-      confirmLabel: 'Post',
+      title: 'Receive items',
+      message: 'Are you sure you would like to receive items?',
+      confirmLabel: 'Yes',
     })
     if (!yes) return
     await runAction(
@@ -733,8 +746,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     attachments={selected.attachments}
                     canUpload={canUploadRequestAttachments(selected.status)}
                     canDelete={canDeleteRequestItems(selected.status)}
-                    onUpdated={(request) => {
-                      queryClient.setQueryData([...config.queryKey, 'detail', selected.id], request)
+                    onUpdated={() => {
                       void refresh()
                     }}
                   />
@@ -846,15 +858,17 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                                   </td>
                                 ) : canReceiveStoreLines ? (
                                   <td className="px-2 py-2">
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={actionId === `receive-${String(row.id ?? row.lineNo ?? '')}`}
-                                      onClick={() => beginReceiveLine(row)}
-                                    >
-                                      Receive Items
-                                    </Button>
+                                    {storeLineIsReceivable(row) ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={actionId === `receive-${String(row.id ?? row.lineNo ?? '')}`}
+                                        onClick={() => beginReceiveLine(row)}
+                                      >
+                                        Receive Items
+                                      </Button>
+                                    ) : null}
                                   </td>
                                 ) : null}
                               </tr>

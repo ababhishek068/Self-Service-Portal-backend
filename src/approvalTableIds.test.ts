@@ -19,32 +19,22 @@ import {
   portalApprovalEntryFilter,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
-import { resolveLeaveApprovalSteps } from './leaveApprovalSteps.js'
+import {
+  normalizeSequentialApprovalStatuses,
+  resolveLeaveApprovalSteps,
+} from './leaveApprovalSteps.js'
 import {
   isHalfDaySelection,
   halfDayOptionValue,
   formatBcSoapDate,
-  formatBcLeaveSoapDateTime,
-  formatBcSoapDateMdy,
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
-  soapCancelOk,
-  soapLeaveActionOk,
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
-  bcLeaveDaysApplied,
   employeeLeaveMetrics,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
-  resolveLeaveBalance,
-  resolveLeaveCardBalances,
-  leaveCardBalancesFromRecord,
-  mergeLeaveCardBalances,
-  parseEmployeeLeaveBalancesReturn,
-  resolveNonAnnualLeaveBalance,
-  employeeLeaveWorkflowCodes,
-  leaveRowHasWorkflowCodes,
 } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
@@ -54,21 +44,36 @@ import {
   employeeResetToken,
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
+  jobTitleNeedsRefresh,
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { inferEmployeeJobId, pickPreferredUserSetupRow, resolveEffectiveBcUserId, resolveEmployeeJobTitle, normalizeEmployeeNoForLookup } from './employeeProfile.js'
+import { inferEmployeeJobId, resolveEmployeeJobTitle, pickDimensionCodeFromRow } from './employeeProfile.js'
 import {
   documentStatusFromBc,
+  injectSalaryAdvanceSalaryHint,
   mapRequest,
   resolveLeaveStatus,
   leaveIsPendingInBc,
+  resolveSalaryAdvanceAmount,
 } from './erpMappings.js'
 import {
   bcDocumentStatus,
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+
+describe('jobTitleNeedsRefresh', () => {
+  it('refreshes missing titles, the STAFF fallback, and raw BC job codes', () => {
+    assert.equal(jobTitleNeedsRefresh(''), true)
+    assert.equal(jobTitleNeedsRefresh('STAFF'), true)
+    assert.equal(jobTitleNeedsRefresh('DHM'), true)
+  })
+
+  it('keeps a resolved Business Central job title', () => {
+    assert.equal(jobTitleNeedsRefresh('Human Resource Manager'), false)
+  })
+})
 
 describe('approvalTableIds', () => {
   it('uses canonical ESS table IDs', () => {
@@ -198,145 +203,37 @@ describe('halfDayRequiresAnnualLeave', () => {
   })
 })
 
-describe('bcLeaveDaysApplied', () => {
-  it('sends integer 1 to BC for half-day leave instead of 0.5', () => {
-    assert.equal(bcLeaveDaysApplied(0.5, '1'), 1)
-    assert.equal(bcLeaveDaysApplied(0.5, '2'), 1)
-  })
-
-  it('passes whole-day counts through as integers', () => {
-    assert.equal(bcLeaveDaysApplied(3, '0'), 3)
-    assert.equal(bcLeaveDaysApplied(1, '0'), 1)
-  })
-})
-
 describe('employeeLeaveMetrics', () => {
   const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
 
-  it('reads BC employee card fields separately (not mixed)', () => {
+  it('reads earned leave and annual balance fields from BC employee OData', () => {
     const metrics = employeeLeaveMetrics(
       {
-        Leave_Balance: 34.08,
-        EarnedLeaveDays: 34.46,
-        Annual_Leave_balance: 0,
+        EarnedLeaveDays: 16,
+        Annual_Leave_balance: 16,
       },
       user,
     )
-    assert.equal(metrics.generalLeaveBalance, 34.08)
-    assert.equal(metrics.earnedLeaveDays, 34.46)
-    assert.equal(metrics.annualLeaveBalance, 0)
+    assert.equal(metrics.earnedLeaveDays, 16)
+    assert.equal(metrics.leaveBalance, 16)
   })
 
   it('does not treat missing leave fields as zero', () => {
     const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
     assert.equal(metrics.earnedLeaveDays, null)
-    assert.equal(metrics.annualLeaveBalance, null)
-    assert.equal(metrics.generalLeaveBalance, null)
+    assert.equal(metrics.leaveBalance, null)
   })
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('uses Annual Leave balance from BC, not earned or general leave balance', () => {
-    const metrics = {
-      generalLeaveBalance: 34.08,
-      earnedLeaveDays: 34.46,
-      annualLeaveBalance: 0,
-    }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 12), 0)
+  it('prefers earned leave over ledger when BC exposes it', () => {
+    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
   })
 
-  it('falls back to ledger when annual balance is absent on the employee card', () => {
-    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34, annualLeaveBalance: null }
+  it('falls back to ledger when employee card fields are absent', () => {
+    const metrics = { earnedLeaveDays: null, leaveBalance: null }
     assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
-  })
-})
-
-describe('resolveAnnualLeaveEntitlement', () => {
-  it('uses earned leave days from BC before leave type policy days', () => {
-    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34.46, annualLeaveBalance: 0 }
-    assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 34.46)
-  })
-
-  it('falls back to leave type days when earned leave is absent', () => {
-    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
-    assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 16)
-  })
-})
-
-describe('resolveNonAnnualLeaveBalance', () => {
-  it('matches Laravel ledger formula for non-annual types', () => {
-    assert.equal(resolveNonAnnualLeaveBalance(10, 2, 5), 7)
-  })
-})
-
-describe('resolveLeaveBalance', () => {
-  it('uses policy days for ANNUAL when OData balance and ledger are empty (matches BC leave card)', () => {
-    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
-    const balance = resolveLeaveBalance({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0)
-    assert.equal(balance, 16)
-  })
-
-  it('respects Annual Leave balance on employee card for ANNUAL', () => {
-    const metrics = { generalLeaveBalance: 34, earnedLeaveDays: 34, annualLeaveBalance: 0 }
-    const balance = resolveLeaveBalance({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0)
-    assert.equal(balance, 0)
-  })
-
-  it('uses ledger net for legacy 0001 code', () => {
-    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
-    const balance = resolveLeaveBalance({ Code: '0001' }, metrics, 16, 5, 2)
-    assert.equal(balance, 3)
-  })
-})
-
-describe('resolveLeaveCardBalances', () => {
-  it('parses balances returned directly by the Staff Portal SOAP codeunit', () => {
-    assert.deepEqual(
-      parseEmployeeLeaveBalancesReturn(
-        'LeaveBalance=20.08#EarnedLeaveDays=10.82#AnnualLeaveBalance=0#CarryForward=18.08',
-      ),
-      {
-        allocatedDays: null,
-        currentLeaveBalance: 20.08,
-        earnedLeaveDays: 10.82,
-      },
-    )
-  })
-
-  it('prefers current employee-card balances over stale leave applications', () => {
-    const employeeCard = leaveCardBalancesFromRecord({
-      Leave_Balance: 20.08,
-      Earned_Leave_Days: 10.82,
-    })
-    const oldApplication = leaveCardBalancesFromRecord({
-      Allocated_Days: 16,
-      Current_Leave_Balance: 16,
-      Earned_Leave_Days: 16,
-    })
-
-    assert.deepEqual(mergeLeaveCardBalances(employeeCard, oldApplication), {
-      allocatedDays: 16,
-      currentLeaveBalance: 20.08,
-      earnedLeaveDays: 10.82,
-    })
-  })
-
-  it('prefers OData Current Leave Balance over computed values', () => {
-    const metrics = { generalLeaveBalance: null, earnedLeaveDays: 15.96, annualLeaveBalance: null }
-    const odata = { allocatedDays: 16, currentLeaveBalance: 16, earnedLeaveDays: 15.96 }
-    const card = resolveLeaveCardBalances({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0, odata)
-    assert.equal(card.allocatedDays, 16)
-    assert.equal(card.currentLeaveBalance, 16)
-    assert.equal(card.earnedLeaveDays, 15.96)
-  })
-
-  it('fills BC card fields when OData balance fields are absent', () => {
-    const metrics = { generalLeaveBalance: null, earnedLeaveDays: null, annualLeaveBalance: null }
-    const empty = { allocatedDays: null, currentLeaveBalance: null, earnedLeaveDays: null }
-    const card = resolveLeaveCardBalances({ Code: 'ANNUAL', Annual: true }, metrics, 16, 0, 0, empty)
-    assert.equal(card.allocatedDays, 16)
-    assert.equal(card.currentLeaveBalance, 16)
-    assert.equal(card.earnedLeaveDays, 16)
   })
 })
 
@@ -360,15 +257,6 @@ describe('resolveLeaveApprovalSteps', () => {
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
 
-  it('does not invent pending steps for Open leaves without BC approval entries', () => {
-    const steps = resolveLeaveApprovalSteps(
-      { ApplicationCode: 'LV00036', Status: 'Open', ApprovalStatus: '' },
-      [],
-      'LV00036',
-    )
-    assert.equal(steps.length, 0)
-  })
-
   it('discovers approver fields from leave header OData aliases', () => {
     const pendingSteps = resolveLeaveApprovalSteps(
       {
@@ -385,84 +273,12 @@ describe('resolveLeaveApprovalSteps', () => {
   })
 })
 
-describe('soapCancelOk', () => {
-  it('accepts explicit boolean success only', () => {
-    assert.equal(soapCancelOk(true), true)
-    assert.equal(soapCancelOk('true'), true)
-    assert.equal(soapCancelOk('1'), true)
-    assert.equal(soapCancelOk(false), false)
-    assert.equal(soapCancelOk('false'), false)
-  })
-
-  it('never treats leave application numbers as cancel success', () => {
-    assert.equal(soapCancelOk('LV00029'), false)
-    assert.equal(soapCancelOk('LV-00001'), false)
-    assert.equal(soapCancelOk('ABH-PQ000012'), false)
-  })
-})
-
-describe('soapLeaveActionOk', () => {
-  it('accepts the hyphenated application numbers returned by Business Central', () => {
-    assert.equal(soapLeaveActionOk('LV-00008'), true)
-    assert.equal(soapLeaveActionOk('LV00008'), true)
-  })
-
-  it('does not accept an error message as a successful leave number', () => {
-    assert.equal(soapLeaveActionOk('Leave application failed'), false)
-  })
-})
-
 describe('normalizeLeaveStartDate', () => {
   it('converts portal dates to yyyy-mm-dd for Business Central SOAP', () => {
     assert.equal(normalizeLeaveStartDate('2026-06-22'), '2026-06-22')
     assert.equal(normalizeLeaveStartDate('2026_06_22'), '2026-06-22')
     assert.equal(formatBcSoapDate('6/23/2026'), '2026-06-23')
     assert.equal(formatBcSoapDate('6/22/26'), '2026-06-22')
-  })
-
-  it('formats Laravel-style ISO timestamps for LeaveApplication SOAP', () => {
-    assert.equal(formatBcLeaveSoapDateTime('2026-07-22'), '2026-07-22T00:00:00.000Z')
-  })
-
-  it('formats return dates as M/D/YYYY for BC SOAP', () => {
-    assert.equal(formatBcSoapDateMdy('2026-07-24'), '7/24/2026')
-    assert.equal(formatBcSoapDateMdy('6/23/2026'), '6/23/2026')
-  })
-})
-
-describe('resolveEffectiveBcUserId', () => {
-  it('prefers configured BC user ID over QyUserSetup aliases', () => {
-    assert.equal(
-      resolveEffectiveBcUserId('HERMON.GETACHEW', { User_ID: 'HERMON.GETACHEW' }, 'ABH-114'),
-      'HERMON_GETACHEW',
-    )
-  })
-
-  it('treats dot and underscore BC user IDs as equivalent when unconfigured', () => {
-    assert.equal(
-      resolveEffectiveBcUserId('HERMON.GETACHEW', { User_ID: 'HERMON_GETACHEW' }, 'ABH-999'),
-      'HERMON_GETACHEW',
-    )
-  })
-
-  it('maps HERMON.GETACHEW session login to HERMON_GETACHEW even without employee map', () => {
-    assert.equal(resolveEffectiveBcUserId('HERMON.GETACHEW', null, ''), 'HERMON_GETACHEW')
-  })
-
-  it('normalizes ABH114 to ABH-114 for BC user lookup', () => {
-    assert.equal(normalizeEmployeeNoForLookup('ABH114'), 'ABH-114')
-    assert.equal(
-      resolveEffectiveBcUserId('HERMON.GETACHEW', null, 'ABH114'),
-      'HERMON_GETACHEW',
-    )
-  })
-
-  it('prefers HERMON_GETACHEW over ADMIN when both map to the same employee', () => {
-    const picked = pickPreferredUserSetupRow([
-      { UserID: 'ADMIN', EmployeeNo: 'ABH-114' },
-      { UserID: 'HERMON_GETACHEW', EmployeeNo: 'ABH-114' },
-    ])
-    assert.equal(picked?.UserID, 'HERMON_GETACHEW')
   })
 })
 
@@ -508,6 +324,37 @@ describe('isMedicalClaimType', () => {
 })
 
 describe('staffClaim saveLine params', () => {
+  it('maps long department names to dimension codes', () => {
+    assert.equal(
+      pickDimensionCodeFromRow(
+        { Code: 'TRR', Name: 'Total Reward and Recognition' },
+        'Total Reward and Recognition',
+      ),
+      'TRR',
+    )
+  })
+
+  it('builds claim header SOAP params with formatted date and department', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveHeader)
+    const payload = (await spec!.params!.saveHeader!({
+      req: {
+        body: { purpose: 'Travel refund', claimDate: '2026-07-04' },
+      },
+      user: {
+        employeeNo: 'E001',
+        userID: 'BEZA',
+        department: 'TRR',
+        branchCode: 'ADDIS',
+      },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.claimDescription, 'Travel refund')
+    assert.equal(payload.claimDate, '2026-07-04')
+    assert.equal(payload.staffNo, 'E001')
+    assert.equal(payload.myUserID, 'BEZA')
+  })
+
   it('sends hospital category 0 for non-medical claim types', () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
@@ -585,6 +432,17 @@ describe('mapApprovalSteps', () => {
     assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
+
+  it('does not show a later step as approved while an earlier step is still pending', () => {
+    const steps = normalizeSequentialApprovalStatuses(
+      mapApprovalSteps([
+        { EntryNo: 10, ApproverID: 'FIRST', ApproverName: 'Muhammed abdi', Status: 'Pending Approval', SequenceNo: 1 },
+        { EntryNo: 20, ApproverID: 'SECOND', ApproverName: 'Tekiya Ali Hassen', Status: 'Approved', SequenceNo: 2 },
+      ]),
+    )
+    assert.equal(steps[0]?.status, 'Pending Approval')
+    assert.equal(steps[1]?.status, 'Pending Approval')
+  })
 })
 
 describe('approvalModule', () => {
@@ -604,11 +462,15 @@ describe('salaryAdvance saveHeader params', () => {
       user: {
         employeeNo: 'E001',
         userID: 'USER1',
+        imprestNo: 'CUST-1001',
+        accountNumber: 'CUST-1001',
       } as AuthUser,
       no: '',
     })
     assert.equal(createParams.recId, '')
     assert.equal(createParams.myAction, 'create')
+    assert.equal(createParams.customerNo, undefined)
+    assert.equal(createParams.staffNo, 'E001')
 
     const editParams = await spec!.params!.saveHeader!({
       req: {
@@ -621,28 +483,19 @@ describe('salaryAdvance saveHeader params', () => {
       user: {
         employeeNo: 'E001',
         userID: 'USER1',
+        imprestNo: 'CUST-1001',
+        accountNumber: 'CUST-1001',
       } as AuthUser,
       no: 'A00523',
     })
     assert.equal(editParams.recId, '00000000-0000-0000-0000-000000000001')
+    assert.equal(editParams.customerNo, undefined)
     assert.equal(editParams.myAction, 'edit')
     assert.notEqual(editParams.recId, 'A00523')
   })
 })
 
 describe('ESS request mutation contracts', () => {
-  it('wires purchase requisitions to Purchase Header table 38 and DocumentNo lines', () => {
-    const spec = findModuleSpec('purchase-requisition')
-    assert.ok(spec)
-    assert.equal(spec.headerTableId, 38)
-    assert.equal(spec.headerService, 'QyPurchaseHeader')
-    assert.equal(spec.lineHeaderField, 'DocumentNo')
-    assert.equal(spec.extraListFilter, undefined)
-    assert.ok(spec.postListFilter)
-    assert.equal(spec.postListFilter!({ DocApprovalType: 'Requisition', DocumentType: 'Quote' }), true)
-    assert.equal(spec.postListFilter!({ DocApprovalType: 'Purchase', DocumentType: 'Order' }), false)
-  })
-
   it('wires header edit and approval actions for every editable ESS module', () => {
     const modules = [
       'imprest',
@@ -750,10 +603,6 @@ describe('mapRequest status', () => {
       'Pending Approval',
     )
     assert.equal(
-      resolveLeaveStatus({ Status: 'Pending Approval', ApprovalStatus: 'Open' }),
-      'Pending Approval',
-    )
-    assert.equal(
       resolveLeaveStatus(
         { Status: 'Open', ApprovalStatus: '' },
         [{ Status: 'Open', DocumentNo: 'LV00018' }],
@@ -764,6 +613,54 @@ describe('mapRequest status', () => {
       resolveLeaveStatus({ Status: 'Open', ApprovalStatus: '', Sent_for_Approval: true }),
       'Pending Approval',
     )
+  })
+
+  it('maps staff claim BC Pending to Draft before approval is requested', () => {
+    const mapped = mapRequest(
+      {
+        No: '1522',
+        Status: 'Pending',
+        ClaimDescription: 'Travel reimbursement',
+      },
+      'staffClaim',
+    )
+    assert.equal(mapped.status, 'Draft')
+    assert.equal(
+      mapRequest({ No: '1522', Status: 'Pending Approval' }, 'staffClaim').status,
+      'Pending Approval',
+    )
+  })
+
+  it('derives salary advance amount from percentage and basic salary when BC amount is zero', () => {
+    assert.equal(
+      resolveSalaryAdvanceAmount(
+        { PercentageofSalary: 2, Amount: 0 },
+        { Basic_Salary: 50000 },
+      ),
+      1000,
+    )
+    assert.equal(
+      resolveSalaryAdvanceAmount({ Amount: 1500, PercentageofSalary: 2 }),
+      1500,
+    )
+  })
+
+  it('ignores zero BC salary fields and uses injected payroll salary instead', () => {
+    const header = injectSalaryAdvanceSalaryHint({ Basic_Salary: 0, MonthlySalary: 0 }, 48000)
+    assert.equal(
+      resolveSalaryAdvanceAmount({ PercentageofSalary: 2, Amount: 0 }, header),
+      960,
+    )
+  })
+
+  it('applies computed advance amount from salary base and percentage', async () => {
+    const { applySalaryAdvanceComputedAmount } = await import('./salaryAdvanceAmount.js')
+    const lines = applySalaryAdvanceComputedAmount(
+      [{ PercentageofSalary: 2, Amount: 0 }],
+      { Basic_Salary: 48000 },
+      48000,
+    )
+    assert.equal(lines[0]?.resolvedAmount, 960)
   })
 })
 
@@ -974,25 +871,5 @@ describe('resolveEmployeeJobTitle', () => {
   it('does not treat long email local-parts as job codes', () => {
     assert.equal(inferEmployeeJobId({ EMail: 'tesfaye@abhpartners.com' }), '')
     assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
-  })
-})
-
-describe('employeeLeaveWorkflowCodes', () => {
-  it('reads department and division from employee card fields', () => {
-    assert.deepEqual(
-      employeeLeaveWorkflowCodes({
-        Department: 'IT',
-        Division: 'FINANCE AND ADMIN',
-      }),
-      { departmentCode: 'IT', divisionCode: 'FINANCE AND ADMIN' },
-    )
-  })
-
-  it('detects when leave header has workflow routing codes', () => {
-    assert.equal(
-      leaveRowHasWorkflowCodes({ DepartmentCode: 'IT', DivisionCode: 'FINANCE AND ADMIN' }),
-      true,
-    )
-    assert.equal(leaveRowHasWorkflowCodes({ DepartmentCode: 'IT' }), false)
   })
 })

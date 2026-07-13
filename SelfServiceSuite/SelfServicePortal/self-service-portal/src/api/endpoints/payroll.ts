@@ -69,6 +69,25 @@ export async function downloadPayslipPdf(year: string, month: string): Promise<v
   URL.revokeObjectURL(url)
 }
 
+export async function openPayslipPdf(year: string, month: string): Promise<void> {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>('/api/payroll/payslip/pdf', {
+    params: { year, month },
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(response.data)
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `payslip-${month}-${year}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 export async function downloadMasterRollPdf(
   year: string,
   month: string,

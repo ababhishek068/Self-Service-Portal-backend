@@ -36,6 +36,11 @@ function isWriteMethod(method?: string) {
   return m === 'post' || m === 'put' || m === 'patch' || m === 'delete'
 }
 
+function isAuthPath(url?: string) {
+  if (!url) return false
+  return /\/auth\/(login|logout|register|forgot-password|reset-password)(?:\?|$)/i.test(url)
+}
+
 /** Register the start of a request; returns a function to call when it settles. */
 export function beginRequest(write: boolean): () => void {
   active += 1
@@ -104,7 +109,8 @@ export function trackAxiosActivity(instance: AxiosInstance) {
         store[END_KEY] = undefined
         return config
       }
-      store[END_KEY] = beginRequest(isWriteMethod(config.method))
+      const write = isWriteMethod(config.method) && !isAuthPath(config.url)
+      store[END_KEY] = beginRequest(write)
       return config
     },
     (error) => Promise.reject(error),
