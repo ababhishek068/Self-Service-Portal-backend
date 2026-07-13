@@ -25,6 +25,7 @@ import {
 } from './leaveApprovalSteps.js'
 import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
+import { fetchEmployeeRecordWithCardFields } from './employeeProfile.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -181,6 +182,7 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
     const sessionBalance = Number(user.leaveBalance)
     return {
       leaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
+      employeeCardLeaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
       earnedLeaveDays: null,
     }
   }
@@ -196,17 +198,22 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
       (key) => key === 'annualleavebalance',
     ])
 
+  const employeeCardLeaveBalance =
+    fieldNumber(row, ['LeaveBalance', 'Leave_Balance']) ??
+    discoverLeaveFieldNumber(row, [(key) => key === 'leavebalance'])
+
   const earnedLeaveDays =
     fieldNumber(row, ['EarnedLeaveDays', 'Earned_Leave_Days', 'EarnedLeave', 'Earned_Leave']) ??
     discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
 
-  return { leaveBalance, earnedLeaveDays }
+  return { leaveBalance, employeeCardLeaveBalance, earnedLeaveDays }
 }
 
 export function resolveAnnualLeaveBalance(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   ledgerNet: number,
 ) {
+  if (metrics.employeeCardLeaveBalance !== null) return metrics.employeeCardLeaveBalance
   if (metrics.leaveBalance !== null) return metrics.leaveBalance
   return ledgerNet
 }
@@ -221,11 +228,7 @@ export function resolveAnnualLeaveEntitlement(
 }
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
-  const rows = (await fetchOData('QyHREmployee', {
-    $filter: `No eq '${odataString(employeeNo)}'`,
-    $top: 1,
-  }).catch(() => [])) as ODataRecord[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  return fetchEmployeeRecordWithCardFields(employeeNo).catch(() => null)
 }
 
 function likelyActiveEmployee(row: ODataRecord) {
@@ -1592,11 +1595,17 @@ export function buildStaffRouter() {
       const entitlement = roundLeaveValue(
         isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
       )
+      const applicationLimit = roundLeaveValue(
+        isAnnual && metrics.earnedLeaveDays !== null
+          ? Math.max(0, Math.min(balance, metrics.earnedLeaveDays))
+          : balance,
+      )
 
       res.json({
         balance,
         entitlement,
         earnedLeaveDays: isAnnual ? metrics.earnedLeaveDays : null,
+        applicationLimit,
         pendingCount,
         isHourly,
       })

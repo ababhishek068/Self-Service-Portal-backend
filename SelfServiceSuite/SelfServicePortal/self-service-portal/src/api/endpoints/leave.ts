@@ -13,6 +13,7 @@ export interface LeaveBalance {
   balance: number
   entitlement?: number
   earnedLeaveDays?: number | null
+  applicationLimit?: number
   pendingCount: number
   isHourly: boolean
 }

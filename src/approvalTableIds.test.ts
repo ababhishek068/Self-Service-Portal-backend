@@ -216,37 +216,40 @@ describe('employeeLeaveMetrics', () => {
     )
     assert.equal(metrics.earnedLeaveDays, 16)
     assert.equal(metrics.leaveBalance, 16)
+    assert.equal(metrics.employeeCardLeaveBalance, null)
   })
 
   it('does not treat missing leave fields as zero', () => {
     const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
     assert.equal(metrics.earnedLeaveDays, null)
     assert.equal(metrics.leaveBalance, null)
+    assert.equal(metrics.employeeCardLeaveBalance, null)
   })
 
-  it('uses annual balance and never the generic employee leave balance', () => {
+  it('keeps the visible Employee Card leave balance separate from annual balance', () => {
     const metrics = employeeLeaveMetrics(
       { LeaveBalance: -2.68, AnnualLeaveBalance: 18.32, EarnedLeaveDays: -1.44 },
       user,
     )
     assert.equal(metrics.leaveBalance, 18.32)
+    assert.equal(metrics.employeeCardLeaveBalance, -2.68)
     assert.equal(metrics.earnedLeaveDays, -1.44)
   })
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('uses the employee annual balance instead of earned days', () => {
-    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32 }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 18.32)
+  it('uses the balance displayed on the Employee Card', () => {
+    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32, employeeCardLeaveBalance: -2.68 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), -2.68)
   })
 
   it('falls back to ledger when employee card fields are absent', () => {
-    const metrics = { earnedLeaveDays: null, leaveBalance: null }
+    const metrics = { earnedLeaveDays: null, leaveBalance: null, employeeCardLeaveBalance: null }
     assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
   })
 
   it('keeps leave-type entitlement separate from the current balance', () => {
-    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32 }
+    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32, employeeCardLeaveBalance: -2.68 }
     assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 16)
   })
 })

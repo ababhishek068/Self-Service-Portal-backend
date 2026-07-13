@@ -1018,6 +1018,13 @@ async function enrichEmployeeRecordFromPageBases(employeeNo: string, merged: ODa
   return next
 }
 
+/** Employee Card-backed record for flows that must mirror fields visible on the BC card. */
+export async function fetchEmployeeRecordWithCardFields(employeeNo: string): Promise<ODataRecord | null> {
+  const fast = await fetchEmployeeRecordFast(employeeNo)
+  if (!fast) return null
+  return enrichEmployeeRecordFromPageBases(employeeNo, { ...fast })
+}
+
 export async function fetchMergedEmployeeRecord(employeeNo: string): Promise<ODataRecord | null> {
   const fast = await fetchEmployeeRecordFast(employeeNo)
   if (!fast) return null

@@ -201,6 +201,7 @@ export function LeaveRequest() {
   const [entitlement, setEntitlement] = useState<number | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
   const [earnedLeaveDays, setEarnedLeaveDays] = useState<number | null>(null)
+  const [applicationLimit, setApplicationLimit] = useState<number | null>(null)
   const [isHourly, setIsHourly] = useState(false)
   const [pendingDuplicate, setPendingDuplicate] = useState(false)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -234,7 +235,7 @@ export function LeaveRequest() {
 
   const duplicatePendingBlocked = env.BLOCK_DUPLICATE_PENDING_LEAVE && pendingDuplicate
   const showSecondary = leaveType !== '' && balance !== null && !duplicatePendingBlocked && !balanceLoading
-  const canSubmit = showSecondary && balance > 0
+  const canSubmit = showSecondary && applicationLimit !== null && applicationLimit > 0
 
   useEffect(() => {
     setEndDate('')
@@ -250,17 +251,20 @@ export function LeaveRequest() {
       setEntitlement(null)
       setBalance(null)
       setEarnedLeaveDays(null)
+      setApplicationLimit(null)
       return
     }
     const type = types.find((t) => t.code === leaveType)
     setEntitlement(type?.days ?? null)
     setEarnedLeaveDays(null)
+    setApplicationLimit(null)
     setBalanceLoading(true)
     getLeaveBalance(leaveType)
       .then((res) => {
         setBalance(res.balance)
         setEntitlement(res.entitlement ?? type?.days ?? null)
         setEarnedLeaveDays(res.earnedLeaveDays ?? null)
+        setApplicationLimit(res.applicationLimit ?? res.balance)
         setIsHourly(res.isHourly)
         setPendingDuplicate(res.pendingCount > 0)
         if (env.BLOCK_DUPLICATE_PENDING_LEAVE && res.pendingCount > 0) {
@@ -375,8 +379,8 @@ export function LeaveRequest() {
       setError('Leave attachments cannot exceed 10 MB each.')
       return
     }
-    if (balance !== null && submittedDays > balance) {
-      setError(`Insufficient leave balance. Available: ${formatDays(balance)} day(s).`)
+    if (applicationLimit !== null && submittedDays > applicationLimit) {
+      setError(`Business Central allows up to ${formatDays(applicationLimit)} day(s) for this application.`)
       return
     }
     const confirmed = await confirm({
@@ -713,7 +717,7 @@ export function LeaveRequest() {
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label>Available Days</Label>
+              <Label>Employee Card Balance</Label>
               <div className="flex h-10 items-center">
                 {balanceLoading ? (
                   <Skeleton className="h-6 w-16" />
@@ -742,9 +746,13 @@ export function LeaveRequest() {
                   <ApprovalTimeline steps={approvalRouteQuery.data} />
                 </section>
               ) : null}
-              {balance <= 0 ? (
+              {applicationLimit !== null && applicationLimit <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  You have no available leave balance for this type. Contact HR if you believe this is incorrect.
+                  Business Central currently allows no days for this leave type. The Employee Card balance and earned leave are shown above for reference.
+                </div>
+              ) : earnedLeaveDays !== null && applicationLimit !== null && applicationLimit < balance ? (
+                <div className="rounded border-l-4 border-sky-500 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                  BC application limit: {formatDays(applicationLimit)} day(s), based on the lower of Employee Card Balance and Earned Leave Days.
                 </div>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
