@@ -1,0 +1,581 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_2901">
+          <DataField>ReportForNavId_2901</DataField>
+        </Field>
+        <Field Name="col1StudNo">
+          <DataField>col1StudNo</DataField>
+        </Field>
+        <Field Name="col2StudNo">
+          <DataField>col2StudNo</DataField>
+        </Field>
+        <Field Name="col1Faculty">
+          <DataField>col1Faculty</DataField>
+        </Field>
+        <Field Name="col1Programme">
+          <DataField>col1Programme</DataField>
+        </Field>
+        <Field Name="RegTransactonID_CourseRegistration">
+          <DataField>RegTransactonID_CourseRegistration</DataField>
+        </Field>
+        <Field Name="col2Faculty">
+          <DataField>col2Faculty</DataField>
+        </Field>
+        <Field Name="col2Programme">
+          <DataField>col2Programme</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="CompLogo">
+          <DataField>CompLogo</DataField>
+        </Field>
+        <Field Name="col1Names">
+          <DataField>col1Names</DataField>
+        </Field>
+        <Field Name="col2Names">
+          <DataField>col2Names</DataField>
+        </Field>
+        <Field Name="col1Bal">
+          <DataField>col1Bal</DataField>
+        </Field>
+        <Field Name="col1BalFormat">
+          <DataField>col1BalFormat</DataField>
+        </Field>
+        <Field Name="col2Bal">
+          <DataField>col2Bal</DataField>
+        </Field>
+        <Field Name="col2BalFormat">
+          <DataField>col2BalFormat</DataField>
+        </Field>
+        <Field Name="i">
+          <DataField>i</DataField>
+        </Field>
+        <Field Name="j">
+          <DataField>j</DataField>
+        </Field>
+        <Field Name="i_Control1102760013">
+          <DataField>i_Control1102760013</DataField>
+        </Field>
+        <Field Name="j_Control1102760014">
+          <DataField>j_Control1102760014</DataField>
+        </Field>
+        <Field Name="studStageSem">
+          <DataField>studStageSem</DataField>
+        </Field>
+        <Field Name="studStageSem2">
+          <DataField>studStageSem2</DataField>
+        </Field>
+        <Field Name="u1_1_">
+          <DataField>u1_1_</DataField>
+        </Field>
+        <Field Name="u1_2_">
+          <DataField>u1_2_</DataField>
+        </Field>
+        <Field Name="u1_3_">
+          <DataField>u1_3_</DataField>
+        </Field>
+        <Field Name="u1_4_">
+          <DataField>u1_4_</DataField>
+        </Field>
+        <Field Name="u1_5_">
+          <DataField>u1_5_</DataField>
+        </Field>
+        <Field Name="u1_6_">
+          <DataField>u1_6_</DataField>
+        </Field>
+        <Field Name="u1_7_">
+          <DataField>u1_7_</DataField>
+        </Field>
+        <Field Name="u1_8_">
+          <DataField>u1_8_</DataField>
+        </Field>
+        <Field Name="u1_9_">
+          <DataField>u1_9_</DataField>
+        </Field>
+        <Field Name="u1_10_">
+          <DataField>u1_10_</DataField>
+        </Field>
+        <Field Name="u1_11_">
+          <DataField>u1_11_</DataField>
+        </Field>
+        <Field Name="u1_12_">
+          <DataField>u1_12_</DataField>
+        </Field>
+        <Field Name="u1_13_">
+          <DataField>u1_13_</DataField>
+        </Field>
+        <Field Name="u1_14_">
+          <DataField>u1_14_</DataField>
+        </Field>
+        <Field Name="u1_15_">
+          <DataField>u1_15_</DataField>
+        </Field>
+        <Field Name="u2_1_">
+          <DataField>u2_1_</DataField>
+        </Field>
+        <Field Name="u2_2_">
+          <DataField>u2_2_</DataField>
+        </Field>
+        <Field Name="u2_3_">
+          <DataField>u2_3_</DataField>
+        </Field>
+        <Field Name="u2_4_">
+          <DataField>u2_4_</DataField>
+        </Field>
+        <Field Name="u2_5_">
+          <DataField>u2_5_</DataField>
+        </Field>
+        <Field Name="u2_6_">
+          <DataField>u2_6_</DataField>
+        </Field>
+        <Field Name="u2_7_">
+          <DataField>u2_7_</DataField>
+        </Field>
+        <Field Name="u2_8_">
+          <DataField>u2_8_</DataField>
+        </Field>
+        <Field Name="u2_9_">
+          <DataField>u2_9_</DataField>
+        </Field>
+        <Field Name="u2_10_">
+          <DataField>u2_10_</DataField>
+        </Field>
+        <Field Name="u2_11_">
+          <DataField>u2_11_</DataField>
+        </Field>
+        <Field Name="u2_12_">
+          <DataField>u2_12_</DataField>
+        </Field>
+        <Field Name="u2_13_">
+          <DataField>u2_13_</DataField>
+        </Field>
+        <Field Name="u2_14_">
+          <DataField>u2_14_</DataField>
+        </Field>
+        <Field Name="u2_15_">
+          <DataField>u2_15_</DataField>
+        </Field>
+        <Field Name="Units_RegisteredCaption">
+          <DataField>Units_RegisteredCaption</DataField>
+        </Field>
+        <Field Name="Units_RegisteredCaption_Control1102755023">
+          <DataField>Units_RegisteredCaption_Control1102755023</DataField>
+        </Field>
+        <Field Name="Course_Registration_Reg__Transacton_ID">
+          <DataField>Course_Registration_Reg__Transacton_ID</DataField>
+        </Field>
+        <Field Name="Course_Registration_Student_No_">
+          <DataField>Course_Registration_Student_No_</DataField>
+        </Field>
+        <Field Name="Course_Registration_Programme">
+          <DataField>Course_Registration_Programme</DataField>
+        </Field>
+        <Field Name="Course_Registration_Semester">
+          <DataField>Course_Registration_Semester</DataField>
+        </Field>
+        <Field Name="Course_Registration_Register_for">
+          <DataField>Course_Registration_Register_for</DataField>
+        </Field>
+        <Field Name="Course_Registration_Type">
+          <DataField>Course_Registration_Type</DataField>
+        </Field>
+        <Field Name="Course_Registration_Stage">
+          <DataField>Course_Registration_Stage</DataField>
+        </Field>
+        <Field Name="Course_Registration_Unit">
+          <DataField>Course_Registration_Unit</DataField>
+        </Field>
+        <Field Name="Course_Registration_Student_Type">
+          <DataField>Course_Registration_Student_Type</DataField>
+        </Field>
+        <Field Name="Course_Registration_Entry_No_">
+          <DataField>Course_Registration_Entry_No_</DataField>
+        </Field>
+        <Field Name="Supervisor_Signature">
+          <DataField>Supervisor_Signature</DataField>
+        </Field>
+        <Field Name="Comp_Name">
+          <DataField>Comp_Name</DataField>
+        </Field>
+        <Field Name="coursecode_title">
+          <DataField>coursecode_title</DataField>
+        </Field>
+        <Field Name="CourseNameCaption">
+          <DataField>CourseNameCaption</DataField>
+        </Field>
+        <Field Name="U1Code_1">
+          <DataField>U1Code_1</DataField>
+        </Field>
+        <Field Name="creditHrs_1">
+          <DataField>creditHrs_1</DataField>
+        </Field>
+        <Field Name="U1Desc_1">
+          <DataField>U1Desc_1</DataField>
+        </Field>
+        <Field Name="U2Code_1">
+          <DataField>U2Code_1</DataField>
+        </Field>
+        <Field Name="U2Desc_1">
+          <DataField>U2Desc_1</DataField>
+        </Field>
+        <Field Name="U1Units_1">
+          <DataField>U1Units_1</DataField>
+        </Field>
+        <Field Name="U1Units_1Format">
+          <DataField>U1Units_1Format</DataField>
+        </Field>
+        <Field Name="U2Units_1">
+          <DataField>U2Units_1</DataField>
+        </Field>
+        <Field Name="U2Units_1Format">
+          <DataField>U2Units_1Format</DataField>
+        </Field>
+        <Field Name="instrtitle">
+          <DataField>instrtitle</DataField>
+        </Field>
+        <Field Name="rule1">
+          <DataField>rule1</DataField>
+        </Field>
+        <Field Name="rule2">
+          <DataField>rule2</DataField>
+        </Field>
+        <Field Name="rule3">
+          <DataField>rule3</DataField>
+        </Field>
+        <Field Name="rule4">
+          <DataField>rule4</DataField>
+        </Field>
+        <Field Name="rule5">
+          <DataField>rule5</DataField>
+        </Field>
+        <Field Name="rule6">
+          <DataField>rule6</DataField>
+        </Field>
+        <Field Name="desclaimer">
+          <DataField>desclaimer</DataField>
+        </Field>
+        <Field Name="desclaimersigns">
+          <DataField>desclaimersigns</DataField>
+        </Field>
+        <Field Name="U1Code_2">
+          <DataField>U1Code_2</DataField>
+        </Field>
+        <Field Name="U1Desc_2">
+          <DataField>U1Desc_2</DataField>
+        </Field>
+        <Field Name="U2Code_2">
+          <DataField>U2Code_2</DataField>
+        </Field>
+        <Field Name="U2Desc_2">
+          <DataField>U2Desc_2</DataField>
+        </Field>
+        <Field Name="U1Units_2">
+          <DataField>U1Units_2</DataField>
+        </Field>
+        <Field Name="U1Units_2Format">
+          <DataField>U1Units_2Format</DataField>
+        </Field>
+        <Field Name="U2Units_2">
+          <DataField>U2Units_2</DataField>
+        </Field>
+        <Field Name="U2Units_2Format">
+          <DataField>U2Units_2Format</DataField>
+        </Field>
+        <Field Name="U1Code_3">
+          <DataField>U1Code_3</DataField>
+        </Field>
+        <Field Name="U1Desc_3">
+          <DataField>U1Desc_3</DataField>
+        </Field>
+        <Field Name="U2Code_3">
+          <DataField>U2Code_3</DataField>
+        </Field>
+        <Field Name="U2Desc_3">
+          <DataField>U2Desc_3</DataField>
+        </Field>
+        <Field Name="U1Units_3">
+          <DataField>U1Units_3</DataField>
+        </Field>
+        <Field Name="U1Units_3Format">
+          <DataField>U1Units_3Format</DataField>
+        </Field>
+        <Field Name="U2Units_3">
+          <DataField>U2Units_3</DataField>
+        </Field>
+        <Field Name="U2Units_3Format">
+          <DataField>U2Units_3Format</DataField>
+        </Field>
+        <Field Name="U1Code_4">
+          <DataField>U1Code_4</DataField>
+        </Field>
+        <Field Name="U1Desc_4">
+          <DataField>U1Desc_4</DataField>
+        </Field>
+        <Field Name="U2Code_4">
+          <DataField>U2Code_4</DataField>
+        </Field>
+        <Field Name="U2Desc_4">
+          <DataField>U2Desc_4</DataField>
+        </Field>
+        <Field Name="U1Units_4">
+          <DataField>U1Units_4</DataField>
+        </Field>
+        <Field Name="U1Units_4Format">
+          <DataField>U1Units_4Format</DataField>
+        </Field>
+        <Field Name="U2Units_4">
+          <DataField>U2Units_4</DataField>
+        </Field>
+        <Field Name="U2Units_4Format">
+          <DataField>U2Units_4Format</DataField>
+        </Field>
+        <Field Name="U1Code_5">
+          <DataField>U1Code_5</DataField>
+        </Field>
+        <Field Name="U1Desc_5">
+          <DataField>U1Desc_5</DataField>
+        </Field>
+        <Field Name="U2Code_5">
+          <DataField>U2Code_5</DataField>
+        </Field>
+        <Field Name="U2Desc_5">
+          <DataField>U2Desc_5</DataField>
+        </Field>
+        <Field Name="U1Units_5">
+          <DataField>U1Units_5</DataField>
+        </Field>
+        <Field Name="U1Units_5Format">
+          <DataField>U1Units_5Format</DataField>
+        </Field>
+        <Field Name="U2Units_5">
+          <DataField>U2Units_5</DataField>
+        </Field>
+        <Field Name="U2Units_5Format">
+          <DataField>U2Units_5Format</DataField>
+        </Field>
+        <Field Name="U1Code_6">
+          <DataField>U1Code_6</DataField>
+        </Field>
+        <Field Name="U1Desc_6">
+          <DataField>U1Desc_6</DataField>
+        </Field>
+        <Field Name="U2Code_6">
+          <DataField>U2Code_6</DataField>
+        </Field>
+        <Field Name="U2Desc_6">
+          <DataField>U2Desc_6</DataField>
+        </Field>
+        <Field Name="U1Units_6">
+          <DataField>U1Units_6</DataField>
+        </Field>
+        <Field Name="U1Units_6Format">
+          <DataField>U1Units_6Format</DataField>
+        </Field>
+        <Field Name="U2Units_6">
+          <DataField>U2Units_6</DataField>
+        </Field>
+        <Field Name="U2Units_6Format">
+          <DataField>U2Units_6Format</DataField>
+        </Field>
+        <Field Name="U1Code_7">
+          <DataField>U1Code_7</DataField>
+        </Field>
+        <Field Name="U1Desc_7">
+          <DataField>U1Desc_7</DataField>
+        </Field>
+        <Field Name="U2Code_7">
+          <DataField>U2Code_7</DataField>
+        </Field>
+        <Field Name="U2Desc_7">
+          <DataField>U2Desc_7</DataField>
+        </Field>
+        <Field Name="U1Units_7">
+          <DataField>U1Units_7</DataField>
+        </Field>
+        <Field Name="U1Units_7Format">
+          <DataField>U1Units_7Format</DataField>
+        </Field>
+        <Field Name="U2Units_7">
+          <DataField>U2Units_7</DataField>
+        </Field>
+        <Field Name="U2Units_7Format">
+          <DataField>U2Units_7Format</DataField>
+        </Field>
+        <Field Name="U1Code_8">
+          <DataField>U1Code_8</DataField>
+        </Field>
+        <Field Name="U1Desc_8">
+          <DataField>U1Desc_8</DataField>
+        </Field>
+        <Field Name="U2Code_8">
+          <DataField>U2Code_8</DataField>
+        </Field>
+        <Field Name="U2Desc_8">
+          <DataField>U2Desc_8</DataField>
+        </Field>
+        <Field Name="U1Units_8">
+          <DataField>U1Units_8</DataField>
+        </Field>
+        <Field Name="U1Units_8Format">
+          <DataField>U1Units_8Format</DataField>
+        </Field>
+        <Field Name="U2Units_8">
+          <DataField>U2Units_8</DataField>
+        </Field>
+        <Field Name="U2Units_8Format">
+          <DataField>U2Units_8Format</DataField>
+        </Field>
+        <Field Name="U1Code_9">
+          <DataField>U1Code_9</DataField>
+        </Field>
+        <Field Name="U1Desc_9">
+          <DataField>U1Desc_9</DataField>
+        </Field>
+        <Field Name="U2Code_9">
+          <DataField>U2Code_9</DataField>
+        </Field>
+        <Field Name="U2Desc_9">
+          <DataField>U2Desc_9</DataField>
+        </Field>
+        <Field Name="U1Units_9">
+          <DataField>U1Units_9</DataField>
+        </Field>
+        <Field Name="U1Units_9Format">
+          <DataField>U1Units_9Format</DataField>
+        </Field>
+        <Field Name="U2Units_9">
+          <DataField>U2Units_9</DataField>
+        </Field>
+        <Field Name="U2Units_9Format">
+          <DataField>U2Units_9Format</DataField>
+        </Field>
+        <Field Name="U1Code_10">
+          <DataField>U1Code_10</DataField>
+        </Field>
+        <Field Name="U1Desc_10">
+          <DataField>U1Desc_10</DataField>
+        </Field>
+        <Field Name="U2Code_10">
+          <DataField>U2Code_10</DataField>
+        </Field>
+        <Field Name="U2Desc_10">
+          <DataField>U2Desc_10</DataField>
+        </Field>
+        <Field Name="U1Units_10">
+          <DataField>U1Units_10</DataField>
+        </Field>
+        <Field Name="U1Units_10Format">
+          <DataField>U1Units_10Format</DataField>
+        </Field>
+        <Field Name="U2Units_10">
+          <DataField>U2Units_10</DataField>
+        </Field>
+        <Field Name="U2Units_10Format">
+          <DataField>U2Units_10Format</DataField>
+        </Field>
+        <Field Name="ExamPeriod">
+          <DataField>ExamPeriod</DataField>
+        </Field>
+        <Field Name="U1Code_11">
+          <DataField>U1Code_11</DataField>
+        </Field>
+        <Field Name="U1Desc_11">
+          <DataField>U1Desc_11</DataField>
+        </Field>
+        <Field Name="U1Code_12">
+          <DataField>U1Code_12</DataField>
+        </Field>
+        <Field Name="U1Desc_12">
+          <DataField>U1Desc_12</DataField>
+        </Field>
+        <Field Name="U1Code_13">
+          <DataField>U1Code_13</DataField>
+        </Field>
+        <Field Name="U1Desc_13">
+          <DataField>U1Desc_13</DataField>
+        </Field>
+        <Field Name="U1Code_14">
+          <DataField>U1Code_14</DataField>
+        </Field>
+        <Field Name="U1Desc_14">
+          <DataField>U1Desc_14</DataField>
+        </Field>
+        <Field Name="U1Code_15">
+          <DataField>U1Code_15</DataField>
+        </Field>
+        <Field Name="U1Desc_15">
+          <DataField>U1Desc_15</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

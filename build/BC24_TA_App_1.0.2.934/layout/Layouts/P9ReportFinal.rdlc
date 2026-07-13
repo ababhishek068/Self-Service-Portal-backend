@@ -1,0 +1,311 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_8631">
+          <DataField>ReportForNavId_8631</DataField>
+        </Field>
+        <Field Name="SelectedPeriod">
+          <DataField>SelectedPeriod</DataField>
+        </Field>
+        <Field Name="EmployerPIN">
+          <DataField>EmployerPIN</DataField>
+        </Field>
+        <Field Name="Fname">
+          <DataField>Fname</DataField>
+        </Field>
+        <Field Name="MName">
+          <DataField>MName</DataField>
+        </Field>
+        <Field Name="Emp_No">
+          <DataField>Emp_No</DataField>
+        </Field>
+        <Field Name="PIN_No_">
+          <DataField>PIN_No_</DataField>
+        </Field>
+        <Field Name="Tac_Charged">
+          <DataField>Tac_Charged</DataField>
+        </Field>
+        <Field Name="Tac_ChargedFormat">
+          <DataField>Tac_ChargedFormat</DataField>
+        </Field>
+        <Field Name="TotalL">
+          <DataField>TotalL</DataField>
+        </Field>
+        <Field Name="TotalLFormat">
+          <DataField>TotalLFormat</DataField>
+        </Field>
+        <Field Name="TotaA">
+          <DataField>TotaA</DataField>
+        </Field>
+        <Field Name="TotaAFormat">
+          <DataField>TotaAFormat</DataField>
+        </Field>
+        <Field Name="TotalB">
+          <DataField>TotalB</DataField>
+        </Field>
+        <Field Name="TotalBFormat">
+          <DataField>TotalBFormat</DataField>
+        </Field>
+        <Field Name="totalD">
+          <DataField>totalD</DataField>
+        </Field>
+        <Field Name="totalDFormat">
+          <DataField>totalDFormat</DataField>
+        </Field>
+        <Field Name="totalC">
+          <DataField>totalC</DataField>
+        </Field>
+        <Field Name="totalCFormat">
+          <DataField>totalCFormat</DataField>
+        </Field>
+        <Field Name="TotalF">
+          <DataField>TotalF</DataField>
+        </Field>
+        <Field Name="TotalFFormat">
+          <DataField>TotalFFormat</DataField>
+        </Field>
+        <Field Name="TotalE3">
+          <DataField>TotalE3</DataField>
+        </Field>
+        <Field Name="TotalE3Format">
+          <DataField>TotalE3Format</DataField>
+        </Field>
+        <Field Name="TotalE2">
+          <DataField>TotalE2</DataField>
+        </Field>
+        <Field Name="TotalE2Format">
+          <DataField>TotalE2Format</DataField>
+        </Field>
+        <Field Name="TotalE1">
+          <DataField>TotalE1</DataField>
+        </Field>
+        <Field Name="TotalE1Format">
+          <DataField>TotalE1Format</DataField>
+        </Field>
+        <Field Name="TotalK">
+          <DataField>TotalK</DataField>
+        </Field>
+        <Field Name="TotalKFormat">
+          <DataField>TotalKFormat</DataField>
+        </Field>
+        <Field Name="TotalJ">
+          <DataField>TotalJ</DataField>
+        </Field>
+        <Field Name="TotalJFormat">
+          <DataField>TotalJFormat</DataField>
+        </Field>
+        <Field Name="TotalH">
+          <DataField>TotalH</DataField>
+        </Field>
+        <Field Name="TotalHFormat">
+          <DataField>TotalHFormat</DataField>
+        </Field>
+        <Field Name="TotalG">
+          <DataField>TotalG</DataField>
+        </Field>
+        <Field Name="TotalGFormat">
+          <DataField>TotalGFormat</DataField>
+        </Field>
+        <Field Name="Comp_Name">
+          <DataField>Comp_Name</DataField>
+        </Field>
+        <Field Name="Month">
+          <DataField>Month</DataField>
+        </Field>
+        <Field Name="Logo">
+          <DataField>Logo</DataField>
+        </Field>
+        <Field Name="CampanyName">
+          <DataField>CampanyName</DataField>
+        </Field>
+        <Field Name="PhoneNo">
+          <DataField>PhoneNo</DataField>
+        </Field>
+        <Field Name="Address">
+          <DataField>Address</DataField>
+        </Field>
+        <Field Name="ReportForNavId_7242">
+          <DataField>ReportForNavId_7242</DataField>
+        </Field>
+        <Field Name="PeriodMonth">
+          <DataField>PeriodMonth</DataField>
+        </Field>
+        <Field Name="B_Pay">
+          <DataField>B_Pay</DataField>
+        </Field>
+        <Field Name="B_PayFormat">
+          <DataField>B_PayFormat</DataField>
+        </Field>
+        <Field Name="Benefits">
+          <DataField>Benefits</DataField>
+        </Field>
+        <Field Name="BenefitsFormat">
+          <DataField>BenefitsFormat</DataField>
+        </Field>
+        <Field Name="Value_Of_Quoters">
+          <DataField>Value_Of_Quoters</DataField>
+        </Field>
+        <Field Name="Value_Of_QuotersFormat">
+          <DataField>Value_Of_QuotersFormat</DataField>
+        </Field>
+        <Field Name="Gross">
+          <DataField>Gross</DataField>
+        </Field>
+        <Field Name="GrossFormat">
+          <DataField>GrossFormat</DataField>
+        </Field>
+        <Field Name="Owner_Occupier">
+          <DataField>Owner_Occupier</DataField>
+        </Field>
+        <Field Name="Owner_OccupierFormat">
+          <DataField>Owner_OccupierFormat</DataField>
+        </Field>
+        <Field Name="thirty_Perc_Of_BPay">
+          <DataField>thirty_Perc_Of_BPay</DataField>
+        </Field>
+        <Field Name="thirty_Perc_Of_BPayFormat">
+          <DataField>thirty_Perc_Of_BPayFormat</DataField>
+        </Field>
+        <Field Name="Actual">
+          <DataField>Actual</DataField>
+        </Field>
+        <Field Name="ActualFormat">
+          <DataField>ActualFormat</DataField>
+        </Field>
+        <Field Name="fixedDefContri">
+          <DataField>fixedDefContri</DataField>
+        </Field>
+        <Field Name="fixedDefContriFormat">
+          <DataField>fixedDefContriFormat</DataField>
+        </Field>
+        <Field Name="Gross_Pay__ColG">
+          <DataField>Gross_Pay__ColG</DataField>
+        </Field>
+        <Field Name="Gross_Pay__ColGFormat">
+          <DataField>Gross_Pay__ColGFormat</DataField>
+        </Field>
+        <Field Name="TaxCharged">
+          <DataField>TaxCharged</DataField>
+        </Field>
+        <Field Name="TaxChargedFormat">
+          <DataField>TaxChargedFormat</DataField>
+        </Field>
+        <Field Name="Tax_Relief">
+          <DataField>Tax_Relief</DataField>
+        </Field>
+        <Field Name="Tax_ReliefFormat">
+          <DataField>Tax_ReliefFormat</DataField>
+        </Field>
+        <Field Name="Insurance_Relief">
+          <DataField>Insurance_Relief</DataField>
+        </Field>
+        <Field Name="Insurance_ReliefFormat">
+          <DataField>Insurance_ReliefFormat</DataField>
+        </Field>
+        <Field Name="Ins_Relief">
+          <DataField>Ins_Relief</DataField>
+        </Field>
+        <Field Name="Ins_ReliefFormat">
+          <DataField>Ins_ReliefFormat</DataField>
+        </Field>
+        <Field Name="PAYE1">
+          <DataField>PAYE1</DataField>
+        </Field>
+        <Field Name="PAYE1Format">
+          <DataField>PAYE1Format</DataField>
+        </Field>
+        <Field Name="ColG">
+          <DataField>ColG</DataField>
+        </Field>
+        <Field Name="ColGFormat">
+          <DataField>ColGFormat</DataField>
+        </Field>
+        <Field Name="Emp_Code">
+          <DataField>Emp_Code</DataField>
+        </Field>
+        <Field Name="Defined_Contribution">
+          <DataField>Defined_Contribution</DataField>
+        </Field>
+        <Field Name="Defined_ContributionFormat">
+          <DataField>Defined_ContributionFormat</DataField>
+        </Field>
+        <Field Name="Pension">
+          <DataField>Pension</DataField>
+        </Field>
+        <Field Name="PensionFormat">
+          <DataField>PensionFormat</DataField>
+        </Field>
+        <Field Name="PayPeriod">
+          <DataField>PayPeriod</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

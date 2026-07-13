@@ -1905,9 +1905,11 @@ export function buildPortalApiRouter() {
         persistEmployeeMac(authUser.employeeNo, macAddress)
         if (deviceId) persistDeviceMac(deviceId, macAddress)
       }
+      const employeeRow = await fetchMergedEmployeeRecord(authUser.employeeNo).catch(() => null)
+      const bcUserId = resolveEffectiveBcUserId(authUser.userID, employeeRow, authUser.employeeNo)
       const result = await callSoapMethod('FnCheckinCheckout', {
         employeeNo: authUser.employeeNo,
-        myUserID: authUser.userID,
+        myUserID: bcUserId || authUser.userID,
         type,
         location: macAddress ? `MAC: ${macAddress}` : '',
       })

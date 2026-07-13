@@ -1,0 +1,224 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Picture">
+          <DataField>Picture</DataField>
+        </Field>
+        <Field Name="Name">
+          <DataField>Name</DataField>
+        </Field>
+        <Field Name="Address">
+          <DataField>Address</DataField>
+        </Field>
+        <Field Name="Address2">
+          <DataField>Address2</DataField>
+        </Field>
+        <Field Name="City">
+          <DataField>City</DataField>
+        </Field>
+        <Field Name="PhoneNo">
+          <DataField>PhoneNo</DataField>
+        </Field>
+        <Field Name="EMail">
+          <DataField>EMail</DataField>
+        </Field>
+        <Field Name="HomePage">
+          <DataField>HomePage</DataField>
+        </Field>
+        <Field Name="No_DisposalHeader">
+          <DataField>No_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Desciption_DisposalHeader">
+          <DataField>Desciption_DisposalHeader</DataField>
+        </Field>
+        <Field Name="DisposalMethod_DisposalHeader">
+          <DataField>DisposalMethod_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Status_DisposalHeader">
+          <DataField>Status_DisposalHeader</DataField>
+        </Field>
+        <Field Name="DisposalStatus_DisposalHeader">
+          <DataField>DisposalStatus_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Date_DisposalHeader">
+          <DataField>Date_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Noseries_DisposalHeader">
+          <DataField>Noseries_DisposalHeader</DataField>
+        </Field>
+        <Field Name="RefNo_DisposalHeader">
+          <DataField>RefNo_DisposalHeader</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_DisposalHeader">
+          <DataField>ResponsibilityCenter_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Disposed_DisposalHeader">
+          <DataField>Disposed_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Shortcutdimension2code_DisposalHeader">
+          <DataField>Shortcutdimension2code_DisposalHeader</DataField>
+        </Field>
+        <Field Name="DisposalPlanNo_DisposalHeader">
+          <DataField>DisposalPlanNo_DisposalHeader</DataField>
+        </Field>
+        <Field Name="Shortcutdimension1code_DisposalHeader">
+          <DataField>Shortcutdimension1code_DisposalHeader</DataField>
+        </Field>
+        <Field Name="DisposalPeriod_DisposalHeader">
+          <DataField>DisposalPeriod_DisposalHeader</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="LineNo_DisposalLine">
+          <DataField>LineNo_DisposalLine</DataField>
+        </Field>
+        <Field Name="ItemTagNo_DisposalLine">
+          <DataField>ItemTagNo_DisposalLine</DataField>
+        </Field>
+        <Field Name="DisposalPlanNo_DisposalLine">
+          <DataField>DisposalPlanNo_DisposalLine</DataField>
+        </Field>
+        <Field Name="Description_DisposalLine">
+          <DataField>Description_DisposalLine</DataField>
+        </Field>
+        <Field Name="UnitofMeasure_DisposalLine">
+          <DataField>UnitofMeasure_DisposalLine</DataField>
+        </Field>
+        <Field Name="PlannedQuantity_DisposalLine">
+          <DataField>PlannedQuantity_DisposalLine</DataField>
+        </Field>
+        <Field Name="ActualDisposalPrice_DisposalLine">
+          <DataField>ActualDisposalPrice_DisposalLine</DataField>
+        </Field>
+        <Field Name="ActualDisposalPrice_DisposalLineFormat">
+          <DataField>ActualDisposalPrice_DisposalLineFormat</DataField>
+        </Field>
+        <Field Name="TotalPrice_DisposalLine">
+          <DataField>TotalPrice_DisposalLine</DataField>
+        </Field>
+        <Field Name="TotalPrice_DisposalLineFormat">
+          <DataField>TotalPrice_DisposalLineFormat</DataField>
+        </Field>
+        <Field Name="Date_DisposalLine">
+          <DataField>Date_DisposalLine</DataField>
+        </Field>
+        <Field Name="Disposed_DisposalLine">
+          <DataField>Disposed_DisposalLine</DataField>
+        </Field>
+        <Field Name="Shortcutdimension1code_DisposalLine">
+          <DataField>Shortcutdimension1code_DisposalLine</DataField>
+        </Field>
+        <Field Name="Shortcutdimension2code_DisposalLine">
+          <DataField>Shortcutdimension2code_DisposalLine</DataField>
+        </Field>
+        <Field Name="DisposalMethods_DisposalLine">
+          <DataField>DisposalMethods_DisposalLine</DataField>
+        </Field>
+        <Field Name="ActualQuantity_DisposalLine">
+          <DataField>ActualQuantity_DisposalLine</DataField>
+        </Field>
+        <Field Name="DisposedTo_DisposalLine">
+          <DataField>DisposedTo_DisposalLine</DataField>
+        </Field>
+        <Field Name="ReservedPrice_DisposalLine">
+          <DataField>ReservedPrice_DisposalLine</DataField>
+        </Field>
+        <Field Name="ReservedPrice_DisposalLineFormat">
+          <DataField>ReservedPrice_DisposalLineFormat</DataField>
+        </Field>
+        <Field Name="Confirmed_DisposalLine">
+          <DataField>Confirmed_DisposalLine</DataField>
+        </Field>
+        <Field Name="ConfirmedBy_DisposalLine">
+          <DataField>ConfirmedBy_DisposalLine</DataField>
+        </Field>
+        <Field Name="DisposalPeriod_DisposalLine">
+          <DataField>DisposalPeriod_DisposalLine</DataField>
+        </Field>
+        <Field Name="No_DisposalLine">
+          <DataField>No_DisposalLine</DataField>
+        </Field>
+        <Field Name="SerialNo_DisposalLine">
+          <DataField>SerialNo_DisposalLine</DataField>
+        </Field>
+        <Field Name="ConfirmationDate_DisposalLine">
+          <DataField>ConfirmationDate_DisposalLine</DataField>
+        </Field>
+        <Field Name="Pic">
+          <DataField>Pic</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

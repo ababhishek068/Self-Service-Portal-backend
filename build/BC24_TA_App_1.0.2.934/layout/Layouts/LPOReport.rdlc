@@ -1,0 +1,284 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="Approver1">
+          <DataField>Approver1</DataField>
+        </Field>
+        <Field Name="Approver2">
+          <DataField>Approver2</DataField>
+        </Field>
+        <Field Name="Approver3">
+          <DataField>Approver3</DataField>
+        </Field>
+        <Field Name="Approver4">
+          <DataField>Approver4</DataField>
+        </Field>
+        <Field Name="Approver5">
+          <DataField>Approver5</DataField>
+        </Field>
+        <Field Name="Date1">
+          <DataField>Date1</DataField>
+        </Field>
+        <Field Name="Date2">
+          <DataField>Date2</DataField>
+        </Field>
+        <Field Name="Date3">
+          <DataField>Date3</DataField>
+        </Field>
+        <Field Name="Date4">
+          <DataField>Date4</DataField>
+        </Field>
+        <Field Name="Date5">
+          <DataField>Date5</DataField>
+        </Field>
+        <Field Name="BuyfromVendorNo_PurchaseHeader">
+          <DataField>BuyfromVendorNo_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="CompanyinforPicture">
+          <DataField>CompanyinforPicture</DataField>
+        </Field>
+        <Field Name="CompanyinforName">
+          <DataField>CompanyinforName</DataField>
+        </Field>
+        <Field Name="CompanyinforAddress">
+          <DataField>CompanyinforAddress</DataField>
+        </Field>
+        <Field Name="QuoteNo_PurchaseHeader">
+          <DataField>QuoteNo_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="CompanyinforAddress2">
+          <DataField>CompanyinforAddress2</DataField>
+        </Field>
+        <Field Name="CompanyinfoCity">
+          <DataField>CompanyinfoCity</DataField>
+        </Field>
+        <Field Name="CompanyinforPhoneNo">
+          <DataField>CompanyinforPhoneNo</DataField>
+        </Field>
+        <Field Name="CompanyinforEMail">
+          <DataField>CompanyinforEMail</DataField>
+        </Field>
+        <Field Name="CompanyinforHomePage">
+          <DataField>CompanyinforHomePage</DataField>
+        </Field>
+        <Field Name="BuyfromVendorName_PurchaseHeader">
+          <DataField>BuyfromVendorName_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="VendorOrderNo">
+          <DataField>VendorOrderNo</DataField>
+        </Field>
+        <Field Name="PaytoAddress2">
+          <DataField>PaytoAddress2</DataField>
+        </Field>
+        <Field Name="PaytoCity">
+          <DataField>PaytoCity</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_PurchaseHeader">
+          <DataField>ShortcutDimension1Code_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="Requiredon_PurchaseHeader">
+          <DataField>Requiredon_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="Due_Date">
+          <DataField>Due_Date</DataField>
+        </Field>
+        <Field Name="Vendor_Invoice_No_">
+          <DataField>Vendor_Invoice_No_</DataField>
+        </Field>
+        <Field Name="Tendor_Number">
+          <DataField>Tendor_Number</DataField>
+        </Field>
+        <Field Name="RFQNo_PurchaseHeader">
+          <DataField>RFQNo_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="No_PurchaseHeader">
+          <DataField>No_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="Number">
+          <DataField>Number</DataField>
+        </Field>
+        <Field Name="NumberText">
+          <DataField>NumberText</DataField>
+        </Field>
+        <Field Name="OrderDate_PurchaseHeader">
+          <DataField>OrderDate_PurchaseHeader</DataField>
+        </Field>
+        <Field Name="Amt">
+          <DataField>Amt</DataField>
+        </Field>
+        <Field Name="AmtFormat">
+          <DataField>AmtFormat</DataField>
+        </Field>
+        <Field Name="Picture">
+          <DataField>Picture</DataField>
+        </Field>
+        <Field Name="Currency_Code">
+          <DataField>Currency_Code</DataField>
+        </Field>
+        <Field Name="Posting_Description">
+          <DataField>Posting_Description</DataField>
+        </Field>
+        <Field Name="Request_Description">
+          <DataField>Request_Description</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="Lineamount_PurchaseLine">
+          <DataField>Lineamount_PurchaseLine</DataField>
+        </Field>
+        <Field Name="Lineamount_PurchaseLineFormat">
+          <DataField>Lineamount_PurchaseLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_PurchaseLine">
+          <DataField>UnitPriceLCY_PurchaseLine</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_PurchaseLineFormat">
+          <DataField>UnitPriceLCY_PurchaseLineFormat</DataField>
+        </Field>
+        <Field Name="Quantity_PurchaseLine">
+          <DataField>Quantity_PurchaseLine</DataField>
+        </Field>
+        <Field Name="Quantity_PurchaseLineFormat">
+          <DataField>Quantity_PurchaseLineFormat</DataField>
+        </Field>
+        <Field Name="Description_PurchaseLine">
+          <DataField>Description_PurchaseLine</DataField>
+        </Field>
+        <Field Name="Description2_PurchaseLine">
+          <DataField>Description2_PurchaseLine</DataField>
+        </Field>
+        <Field Name="No_PurchaseLine">
+          <DataField>No_PurchaseLine</DataField>
+        </Field>
+        <Field Name="DirectUnitCost_PurchaseLine">
+          <DataField>DirectUnitCost_PurchaseLine</DataField>
+        </Field>
+        <Field Name="DirectUnitCost_PurchaseLineFormat">
+          <DataField>DirectUnitCost_PurchaseLineFormat</DataField>
+        </Field>
+        <Field Name="LocationCode_PurchaseLine">
+          <DataField>LocationCode_PurchaseLine</DataField>
+        </Field>
+        <Field Name="ApproverID_ApprovalEntry">
+          <DataField>ApproverID_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="LastDateTimeModified_ApprovalEntry">
+          <DataField>LastDateTimeModified_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup">
+          <DataField>Signature_UserSetup</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup">
+          <DataField>ApprovalDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup2">
+          <DataField>Signature_UserSetup2</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup2">
+          <DataField>ApprovalDesignation_UserSetup2</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup3">
+          <DataField>Signature_UserSetup3</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup3">
+          <DataField>ApprovalDesignation_UserSetup3</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup4">
+          <DataField>Signature_UserSetup4</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup4">
+          <DataField>ApprovalDesignation_UserSetup4</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup5">
+          <DataField>Signature_UserSetup5</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup5">
+          <DataField>ApprovalDesignation_UserSetup5</DataField>
+        </Field>
+        <Field Name="Sequence_No_">
+          <DataField>Sequence_No_</DataField>
+        </Field>
+        <Field Name="Sender_ID">
+          <DataField>Sender_ID</DataField>
+        </Field>
+        <Field Name="Approver_ID">
+          <DataField>Approver_ID</DataField>
+        </Field>
+        <Field Name="Date_Time_Sent_for_Approval">
+          <DataField>Date_Time_Sent_for_Approval</DataField>
+        </Field>
+        <Field Name="Last_Date_Time_Modified">
+          <DataField>Last_Date_Time_Modified</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

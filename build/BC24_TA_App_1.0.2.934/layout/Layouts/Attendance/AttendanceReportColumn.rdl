@@ -1,0 +1,446 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="CompInfo_Name">
+          <DataField>CompInfo_Name</DataField>
+        </Field>
+        <Field Name="CompInfo_Email">
+          <DataField>CompInfo_Email</DataField>
+        </Field>
+        <Field Name="CompInfo_Address">
+          <DataField>CompInfo_Address</DataField>
+        </Field>
+        <Field Name="CompInfo_Picture">
+          <DataField>CompInfo_Picture</DataField>
+        </Field>
+        <Field Name="No">
+          <DataField>No</DataField>
+        </Field>
+        <Field Name="fullName">
+          <DataField>fullName</DataField>
+        </Field>
+        <Field Name="Cell_Phone_Number">
+          <DataField>Cell_Phone_Number</DataField>
+        </Field>
+        <Field Name="E_Mail">
+          <DataField>E_Mail</DataField>
+        </Field>
+        <Field Name="Company_E_Mail">
+          <DataField>Company_E_Mail</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code">
+          <DataField>GlobalDimension1Code</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code">
+          <DataField>GlobalDimension2Code</DataField>
+        </Field>
+        <Field Name="ID_Number">
+          <DataField>ID_Number</DataField>
+        </Field>
+        <Field Name="Responsibility_Center">
+          <DataField>Responsibility_Center</DataField>
+        </Field>
+        <Field Name="Supervisor_No_">
+          <DataField>Supervisor_No_</DataField>
+        </Field>
+        <Field Name="Tribe">
+          <DataField>Tribe</DataField>
+        </Field>
+        <Field Name="Work_Station">
+          <DataField>Work_Station</DataField>
+        </Field>
+        <Field Name="Gender">
+          <DataField>Gender</DataField>
+        </Field>
+        <Field Name="Marital_Status">
+          <DataField>Marital_Status</DataField>
+        </Field>
+        <Field Name="Date_Of_Joining_the_Company">
+          <DataField>Date_Of_Joining_the_Company</DataField>
+        </Field>
+        <Field Name="Job_Title">
+          <DataField>Job_Title</DataField>
+        </Field>
+        <Field Name="Contract_End_Date">
+          <DataField>Contract_End_Date</DataField>
+        </Field>
+        <Field Name="NHIF_No_">
+          <DataField>NHIF_No_</DataField>
+        </Field>
+        <Field Name="Daily_Rate">
+          <DataField>Daily_Rate</DataField>
+        </Field>
+        <Field Name="Daily_RateFormat">
+          <DataField>Daily_RateFormat</DataField>
+        </Field>
+        <Field Name="noOfDays">
+          <DataField>noOfDays</DataField>
+        </Field>
+        <Field Name="NoofLeaves">
+          <DataField>NoofLeaves</DataField>
+        </Field>
+        <Field Name="AbsentDays">
+          <DataField>AbsentDays</DataField>
+        </Field>
+        <Field Name="NoOfDaysInMonth">
+          <DataField>NoOfDaysInMonth</DataField>
+        </Field>
+        <Field Name="NonWorkingDays">
+          <DataField>NonWorkingDays</DataField>
+        </Field>
+        <Field Name="WorkingDays">
+          <DataField>WorkingDays</DataField>
+        </Field>
+        <Field Name="ReportTitle">
+          <DataField>ReportTitle</DataField>
+        </Field>
+        <Field Name="w1">
+          <DataField>w1</DataField>
+        </Field>
+        <Field Name="w2">
+          <DataField>w2</DataField>
+        </Field>
+        <Field Name="w3">
+          <DataField>w3</DataField>
+        </Field>
+        <Field Name="w4">
+          <DataField>w4</DataField>
+        </Field>
+        <Field Name="w5">
+          <DataField>w5</DataField>
+        </Field>
+        <Field Name="w6">
+          <DataField>w6</DataField>
+        </Field>
+        <Field Name="w7">
+          <DataField>w7</DataField>
+        </Field>
+        <Field Name="w8">
+          <DataField>w8</DataField>
+        </Field>
+        <Field Name="w9">
+          <DataField>w9</DataField>
+        </Field>
+        <Field Name="w10">
+          <DataField>w10</DataField>
+        </Field>
+        <Field Name="w11">
+          <DataField>w11</DataField>
+        </Field>
+        <Field Name="w12">
+          <DataField>w12</DataField>
+        </Field>
+        <Field Name="w13">
+          <DataField>w13</DataField>
+        </Field>
+        <Field Name="w14">
+          <DataField>w14</DataField>
+        </Field>
+        <Field Name="w15">
+          <DataField>w15</DataField>
+        </Field>
+        <Field Name="w16">
+          <DataField>w16</DataField>
+        </Field>
+        <Field Name="w17">
+          <DataField>w17</DataField>
+        </Field>
+        <Field Name="w18">
+          <DataField>w18</DataField>
+        </Field>
+        <Field Name="w19">
+          <DataField>w19</DataField>
+        </Field>
+        <Field Name="w20">
+          <DataField>w20</DataField>
+        </Field>
+        <Field Name="w21">
+          <DataField>w21</DataField>
+        </Field>
+        <Field Name="w22">
+          <DataField>w22</DataField>
+        </Field>
+        <Field Name="w23">
+          <DataField>w23</DataField>
+        </Field>
+        <Field Name="w24">
+          <DataField>w24</DataField>
+        </Field>
+        <Field Name="w25">
+          <DataField>w25</DataField>
+        </Field>
+        <Field Name="w26">
+          <DataField>w26</DataField>
+        </Field>
+        <Field Name="w27">
+          <DataField>w27</DataField>
+        </Field>
+        <Field Name="w28">
+          <DataField>w28</DataField>
+        </Field>
+        <Field Name="w29">
+          <DataField>w29</DataField>
+        </Field>
+        <Field Name="w30">
+          <DataField>w30</DataField>
+        </Field>
+        <Field Name="w31">
+          <DataField>w31</DataField>
+        </Field>
+        <Field Name="d1">
+          <DataField>d1</DataField>
+        </Field>
+        <Field Name="d2">
+          <DataField>d2</DataField>
+        </Field>
+        <Field Name="d3">
+          <DataField>d3</DataField>
+        </Field>
+        <Field Name="d4">
+          <DataField>d4</DataField>
+        </Field>
+        <Field Name="d5">
+          <DataField>d5</DataField>
+        </Field>
+        <Field Name="d6">
+          <DataField>d6</DataField>
+        </Field>
+        <Field Name="d7">
+          <DataField>d7</DataField>
+        </Field>
+        <Field Name="d8">
+          <DataField>d8</DataField>
+        </Field>
+        <Field Name="d9">
+          <DataField>d9</DataField>
+        </Field>
+        <Field Name="d10">
+          <DataField>d10</DataField>
+        </Field>
+        <Field Name="d11">
+          <DataField>d11</DataField>
+        </Field>
+        <Field Name="d12">
+          <DataField>d12</DataField>
+        </Field>
+        <Field Name="d13">
+          <DataField>d13</DataField>
+        </Field>
+        <Field Name="d14">
+          <DataField>d14</DataField>
+        </Field>
+        <Field Name="d15">
+          <DataField>d15</DataField>
+        </Field>
+        <Field Name="d16">
+          <DataField>d16</DataField>
+        </Field>
+        <Field Name="d17">
+          <DataField>d17</DataField>
+        </Field>
+        <Field Name="d18">
+          <DataField>d18</DataField>
+        </Field>
+        <Field Name="d19">
+          <DataField>d19</DataField>
+        </Field>
+        <Field Name="d20">
+          <DataField>d20</DataField>
+        </Field>
+        <Field Name="d21">
+          <DataField>d21</DataField>
+        </Field>
+        <Field Name="d22">
+          <DataField>d22</DataField>
+        </Field>
+        <Field Name="d23">
+          <DataField>d23</DataField>
+        </Field>
+        <Field Name="d24">
+          <DataField>d24</DataField>
+        </Field>
+        <Field Name="d25">
+          <DataField>d25</DataField>
+        </Field>
+        <Field Name="d26">
+          <DataField>d26</DataField>
+        </Field>
+        <Field Name="d27">
+          <DataField>d27</DataField>
+        </Field>
+        <Field Name="d28">
+          <DataField>d28</DataField>
+        </Field>
+        <Field Name="d29">
+          <DataField>d29</DataField>
+        </Field>
+        <Field Name="d30">
+          <DataField>d30</DataField>
+        </Field>
+        <Field Name="d31">
+          <DataField>d31</DataField>
+        </Field>
+        <Field Name="AttendanceTime1">
+          <DataField>AttendanceTime1</DataField>
+        </Field>
+        <Field Name="AttendanceTime2">
+          <DataField>AttendanceTime2</DataField>
+        </Field>
+        <Field Name="AttendanceTime3">
+          <DataField>AttendanceTime3</DataField>
+        </Field>
+        <Field Name="AttendanceTime4">
+          <DataField>AttendanceTime4</DataField>
+        </Field>
+        <Field Name="AttendanceTime5">
+          <DataField>AttendanceTime5</DataField>
+        </Field>
+        <Field Name="AttendanceTime6">
+          <DataField>AttendanceTime6</DataField>
+        </Field>
+        <Field Name="AttendanceTime7">
+          <DataField>AttendanceTime7</DataField>
+        </Field>
+        <Field Name="AttendanceTime8">
+          <DataField>AttendanceTime8</DataField>
+        </Field>
+        <Field Name="AttendanceTime9">
+          <DataField>AttendanceTime9</DataField>
+        </Field>
+        <Field Name="AttendanceTime10">
+          <DataField>AttendanceTime10</DataField>
+        </Field>
+        <Field Name="AttendanceTime11">
+          <DataField>AttendanceTime11</DataField>
+        </Field>
+        <Field Name="AttendanceTime12">
+          <DataField>AttendanceTime12</DataField>
+        </Field>
+        <Field Name="AttendanceTime13">
+          <DataField>AttendanceTime13</DataField>
+        </Field>
+        <Field Name="AttendanceTime14">
+          <DataField>AttendanceTime14</DataField>
+        </Field>
+        <Field Name="AttendanceTime15">
+          <DataField>AttendanceTime15</DataField>
+        </Field>
+        <Field Name="AttendanceTime16">
+          <DataField>AttendanceTime16</DataField>
+        </Field>
+        <Field Name="AttendanceTime17">
+          <DataField>AttendanceTime17</DataField>
+        </Field>
+        <Field Name="AttendanceTime18">
+          <DataField>AttendanceTime18</DataField>
+        </Field>
+        <Field Name="AttendanceTime19">
+          <DataField>AttendanceTime19</DataField>
+        </Field>
+        <Field Name="AttendanceTime20">
+          <DataField>AttendanceTime20</DataField>
+        </Field>
+        <Field Name="AttendanceTime21">
+          <DataField>AttendanceTime21</DataField>
+        </Field>
+        <Field Name="AttendanceTime22">
+          <DataField>AttendanceTime22</DataField>
+        </Field>
+        <Field Name="AttendanceTime23">
+          <DataField>AttendanceTime23</DataField>
+        </Field>
+        <Field Name="AttendanceTime24">
+          <DataField>AttendanceTime24</DataField>
+        </Field>
+        <Field Name="AttendanceTime25">
+          <DataField>AttendanceTime25</DataField>
+        </Field>
+        <Field Name="AttendanceTime26">
+          <DataField>AttendanceTime26</DataField>
+        </Field>
+        <Field Name="AttendanceTime27">
+          <DataField>AttendanceTime27</DataField>
+        </Field>
+        <Field Name="AttendanceTime28">
+          <DataField>AttendanceTime28</DataField>
+        </Field>
+        <Field Name="AttendanceTime29">
+          <DataField>AttendanceTime29</DataField>
+        </Field>
+        <Field Name="AttendanceTime30">
+          <DataField>AttendanceTime30</DataField>
+        </Field>
+        <Field Name="AttendanceTime31">
+          <DataField>AttendanceTime31</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

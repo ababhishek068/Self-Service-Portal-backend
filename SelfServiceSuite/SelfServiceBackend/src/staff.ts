@@ -113,13 +113,13 @@ function soapTruthy(value: string | null | undefined) {
 }
 
 /** Leave create/update should not treat arbitrary BC error text as success. */
-function soapLeaveActionOk(value: unknown) {
+export function soapLeaveActionOk(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   if (['true', '1', 'yes'].includes(normalized)) return true
-  if (/^lv\d+/i.test(raw)) return true
+  if (/^lv-?\d+/i.test(raw)) return true
   return /^[a-z]{1,6}\d{2,}$/i.test(raw)
 }
 
@@ -292,6 +292,24 @@ export type LeaveCardBalances = {
   allocatedDays: number | null
   currentLeaveBalance: number | null
   earnedLeaveDays: number | null
+}
+
+/** Staff Portal SOAP response sourced directly from the live BC employee card. */
+export function parseEmployeeLeaveBalancesReturn(rawValue: unknown): LeaveCardBalances {
+  const values = new Map<string, number>()
+  for (const segment of String(rawValue ?? '').split('#')) {
+    const separator = segment.indexOf('=')
+    if (separator < 1) continue
+    const key = segment.slice(0, separator).trim().toLowerCase()
+    const value = Number(segment.slice(separator + 1).trim())
+    if (Number.isFinite(value)) values.set(key, value)
+  }
+
+  return {
+    allocatedDays: null,
+    currentLeaveBalance: values.get('leavebalance') ?? null,
+    earnedLeaveDays: values.get('earnedleavedays') ?? null,
+  }
 }
 
 export function leaveCardBalancesFromRecord(row: ODataRecord | null | undefined): LeaveCardBalances {
@@ -2205,7 +2223,7 @@ export function buildStaffRouter() {
       const leaveTypeCode = String(req.params.type ?? '')
       const today = new Date().toISOString().slice(0, 10)
 
-      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows, soapBalanceResult] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
@@ -2222,6 +2240,7 @@ export function buildStaffRouter() {
         }) as Promise<ODataRecord[] | null>,
         fetchEmployeeLeaveMetricsRow(user.employeeNo),
         fetchLeaveApplicationBalanceRows(user.employeeNo, leaveTypeCode),
+        callSoapMethod('FnGetEmployeeLeaveBalances', { employeeNo: user.employeeNo }).catch(() => null),
       ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
@@ -2242,8 +2261,9 @@ export function buildStaffRouter() {
       }
 
       const odataBalances = mergeLeaveCardBalances(
-        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
+        parseEmployeeLeaveBalancesReturn(soapBalanceResult?.returnValue),
         leaveCardBalancesFromRecord(employeeRow),
+        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
       )
       const cardBalances = resolveLeaveCardBalances(
         leaveTypeRow,
@@ -2583,6 +2603,12 @@ export function buildStaffRouter() {
       }
 
       const ok = action === 'create' ? Boolean(soapOk && documentNo) : soapOk
+
+      if (!ok) {
+        console.error(
+          `[leave-${action}] BC reported failure — employeeNo=${user.employeeNo} returnValue=${JSON.stringify(result.returnValue)}`,
+        )
+      }
 
       res.json({
         ok,

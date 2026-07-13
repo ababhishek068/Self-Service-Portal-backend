@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<doc>
+    <application>
+        <id>5b5c244a-59bb-4a49-a255-0757fe4470cd</id>
+        <name>BC24_TA App</name>
+        <publisher>Technology Associates EA Ltd</publisher>
+        <version>1.0.2.933</version>
+    </application>
+    <members>
+        <member name="O:Page::Store Requisition Line UP">
+            <summary>
+            Page Store Requisition Line UP (ID 70135385).
+            </summary>
+        </member>
+        <member name="O:TableExtension::Purchase Header Extension">
+            <summary>
+            TableExtension Purchase Header Extension (ID 70134691) extends Record Purchase Header.
+            </summary>
+        </member>
+        <member name="M:Codeunit::Staff Portal Codeunit.PortalValidateDaysApplied(HR Leave Application@)">
+            Non-annual leave (sick, compassionate, etc.): BC table validation only counts HR Leave Allocation
+            rows. When HR has not posted allocation yet, fall back to Leave Types.Days so portal matches policy.
+        </member>
+        <member name="O:Page::Approval Comment Line">
+            <summary>
+            Page Approval Comment Line (ID 50044).
+            </summary>
+        </member>
+        <member name="V:Codeunit::Custom Approvals Codeunit.OnSendPCAApprovalRequestTxt">
+            Payroll PCA *
+        </member>
+        <member name="V:Codeunit::Custom Approvals Codeunit.OnSendDeptDisposalApprovalRequestTxt">
+            Departmental Disposal *
+        </member>
+        <member name="V:Codeunit::Custom Approvals Codeunit.OnSendConsDisposalApprovalRequestTxt">
+            Consolidated Disposal *
+        </member>
+        <member name="V:Codeunit::Custom Approvals Codeunit.OnSendProcCommApprovalRequestTxt">
+            Procurement Committee *
+        </member>
+        <member name="M:Codeunit::HRWebportal.SendEmail(Text[50],Text[100],Text[1000]):Boolean">
+            <summary>
+            SendEmail.
+            </summary>
+            <param name="receiver">Text[50].</param>
+            <param name="subject">Text[100].</param>
+            <param name="message">Text[1000].</param>
+            <returns>Return variable returnValue of type Boolean.</returns>
+        </member>
+        <member name="C:Page::HR Appraisal Lines - CS.content.Group.Target">
+            field("Performance measures"; "Performance measures") { ApplicationArea = ALL; }
+        </member>
+    </members>
+</doc>

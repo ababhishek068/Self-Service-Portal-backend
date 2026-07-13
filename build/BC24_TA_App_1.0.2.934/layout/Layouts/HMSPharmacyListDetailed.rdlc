@@ -1,0 +1,191 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_7110">
+          <DataField>ReportForNavId_7110</DataField>
+        </Field>
+        <Field Name="DATE_PRINTED_____FORMAT_TODAY_0_4_">
+          <DataField>DATE_PRINTED_____FORMAT_TODAY_0_4_</DataField>
+        </Field>
+        <Field Name="UPPERCASE_COMPANYNAME_">
+          <DataField>UPPERCASE_COMPANYNAME_</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENO">
+          <DataField>CurrReport_PAGENO</DataField>
+        </Field>
+        <Field Name="PRINTED_BY______USERID">
+          <DataField>PRINTED_BY______USERID</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header__Pharmacy_No__">
+          <DataField>HMS_Pharmacy_Header__Pharmacy_No__</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header__Pharmacy_Date_">
+          <DataField>HMS_Pharmacy_Header__Pharmacy_Date_</DataField>
+        </Field>
+        <Field Name="PFNo">
+          <DataField>PFNo</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header__Issued_By_">
+          <DataField>HMS_Pharmacy_Header__Issued_By_</DataField>
+        </Field>
+        <Field Name="PatientName">
+          <DataField>PatientName</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header_Status">
+          <DataField>HMS_Pharmacy_Header_Status</DataField>
+        </Field>
+        <Field Name="UNIVERSITY_HEALTH_SERVICESCaption">
+          <DataField>UNIVERSITY_HEALTH_SERVICESCaption</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENOCaption">
+          <DataField>CurrReport_PAGENOCaption</DataField>
+        </Field>
+        <Field Name="PHARMACY_LISTING_REPORTCaption">
+          <DataField>PHARMACY_LISTING_REPORTCaption</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Drug_No__Caption">
+          <DataField>HMS_Pharmacy_Line__Drug_No__Caption</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Drug_Name_Caption">
+          <DataField>HMS_Pharmacy_Line__Drug_Name_Caption</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_DosageCaption">
+          <DataField>HMS_Pharmacy_Line_DosageCaption</DataField>
+        </Field>
+        <Field Name="StoreCaption">
+          <DataField>StoreCaption</DataField>
+        </Field>
+        <Field Name="QtyCaption">
+          <DataField>QtyCaption</DataField>
+        </Field>
+        <Field Name="Actl_QtyCaption">
+          <DataField>Actl_QtyCaption</DataField>
+        </Field>
+        <Field Name="Issued_QtyCaption">
+          <DataField>Issued_QtyCaption</DataField>
+        </Field>
+        <Field Name="No_Caption">
+          <DataField>No_Caption</DataField>
+        </Field>
+        <Field Name="DateCaption">
+          <DataField>DateCaption</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header__Issued_By_Caption">
+          <DataField>HMS_Pharmacy_Header__Issued_By_Caption</DataField>
+        </Field>
+        <Field Name="PFNoCaption">
+          <DataField>PFNoCaption</DataField>
+        </Field>
+        <Field Name="Patient_nameCaption">
+          <DataField>Patient_nameCaption</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Header_StatusCaption">
+          <DataField>HMS_Pharmacy_Header_StatusCaption</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1251">
+          <DataField>ReportForNavId_1251</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Drug_No__">
+          <DataField>HMS_Pharmacy_Line__Drug_No__</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Drug_Name_">
+          <DataField>HMS_Pharmacy_Line__Drug_Name_</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_Quantity">
+          <DataField>HMS_Pharmacy_Line_Quantity</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_QuantityFormat">
+          <DataField>HMS_Pharmacy_Line_QuantityFormat</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Actual_Qty_">
+          <DataField>HMS_Pharmacy_Line__Actual_Qty_</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Actual_Qty_Format">
+          <DataField>HMS_Pharmacy_Line__Actual_Qty_Format</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Issued_Quantity_">
+          <DataField>HMS_Pharmacy_Line__Issued_Quantity_</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line__Issued_Quantity_Format">
+          <DataField>HMS_Pharmacy_Line__Issued_Quantity_Format</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_Dosage">
+          <DataField>HMS_Pharmacy_Line_Dosage</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_Pharmacy">
+          <DataField>HMS_Pharmacy_Line_Pharmacy</DataField>
+        </Field>
+        <Field Name="HMS_Pharmacy_Line_Pharmacy_No_">
+          <DataField>HMS_Pharmacy_Line_Pharmacy_No_</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

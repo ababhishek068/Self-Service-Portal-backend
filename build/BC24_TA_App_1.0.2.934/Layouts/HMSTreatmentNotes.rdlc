@@ -1,0 +1,1013 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Names">
+          <DataField>Names</DataField>
+        </Field>
+        <Field Name="TreatmentNo_HMSTreatmentFormHeader">
+          <DataField>TreatmentNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentType_HMSTreatmentFormHeader">
+          <DataField>TreatmentType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentDate_HMSTreatmentFormHeader">
+          <DataField>TreatmentDate_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentTime_HMSTreatmentFormHeader">
+          <DataField>TreatmentTime_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DoctorID_HMSTreatmentFormHeader">
+          <DataField>DoctorID_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientNo_HMSTreatmentFormHeader">
+          <DataField>PatientNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="StudentNo_HMSTreatmentFormHeader">
+          <DataField>StudentNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="EmployeeNo_HMSTreatmentFormHeader">
+          <DataField>EmployeeNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="RelativeNo_HMSTreatmentFormHeader">
+          <DataField>RelativeNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DoctorNotes_HMSTreatmentFormHeader">
+          <DataField>DoctorNotes_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Status_HMSTreatmentFormHeader">
+          <DataField>Status_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LinkNo_HMSTreatmentFormHeader">
+          <DataField>LinkNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LinkType_HMSTreatmentFormHeader">
+          <DataField>LinkType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="NoSeries_HMSTreatmentFormHeader">
+          <DataField>NoSeries_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDutyDays_HMSTreatmentFormHeader">
+          <DataField>OffDutyDays_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDutyDays_HMSTreatmentFormHeaderFormat">
+          <DataField>OffDutyDays_HMSTreatmentFormHeaderFormat</DataField>
+        </Field>
+        <Field Name="LightDutyDays_HMSTreatmentFormHeader">
+          <DataField>LightDutyDays_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LightDutyDays_HMSTreatmentFormHeaderFormat">
+          <DataField>LightDutyDays_HMSTreatmentFormHeaderFormat</DataField>
+        </Field>
+        <Field Name="OffDutyComments_HMSTreatmentFormHeader">
+          <DataField>OffDutyComments_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDuty_HMSTreatmentFormHeader">
+          <DataField>OffDuty_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentLocation_HMSTreatmentFormHeader">
+          <DataField>TreatmentLocation_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientType_HMSTreatmentFormHeader">
+          <DataField>PatientType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Direct_HMSTreatmentFormHeader">
+          <DataField>Direct_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LabStatus_HMSTreatmentFormHeader">
+          <DataField>LabStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="RadiologyStatus_HMSTreatmentFormHeader">
+          <DataField>RadiologyStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PharmacyStatus_HMSTreatmentFormHeader">
+          <DataField>PharmacyStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="InjectionStatus_HMSTreatmentFormHeader">
+          <DataField>InjectionStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Surname_HMSTreatmentFormHeader">
+          <DataField>Surname_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="MiddleName_HMSTreatmentFormHeader">
+          <DataField>MiddleName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LastName_HMSTreatmentFormHeader">
+          <DataField>LastName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="IDNumber_HMSTreatmentFormHeader">
+          <DataField>IDNumber_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="CorrespondenceAddress1_HMSTreatmentFormHeader">
+          <DataField>CorrespondenceAddress1_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TelephoneNo1_HMSTreatmentFormHeader">
+          <DataField>TelephoneNo1_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Email_HMSTreatmentFormHeader">
+          <DataField>Email_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientRefNo_HMSTreatmentFormHeader">
+          <DataField>PatientRefNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientName_HMSTreatmentFormHeader">
+          <DataField>PatientName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="SettlementType_HMSTreatmentFormHeader">
+          <DataField>SettlementType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="MembershipNo_HMSTreatmentFormHeader">
+          <DataField>MembershipNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="InsuranceName_HMSTreatmentFormHeader">
+          <DataField>InsuranceName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="AdmNo_HMSTreatmentFormHeader">
+          <DataField>AdmNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LkNo_HMSTreatmentFormHeader">
+          <DataField>LkNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TriageNotes_HMSTreatmentFormHeader">
+          <DataField>TriageNotes_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="NextAppointmentDate_HMSTreatmentFormHeader">
+          <DataField>NextAppointmentDate_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="SickOffStartDate_HMSTreatmentFormHeader">
+          <DataField>SickOffStartDate_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="SickOffEndDate_HMSTreatmentFormHeader">
+          <DataField>SickOffEndDate_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="InPatient_HMSTreatmentFormHeader">
+          <DataField>InPatient_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="StatusRemarks_HMSTreatmentFormHeader">
+          <DataField>StatusRemarks_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Clinic_HMSTreatmentFormHeader">
+          <DataField>Clinic_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DoctorsName_HMSTreatmentFormHeader">
+          <DataField>DoctorsName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="WaitingAt_HMSTreatmentFormHeader">
+          <DataField>WaitingAt_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LabNo_HMSTreatmentFormHeader">
+          <DataField>LabNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Branch_HMSTreatmentFormHeader">
+          <DataField>Branch_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DOB">
+          <DataField>DOB</DataField>
+        </Field>
+        <Field Name="Sex">
+          <DataField>Sex</DataField>
+        </Field>
+        <Field Name="Residence">
+          <DataField>Residence</DataField>
+        </Field>
+        <Field Name="Address">
+          <DataField>Address</DataField>
+        </Field>
+        <Field Name="DOA">
+          <DataField>DOA</DataField>
+        </Field>
+        <Field Name="Age">
+          <DataField>Age</DataField>
+        </Field>
+        <Field Name="Tel">
+          <DataField>Tel</DataField>
+        </Field>
+        <Field Name="PatNo">
+          <DataField>PatNo</DataField>
+        </Field>
+        <Field Name="Logo">
+          <DataField>Logo</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="Adress">
+          <DataField>Adress</DataField>
+        </Field>
+        <Field Name="Adress2">
+          <DataField>Adress2</DataField>
+        </Field>
+        <Field Name="Phone">
+          <DataField>Phone</DataField>
+        </Field>
+        <Field Name="PB">
+          <DataField>PB</DataField>
+        </Field>
+        <Field Name="Temp">
+          <DataField>Temp</DataField>
+        </Field>
+        <Field Name="Pulse">
+          <DataField>Pulse</DataField>
+        </Field>
+        <Field Name="Resp">
+          <DataField>Resp</DataField>
+        </Field>
+        <Field Name="Wt">
+          <DataField>Wt</DataField>
+        </Field>
+        <Field Name="O2">
+          <DataField>O2</DataField>
+        </Field>
+        <Field Name="HPI">
+          <DataField>HPI</DataField>
+        </Field>
+        <Field Name="HPIuser">
+          <DataField>HPIuser</DataField>
+        </Field>
+        <Field Name="Nt1">
+          <DataField>Nt1</DataField>
+        </Field>
+        <Field Name="Nt2">
+          <DataField>Nt2</DataField>
+        </Field>
+        <Field Name="Nt3">
+          <DataField>Nt3</DataField>
+        </Field>
+        <Field Name="Nt4">
+          <DataField>Nt4</DataField>
+        </Field>
+        <Field Name="Nt5">
+          <DataField>Nt5</DataField>
+        </Field>
+        <Field Name="Nt6">
+          <DataField>Nt6</DataField>
+        </Field>
+        <Field Name="Nt7">
+          <DataField>Nt7</DataField>
+        </Field>
+        <Field Name="Nt8">
+          <DataField>Nt8</DataField>
+        </Field>
+        <Field Name="Nt9">
+          <DataField>Nt9</DataField>
+        </Field>
+        <Field Name="Nt10">
+          <DataField>Nt10</DataField>
+        </Field>
+        <Field Name="Chiefcomplaints">
+          <DataField>Chiefcomplaints</DataField>
+        </Field>
+        <Field Name="ChiefcomplaintsUser">
+          <DataField>ChiefcomplaintsUser</DataField>
+        </Field>
+        <Field Name="CC1">
+          <DataField>CC1</DataField>
+        </Field>
+        <Field Name="CC2">
+          <DataField>CC2</DataField>
+        </Field>
+        <Field Name="CC3">
+          <DataField>CC3</DataField>
+        </Field>
+        <Field Name="CC4">
+          <DataField>CC4</DataField>
+        </Field>
+        <Field Name="CC5">
+          <DataField>CC5</DataField>
+        </Field>
+        <Field Name="CC6">
+          <DataField>CC6</DataField>
+        </Field>
+        <Field Name="CC7">
+          <DataField>CC7</DataField>
+        </Field>
+        <Field Name="DocNotes">
+          <DataField>DocNotes</DataField>
+        </Field>
+        <Field Name="DocNotesUser">
+          <DataField>DocNotesUser</DataField>
+        </Field>
+        <Field Name="DocNot1">
+          <DataField>DocNot1</DataField>
+        </Field>
+        <Field Name="DocNot2">
+          <DataField>DocNot2</DataField>
+        </Field>
+        <Field Name="DocNot3">
+          <DataField>DocNot3</DataField>
+        </Field>
+        <Field Name="DocNot4">
+          <DataField>DocNot4</DataField>
+        </Field>
+        <Field Name="DocNot5">
+          <DataField>DocNot5</DataField>
+        </Field>
+        <Field Name="DocNot6">
+          <DataField>DocNot6</DataField>
+        </Field>
+        <Field Name="DocNot7">
+          <DataField>DocNot7</DataField>
+        </Field>
+        <Field Name="PastSurgicalH">
+          <DataField>PastSurgicalH</DataField>
+        </Field>
+        <Field Name="PastSurgicalHUser">
+          <DataField>PastSurgicalHUser</DataField>
+        </Field>
+        <Field Name="PSH1">
+          <DataField>PSH1</DataField>
+        </Field>
+        <Field Name="PSH2">
+          <DataField>PSH2</DataField>
+        </Field>
+        <Field Name="PSH3">
+          <DataField>PSH3</DataField>
+        </Field>
+        <Field Name="PSH4">
+          <DataField>PSH4</DataField>
+        </Field>
+        <Field Name="PSH5">
+          <DataField>PSH5</DataField>
+        </Field>
+        <Field Name="PSH6">
+          <DataField>PSH6</DataField>
+        </Field>
+        <Field Name="PSH7">
+          <DataField>PSH7</DataField>
+        </Field>
+        <Field Name="PastMed">
+          <DataField>PastMed</DataField>
+        </Field>
+        <Field Name="PastMedUser">
+          <DataField>PastMedUser</DataField>
+        </Field>
+        <Field Name="PMH1">
+          <DataField>PMH1</DataField>
+        </Field>
+        <Field Name="PMH2">
+          <DataField>PMH2</DataField>
+        </Field>
+        <Field Name="PMH3">
+          <DataField>PMH3</DataField>
+        </Field>
+        <Field Name="PMH4">
+          <DataField>PMH4</DataField>
+        </Field>
+        <Field Name="PMH5">
+          <DataField>PMH5</DataField>
+        </Field>
+        <Field Name="PMH6">
+          <DataField>PMH6</DataField>
+        </Field>
+        <Field Name="PMH7">
+          <DataField>PMH7</DataField>
+        </Field>
+        <Field Name="PastSocialHist">
+          <DataField>PastSocialHist</DataField>
+        </Field>
+        <Field Name="PastSocialHistUser">
+          <DataField>PastSocialHistUser</DataField>
+        </Field>
+        <Field Name="PSCH1">
+          <DataField>PSCH1</DataField>
+        </Field>
+        <Field Name="PSCH2">
+          <DataField>PSCH2</DataField>
+        </Field>
+        <Field Name="PSCH3">
+          <DataField>PSCH3</DataField>
+        </Field>
+        <Field Name="PSCH4">
+          <DataField>PSCH4</DataField>
+        </Field>
+        <Field Name="PSCH5">
+          <DataField>PSCH5</DataField>
+        </Field>
+        <Field Name="PSCH6">
+          <DataField>PSCH6</DataField>
+        </Field>
+        <Field Name="PSCH7">
+          <DataField>PSCH7</DataField>
+        </Field>
+        <Field Name="MedicalReport">
+          <DataField>MedicalReport</DataField>
+        </Field>
+        <Field Name="MedicalReportUser">
+          <DataField>MedicalReportUser</DataField>
+        </Field>
+        <Field Name="MEDR1">
+          <DataField>MEDR1</DataField>
+        </Field>
+        <Field Name="MEDR2">
+          <DataField>MEDR2</DataField>
+        </Field>
+        <Field Name="MEDR3">
+          <DataField>MEDR3</DataField>
+        </Field>
+        <Field Name="MEDR4">
+          <DataField>MEDR4</DataField>
+        </Field>
+        <Field Name="MEDR5">
+          <DataField>MEDR5</DataField>
+        </Field>
+        <Field Name="MEDR6">
+          <DataField>MEDR6</DataField>
+        </Field>
+        <Field Name="MEDR7">
+          <DataField>MEDR7</DataField>
+        </Field>
+        <Field Name="TreatmentPlan">
+          <DataField>TreatmentPlan</DataField>
+        </Field>
+        <Field Name="TreatmentPlanUser">
+          <DataField>TreatmentPlanUser</DataField>
+        </Field>
+        <Field Name="TreatP1">
+          <DataField>TreatP1</DataField>
+        </Field>
+        <Field Name="TreatP2">
+          <DataField>TreatP2</DataField>
+        </Field>
+        <Field Name="TreatP3">
+          <DataField>TreatP3</DataField>
+        </Field>
+        <Field Name="TreatP4">
+          <DataField>TreatP4</DataField>
+        </Field>
+        <Field Name="TreatP5">
+          <DataField>TreatP5</DataField>
+        </Field>
+        <Field Name="TreatP6">
+          <DataField>TreatP6</DataField>
+        </Field>
+        <Field Name="TreatP7">
+          <DataField>TreatP7</DataField>
+        </Field>
+        <Field Name="Investigations">
+          <DataField>Investigations</DataField>
+        </Field>
+        <Field Name="InvestigationsUser">
+          <DataField>InvestigationsUser</DataField>
+        </Field>
+        <Field Name="Inves1">
+          <DataField>Inves1</DataField>
+        </Field>
+        <Field Name="Inves2">
+          <DataField>Inves2</DataField>
+        </Field>
+        <Field Name="Inves3">
+          <DataField>Inves3</DataField>
+        </Field>
+        <Field Name="Inves4">
+          <DataField>Inves4</DataField>
+        </Field>
+        <Field Name="Inves5">
+          <DataField>Inves5</DataField>
+        </Field>
+        <Field Name="Inves6">
+          <DataField>Inves6</DataField>
+        </Field>
+        <Field Name="Inves7">
+          <DataField>Inves7</DataField>
+        </Field>
+        <Field Name="AssessmentPlan">
+          <DataField>AssessmentPlan</DataField>
+        </Field>
+        <Field Name="AssessmentPlanuser">
+          <DataField>AssessmentPlanuser</DataField>
+        </Field>
+        <Field Name="Asses1">
+          <DataField>Asses1</DataField>
+        </Field>
+        <Field Name="Asses2">
+          <DataField>Asses2</DataField>
+        </Field>
+        <Field Name="Asses3">
+          <DataField>Asses3</DataField>
+        </Field>
+        <Field Name="Asses4">
+          <DataField>Asses4</DataField>
+        </Field>
+        <Field Name="Asses5">
+          <DataField>Asses5</DataField>
+        </Field>
+        <Field Name="Asses6">
+          <DataField>Asses6</DataField>
+        </Field>
+        <Field Name="Asses7">
+          <DataField>Asses7</DataField>
+        </Field>
+        <Field Name="ReviewsOfSytems">
+          <DataField>ReviewsOfSytems</DataField>
+        </Field>
+        <Field Name="ReviewsOfSytemsUser">
+          <DataField>ReviewsOfSytemsUser</DataField>
+        </Field>
+        <Field Name="RvwS1">
+          <DataField>RvwS1</DataField>
+        </Field>
+        <Field Name="RvwS2">
+          <DataField>RvwS2</DataField>
+        </Field>
+        <Field Name="RvwS3">
+          <DataField>RvwS3</DataField>
+        </Field>
+        <Field Name="RvwS4">
+          <DataField>RvwS4</DataField>
+        </Field>
+        <Field Name="RvwS5">
+          <DataField>RvwS5</DataField>
+        </Field>
+        <Field Name="RvwS6">
+          <DataField>RvwS6</DataField>
+        </Field>
+        <Field Name="RvwS7">
+          <DataField>RvwS7</DataField>
+        </Field>
+        <Field Name="Impression">
+          <DataField>Impression</DataField>
+        </Field>
+        <Field Name="Impressionuser">
+          <DataField>Impressionuser</DataField>
+        </Field>
+        <Field Name="Impr1">
+          <DataField>Impr1</DataField>
+        </Field>
+        <Field Name="Impr2">
+          <DataField>Impr2</DataField>
+        </Field>
+        <Field Name="Impr3">
+          <DataField>Impr3</DataField>
+        </Field>
+        <Field Name="Impr4">
+          <DataField>Impr4</DataField>
+        </Field>
+        <Field Name="Impr5">
+          <DataField>Impr5</DataField>
+        </Field>
+        <Field Name="Impr6">
+          <DataField>Impr6</DataField>
+        </Field>
+        <Field Name="Impr7">
+          <DataField>Impr7</DataField>
+        </Field>
+        <Field Name="VisualAcuity">
+          <DataField>VisualAcuity</DataField>
+        </Field>
+        <Field Name="VisualAcuityUser">
+          <DataField>VisualAcuityUser</DataField>
+        </Field>
+        <Field Name="VA1">
+          <DataField>VA1</DataField>
+        </Field>
+        <Field Name="VA2">
+          <DataField>VA2</DataField>
+        </Field>
+        <Field Name="VA3">
+          <DataField>VA3</DataField>
+        </Field>
+        <Field Name="VA4">
+          <DataField>VA4</DataField>
+        </Field>
+        <Field Name="VA5">
+          <DataField>VA5</DataField>
+        </Field>
+        <Field Name="VA6">
+          <DataField>VA6</DataField>
+        </Field>
+        <Field Name="VA7">
+          <DataField>VA7</DataField>
+        </Field>
+        <Field Name="PastOcularHis">
+          <DataField>PastOcularHis</DataField>
+        </Field>
+        <Field Name="PastOcularHisUser">
+          <DataField>PastOcularHisUser</DataField>
+        </Field>
+        <Field Name="POCH1">
+          <DataField>POCH1</DataField>
+        </Field>
+        <Field Name="POCH2">
+          <DataField>POCH2</DataField>
+        </Field>
+        <Field Name="POCH3">
+          <DataField>POCH3</DataField>
+        </Field>
+        <Field Name="POCH4">
+          <DataField>POCH4</DataField>
+        </Field>
+        <Field Name="POCH5">
+          <DataField>POCH5</DataField>
+        </Field>
+        <Field Name="POCH6">
+          <DataField>POCH6</DataField>
+        </Field>
+        <Field Name="POCH7">
+          <DataField>POCH7</DataField>
+        </Field>
+        <Field Name="PhysicalExam">
+          <DataField>PhysicalExam</DataField>
+        </Field>
+        <Field Name="PhysicalExamUser">
+          <DataField>PhysicalExamUser</DataField>
+        </Field>
+        <Field Name="PhyEx1">
+          <DataField>PhyEx1</DataField>
+        </Field>
+        <Field Name="PhyEx2">
+          <DataField>PhyEx2</DataField>
+        </Field>
+        <Field Name="PhyEx3">
+          <DataField>PhyEx3</DataField>
+        </Field>
+        <Field Name="PhyEx4">
+          <DataField>PhyEx4</DataField>
+        </Field>
+        <Field Name="PhyEx5">
+          <DataField>PhyEx5</DataField>
+        </Field>
+        <Field Name="PhyEx6">
+          <DataField>PhyEx6</DataField>
+        </Field>
+        <Field Name="PhyEx7">
+          <DataField>PhyEx7</DataField>
+        </Field>
+        <Field Name="Diagnosis">
+          <DataField>Diagnosis</DataField>
+        </Field>
+        <Field Name="DiagnosisName1">
+          <DataField>DiagnosisName1</DataField>
+        </Field>
+        <Field Name="DiagnosisName2">
+          <DataField>DiagnosisName2</DataField>
+        </Field>
+        <Field Name="DiagnosisName3">
+          <DataField>DiagnosisName3</DataField>
+        </Field>
+        <Field Name="DiagnosisName4">
+          <DataField>DiagnosisName4</DataField>
+        </Field>
+        <Field Name="DiagnosisName5">
+          <DataField>DiagnosisName5</DataField>
+        </Field>
+        <Field Name="DiagnosisName6">
+          <DataField>DiagnosisName6</DataField>
+        </Field>
+        <Field Name="DiagnosisName7">
+          <DataField>DiagnosisName7</DataField>
+        </Field>
+        <Field Name="TreatDone">
+          <DataField>TreatDone</DataField>
+        </Field>
+        <Field Name="TDone1">
+          <DataField>TDone1</DataField>
+        </Field>
+        <Field Name="TDone2">
+          <DataField>TDone2</DataField>
+        </Field>
+        <Field Name="TDone3">
+          <DataField>TDone3</DataField>
+        </Field>
+        <Field Name="TDone4">
+          <DataField>TDone4</DataField>
+        </Field>
+        <Field Name="TDone5">
+          <DataField>TDone5</DataField>
+        </Field>
+        <Field Name="TDone6">
+          <DataField>TDone6</DataField>
+        </Field>
+        <Field Name="TDone7">
+          <DataField>TDone7</DataField>
+        </Field>
+        <Field Name="PastDental">
+          <DataField>PastDental</DataField>
+        </Field>
+        <Field Name="PastDentalUser">
+          <DataField>PastDentalUser</DataField>
+        </Field>
+        <Field Name="PDent1">
+          <DataField>PDent1</DataField>
+        </Field>
+        <Field Name="PDent2">
+          <DataField>PDent2</DataField>
+        </Field>
+        <Field Name="PDent3">
+          <DataField>PDent3</DataField>
+        </Field>
+        <Field Name="PDent4">
+          <DataField>PDent4</DataField>
+        </Field>
+        <Field Name="PDent5">
+          <DataField>PDent5</DataField>
+        </Field>
+        <Field Name="PDent6">
+          <DataField>PDent6</DataField>
+        </Field>
+        <Field Name="PDent7">
+          <DataField>PDent7</DataField>
+        </Field>
+        <Field Name="PastFam">
+          <DataField>PastFam</DataField>
+        </Field>
+        <Field Name="PastFamUser">
+          <DataField>PastFamUser</DataField>
+        </Field>
+        <Field Name="PFam1">
+          <DataField>PFam1</DataField>
+        </Field>
+        <Field Name="PFam2">
+          <DataField>PFam2</DataField>
+        </Field>
+        <Field Name="PFam3">
+          <DataField>PFam3</DataField>
+        </Field>
+        <Field Name="PFam4">
+          <DataField>PFam4</DataField>
+        </Field>
+        <Field Name="PFam5">
+          <DataField>PFam5</DataField>
+        </Field>
+        <Field Name="PFam6">
+          <DataField>PFam6</DataField>
+        </Field>
+        <Field Name="PFam7">
+          <DataField>PFam7</DataField>
+        </Field>
+        <Field Name="ReportForNavId_228">
+          <DataField>ReportForNavId_228</DataField>
+        </Field>
+        <Field Name="PatNames">
+          <DataField>PatNames</DataField>
+        </Field>
+        <Field Name="LaboratoryNo_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryNo_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="LaboratoryTestCode_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryTestCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SpecimenCode_HMSLaboratoryResultsEntry">
+          <DataField>SpecimenCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SpecimenName_HMSLaboratoryResultsEntry">
+          <DataField>SpecimenName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="AssignedUserID_HMSLaboratoryResultsEntry">
+          <DataField>AssignedUserID_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="CollectionDate_HMSLaboratoryResultsEntry">
+          <DataField>CollectionDate_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="CollectionTime_HMSLaboratoryResultsEntry">
+          <DataField>CollectionTime_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="MeasuringUnitCode_HMSLaboratoryResultsEntry">
+          <DataField>MeasuringUnitCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="MeasuringUnitName_HMSLaboratoryResultsEntry">
+          <DataField>MeasuringUnitName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Results_HMSLaboratoryResultsEntry">
+          <DataField>Results_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Results_HMSLaboratoryResultsEntryFormat">
+          <DataField>Results_HMSLaboratoryResultsEntryFormat</DataField>
+        </Field>
+        <Field Name="Remarks_HMSLaboratoryResultsEntry">
+          <DataField>Remarks_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Completed_HMSLaboratoryResultsEntry">
+          <DataField>Completed_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Positive_HMSLaboratoryResultsEntry">
+          <DataField>Positive_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="TestNormalRanges_HMSLaboratoryResultsEntry">
+          <DataField>TestNormalRanges_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="TestUnits_HMSLaboratoryResultsEntry">
+          <DataField>TestUnits_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Flag_HMSLaboratoryResultsEntry">
+          <DataField>Flag_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Reactive_HMSLaboratoryResultsEntry">
+          <DataField>Reactive_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="NormalRange_HMSLaboratoryResultsEntry">
+          <DataField>NormalRange_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SortTest_HMSLaboratoryResultsEntry">
+          <DataField>SortTest_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="LabTestDate_HMSLaboratoryResultsEntry">
+          <DataField>LabTestDate_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="DoctID">
+          <DataField>DoctID</DataField>
+        </Field>
+        <Field Name="ReceivedDate">
+          <DataField>ReceivedDate</DataField>
+        </Field>
+        <Field Name="CompletionDate">
+          <DataField>CompletionDate</DataField>
+        </Field>
+        <Field Name="TestDesc">
+          <DataField>TestDesc</DataField>
+        </Field>
+        <Field Name="SupervisorID">
+          <DataField>SupervisorID</DataField>
+        </Field>
+        <Field Name="AgeinYrs">
+          <DataField>AgeinYrs</DataField>
+        </Field>
+        <Field Name="PatGender">
+          <DataField>PatGender</DataField>
+        </Field>
+        <Field Name="LaboratoryTestName_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryTestName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Results">
+          <DataField>Results</DataField>
+        </Field>
+        <Field Name="Counts">
+          <DataField>Counts</DataField>
+        </Field>
+        <Field Name="ReportForNavId_210">
+          <DataField>ReportForNavId_210</DataField>
+        </Field>
+        <Field Name="TreatmentNo_HMSTreatmentFormDrug">
+          <DataField>TreatmentNo_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="DrugNo_HMSTreatmentFormDrug">
+          <DataField>DrugNo_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="DrugName_HMSTreatmentFormDrug">
+          <DataField>DrugName_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Quantity_HMSTreatmentFormDrug">
+          <DataField>Quantity_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="UnitOfMeasure_HMSTreatmentFormDrug">
+          <DataField>UnitOfMeasure_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Remarks_HMSTreatmentFormDrug">
+          <DataField>Remarks_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="PharmacyCode_HMSTreatmentFormDrug">
+          <DataField>PharmacyCode_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="ActualQuantity_HMSTreatmentFormDrug">
+          <DataField>ActualQuantity_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="ActualQuantity_HMSTreatmentFormDrugFormat">
+          <DataField>ActualQuantity_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="Inventory_HMSTreatmentFormDrug">
+          <DataField>Inventory_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Inventory_HMSTreatmentFormDrugFormat">
+          <DataField>Inventory_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="Issued_HMSTreatmentFormDrug">
+          <DataField>Issued_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Take_HMSTreatmentFormDrug">
+          <DataField>Take_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Take_HMSTreatmentFormDrugFormat">
+          <DataField>Take_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="MarkedasIncompatible_HMSTreatmentFormDrug">
+          <DataField>MarkedasIncompatible_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="ProductGroup_HMSTreatmentFormDrug">
+          <DataField>ProductGroup_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Route_HMSTreatmentFormDrug">
+          <DataField>Route_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Frequency_HMSTreatmentFormDrug">
+          <DataField>Frequency_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Dosage_HMSTreatmentFormDrug">
+          <DataField>Dosage_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="NumberofDays_HMSTreatmentFormDrug">
+          <DataField>NumberofDays_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Posted_HMSTreatmentFormDrug">
+          <DataField>Posted_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="IPStatus_HMSTreatmentFormDrug">
+          <DataField>IPStatus_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Inpatient_HMSTreatmentFormDrug">
+          <DataField>Inpatient_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Stoppedby_HMSTreatmentFormDrug">
+          <DataField>Stoppedby_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="StoppedDate_HMSTreatmentFormDrug">
+          <DataField>StoppedDate_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="PrescriptionDose_HMSTreatmentFormDrug">
+          <DataField>PrescriptionDose_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="DateTaken_HMSTreatmentFormDrug">
+          <DataField>DateTaken_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Status_HMSTreatmentFormDrug">
+          <DataField>Status_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="UnitPrice_HMSTreatmentFormDrug">
+          <DataField>UnitPrice_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="UnitPrice_HMSTreatmentFormDrugFormat">
+          <DataField>UnitPrice_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="TotalPrice_HMSTreatmentFormDrug">
+          <DataField>TotalPrice_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="TotalPrice_HMSTreatmentFormDrugFormat">
+          <DataField>TotalPrice_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="LlineNo_HMSTreatmentFormDrug">
+          <DataField>LlineNo_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Branch_HMSTreatmentFormDrug">
+          <DataField>Branch_HMSTreatmentFormDrug</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

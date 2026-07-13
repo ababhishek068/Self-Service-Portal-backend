@@ -1,0 +1,272 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Logo">
+          <DataField>Logo</DataField>
+        </Field>
+        <Field Name="ComName">
+          <DataField>ComName</DataField>
+        </Field>
+        <Field Name="Name_of_Patient______UPPERCASE_PatientName_">
+          <DataField>Name_of_Patient______UPPERCASE_PatientName_</DataField>
+        </Field>
+        <Field Name="Doctors_Name______DoctorName">
+          <DataField>Doctors_Name______DoctorName</DataField>
+        </Field>
+        <Field Name="TreatmentNo_HMSTreatmentFormHeader">
+          <DataField>TreatmentNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentType_HMSTreatmentFormHeader">
+          <DataField>TreatmentType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentDate_HMSTreatmentFormHeader">
+          <DataField>TreatmentDate_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentTime_HMSTreatmentFormHeader">
+          <DataField>TreatmentTime_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DoctorID_HMSTreatmentFormHeader">
+          <DataField>DoctorID_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientNo_HMSTreatmentFormHeader">
+          <DataField>PatientNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentRemarks_HMSTreatmentFormHeader">
+          <DataField>TreatmentRemarks_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Status_HMSTreatmentFormHeader">
+          <DataField>Status_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LinkNo_HMSTreatmentFormHeader">
+          <DataField>LinkNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LinkType_HMSTreatmentFormHeader">
+          <DataField>LinkType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="NoSeries_HMSTreatmentFormHeader">
+          <DataField>NoSeries_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDutyDays_HMSTreatmentFormHeader">
+          <DataField>OffDutyDays_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDutyDays_HMSTreatmentFormHeaderFormat">
+          <DataField>OffDutyDays_HMSTreatmentFormHeaderFormat</DataField>
+        </Field>
+        <Field Name="LightDutyDays_HMSTreatmentFormHeader">
+          <DataField>LightDutyDays_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LightDutyDays_HMSTreatmentFormHeaderFormat">
+          <DataField>LightDutyDays_HMSTreatmentFormHeaderFormat</DataField>
+        </Field>
+        <Field Name="OffDutyComments_HMSTreatmentFormHeader">
+          <DataField>OffDutyComments_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="OffDuty_HMSTreatmentFormHeader">
+          <DataField>OffDuty_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TreatmentLocation_HMSTreatmentFormHeader">
+          <DataField>TreatmentLocation_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientType_HMSTreatmentFormHeader">
+          <DataField>PatientType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Direct_HMSTreatmentFormHeader">
+          <DataField>Direct_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LabStatus_HMSTreatmentFormHeader">
+          <DataField>LabStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="RadiologyStatus_HMSTreatmentFormHeader">
+          <DataField>RadiologyStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PharmacyStatus_HMSTreatmentFormHeader">
+          <DataField>PharmacyStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="InjectionStatus_HMSTreatmentFormHeader">
+          <DataField>InjectionStatus_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Surname_HMSTreatmentFormHeader">
+          <DataField>Surname_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="MiddleName_HMSTreatmentFormHeader">
+          <DataField>MiddleName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="LastName_HMSTreatmentFormHeader">
+          <DataField>LastName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="CorrespondenceAddress1_HMSTreatmentFormHeader">
+          <DataField>CorrespondenceAddress1_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="TelephoneNo1_HMSTreatmentFormHeader">
+          <DataField>TelephoneNo1_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="Email_HMSTreatmentFormHeader">
+          <DataField>Email_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientRefNo_HMSTreatmentFormHeader">
+          <DataField>PatientRefNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="PatientName_HMSTreatmentFormHeader">
+          <DataField>PatientName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="SettlementType_HMSTreatmentFormHeader">
+          <DataField>SettlementType_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="MembershipNo_HMSTreatmentFormHeader">
+          <DataField>MembershipNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="InsuranceName_HMSTreatmentFormHeader">
+          <DataField>InsuranceName_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="AdmNo_HMSTreatmentFormHeader">
+          <DataField>AdmNo_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="DoctorNotes_HMSTreatmentFormHeader">
+          <DataField>DoctorNotes_HMSTreatmentFormHeader</DataField>
+        </Field>
+        <Field Name="ReportForNavId_40">
+          <DataField>ReportForNavId_40</DataField>
+        </Field>
+        <Field Name="Treatmentno_HMSReferralHeader">
+          <DataField>Treatmentno_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="HospitalNo_HMSReferralHeader">
+          <DataField>HospitalNo_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="PatientNo_HMSReferralHeader">
+          <DataField>PatientNo_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="DateReferred_HMSReferralHeader">
+          <DataField>DateReferred_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="ReferralReason_HMSReferralHeader">
+          <DataField>ReferralReason_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="ReferralRemarks_HMSReferralHeader">
+          <DataField>ReferralRemarks_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="Status_HMSReferralHeader">
+          <DataField>Status_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="Surname_HMSReferralHeader">
+          <DataField>Surname_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="MiddleName_HMSReferralHeader">
+          <DataField>MiddleName_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="LastName_HMSReferralHeader">
+          <DataField>LastName_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="IDNumber_HMSReferralHeader">
+          <DataField>IDNumber_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="CorrespondenceAddress1_HMSReferralHeader">
+          <DataField>CorrespondenceAddress1_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="TelephoneNo1_HMSReferralHeader">
+          <DataField>TelephoneNo1_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="Email_HMSReferralHeader">
+          <DataField>Email_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="PatientRefNo_HMSReferralHeader">
+          <DataField>PatientRefNo_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="Diagnosis_HMSReferralHeader">
+          <DataField>Diagnosis_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="StudentNo_HMSReferralHeader">
+          <DataField>StudentNo_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="ADMNo_HMSReferralHeader">
+          <DataField>ADMNo_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="HospitalName_HMSReferralHeader">
+          <DataField>HospitalName_HMSReferralHeader</DataField>
+        </Field>
+        <Field Name="ReportForNavId_8">
+          <DataField>ReportForNavId_8</DataField>
+        </Field>
+        <Field Name="DiagnosisName">
+          <DataField>DiagnosisName</DataField>
+        </Field>
+        <Field Name="Description_HMSTreatmentFormDiagnosis">
+          <DataField>Description_HMSTreatmentFormDiagnosis</DataField>
+        </Field>
+        <Field Name="DiagnosisNo_HMSTreatmentFormDiagnosis">
+          <DataField>DiagnosisNo_HMSTreatmentFormDiagnosis</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

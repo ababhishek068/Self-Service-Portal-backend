@@ -1,0 +1,149 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_5769">
+          <DataField>ReportForNavId_5769</DataField>
+        </Field>
+        <Field Name="FORMAT_TODAY_0_4_">
+          <DataField>FORMAT_TODAY_0_4_</DataField>
+        </Field>
+        <Field Name="COMPANYNAME">
+          <DataField>COMPANYNAME</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENO">
+          <DataField>CurrReport_PAGENO</DataField>
+        </Field>
+        <Field Name="UserId">
+          <DataField>UserId</DataField>
+        </Field>
+        <Field Name="PFNo">
+          <DataField>PFNo</DataField>
+        </Field>
+        <Field Name="HMS_Patient__Patient_Type_">
+          <DataField>HMS_Patient__Patient_Type_</DataField>
+        </Field>
+        <Field Name="HMS_Patient_Gender">
+          <DataField>HMS_Patient_Gender</DataField>
+        </Field>
+        <Field Name="HMS_Patient__Date_Of_Birth_">
+          <DataField>HMS_Patient__Date_Of_Birth_</DataField>
+        </Field>
+        <Field Name="PatientName">
+          <DataField>PatientName</DataField>
+        </Field>
+        <Field Name="HMS_Patient__ID_Number_">
+          <DataField>HMS_Patient__ID_Number_</DataField>
+        </Field>
+        <Field Name="HMS_Patient__COUNT">
+          <DataField>HMS_Patient__COUNT</DataField>
+        </Field>
+        <Field Name="HEALTH_SERVICESCaption">
+          <DataField>HEALTH_SERVICESCaption</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENOCaption">
+          <DataField>CurrReport_PAGENOCaption</DataField>
+        </Field>
+        <Field Name="PATIENT_LISTING_REPORTCaption">
+          <DataField>PATIENT_LISTING_REPORTCaption</DataField>
+        </Field>
+        <Field Name="Date_Printed_Caption">
+          <DataField>Date_Printed_Caption</DataField>
+        </Field>
+        <Field Name="Printed_By_Caption">
+          <DataField>Printed_By_Caption</DataField>
+        </Field>
+        <Field Name="No_Caption">
+          <DataField>No_Caption</DataField>
+        </Field>
+        <Field Name="TypeCaption">
+          <DataField>TypeCaption</DataField>
+        </Field>
+        <Field Name="HMS_Patient_GenderCaption">
+          <DataField>HMS_Patient_GenderCaption</DataField>
+        </Field>
+        <Field Name="HMS_Patient__Date_Of_Birth_Caption">
+          <DataField>HMS_Patient__Date_Of_Birth_Caption</DataField>
+        </Field>
+        <Field Name="HMS_Patient__ID_Number_Caption">
+          <DataField>HMS_Patient__ID_Number_Caption</DataField>
+        </Field>
+        <Field Name="Patient_nameCaption">
+          <DataField>Patient_nameCaption</DataField>
+        </Field>
+        <Field Name="Total_Number_Of_Patients_Listed_Caption">
+          <DataField>Total_Number_Of_Patients_Listed_Caption</DataField>
+        </Field>
+        <Field Name="HMS_Patient_Patient_No_">
+          <DataField>HMS_Patient_Patient_No_</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

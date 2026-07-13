@@ -1,0 +1,398 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="PatientNo_HMSPatientCharges">
+          <DataField>PatientNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_HMSPatientCharges">
+          <DataField>ShortcutDimension1Code_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TransactionType_HMSPatientCharges">
+          <DataField>TransactionType_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Code_HMSPatientCharges">
+          <DataField>Code_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Description_HMSPatientCharges">
+          <DataField>Description_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TranDate">
+          <DataField>TranDate</DataField>
+        </Field>
+        <Field Name="Amount_HMSPatientCharges">
+          <DataField>Amount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Amount_HMSPatientChargesFormat">
+          <DataField>Amount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="Remarks_HMSPatientCharges">
+          <DataField>Remarks_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Qty">
+          <DataField>Qty</DataField>
+        </Field>
+        <Field Name="QtyFormat">
+          <DataField>QtyFormat</DataField>
+        </Field>
+        <Field Name="AmountPaid_HMSPatientCharges">
+          <DataField>AmountPaid_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AmountPaid_HMSPatientChargesFormat">
+          <DataField>AmountPaid_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="ShortcutDimension2Code_HMSPatientCharges">
+          <DataField>ShortcutDimension2Code_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppliedAmount_HMSPatientCharges">
+          <DataField>AppliedAmount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppliedAmount_HMSPatientChargesFormat">
+          <DataField>AppliedAmount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="Applyto_HMSPatientCharges">
+          <DataField>Applyto_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Recognized_HMSPatientCharges">
+          <DataField>Recognized_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Posted_HMSPatientCharges">
+          <DataField>Posted_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="PharmacyNo_HMSPatientCharges">
+          <DataField>PharmacyNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Location_HMSPatientCharges">
+          <DataField>Location_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Unit_HMSPatientCharges">
+          <DataField>Unit_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Unit_HMSPatientChargesFormat">
+          <DataField>Unit_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="RecoveredFirst_HMSPatientCharges">
+          <DataField>RecoveredFirst_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Transfer_HMSPatientCharges">
+          <DataField>Transfer_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TransferAmount_HMSPatientCharges">
+          <DataField>TransferAmount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TransferAmount_HMSPatientChargesFormat">
+          <DataField>TransferAmount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="Transfered_HMSPatientCharges">
+          <DataField>Transfered_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TransactonID_HMSPatientCharges">
+          <DataField>TransactonID_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="NoSeries_HMSPatientCharges">
+          <DataField>NoSeries_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="FullyPaid_HMSPatientCharges">
+          <DataField>FullyPaid_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="RoomAllocation_HMSPatientCharges">
+          <DataField>RoomAllocation_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Charge_HMSPatientCharges">
+          <DataField>Charge_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Reversed_HMSPatientCharges">
+          <DataField>Reversed_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Distribution_HMSPatientCharges">
+          <DataField>Distribution_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Distribution_HMSPatientChargesFormat">
+          <DataField>Distribution_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="Quantity_HMSPatientCharges">
+          <DataField>Quantity_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Quantity_HMSPatientChargesFormat">
+          <DataField>Quantity_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="Course_HMSPatientCharges">
+          <DataField>Course_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppliedPayment_HMSPatientCharges">
+          <DataField>AppliedPayment_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppliedPayment_HMSPatientChargesFormat">
+          <DataField>AppliedPayment_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="RecoveryPriority_HMSPatientCharges">
+          <DataField>RecoveryPriority_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="FullTuitionFee_HMSPatientCharges">
+          <DataField>FullTuitionFee_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="FullTuitionFee_HMSPatientChargesFormat">
+          <DataField>FullTuitionFee_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="DistributionAccount_HMSPatientCharges">
+          <DataField>DistributionAccount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="Currency_HMSPatientCharges">
+          <DataField>Currency_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="OverCharged_HMSPatientCharges">
+          <DataField>OverCharged_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="OverChargedAmount_HMSPatientCharges">
+          <DataField>OverChargedAmount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="OverChargedAmount_HMSPatientChargesFormat">
+          <DataField>OverChargedAmount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="SystemCreated_HMSPatientCharges">
+          <DataField>SystemCreated_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="ChargeGender_HMSPatientCharges">
+          <DataField>ChargeGender_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="CustomerNo_HMSPatientCharges">
+          <DataField>CustomerNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="BillSection_HMSPatientCharges">
+          <DataField>BillSection_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="LineNo_HMSPatientCharges">
+          <DataField>LineNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="GLAccount_HMSPatientCharges">
+          <DataField>GLAccount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="TreatmentNo_HMSPatientCharges">
+          <DataField>TreatmentNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="InvoiceCounter_HMSPatientCharges">
+          <DataField>InvoiceCounter_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="ApplicableSection_HMSPatientCharges">
+          <DataField>ApplicableSection_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="LinkNo_HMSPatientCharges">
+          <DataField>LinkNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="LinkNoLk_HMSPatientCharges">
+          <DataField>LinkNoLk_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppointmentNo_HMSPatientCharges">
+          <DataField>AppointmentNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="PatientTypeLk_HMSPatientCharges">
+          <DataField>PatientTypeLk_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AppointmentNoLk_HMSPatientCharges">
+          <DataField>AppointmentNoLk_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="BillingType_HMSPatientCharges">
+          <DataField>BillingType_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="BillingStartDate_HMSPatientCharges">
+          <DataField>BillingStartDate_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="BillingEndDate_HMSPatientCharges">
+          <DataField>BillingEndDate_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="AdmissionNo_HMSPatientCharges">
+          <DataField>AdmissionNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="DoctorID_HMSPatientCharges">
+          <DataField>DoctorID_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="DimensionSetID_HMSPatientCharges">
+          <DataField>DimensionSetID_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="NewDimensionSetID_HMSPatientCharges">
+          <DataField>NewDimensionSetID_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="GLAccountNo_HMSPatientCharges">
+          <DataField>GLAccountNo_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="DoctorsAmount_HMSPatientCharges">
+          <DataField>DoctorsAmount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="DoctorsAmount_HMSPatientChargesFormat">
+          <DataField>DoctorsAmount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="InsuranceAmount_HMSPatientCharges">
+          <DataField>InsuranceAmount_HMSPatientCharges</DataField>
+        </Field>
+        <Field Name="InsuranceAmount_HMSPatientChargesFormat">
+          <DataField>InsuranceAmount_HMSPatientChargesFormat</DataField>
+        </Field>
+        <Field Name="RunBal">
+          <DataField>RunBal</DataField>
+        </Field>
+        <Field Name="RunBalFormat">
+          <DataField>RunBalFormat</DataField>
+        </Field>
+        <Field Name="InsNo">
+          <DataField>InsNo</DataField>
+        </Field>
+        <Field Name="InsName">
+          <DataField>InsName</DataField>
+        </Field>
+        <Field Name="MemberNo">
+          <DataField>MemberNo</DataField>
+        </Field>
+        <Field Name="AdmDate">
+          <DataField>AdmDate</DataField>
+        </Field>
+        <Field Name="dischargeDate">
+          <DataField>dischargeDate</DataField>
+        </Field>
+        <Field Name="Ward">
+          <DataField>Ward</DataField>
+        </Field>
+        <Field Name="Bed">
+          <DataField>Bed</DataField>
+        </Field>
+        <Field Name="InvoiceNo">
+          <DataField>InvoiceNo</DataField>
+        </Field>
+        <Field Name="PatName">
+          <DataField>PatName</DataField>
+        </Field>
+        <Field Name="Balance">
+          <DataField>Balance</DataField>
+        </Field>
+        <Field Name="BalanceFormat">
+          <DataField>BalanceFormat</DataField>
+        </Field>
+        <Field Name="InvAmt">
+          <DataField>InvAmt</DataField>
+        </Field>
+        <Field Name="InvAmtFormat">
+          <DataField>InvAmtFormat</DataField>
+        </Field>
+        <Field Name="RecAmt">
+          <DataField>RecAmt</DataField>
+        </Field>
+        <Field Name="RecAmtFormat">
+          <DataField>RecAmtFormat</DataField>
+        </Field>
+        <Field Name="LogoName">
+          <DataField>LogoName</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="CompInfAddress">
+          <DataField>CompInfAddress</DataField>
+        </Field>
+        <Field Name="CompInfAddress2">
+          <DataField>CompInfAddress2</DataField>
+        </Field>
+        <Field Name="CompInfPhone">
+          <DataField>CompInfPhone</DataField>
+        </Field>
+        <Field Name="UserN">
+          <DataField>UserN</DataField>
+        </Field>
+        <Field Name="Amt">
+          <DataField>Amt</DataField>
+        </Field>
+        <Field Name="AmtFormat">
+          <DataField>AmtFormat</DataField>
+        </Field>
+        <Field Name="DocName">
+          <DataField>DocName</DataField>
+        </Field>
+        <Field Name="UAmt">
+          <DataField>UAmt</DataField>
+        </Field>
+        <Field Name="UAmtFormat">
+          <DataField>UAmtFormat</DataField>
+        </Field>
+        <Field Name="AdminNo">
+          <DataField>AdminNo</DataField>
+        </Field>
+        <Field Name="Names">
+          <DataField>Names</DataField>
+        </Field>
+        <Field Name="InsurancePaidAmount">
+          <DataField>InsurancePaidAmount</DataField>
+        </Field>
+        <Field Name="InsurancePaidAmountFormat">
+          <DataField>InsurancePaidAmountFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

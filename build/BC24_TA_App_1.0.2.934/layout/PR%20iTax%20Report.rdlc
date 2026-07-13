@@ -1,0 +1,278 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="EmployeeType_HREmployees">
+          <DataField>EmployeeType_HREmployees</DataField>
+        </Field>
+        <Field Name="No_">
+          <DataField>No_</DataField>
+        </Field>
+        <Field Name="Employee_Contract_Type">
+          <DataField>Employee_Contract_Type</DataField>
+        </Field>
+        <Field Name="Employement_Type">
+          <DataField>Employement_Type</DataField>
+        </Field>
+        <Field Name="Contract_Type">
+          <DataField>Contract_Type</DataField>
+        </Field>
+        <Field Name="Citizenship_HREmployees">
+          <DataField>Citizenship_HREmployees</DataField>
+        </Field>
+        <Field Name="FullName_HREmployees">
+          <DataField>FullName_HREmployees</DataField>
+        </Field>
+        <Field Name="PINNo_HREmployees">
+          <DataField>PINNo_HREmployees</DataField>
+        </Field>
+        <Field Name="BPAY">
+          <DataField>BPAY</DataField>
+        </Field>
+        <Field Name="BPAYFormat">
+          <DataField>BPAYFormat</DataField>
+        </Field>
+        <Field Name="HouseAllowance">
+          <DataField>HouseAllowance</DataField>
+        </Field>
+        <Field Name="HouseAllowanceFormat">
+          <DataField>HouseAllowanceFormat</DataField>
+        </Field>
+        <Field Name="TransportAllowance">
+          <DataField>TransportAllowance</DataField>
+        </Field>
+        <Field Name="TransportAllowanceFormat">
+          <DataField>TransportAllowanceFormat</DataField>
+        </Field>
+        <Field Name="LeaveAllowance">
+          <DataField>LeaveAllowance</DataField>
+        </Field>
+        <Field Name="LeaveAllowanceFormat">
+          <DataField>LeaveAllowanceFormat</DataField>
+        </Field>
+        <Field Name="DirectorsFee">
+          <DataField>DirectorsFee</DataField>
+        </Field>
+        <Field Name="DirectorsFeeFormat">
+          <DataField>DirectorsFeeFormat</DataField>
+        </Field>
+        <Field Name="OvertimeAllowance">
+          <DataField>OvertimeAllowance</DataField>
+        </Field>
+        <Field Name="OvertimeAllowanceFormat">
+          <DataField>OvertimeAllowanceFormat</DataField>
+        </Field>
+        <Field Name="Lumpsum">
+          <DataField>Lumpsum</DataField>
+        </Field>
+        <Field Name="LumpsumFormat">
+          <DataField>LumpsumFormat</DataField>
+        </Field>
+        <Field Name="OtherAllowances">
+          <DataField>OtherAllowances</DataField>
+        </Field>
+        <Field Name="OtherAllowancesFormat">
+          <DataField>OtherAllowancesFormat</DataField>
+        </Field>
+        <Field Name="TotalCashPay">
+          <DataField>TotalCashPay</DataField>
+        </Field>
+        <Field Name="TotalCashPayFormat">
+          <DataField>TotalCashPayFormat</DataField>
+        </Field>
+        <Field Name="ValueOfCar">
+          <DataField>ValueOfCar</DataField>
+        </Field>
+        <Field Name="ValueOfCarFormat">
+          <DataField>ValueOfCarFormat</DataField>
+        </Field>
+        <Field Name="OtherNonCash">
+          <DataField>OtherNonCash</DataField>
+        </Field>
+        <Field Name="OtherNonCashFormat">
+          <DataField>OtherNonCashFormat</DataField>
+        </Field>
+        <Field Name="TotalNonCash">
+          <DataField>TotalNonCash</DataField>
+        </Field>
+        <Field Name="TotalNonCashFormat">
+          <DataField>TotalNonCashFormat</DataField>
+        </Field>
+        <Field Name="GlobalIncome">
+          <DataField>GlobalIncome</DataField>
+        </Field>
+        <Field Name="GlobalIncomeFormat">
+          <DataField>GlobalIncomeFormat</DataField>
+        </Field>
+        <Field Name="TypeOfHousing">
+          <DataField>TypeOfHousing</DataField>
+        </Field>
+        <Field Name="TypeOfHousingFormat">
+          <DataField>TypeOfHousingFormat</DataField>
+        </Field>
+        <Field Name="RentOfHouse">
+          <DataField>RentOfHouse</DataField>
+        </Field>
+        <Field Name="RentOfHouseFormat">
+          <DataField>RentOfHouseFormat</DataField>
+        </Field>
+        <Field Name="ComputedRent">
+          <DataField>ComputedRent</DataField>
+        </Field>
+        <Field Name="ComputedRentFormat">
+          <DataField>ComputedRentFormat</DataField>
+        </Field>
+        <Field Name="RentRecovered">
+          <DataField>RentRecovered</DataField>
+        </Field>
+        <Field Name="RentRecoveredFormat">
+          <DataField>RentRecoveredFormat</DataField>
+        </Field>
+        <Field Name="NetValue">
+          <DataField>NetValue</DataField>
+        </Field>
+        <Field Name="NetValueFormat">
+          <DataField>NetValueFormat</DataField>
+        </Field>
+        <Field Name="TotalGross">
+          <DataField>TotalGross</DataField>
+        </Field>
+        <Field Name="TotalGrossFormat">
+          <DataField>TotalGrossFormat</DataField>
+        </Field>
+        <Field Name="ThirtyPCash">
+          <DataField>ThirtyPCash</DataField>
+        </Field>
+        <Field Name="ThirtyPCashFormat">
+          <DataField>ThirtyPCashFormat</DataField>
+        </Field>
+        <Field Name="ActualContr">
+          <DataField>ActualContr</DataField>
+        </Field>
+        <Field Name="ActualContrFormat">
+          <DataField>ActualContrFormat</DataField>
+        </Field>
+        <Field Name="PermissibleLimit">
+          <DataField>PermissibleLimit</DataField>
+        </Field>
+        <Field Name="PermissibleLimitFormat">
+          <DataField>PermissibleLimitFormat</DataField>
+        </Field>
+        <Field Name="MortgageIntrest">
+          <DataField>MortgageIntrest</DataField>
+        </Field>
+        <Field Name="MortgageIntrestFormat">
+          <DataField>MortgageIntrestFormat</DataField>
+        </Field>
+        <Field Name="HOSP">
+          <DataField>HOSP</DataField>
+        </Field>
+        <Field Name="HOSPFormat">
+          <DataField>HOSPFormat</DataField>
+        </Field>
+        <Field Name="AmountOfBenefit">
+          <DataField>AmountOfBenefit</DataField>
+        </Field>
+        <Field Name="AmountOfBenefitFormat">
+          <DataField>AmountOfBenefitFormat</DataField>
+        </Field>
+        <Field Name="TaxablePay">
+          <DataField>TaxablePay</DataField>
+        </Field>
+        <Field Name="TaxablePayFormat">
+          <DataField>TaxablePayFormat</DataField>
+        </Field>
+        <Field Name="TaxPayable">
+          <DataField>TaxPayable</DataField>
+        </Field>
+        <Field Name="TaxPayableFormat">
+          <DataField>TaxPayableFormat</DataField>
+        </Field>
+        <Field Name="MonthlyRelief">
+          <DataField>MonthlyRelief</DataField>
+        </Field>
+        <Field Name="MonthlyReliefFormat">
+          <DataField>MonthlyReliefFormat</DataField>
+        </Field>
+        <Field Name="InsuranceRelief">
+          <DataField>InsuranceRelief</DataField>
+        </Field>
+        <Field Name="InsuranceReliefFormat">
+          <DataField>InsuranceReliefFormat</DataField>
+        </Field>
+        <Field Name="PAYE">
+          <DataField>PAYE</DataField>
+        </Field>
+        <Field Name="PAYEFormat">
+          <DataField>PAYEFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

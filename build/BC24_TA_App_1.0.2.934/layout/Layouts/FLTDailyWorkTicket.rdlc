@@ -1,0 +1,185 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Min_Name">
+          <DataField>Min_Name</DataField>
+        </Field>
+        <Field Name="dept">
+          <DataField>dept</DataField>
+        </Field>
+        <Field Name="ticNo">
+          <DataField>ticNo</DataField>
+        </Field>
+        <Field Name="prevTick">
+          <DataField>prevTick</DataField>
+        </Field>
+        <Field Name="GK_No">
+          <DataField>GK_No</DataField>
+        </Field>
+        <Field Name="make">
+          <DataField>make</DataField>
+        </Field>
+        <Field Name="Type">
+          <DataField>Type</DataField>
+        </Field>
+        <Field Name="Unit">
+          <DataField>Unit</DataField>
+        </Field>
+        <Field Name="stattion">
+          <DataField>stattion</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="ReportForNavId_3">
+          <DataField>ReportForNavId_3</DataField>
+        </Field>
+        <Field Name="ReportForNavId_4">
+          <DataField>ReportForNavId_4</DataField>
+        </Field>
+        <Field Name="Drive1">
+          <DataField>Drive1</DataField>
+        </Field>
+        <Field Name="Drive2">
+          <DataField>Drive2</DataField>
+        </Field>
+        <Field Name="Drive3">
+          <DataField>Drive3</DataField>
+        </Field>
+        <Field Name="Drive4">
+          <DataField>Drive4</DataField>
+        </Field>
+        <Field Name="Drive5">
+          <DataField>Drive5</DataField>
+        </Field>
+        <Field Name="Drive6">
+          <DataField>Drive6</DataField>
+        </Field>
+        <Field Name="Off1">
+          <DataField>Off1</DataField>
+        </Field>
+        <Field Name="Off2">
+          <DataField>Off2</DataField>
+        </Field>
+        <Field Name="Off3">
+          <DataField>Off3</DataField>
+        </Field>
+        <Field Name="W_date">
+          <DataField>W_date</DataField>
+        </Field>
+        <Field Name="Drive_No">
+          <DataField>Drive_No</DataField>
+        </Field>
+        <Field Name="Route">
+          <DataField>Route</DataField>
+        </Field>
+        <Field Name="Auth_Ifficer">
+          <DataField>Auth_Ifficer</DataField>
+        </Field>
+        <Field Name="Oil_Consumed">
+          <DataField>Oil_Consumed</DataField>
+        </Field>
+        <Field Name="Oil_ConsumedFormat">
+          <DataField>Oil_ConsumedFormat</DataField>
+        </Field>
+        <Field Name="Fuel_Consumed">
+          <DataField>Fuel_Consumed</DataField>
+        </Field>
+        <Field Name="Fuel_ConsumedFormat">
+          <DataField>Fuel_ConsumedFormat</DataField>
+        </Field>
+        <Field Name="Vouch_No">
+          <DataField>Vouch_No</DataField>
+        </Field>
+        <Field Name="Time_out">
+          <DataField>Time_out</DataField>
+        </Field>
+        <Field Name="Time_In">
+          <DataField>Time_In</DataField>
+        </Field>
+        <Field Name="End_Milleage">
+          <DataField>End_Milleage</DataField>
+        </Field>
+        <Field Name="End_MilleageFormat">
+          <DataField>End_MilleageFormat</DataField>
+        </Field>
+        <Field Name="Kilo_Covered">
+          <DataField>Kilo_Covered</DataField>
+        </Field>
+        <Field Name="Kilo_CoveredFormat">
+          <DataField>Kilo_CoveredFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

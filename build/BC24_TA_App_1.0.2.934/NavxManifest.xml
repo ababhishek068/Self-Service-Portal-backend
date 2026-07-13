@@ -1,0 +1,23 @@
+<Package xmlns="http://schemas.microsoft.com/navx/2015/manifest">
+  <App Id="5b5c244a-59bb-4a49-a255-0757fe4470cd" Name="BC24_TA App" Publisher="Technology Associates EA Ltd" Brief="" Description="" Version="1.0.2.933" CompatibilityId="0.0.0.0" PrivacyStatement="" EULA="" Help="" HelpBaseUrl="" Url="" Logo="" Platform="1.0.0.0" Application="21.0.0.0" Runtime="13.0" Target="OnPrem" ShowMyCode="False" />
+  <IdRanges>
+    <IdRange MinObjectId="50000" MaxObjectId="52203400" />
+  </IdRanges>
+  <Dependencies />
+  <InternalsVisibleTo />
+  <ScreenShots />
+  <SupportedLocales />
+  <Features />
+  <PreprocessorSymbols />
+  <SuppressWarnings>
+    <SuppressWarning Name="AL0185" />
+    <SuppressWarning Name="AL0685" />
+    <SuppressWarning Name="AL0603" />
+    <SuppressWarning Name="AL0729" />
+  </SuppressWarnings>
+  <ResourceExposurePolicy AllowDebugging="true" AllowDownloadingSource="true" IncludeSourceInSymbolFile="true" ApplyToDevExtension="false" />
+  <KeyVaultUrls />
+  <Source />
+  <Build Timestamp="2026-07-09T23:39:57.0124510Z" CompilerVersion="17.0.34.45391" />
+  <AlternateIds />
+</Package>

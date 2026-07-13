@@ -1,34 +1,75 @@
-SELF SERVICE SUITE - ABH UAT FULL OFFLINE PACKAGE
-=================================================
+SELF SERVICE SUITE - ABH UAT LATEST FULL OFFLINE PACKAGE
+========================================================
 
-Release: 2026-07-10 full-suite-v9
+Release: 2026-07-13 leave-attendance-salary-fix-v6
+Business Central app: BC24_TA App 1.0.2.936
 
-WHAT IS INCLUDED
-----------------
-- Leave Requisition fixes
-- Leave draft creation now exits the New Leave Request form immediately
-- After creating a draft, the screen opens directly on the animated Review / Attachments page
-- The selected leave row stays visible above the detail card, matching the normal leave flow
-- Leave Requisition detail is now one page at a time: Draft, Review, Approval
-- Cancel button hidden after leave is sent for approval
-- Leave Application cancel support in BC app 1.0.2.933
-- Payslip module
-- Purchase Requisition module
-- Store Requisition module
-- Approval process fixes
-- ABH UAT env configured for 146.161.102.7 / BC240 / ABH_UAT_LIVE
+USE ONLY THIS BC APP
+--------------------
+SelfServiceBackend\deploy\Technology Associates EA Ltd_BC24_TA App_1.0.2.936.app
 
-INSTALL / UPDATE ON ABH SERVER
-------------------------------
-1. Stop current Self Service services.
-2. Backup existing C:\TA\SelfServiceSuite folder.
-3. Extract this ZIP to C:\TA so the folder is exactly C:\TA\SelfServiceSuite.
-4. Start the services again using the existing start script.
-5. Open http://146.161.102.7:4000 and press Ctrl+F5 once.
+FIXES INCLUDED
+--------------
+- Leave balances now come from the live Business Central employee card values.
+- Leave creation accepts Business Central application numbers such as LV-00008.
+- Leave-day validation uses the correct available balance.
+- Attendance accepts the full Business Central user ID.
+- Salary advance creates/uses a valid number and ensures the SALARY advance type exists.
+- Existing leave cancellation and approval-flow fixes are preserved.
 
-BC APP
-------
-This package also includes:
-SelfServiceBackend\deploy\Technology Associates EA Ltd_BC24_TA App_1.0.2.933.app
+FULL SUITE UPDATE
+-----------------
+1. Stop the current Self Service Portal command window/service.
+2. Back up the existing C:\SelfServiceSuite folder.
+3. Extract this ZIP and copy the included SelfServiceSuite folder to C:\SelfServiceSuite.
+4. Keep the server's working .env values if they are different from the included .env.
+5. Publish the Business Central app using the commands below.
+6. Start the Self Service Portal again.
+7. In the browser press Ctrl+F5 once.
 
-Publish/sync/data-upgrade that BC app only if the server is not already on 1.0.2.933.
+BUSINESS CENTRAL PUBLISH COMMANDS
+---------------------------------
+Run Windows PowerShell as Administrator:
+
+Import-Module "C:\Program Files\Microsoft Dynamics 365 Business Central\240\Service\NavAdminTool.ps1"
+
+Publish-NAVApp `
+  -ServerInstance BC240 `
+  -Path "C:\SelfServiceSuite\SelfServiceBackend\deploy\Technology Associates EA Ltd_BC24_TA App_1.0.2.936.app" `
+  -SkipVerification `
+  -Force
+
+Sync-NAVApp `
+  -ServerInstance BC240 `
+  -Tenant default `
+  -Name "BC24_TA App" `
+  -Version "1.0.2.936" `
+  -Mode Add
+
+Start-NAVAppDataUpgrade `
+  -ServerInstance BC240 `
+  -Tenant default `
+  -Name "BC24_TA App" `
+  -Version "1.0.2.936"
+
+VERIFY THE INSTALLED VERSION
+----------------------------
+Get-NAVAppInfo -ServerInstance BC240 -Tenant default -Name "BC24_TA App" |
+  Format-Table Name, Version, IsInstalled
+
+Expected: Version 1.0.2.936 and IsInstalled True.
+
+IMPORTANT
+---------
+- Do not publish app 1.0.2.933, 1.0.2.934, or 1.0.2.935.
+- Do not use ForceSync.
+- If a previous failed-looking leave attempt created an LV- number, check My Leave
+  Applications before submitting again to avoid a duplicate request.
+
+VERIFIED FILE HASHES (SHA256)
+-----------------------------
+BC app 1.0.2.936:
+7064405D74A32C4AAC18514B821710246A72B906BD9E447C9F859F244D892411
+
+SelfServiceBackend\dist\staff.js:
+A3ED98187469B6068E9E3F47F42AA2386B7B2FD7E4F91768733D42A989093862

@@ -1,0 +1,221 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="GrantPhase_JobTask">
+          <DataField>GrantPhase_JobTask</DataField>
+        </Field>
+        <Field Name="GrantNo_JobTask">
+          <DataField>GrantNo_JobTask</DataField>
+        </Field>
+        <Field Name="GrantTaskNo_JobTask">
+          <DataField>GrantTaskNo_JobTask</DataField>
+        </Field>
+        <Field Name="Description_JobTask">
+          <DataField>Description_JobTask</DataField>
+        </Field>
+        <Field Name="GrantTaskType_JobTask">
+          <DataField>GrantTaskType_JobTask</DataField>
+        </Field>
+        <Field Name="ReportForNavId_7">
+          <DataField>ReportForNavId_7</DataField>
+        </Field>
+        <Field Name="GrantNo_JobPlanningLine">
+          <DataField>GrantNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="PlanningDate_JobPlanningLine">
+          <DataField>PlanningDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DocumentNo_JobPlanningLine">
+          <DataField>DocumentNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Type_JobPlanningLine">
+          <DataField>Type_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="No_JobPlanningLine">
+          <DataField>No_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Description_JobPlanningLine">
+          <DataField>Description_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Quantity_JobPlanningLine">
+          <DataField>Quantity_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Quantity_JobPlanningLineFormat">
+          <DataField>Quantity_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="DirectUnitCostLCY_JobPlanningLine">
+          <DataField>DirectUnitCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DirectUnitCostLCY_JobPlanningLineFormat">
+          <DataField>DirectUnitCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_JobPlanningLine">
+          <DataField>UnitCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_JobPlanningLineFormat">
+          <DataField>UnitCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobPlanningLine">
+          <DataField>TotalCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobPlanningLineFormat">
+          <DataField>TotalCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_JobPlanningLine">
+          <DataField>UnitPriceLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_JobPlanningLineFormat">
+          <DataField>UnitPriceLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalPriceLCY_JobPlanningLine">
+          <DataField>TotalPriceLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalPriceLCY_JobPlanningLineFormat">
+          <DataField>TotalPriceLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="ResourceGroupNo_JobPlanningLine">
+          <DataField>ResourceGroupNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmountLCY_JobPlanningLine">
+          <DataField>LineAmountLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmountLCY_JobPlanningLineFormat">
+          <DataField>LineAmountLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCost_JobPlanningLine">
+          <DataField>UnitCost_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitCost_JobPlanningLineFormat">
+          <DataField>UnitCost_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalCost_JobPlanningLine">
+          <DataField>TotalCost_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalCost_JobPlanningLineFormat">
+          <DataField>TotalCost_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPrice_JobPlanningLine">
+          <DataField>UnitPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitPrice_JobPlanningLineFormat">
+          <DataField>UnitPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalPrice_JobPlanningLine">
+          <DataField>TotalPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalPrice_JobPlanningLineFormat">
+          <DataField>TotalPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LineAmount_JobPlanningLine">
+          <DataField>LineAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmount_JobPlanningLineFormat">
+          <DataField>LineAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="BudgetPeriod_JobPlanningLine">
+          <DataField>BudgetPeriod_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear1_JobPlanningLine">
+          <DataField>TotalYear1_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear1_JobPlanningLineFormat">
+          <DataField>TotalYear1_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear2_JobPlanningLine">
+          <DataField>TotalYear2_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear2_JobPlanningLineFormat">
+          <DataField>TotalYear2_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear3_JobPlanningLine">
+          <DataField>TotalYear3_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear3_JobPlanningLineFormat">
+          <DataField>TotalYear3_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobPlanningLine">
+          <DataField>DisbursedAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobPlanningLineFormat">
+          <DataField>DisbursedAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="Restriction_JobPlanningLine">
+          <DataField>Restriction_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DonorExpenseCode_JobPlanningLine">
+          <DataField>DonorExpenseCode_JobPlanningLine</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

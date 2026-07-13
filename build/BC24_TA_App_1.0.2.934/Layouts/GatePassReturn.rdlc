@@ -1,0 +1,146 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="GatePassNo_GatePassReturn">
+          <DataField>GatePassNo_GatePassReturn</DataField>
+        </Field>
+        <Field Name="DateOut_GatePassReturn">
+          <DataField>DateOut_GatePassReturn</DataField>
+        </Field>
+        <Field Name="TimeOut_GatePassReturn">
+          <DataField>TimeOut_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetTransferNo_GatePassReturn">
+          <DataField>AssetTransferNo_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetNo_GatePassReturn">
+          <DataField>AssetNo_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetDescription_GatePassReturn">
+          <DataField>AssetDescription_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetFromLocation_GatePassReturn">
+          <DataField>AssetFromLocation_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetToLocation_GatePassReturn">
+          <DataField>AssetToLocation_GatePassReturn</DataField>
+        </Field>
+        <Field Name="Status_GatePassReturn">
+          <DataField>Status_GatePassReturn</DataField>
+        </Field>
+        <Field Name="DateCreated_GatePassReturn">
+          <DataField>DateCreated_GatePassReturn</DataField>
+        </Field>
+        <Field Name="CreatedBy_GatePassReturn">
+          <DataField>CreatedBy_GatePassReturn</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_GatePassReturn">
+          <DataField>ResponsibilityCenter_GatePassReturn</DataField>
+        </Field>
+        <Field Name="ReturnedStatus_GatePassReturn">
+          <DataField>ReturnedStatus_GatePassReturn</DataField>
+        </Field>
+        <Field Name="ReturnComment_GatePassReturn">
+          <DataField>ReturnComment_GatePassReturn</DataField>
+        </Field>
+        <Field Name="ToBeReturned_GatePassReturn">
+          <DataField>ToBeReturned_GatePassReturn</DataField>
+        </Field>
+        <Field Name="EmployeeNo_GatePassReturn">
+          <DataField>EmployeeNo_GatePassReturn</DataField>
+        </Field>
+        <Field Name="EmployeeName_GatePassReturn">
+          <DataField>EmployeeName_GatePassReturn</DataField>
+        </Field>
+        <Field Name="No_GatePassReturn">
+          <DataField>No_GatePassReturn</DataField>
+        </Field>
+        <Field Name="NoSeries_GatePassReturn">
+          <DataField>NoSeries_GatePassReturn</DataField>
+        </Field>
+        <Field Name="DateIn_GatePassReturn">
+          <DataField>DateIn_GatePassReturn</DataField>
+        </Field>
+        <Field Name="AssetRecordNo_GatePassReturn">
+          <DataField>AssetRecordNo_GatePassReturn</DataField>
+        </Field>
+        <Field Name="SecurityComment_GatePassReturn">
+          <DataField>SecurityComment_GatePassReturn</DataField>
+        </Field>
+        <Field Name="picture">
+          <DataField>picture</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

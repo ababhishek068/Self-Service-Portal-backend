@@ -1,0 +1,22 @@
+<Package xmlns="http://schemas.microsoft.com/navx/2015/manifest">
+  <App Id="677583a9-c01e-4e4f-8135-826a054559d1" Name="Parastatal21" Publisher="PTL" Brief="" Description="" Version="1.0.0.8" CompatibilityId="0.0.0.0" PrivacyStatement="" EULA="" Help="" HelpBaseUrl="" Url="" Logo="" Platform="1.0.0.0" Application="21.0.0.0" Runtime="10.0" Target="OnPrem" ShowMyCode="False" />
+  <IdRanges>
+    <IdRange MinObjectId="50000" MaxObjectId="52203400" />
+  </IdRanges>
+  <Dependencies />
+  <InternalsVisibleTo />
+  <ScreenShots />
+  <SupportedLocales />
+  <Features />
+  <PreprocessorSymbols />
+  <SuppressWarnings>
+    <SuppressWarning Name="AL0118" />
+    <SuppressWarning Name="AL0185" />
+    <SuppressWarning Name="AL0685" />
+    <SuppressWarning Name="AL0603" />
+  </SuppressWarnings>
+  <ResourceExposurePolicy AllowDebugging="true" AllowDownloadingSource="true" IncludeSourceInSymbolFile="true" ApplyToDevExtension="false" />
+  <KeyVaultUrls />
+  <Source />
+  <Build By="AL Language Extension,12.3.900902" Timestamp="2023-12-11T16:26:36.0629482Z" CompilerVersion="12.3.13.48960" />
+</Package>

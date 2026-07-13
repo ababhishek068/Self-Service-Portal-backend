@@ -1,0 +1,245 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="CompInfo_Name">
+          <DataField>CompInfo_Name</DataField>
+        </Field>
+        <Field Name="CompInfo_Address">
+          <DataField>CompInfo_Address</DataField>
+        </Field>
+        <Field Name="CompInfo_Address2">
+          <DataField>CompInfo_Address2</DataField>
+        </Field>
+        <Field Name="CompInfo_City">
+          <DataField>CompInfo_City</DataField>
+        </Field>
+        <Field Name="CompInfo_Picture">
+          <DataField>CompInfo_Picture</DataField>
+        </Field>
+        <Field Name="CompInfo_PhoneNo">
+          <DataField>CompInfo_PhoneNo</DataField>
+        </Field>
+        <Field Name="No_HREmployees">
+          <DataField>No_HREmployees</DataField>
+        </Field>
+        <Field Name="FirstName_HREmployees">
+          <DataField>FirstName_HREmployees</DataField>
+        </Field>
+        <Field Name="MiddleName_HREmployees">
+          <DataField>MiddleName_HREmployees</DataField>
+        </Field>
+        <Field Name="LastName_HREmployees">
+          <DataField>LastName_HREmployees</DataField>
+        </Field>
+        <Field Name="PeriodName">
+          <DataField>PeriodName</DataField>
+        </Field>
+        <Field Name="PAYENumber_HREmployees">
+          <DataField>PAYENumber_HREmployees</DataField>
+        </Field>
+        <Field Name="TaxableAmount">
+          <DataField>TaxableAmount</DataField>
+        </Field>
+        <Field Name="TaxableAmountFormat">
+          <DataField>TaxableAmountFormat</DataField>
+        </Field>
+        <Field Name="TaxCharged">
+          <DataField>TaxCharged</DataField>
+        </Field>
+        <Field Name="TaxChargedFormat">
+          <DataField>TaxChargedFormat</DataField>
+        </Field>
+        <Field Name="TaxReliefKSH">
+          <DataField>TaxReliefKSH</DataField>
+        </Field>
+        <Field Name="TaxReliefKSHFormat">
+          <DataField>TaxReliefKSHFormat</DataField>
+        </Field>
+        <Field Name="PAYEKSH">
+          <DataField>PAYEKSH</DataField>
+        </Field>
+        <Field Name="PAYEKSHFormat">
+          <DataField>PAYEKSHFormat</DataField>
+        </Field>
+        <Field Name="TotalRelief">
+          <DataField>TotalRelief</DataField>
+        </Field>
+        <Field Name="TotalReliefFormat">
+          <DataField>TotalReliefFormat</DataField>
+        </Field>
+        <Field Name="OOI">
+          <DataField>OOI</DataField>
+        </Field>
+        <Field Name="OOIFormat">
+          <DataField>OOIFormat</DataField>
+        </Field>
+        <Field Name="ApproverID_ApprovalEntry">
+          <DataField>ApproverID_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="LastDateTimeModified_ApprovalEntry">
+          <DataField>LastDateTimeModified_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="Signature_PreparedBy">
+          <DataField>Signature_PreparedBy</DataField>
+        </Field>
+        <Field Name="PreparedByDesignation_UserSetup">
+          <DataField>PreparedByDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup">
+          <DataField>Signature_UserSetup</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup">
+          <DataField>ApprovalDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup2">
+          <DataField>Signature_UserSetup2</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup2">
+          <DataField>ApprovalDesignation_UserSetup2</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup3">
+          <DataField>Signature_UserSetup3</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup3">
+          <DataField>ApprovalDesignation_UserSetup3</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup4">
+          <DataField>Signature_UserSetup4</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup4">
+          <DataField>ApprovalDesignation_UserSetup4</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup5">
+          <DataField>Signature_UserSetup5</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup5">
+          <DataField>ApprovalDesignation_UserSetup5</DataField>
+        </Field>
+        <Field Name="UserDesign1">
+          <DataField>UserDesign1</DataField>
+        </Field>
+        <Field Name="UserDesign2">
+          <DataField>UserDesign2</DataField>
+        </Field>
+        <Field Name="UserDesign3">
+          <DataField>UserDesign3</DataField>
+        </Field>
+        <Field Name="UserDesign4">
+          <DataField>UserDesign4</DataField>
+        </Field>
+        <Field Name="UserDesign5">
+          <DataField>UserDesign5</DataField>
+        </Field>
+        <Field Name="ApprovalDate1">
+          <DataField>ApprovalDate1</DataField>
+        </Field>
+        <Field Name="ApprovalDate2">
+          <DataField>ApprovalDate2</DataField>
+        </Field>
+        <Field Name="ApprovalDate3">
+          <DataField>ApprovalDate3</DataField>
+        </Field>
+        <Field Name="ApprovalDate4">
+          <DataField>ApprovalDate4</DataField>
+        </Field>
+        <Field Name="ApprovalDate5">
+          <DataField>ApprovalDate5</DataField>
+        </Field>
+        <Field Name="UserName1">
+          <DataField>UserName1</DataField>
+        </Field>
+        <Field Name="UserName2">
+          <DataField>UserName2</DataField>
+        </Field>
+        <Field Name="UserName3">
+          <DataField>UserName3</DataField>
+        </Field>
+        <Field Name="UserName4">
+          <DataField>UserName4</DataField>
+        </Field>
+        <Field Name="UserName5">
+          <DataField>UserName5</DataField>
+        </Field>
+        <Field Name="SendDate">
+          <DataField>SendDate</DataField>
+        </Field>
+        <Field Name="SenderDesign">
+          <DataField>SenderDesign</DataField>
+        </Field>
+        <Field Name="SenderName">
+          <DataField>SenderName</DataField>
+        </Field>
+        <Field Name="SenderSignature">
+          <DataField>SenderSignature</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

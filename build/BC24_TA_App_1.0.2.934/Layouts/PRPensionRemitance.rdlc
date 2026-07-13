@@ -1,0 +1,158 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="PensionNo_HREmployees">
+          <DataField>PensionNo_HREmployees</DataField>
+        </Field>
+        <Field Name="No_HREmployees">
+          <DataField>No_HREmployees</DataField>
+        </Field>
+        <Field Name="FullName_HREmployees">
+          <DataField>FullName_HREmployees</DataField>
+        </Field>
+        <Field Name="IDNumber_HREmployees">
+          <DataField>IDNumber_HREmployees</DataField>
+        </Field>
+        <Field Name="STDAmount">
+          <DataField>STDAmount</DataField>
+        </Field>
+        <Field Name="STDAmountFormat">
+          <DataField>STDAmountFormat</DataField>
+        </Field>
+        <Field Name="GROSSAmount">
+          <DataField>GROSSAmount</DataField>
+        </Field>
+        <Field Name="GROSSAmountFormat">
+          <DataField>GROSSAmountFormat</DataField>
+        </Field>
+        <Field Name="VolAmount">
+          <DataField>VolAmount</DataField>
+        </Field>
+        <Field Name="VolAmountFormat">
+          <DataField>VolAmountFormat</DataField>
+        </Field>
+        <Field Name="Vol_STD_Amount">
+          <DataField>Vol_STD_Amount</DataField>
+        </Field>
+        <Field Name="Vol_STD_AmountFormat">
+          <DataField>Vol_STD_AmountFormat</DataField>
+        </Field>
+        <Field Name="Tot_VolAmount">
+          <DataField>Tot_VolAmount</DataField>
+        </Field>
+        <Field Name="Tot_VolAmountFormat">
+          <DataField>Tot_VolAmountFormat</DataField>
+        </Field>
+        <Field Name="Tot_STDAmount">
+          <DataField>Tot_STDAmount</DataField>
+        </Field>
+        <Field Name="Tot_STDAmountFormat">
+          <DataField>Tot_STDAmountFormat</DataField>
+        </Field>
+        <Field Name="i">
+          <DataField>i</DataField>
+        </Field>
+        <Field Name="CompInfoName">
+          <DataField>CompInfoName</DataField>
+        </Field>
+        <Field Name="PayrollPeriod">
+          <DataField>PayrollPeriod</DataField>
+        </Field>
+        <Field Name="CompInfoPension">
+          <DataField>CompInfoPension</DataField>
+        </Field>
+        <Field Name="CompInfoNHIF">
+          <DataField>CompInfoNHIF</DataField>
+        </Field>
+        <Field Name="FirstName_HREmployees">
+          <DataField>FirstName_HREmployees</DataField>
+        </Field>
+        <Field Name="MiddleName_HREmployees">
+          <DataField>MiddleName_HREmployees</DataField>
+        </Field>
+        <Field Name="LastName_HREmployees">
+          <DataField>LastName_HREmployees</DataField>
+        </Field>
+        <Field Name="NHIFNo_HREmployees">
+          <DataField>NHIFNo_HREmployees</DataField>
+        </Field>
+        <Field Name="AppliedFilters">
+          <DataField>AppliedFilters</DataField>
+        </Field>
+        <Field Name="PINNo_HREmployees">
+          <DataField>PINNo_HREmployees</DataField>
+        </Field>
+        <Field Name="PensionNO">
+          <DataField>PensionNO</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

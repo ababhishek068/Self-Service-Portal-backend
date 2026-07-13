@@ -1,0 +1,194 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="ReceiptNo_MenuSaleHeader">
+          <DataField>ReceiptNo_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="Date_MenuSaleHeader">
+          <DataField>Date_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="CashierNo_MenuSaleHeader">
+          <DataField>CashierNo_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="CustomerType_MenuSaleHeader">
+          <DataField>CustomerType_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="CustomerNo_MenuSaleHeader">
+          <DataField>CustomerNo_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="CustomerName_MenuSaleHeader">
+          <DataField>CustomerName_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="ReceivingBank_MenuSaleHeader">
+          <DataField>ReceivingBank_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="Amount_MenuSaleHeader">
+          <DataField>Amount_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="Amount_MenuSaleHeaderFormat">
+          <DataField>Amount_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="Department_MenuSaleHeader">
+          <DataField>Department_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="ContactStaff_MenuSaleHeader">
+          <DataField>ContactStaff_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="SalesPoint_MenuSaleHeader">
+          <DataField>SalesPoint_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="PaidAmount_MenuSaleHeader">
+          <DataField>PaidAmount_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="PaidAmount_MenuSaleHeaderFormat">
+          <DataField>PaidAmount_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="Balance_MenuSaleHeader">
+          <DataField>Balance_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="Balance_MenuSaleHeaderFormat">
+          <DataField>Balance_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="Posted_MenuSaleHeader">
+          <DataField>Posted_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="CashierName_MenuSaleHeader">
+          <DataField>CashierName_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="SalesType_MenuSaleHeader">
+          <DataField>SalesType_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="PrepaymentBalance_MenuSaleHeader">
+          <DataField>PrepaymentBalance_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="PrepaymentBalance_MenuSaleHeaderFormat">
+          <DataField>PrepaymentBalance_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="LastSc_MenuSaleHeader">
+          <DataField>LastSc_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="LineAmount_MenuSaleHeader">
+          <DataField>LineAmount_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="LineAmount_MenuSaleHeaderFormat">
+          <DataField>LineAmount_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="DailyTotalPrepayment_MenuSaleHeader">
+          <DataField>DailyTotalPrepayment_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="DailyTotalPrepayment_MenuSaleHeaderFormat">
+          <DataField>DailyTotalPrepayment_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="DailyTotalCash_MenuSaleHeader">
+          <DataField>DailyTotalCash_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="DailyTotalCash_MenuSaleHeaderFormat">
+          <DataField>DailyTotalCash_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="Sum2">
+          <DataField>Sum2</DataField>
+        </Field>
+        <Field Name="Sum2Format">
+          <DataField>Sum2Format</DataField>
+        </Field>
+        <Field Name="UserTotalCash">
+          <DataField>UserTotalCash</DataField>
+        </Field>
+        <Field Name="UserTotalCashFormat">
+          <DataField>UserTotalCashFormat</DataField>
+        </Field>
+        <Field Name="UserTotalPrep">
+          <DataField>UserTotalPrep</DataField>
+        </Field>
+        <Field Name="TotalAmount">
+          <DataField>TotalAmount</DataField>
+        </Field>
+        <Field Name="TotalAmountFormat">
+          <DataField>TotalAmountFormat</DataField>
+        </Field>
+        <Field Name="TotalPrepayment_MenuSaleHeader">
+          <DataField>TotalPrepayment_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="TotalPrepayment_MenuSaleHeaderFormat">
+          <DataField>TotalPrepayment_MenuSaleHeaderFormat</DataField>
+        </Field>
+        <Field Name="TotalCash_MenuSaleHeader">
+          <DataField>TotalCash_MenuSaleHeader</DataField>
+        </Field>
+        <Field Name="TotalCash_MenuSaleHeaderFormat">
+          <DataField>TotalCash_MenuSaleHeaderFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

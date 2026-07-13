@@ -1,0 +1,347 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_67">
+          <DataField>ReportForNavId_67</DataField>
+        </Field>
+        <Field Name="Code_AuditProgrammes">
+          <DataField>Code_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="Title_AuditProgrammes">
+          <DataField>Title_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="DateCreated_AuditProgrammes">
+          <DataField>DateCreated_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="DescriptionComment_AuditProgrammes">
+          <DataField>DescriptionComment_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="CreatedBy_AuditProgrammes">
+          <DataField>CreatedBy_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="LastEditedBy_AuditProgrammes">
+          <DataField>LastEditedBy_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="DateEdited_AuditProgrammes">
+          <DataField>DateEdited_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="Status_AuditProgrammes">
+          <DataField>Status_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="ApprovalComments_AuditProgrammes">
+          <DataField>ApprovalComments_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="NotificationSent_AuditProgrammes">
+          <DataField>NotificationSent_AuditProgrammes</DataField>
+        </Field>
+        <Field Name="Address_companyInfo">
+          <DataField>Address_companyInfo</DataField>
+        </Field>
+        <Field Name="Address2_companyInfo">
+          <DataField>Address2_companyInfo</DataField>
+        </Field>
+        <Field Name="City_companyInfo">
+          <DataField>City_companyInfo</DataField>
+        </Field>
+        <Field Name="PhoneNo_companyInfo">
+          <DataField>PhoneNo_companyInfo</DataField>
+        </Field>
+        <Field Name="Picture_companyInfo">
+          <DataField>Picture_companyInfo</DataField>
+        </Field>
+        <Field Name="EMail_companyInfo">
+          <DataField>EMail_companyInfo</DataField>
+        </Field>
+        <Field Name="Name_companyInfo">
+          <DataField>Name_companyInfo</DataField>
+        </Field>
+        <Field Name="website_companyInfo">
+          <DataField>website_companyInfo</DataField>
+        </Field>
+        <Field Name="dateToday">
+          <DataField>dateToday</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Code_Audits">
+          <DataField>Code_Audits</DataField>
+        </Field>
+        <Field Name="AuditProgramme_Audits">
+          <DataField>AuditProgramme_Audits</DataField>
+        </Field>
+        <Field Name="AuditNo_Audits">
+          <DataField>AuditNo_Audits</DataField>
+        </Field>
+        <Field Name="AuditFromDate_Audits">
+          <DataField>AuditFromDate_Audits</DataField>
+        </Field>
+        <Field Name="AuditToDate_Audits">
+          <DataField>AuditToDate_Audits</DataField>
+        </Field>
+        <Field Name="LeadersAppointmentDate_Audits">
+          <DataField>LeadersAppointmentDate_Audits</DataField>
+        </Field>
+        <Field Name="MembersAppointmentDate_Audits">
+          <DataField>MembersAppointmentDate_Audits</DataField>
+        </Field>
+        <Field Name="FollowUpToDate_Audits">
+          <DataField>FollowUpToDate_Audits</DataField>
+        </Field>
+        <Field Name="ReviewToDate_Audits">
+          <DataField>ReviewToDate_Audits</DataField>
+        </Field>
+        <Field Name="FollowUpFromDate_Audits">
+          <DataField>FollowUpFromDate_Audits</DataField>
+        </Field>
+        <Field Name="ReviewFromDate_Audits">
+          <DataField>ReviewFromDate_Audits</DataField>
+        </Field>
+        <Field Name="Status_Audits">
+          <DataField>Status_Audits</DataField>
+        </Field>
+        <Field Name="DateCreated_Audits">
+          <DataField>DateCreated_Audits</DataField>
+        </Field>
+        <Field Name="Sequence_Audits">
+          <DataField>Sequence_Audits</DataField>
+        </Field>
+        <Field Name="Description_Audits">
+          <DataField>Description_Audits</DataField>
+        </Field>
+        <Field Name="CreatedBy_Audits">
+          <DataField>CreatedBy_Audits</DataField>
+        </Field>
+        <Field Name="Name_Audits">
+          <DataField>Name_Audits</DataField>
+        </Field>
+        <Field Name="ReportForNavId_19">
+          <DataField>ReportForNavId_19</DataField>
+        </Field>
+        <Field Name="Conclusion1_Auditors">
+          <DataField>Conclusion1_Auditors</DataField>
+        </Field>
+        <Field Name="Conclusion2_Auditors">
+          <DataField>Conclusion2_Auditors</DataField>
+        </Field>
+        <Field Name="Code_Auditors">
+          <DataField>Code_Auditors</DataField>
+        </Field>
+        <Field Name="Role_Auditors">
+          <DataField>Role_Auditors</DataField>
+        </Field>
+        <Field Name="AuditProgramme_Auditors">
+          <DataField>AuditProgramme_Auditors</DataField>
+        </Field>
+        <Field Name="AuditNo_Auditors">
+          <DataField>AuditNo_Auditors</DataField>
+        </Field>
+        <Field Name="DateCreated_Auditors">
+          <DataField>DateCreated_Auditors</DataField>
+        </Field>
+        <Field Name="UserID_Auditors">
+          <DataField>UserID_Auditors</DataField>
+        </Field>
+        <Field Name="Department_Auditors">
+          <DataField>Department_Auditors</DataField>
+        </Field>
+        <Field Name="AuditCode_Auditors">
+          <DataField>AuditCode_Auditors</DataField>
+        </Field>
+        <Field Name="Status_Auditors">
+          <DataField>Status_Auditors</DataField>
+        </Field>
+        <Field Name="ApprovalComments_Auditors">
+          <DataField>ApprovalComments_Auditors</DataField>
+        </Field>
+        <Field Name="auditorName">
+          <DataField>auditorName</DataField>
+        </Field>
+        <Field Name="departmentName">
+          <DataField>departmentName</DataField>
+        </Field>
+        <Field Name="ReportForNavId_20">
+          <DataField>ReportForNavId_20</DataField>
+        </Field>
+        <Field Name="Code_AuditChecklists">
+          <DataField>Code_AuditChecklists</DataField>
+        </Field>
+        <Field Name="AuditCode_AuditChecklists">
+          <DataField>AuditCode_AuditChecklists</DataField>
+        </Field>
+        <Field Name="CheckpointDesc1_AuditChecklists">
+          <DataField>CheckpointDesc1_AuditChecklists</DataField>
+        </Field>
+        <Field Name="CheckpointDesc2_AuditChecklists">
+          <DataField>CheckpointDesc2_AuditChecklists</DataField>
+        </Field>
+        <Field Name="ClauseofCriteriaDocument_AuditChecklists">
+          <DataField>ClauseofCriteriaDocument_AuditChecklists</DataField>
+        </Field>
+        <Field Name="CheckpointDesc3_AuditChecklists">
+          <DataField>CheckpointDesc3_AuditChecklists</DataField>
+        </Field>
+        <Field Name="CheckpointDesc4_AuditChecklists">
+          <DataField>CheckpointDesc4_AuditChecklists</DataField>
+        </Field>
+        <Field Name="DateCreated_AuditChecklists">
+          <DataField>DateCreated_AuditChecklists</DataField>
+        </Field>
+        <Field Name="CreatedBy_AuditChecklists">
+          <DataField>CreatedBy_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingDesc1_AuditChecklists">
+          <DataField>FindingDesc1_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingDesc2_AuditChecklists">
+          <DataField>FindingDesc2_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingDesc3_AuditChecklists">
+          <DataField>FindingDesc3_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingCitation1_AuditChecklists">
+          <DataField>FindingCitation1_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingCitation2_AuditChecklists">
+          <DataField>FindingCitation2_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingDesc4_AuditChecklists">
+          <DataField>FindingDesc4_AuditChecklists</DataField>
+        </Field>
+        <Field Name="FindingStatus_AuditChecklists">
+          <DataField>FindingStatus_AuditChecklists</DataField>
+        </Field>
+        <Field Name="RejectedCount_AuditChecklists">
+          <DataField>RejectedCount_AuditChecklists</DataField>
+        </Field>
+        <Field Name="Department_AuditChecklists">
+          <DataField>Department_AuditChecklists</DataField>
+        </Field>
+        <Field Name="Classification_AuditChecklists">
+          <DataField>Classification_AuditChecklists</DataField>
+        </Field>
+        <Field Name="ApprovalComments_AuditChecklists">
+          <DataField>ApprovalComments_AuditChecklists</DataField>
+        </Field>
+        <Field Name="AuditProgramme_AuditChecklists">
+          <DataField>AuditProgramme_AuditChecklists</DataField>
+        </Field>
+        <Field Name="AuditNo_AuditChecklists">
+          <DataField>AuditNo_AuditChecklists</DataField>
+        </Field>
+        <Field Name="ReportForNavId_21">
+          <DataField>ReportForNavId_21</DataField>
+        </Field>
+        <Field Name="Code_AuditNotifications">
+          <DataField>Code_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Audit_AuditNotifications">
+          <DataField>Audit_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Programme_AuditNotifications">
+          <DataField>Programme_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Auditor_AuditNotifications">
+          <DataField>Auditor_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Auditee_AuditNotifications">
+          <DataField>Auditee_AuditNotifications</DataField>
+        </Field>
+        <Field Name="AuditDate_AuditNotifications">
+          <DataField>AuditDate_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Objectivies1_AuditNotifications">
+          <DataField>Objectivies1_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Objectivies2_AuditNotifications">
+          <DataField>Objectivies2_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Criteria1_AuditNotifications">
+          <DataField>Criteria1_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Criteria2_AuditNotifications">
+          <DataField>Criteria2_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Activities1_AuditNotifications">
+          <DataField>Activities1_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Activities2_AuditNotifications">
+          <DataField>Activities2_AuditNotifications</DataField>
+        </Field>
+        <Field Name="Read_AuditNotifications">
+          <DataField>Read_AuditNotifications</DataField>
+        </Field>
+        <Field Name="auditeeName">
+          <DataField>auditeeName</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

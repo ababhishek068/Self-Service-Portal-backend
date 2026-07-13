@@ -1,0 +1,392 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_5698">
+          <DataField>ReportForNavId_5698</DataField>
+        </Field>
+        <Field Name="FORMAT_TODAY_0_4_">
+          <DataField>FORMAT_TODAY_0_4_</DataField>
+        </Field>
+        <Field Name="UserId">
+          <DataField>UserId</DataField>
+        </Field>
+        <Field Name="CompInfo_Name">
+          <DataField>CompInfo_Name</DataField>
+        </Field>
+        <Field Name="CompInfo_Picture">
+          <DataField>CompInfo_Picture</DataField>
+        </Field>
+        <Field Name="CompInfo_Address2">
+          <DataField>CompInfo_Address2</DataField>
+        </Field>
+        <Field Name="CompInfo_Home_Page">
+          <DataField>CompInfo_Home_Page</DataField>
+        </Field>
+        <Field Name="CompInfo_EMail">
+          <DataField>CompInfo_EMail</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_Date">
+          <DataField>InterBank_Transfers_Date</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_No">
+          <DataField>InterBank_Transfers_No</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_Status">
+          <DataField>InterBank_Transfers_Status</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Receipt_Resp_Centre_">
+          <DataField>InterBank_Transfers__Receipt_Resp_Centre_</DataField>
+        </Field>
+        <Field Name="Receiving_Account_______Receiving_Bank_Account_Name_">
+          <DataField>Receiving_Account_______Receiving_Bank_Account_Name_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Currency_Code_Destination_">
+          <DataField>InterBank_Transfers__Currency_Code_Destination_</DataField>
+        </Field>
+        <Field Name="Remarks_InterBankTransfers">
+          <DataField>Remarks_InterBankTransfers</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Amount_2_">
+          <DataField>InterBank_Transfers__Amount_2_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Amount_2_Format">
+          <DataField>InterBank_Transfers__Amount_2_Format</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Destination_">
+          <DataField>InterBank_Transfers__Exch__Rate_Destination_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Destination_Format">
+          <DataField>InterBank_Transfers__Exch__Rate_Destination_Format</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Request_Amt_LCY_">
+          <DataField>InterBank_Transfers__Request_Amt_LCY_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Request_Amt_LCY_Format">
+          <DataField>InterBank_Transfers__Request_Amt_LCY_Format</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Sending_Resp_Centre_">
+          <DataField>InterBank_Transfers__Sending_Resp_Centre_</DataField>
+        </Field>
+        <Field Name="Paying_Account_______Paying__Bank_Account_Name_">
+          <DataField>Paying_Account_______Paying__Bank_Account_Name_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Currency_Code_Source_">
+          <DataField>InterBank_Transfers__Currency_Code_Source_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_Amount">
+          <DataField>InterBank_Transfers_Amount</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_AmountFormat">
+          <DataField>InterBank_Transfers_AmountFormat</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Source_">
+          <DataField>InterBank_Transfers__Exch__Rate_Source_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Source_Format">
+          <DataField>InterBank_Transfers__Exch__Rate_Source_Format</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Pay_Amt_LCY_">
+          <DataField>InterBank_Transfers__Pay_Amt_LCY_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Pay_Amt_LCY_Format">
+          <DataField>InterBank_Transfers__Pay_Amt_LCY_Format</DataField>
+        </Field>
+        <Field Name="Source_Depot_Code">
+          <DataField>Source_Depot_Code</DataField>
+        </Field>
+        <Field Name="Receiving_Depot_Code">
+          <DataField>Receiving_Depot_Code</DataField>
+        </Field>
+        <Field Name="Receiving_Department_Code">
+          <DataField>Receiving_Department_Code</DataField>
+        </Field>
+        <Field Name="Source_Department_Code">
+          <DataField>Source_Department_Code</DataField>
+        </Field>
+        <Field Name="Bank_and_Cash_TransferCaption">
+          <DataField>Bank_and_Cash_TransferCaption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_DateCaption">
+          <DataField>InterBank_Transfers_DateCaption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_NoCaption">
+          <DataField>InterBank_Transfers_NoCaption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_StatusCaption">
+          <DataField>InterBank_Transfers_StatusCaption</DataField>
+        </Field>
+        <Field Name="Pay_Mode">
+          <DataField>Pay_Mode</DataField>
+        </Field>
+        <Field Name="Transaction_Name">
+          <DataField>Transaction_Name</DataField>
+        </Field>
+        <Field Name="External_Doc_No_">
+          <DataField>External_Doc_No_</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Receipt_Resp_Centre_Caption">
+          <DataField>InterBank_Transfers__Receipt_Resp_Centre_Caption</DataField>
+        </Field>
+        <Field Name="Receiving_BankCaption">
+          <DataField>Receiving_BankCaption</DataField>
+        </Field>
+        <Field Name="Currency_CodeCaption">
+          <DataField>Currency_CodeCaption</DataField>
+        </Field>
+        <Field Name="ExternalDocNo">
+          <DataField>ExternalDocNo</DataField>
+        </Field>
+        <Field Name="AmountCaption">
+          <DataField>AmountCaption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Destination_Caption">
+          <DataField>InterBank_Transfers__Exch__Rate_Destination_Caption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Request_Amt_LCY_Caption">
+          <DataField>InterBank_Transfers__Request_Amt_LCY_Caption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Sending_Resp_Centre_Caption">
+          <DataField>InterBank_Transfers__Sending_Resp_Centre_Caption</DataField>
+        </Field>
+        <Field Name="Paying_BankCaption">
+          <DataField>Paying_BankCaption</DataField>
+        </Field>
+        <Field Name="Currency_CodeCaption_Control1102756045">
+          <DataField>Currency_CodeCaption_Control1102756045</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers_AmountCaption">
+          <DataField>InterBank_Transfers_AmountCaption</DataField>
+        </Field>
+        <Field Name="InterBank_Transfers__Exch__Rate_Source_Caption">
+          <DataField>InterBank_Transfers__Exch__Rate_Source_Caption</DataField>
+        </Field>
+        <Field Name="Transferred_Amt_LCYCaption">
+          <DataField>Transferred_Amt_LCYCaption</DataField>
+        </Field>
+        <Field Name="Request_DetailsCaption">
+          <DataField>Request_DetailsCaption</DataField>
+        </Field>
+        <Field Name="Source_DetailsCaption">
+          <DataField>Source_DetailsCaption</DataField>
+        </Field>
+        <Field Name="Signature_Caption">
+          <DataField>Signature_Caption</DataField>
+        </Field>
+        <Field Name="Date_Caption">
+          <DataField>Date_Caption</DataField>
+        </Field>
+        <Field Name="Name_Caption">
+          <DataField>Name_Caption</DataField>
+        </Field>
+        <Field Name="Name_Caption_Control1102756018">
+          <DataField>Name_Caption_Control1102756018</DataField>
+        </Field>
+        <Field Name="CreatedBy_InterBankTransfers">
+          <DataField>CreatedBy_InterBankTransfers</DataField>
+        </Field>
+        <Field Name="Date_Caption_Control1102756019">
+          <DataField>Date_Caption_Control1102756019</DataField>
+        </Field>
+        <Field Name="Signature_Caption_Control1102756022">
+          <DataField>Signature_Caption_Control1102756022</DataField>
+        </Field>
+        <Field Name="AuthorisationsCaption">
+          <DataField>AuthorisationsCaption</DataField>
+        </Field>
+        <Field Name="AuthorisationsCaption_Control1102756028">
+          <DataField>AuthorisationsCaption_Control1102756028</DataField>
+        </Field>
+        <Field Name="Signature_Caption_Control1102756031">
+          <DataField>Signature_Caption_Control1102756031</DataField>
+        </Field>
+        <Field Name="Date_Caption_Control1102756034">
+          <DataField>Date_Caption_Control1102756034</DataField>
+        </Field>
+        <Field Name="Name_Caption_Control1102756037">
+          <DataField>Name_Caption_Control1102756037</DataField>
+        </Field>
+        <Field Name="RecipientCaption">
+          <DataField>RecipientCaption</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENOCaption">
+          <DataField>CurrReport_PAGENOCaption</DataField>
+        </Field>
+        <Field Name="EmptyStringCaption_Control1102756003">
+          <DataField>EmptyStringCaption_Control1102756003</DataField>
+        </Field>
+        <Field Name="EmptyStringCaption_Control1102756043">
+          <DataField>EmptyStringCaption_Control1102756043</DataField>
+        </Field>
+        <Field Name="NumberText_1_">
+          <DataField>NumberText_1_</DataField>
+        </Field>
+        <Field Name="ApproverID_ApprovalEntry">
+          <DataField>ApproverID_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="LastDateTimeModified_ApprovalEntry">
+          <DataField>LastDateTimeModified_ApprovalEntry</DataField>
+        </Field>
+        <Field Name="Signature_PreparedBy">
+          <DataField>Signature_PreparedBy</DataField>
+        </Field>
+        <Field Name="PreparedByDesignation_UserSetup">
+          <DataField>PreparedByDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup">
+          <DataField>Signature_UserSetup</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup">
+          <DataField>ApprovalDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup2">
+          <DataField>Signature_UserSetup2</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup2">
+          <DataField>ApprovalDesignation_UserSetup2</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup3">
+          <DataField>Signature_UserSetup3</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup3">
+          <DataField>ApprovalDesignation_UserSetup3</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup4">
+          <DataField>Signature_UserSetup4</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup4">
+          <DataField>ApprovalDesignation_UserSetup4</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup5">
+          <DataField>Signature_UserSetup5</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup5">
+          <DataField>ApprovalDesignation_UserSetup5</DataField>
+        </Field>
+        <Field Name="UserDesign1">
+          <DataField>UserDesign1</DataField>
+        </Field>
+        <Field Name="UserDesign2">
+          <DataField>UserDesign2</DataField>
+        </Field>
+        <Field Name="UserDesign3">
+          <DataField>UserDesign3</DataField>
+        </Field>
+        <Field Name="UserDesign4">
+          <DataField>UserDesign4</DataField>
+        </Field>
+        <Field Name="UserDesign5">
+          <DataField>UserDesign5</DataField>
+        </Field>
+        <Field Name="ApprovalDate1">
+          <DataField>ApprovalDate1</DataField>
+        </Field>
+        <Field Name="ApprovalDate2">
+          <DataField>ApprovalDate2</DataField>
+        </Field>
+        <Field Name="ApprovalDate3">
+          <DataField>ApprovalDate3</DataField>
+        </Field>
+        <Field Name="ApprovalDate4">
+          <DataField>ApprovalDate4</DataField>
+        </Field>
+        <Field Name="ApprovalDate5">
+          <DataField>ApprovalDate5</DataField>
+        </Field>
+        <Field Name="UserName1">
+          <DataField>UserName1</DataField>
+        </Field>
+        <Field Name="UserName2">
+          <DataField>UserName2</DataField>
+        </Field>
+        <Field Name="UserName3">
+          <DataField>UserName3</DataField>
+        </Field>
+        <Field Name="UserName4">
+          <DataField>UserName4</DataField>
+        </Field>
+        <Field Name="UserName5">
+          <DataField>UserName5</DataField>
+        </Field>
+        <Field Name="SendDate">
+          <DataField>SendDate</DataField>
+        </Field>
+        <Field Name="SenderDesign">
+          <DataField>SenderDesign</DataField>
+        </Field>
+        <Field Name="SenderName">
+          <DataField>SenderName</DataField>
+        </Field>
+        <Field Name="SenderSignature">
+          <DataField>SenderSignature</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

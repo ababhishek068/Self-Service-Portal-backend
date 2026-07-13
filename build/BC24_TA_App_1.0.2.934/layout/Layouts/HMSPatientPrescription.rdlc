@@ -1,0 +1,176 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_6640">
+          <DataField>ReportForNavId_6640</DataField>
+        </Field>
+        <Field Name="PatientName">
+          <DataField>PatientName</DataField>
+        </Field>
+        <Field Name="PharmacyNo_HMSPharmacyHeader">
+          <DataField>PharmacyNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="PharmacyDate_HMSPharmacyHeader">
+          <DataField>PharmacyDate_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="PharmacyTime_HMSPharmacyHeader">
+          <DataField>PharmacyTime_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="RequestArea_HMSPharmacyHeader">
+          <DataField>RequestArea_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="PatientNo_HMSPharmacyHeader">
+          <DataField>PatientNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="StudentNo_HMSPharmacyHeader">
+          <DataField>StudentNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="EmployeeNo_HMSPharmacyHeader">
+          <DataField>EmployeeNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="RelativeNo_HMSPharmacyHeader">
+          <DataField>RelativeNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="BillToCustomerNo_HMSPharmacyHeader">
+          <DataField>BillToCustomerNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="IssuedBy_HMSPharmacyHeader">
+          <DataField>IssuedBy_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="LinkType_HMSPharmacyHeader">
+          <DataField>LinkType_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="LinkNo_HMSPharmacyHeader">
+          <DataField>LinkNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="Status_HMSPharmacyHeader">
+          <DataField>Status_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="NoSeries_HMSPharmacyHeader">
+          <DataField>NoSeries_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="Surname_HMSPharmacyHeader">
+          <DataField>Surname_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="MiddleName_HMSPharmacyHeader">
+          <DataField>MiddleName_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="LastName_HMSPharmacyHeader">
+          <DataField>LastName_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="IDNumber_HMSPharmacyHeader">
+          <DataField>IDNumber_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="CorrespondenceAddress1_HMSPharmacyHeader">
+          <DataField>CorrespondenceAddress1_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="TelephoneNo1_HMSPharmacyHeader">
+          <DataField>TelephoneNo1_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="Email_HMSPharmacyHeader">
+          <DataField>Email_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="PatientRefNo_HMSPharmacyHeader">
+          <DataField>PatientRefNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="TotalPrice_HMSPharmacyHeader">
+          <DataField>TotalPrice_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="TotalPrice_HMSPharmacyHeaderFormat">
+          <DataField>TotalPrice_HMSPharmacyHeaderFormat</DataField>
+        </Field>
+        <Field Name="InsuranceNo_HMSPharmacyHeader">
+          <DataField>InsuranceNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="AdmNo_HMSPharmacyHeader">
+          <DataField>AdmNo_HMSPharmacyHeader</DataField>
+        </Field>
+        <Field Name="CLogo">
+          <DataField>CLogo</DataField>
+        </Field>
+        <Field Name="ReportForNavId_7">
+          <DataField>ReportForNavId_7</DataField>
+        </Field>
+        <Field Name="DrugName_HMSPharmacyLine">
+          <DataField>DrugName_HMSPharmacyLine</DataField>
+        </Field>
+        <Field Name="Quantity_HMSPharmacyLine">
+          <DataField>Quantity_HMSPharmacyLine</DataField>
+        </Field>
+        <Field Name="Quantity_HMSPharmacyLineFormat">
+          <DataField>Quantity_HMSPharmacyLineFormat</DataField>
+        </Field>
+        <Field Name="Dosage_HMSPharmacyLine">
+          <DataField>Dosage_HMSPharmacyLine</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

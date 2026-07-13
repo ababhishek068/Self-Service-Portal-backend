@@ -1,0 +1,209 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Address_Customer">
+          <DataField>Address_Customer</DataField>
+        </Field>
+        <Field Name="Address2_Customer">
+          <DataField>Address2_Customer</DataField>
+        </Field>
+        <Field Name="PhoneNo_Customer">
+          <DataField>PhoneNo_Customer</DataField>
+        </Field>
+        <Field Name="No_Customer">
+          <DataField>No_Customer</DataField>
+        </Field>
+        <Field Name="Name_Customer">
+          <DataField>Name_Customer</DataField>
+        </Field>
+        <Field Name="Balance_Customer">
+          <DataField>Balance_Customer</DataField>
+        </Field>
+        <Field Name="Balance_CustomerFormat">
+          <DataField>Balance_CustomerFormat</DataField>
+        </Field>
+        <Field Name="Balance__LCY_">
+          <DataField>Balance__LCY_</DataField>
+        </Field>
+        <Field Name="Balance__LCY_Format">
+          <DataField>Balance__LCY_Format</DataField>
+        </Field>
+        <Field Name="Global_Dimension_1_Code">
+          <DataField>Global_Dimension_1_Code</DataField>
+        </Field>
+        <Field Name="Global_Dimension_2_Code">
+          <DataField>Global_Dimension_2_Code</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="CompLogo">
+          <DataField>CompLogo</DataField>
+        </Field>
+        <Field Name="CompAdd1">
+          <DataField>CompAdd1</DataField>
+        </Field>
+        <Field Name="CompAdd2">
+          <DataField>CompAdd2</DataField>
+        </Field>
+        <Field Name="ReportForNavId_7">
+          <DataField>ReportForNavId_7</DataField>
+        </Field>
+        <Field Name="PostingDate_DetailedCustLedgEntry">
+          <DataField>PostingDate_DetailedCustLedgEntry</DataField>
+        </Field>
+        <Field Name="DocumentNo_DetailedCustLedgEntry">
+          <DataField>DocumentNo_DetailedCustLedgEntry</DataField>
+        </Field>
+        <Field Name="Description_DetailedCustLedgEntry">
+          <DataField>Description_DetailedCustLedgEntry</DataField>
+        </Field>
+        <Field Name="DebitAmountLCY_DetailedCustLedgEntry">
+          <DataField>DebitAmountLCY_DetailedCustLedgEntry</DataField>
+        </Field>
+        <Field Name="DebitAmountLCY_DetailedCustLedgEntryFormat">
+          <DataField>DebitAmountLCY_DetailedCustLedgEntryFormat</DataField>
+        </Field>
+        <Field Name="CreditAmountLCY_DetailedCustLedgEntry">
+          <DataField>CreditAmountLCY_DetailedCustLedgEntry</DataField>
+        </Field>
+        <Field Name="CreditAmountLCY_DetailedCustLedgEntryFormat">
+          <DataField>CreditAmountLCY_DetailedCustLedgEntryFormat</DataField>
+        </Field>
+        <Field Name="RuningBal">
+          <DataField>RuningBal</DataField>
+        </Field>
+        <Field Name="RuningBalFormat">
+          <DataField>RuningBalFormat</DataField>
+        </Field>
+        <Field Name="PriceUSD">
+          <DataField>PriceUSD</DataField>
+        </Field>
+        <Field Name="PriceUSDFormat">
+          <DataField>PriceUSDFormat</DataField>
+        </Field>
+        <Field Name="Semester">
+          <DataField>Semester</DataField>
+        </Field>
+        <Field Name="ProgName">
+          <DataField>ProgName</DataField>
+        </Field>
+        <Field Name="SchoolName">
+          <DataField>SchoolName</DataField>
+        </Field>
+        <Field Name="TransPrefix">
+          <DataField>TransPrefix</DataField>
+        </Field>
+        <Field Name="Currency_Code">
+          <DataField>Currency_Code</DataField>
+        </Field>
+        <Field Name="Transaction_No_">
+          <DataField>Transaction_No_</DataField>
+        </Field>
+        <Field Name="Driver">
+          <DataField>Driver</DataField>
+        </Field>
+        <Field Name="Truck">
+          <DataField>Truck</DataField>
+        </Field>
+        <Field Name="VATRate">
+          <DataField>VATRate</DataField>
+        </Field>
+        <Field Name="VATRateFormat">
+          <DataField>VATRateFormat</DataField>
+        </Field>
+        <Field Name="L20Quantity">
+          <DataField>L20Quantity</DataField>
+        </Field>
+        <Field Name="L20QuantityFormat">
+          <DataField>L20QuantityFormat</DataField>
+        </Field>
+        <Field Name="Observed">
+          <DataField>Observed</DataField>
+        </Field>
+        <Field Name="ObservedFormat">
+          <DataField>ObservedFormat</DataField>
+        </Field>
+        <Field Name="Description2">
+          <DataField>Description2</DataField>
+        </Field>
+        <Field Name="Lts">
+          <DataField>Lts</DataField>
+        </Field>
+        <Field Name="LtsFormat">
+          <DataField>LtsFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

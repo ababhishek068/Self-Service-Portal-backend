@@ -1,0 +1,188 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_8129">
+          <DataField>ReportForNavId_8129</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Name">
+          <DataField>CompanyInfo_Name</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Address">
+          <DataField>CompanyInfo_Address</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Address2">
+          <DataField>CompanyInfo_Address2</DataField>
+        </Field>
+        <Field Name="CompanyInfo_City">
+          <DataField>CompanyInfo_City</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Phone">
+          <DataField>CompanyInfo_Phone</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Fax">
+          <DataField>CompanyInfo_Fax</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Picture">
+          <DataField>CompanyInfo_Picture</DataField>
+        </Field>
+        <Field Name="No_SecVisitorManagement">
+          <DataField>No_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="VisitorNumber_SecVisitorManagement">
+          <DataField>VisitorNumber_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="VisitorName_SecVisitorManagement">
+          <DataField>VisitorName_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="IDNumber_SecVisitorManagement">
+          <DataField>IDNumber_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="PhoneNumber_SecVisitorManagement">
+          <DataField>PhoneNumber_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="CarRegNumber_SecVisitorManagement">
+          <DataField>CarRegNumber_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="VisitorPassNo_SecVisitorManagement">
+          <DataField>VisitorPassNo_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="PurposeofVisit_SecVisitorManagement">
+          <DataField>PurposeofVisit_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="PersonToSee_SecVisitorManagement">
+          <DataField>PersonToSee_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="Status_SecVisitorManagement">
+          <DataField>Status_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="InitiatedBy_SecVisitorManagement">
+          <DataField>InitiatedBy_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="InitiatedByTime_SecVisitorManagement">
+          <DataField>InitiatedByTime_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="ClearedBy_SecVisitorManagement">
+          <DataField>ClearedBy_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="ClearedByTime_SecVisitorManagement">
+          <DataField>ClearedByTime_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="NoSeries_SecVisitorManagement">
+          <DataField>NoSeries_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="CreatedDate_SecVisitorManagement">
+          <DataField>CreatedDate_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="CreatedTime_SecVisitorManagement">
+          <DataField>CreatedTime_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="InitiatedDate_SecVisitorManagement">
+          <DataField>InitiatedDate_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="ClearedDate_SecVisitorManagement">
+          <DataField>ClearedDate_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="VisitorCategory_SecVisitorManagement">
+          <DataField>VisitorCategory_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="VisitorCarRegNumber_SecVisitorManagement">
+          <DataField>VisitorCarRegNumber_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="ActionRecommended_SecVisitorManagement">
+          <DataField>ActionRecommended_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="ActionTaken_SecVisitorManagement">
+          <DataField>ActionTaken_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="IncidentDetails_SecVisitorManagement">
+          <DataField>IncidentDetails_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="IncidentWitness_SecVisitorManagement">
+          <DataField>IncidentWitness_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="IncidentReported_SecVisitorManagement">
+          <DataField>IncidentReported_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="IncidentCategory_SecVisitorManagement">
+          <DataField>IncidentCategory_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="WitnessContacts_SecVisitorManagement">
+          <DataField>WitnessContacts_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="WitnessID_SecVisitorManagement">
+          <DataField>WitnessID_SecVisitorManagement</DataField>
+        </Field>
+        <Field Name="Department_SecVisitorManagement">
+          <DataField>Department_SecVisitorManagement</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

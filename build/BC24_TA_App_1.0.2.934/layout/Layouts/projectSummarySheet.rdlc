@@ -1,0 +1,1013 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="No_Jobs">
+          <DataField>No_Jobs</DataField>
+        </Field>
+        <Field Name="SearchDescription_Jobs">
+          <DataField>SearchDescription_Jobs</DataField>
+        </Field>
+        <Field Name="Description_Jobs">
+          <DataField>Description_Jobs</DataField>
+        </Field>
+        <Field Name="Description2_Jobs">
+          <DataField>Description2_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoPartnerNo_Jobs">
+          <DataField>BilltoPartnerNo_Jobs</DataField>
+        </Field>
+        <Field Name="CreationDate_Jobs">
+          <DataField>CreationDate_Jobs</DataField>
+        </Field>
+        <Field Name="StartingDate_Jobs">
+          <DataField>StartingDate_Jobs</DataField>
+        </Field>
+        <Field Name="EndingDate_Jobs">
+          <DataField>EndingDate_Jobs</DataField>
+        </Field>
+        <Field Name="Status_Jobs">
+          <DataField>Status_Jobs</DataField>
+        </Field>
+        <Field Name="PersonResponsible_Jobs">
+          <DataField>PersonResponsible_Jobs</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_Jobs">
+          <DataField>GlobalDimension1Code_Jobs</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code_Jobs">
+          <DataField>GlobalDimension2Code_Jobs</DataField>
+        </Field>
+        <Field Name="JobPostingGroup_Jobs">
+          <DataField>JobPostingGroup_Jobs</DataField>
+        </Field>
+        <Field Name="Blocked_Jobs">
+          <DataField>Blocked_Jobs</DataField>
+        </Field>
+        <Field Name="LastDateModified_Jobs">
+          <DataField>LastDateModified_Jobs</DataField>
+        </Field>
+        <Field Name="Comment_Jobs">
+          <DataField>Comment_Jobs</DataField>
+        </Field>
+        <Field Name="CustomerDiscGroup_Jobs">
+          <DataField>CustomerDiscGroup_Jobs</DataField>
+        </Field>
+        <Field Name="CustomerPriceGroup_Jobs">
+          <DataField>CustomerPriceGroup_Jobs</DataField>
+        </Field>
+        <Field Name="LanguageCode_Jobs">
+          <DataField>LanguageCode_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResQty_Jobs">
+          <DataField>ScheduledResQty_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResQty_JobsFormat">
+          <DataField>ScheduledResQty_JobsFormat</DataField>
+        </Field>
+        <Field Name="ResourceFilter_Jobs">
+          <DataField>ResourceFilter_Jobs</DataField>
+        </Field>
+        <Field Name="PostingDateFilter_Jobs">
+          <DataField>PostingDateFilter_Jobs</DataField>
+        </Field>
+        <Field Name="ResourceGrFilter_Jobs">
+          <DataField>ResourceGrFilter_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResGrQty_Jobs">
+          <DataField>ScheduledResGrQty_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResGrQty_JobsFormat">
+          <DataField>ScheduledResGrQty_JobsFormat</DataField>
+        </Field>
+        <Field Name="Picture_Jobs">
+          <DataField>Picture_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoName_Jobs">
+          <DataField>BilltoName_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoAddress_Jobs">
+          <DataField>BilltoAddress_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoAddress2_Jobs">
+          <DataField>BilltoAddress2_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoCity_Jobs">
+          <DataField>BilltoCity_Jobs</DataField>
+        </Field>
+        <Field Name="Region_Jobs">
+          <DataField>Region_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoPostCode_Jobs">
+          <DataField>BilltoPostCode_Jobs</DataField>
+        </Field>
+        <Field Name="NoSeries_Jobs">
+          <DataField>NoSeries_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoCountryRegionCode_Jobs">
+          <DataField>BilltoCountryRegionCode_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoName2_Jobs">
+          <DataField>BilltoName2_Jobs</DataField>
+        </Field>
+        <Field Name="WIPMethod_Jobs">
+          <DataField>WIPMethod_Jobs</DataField>
+        </Field>
+        <Field Name="CurrencyCode_Jobs">
+          <DataField>CurrencyCode_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoContactNo_Jobs">
+          <DataField>BilltoContactNo_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoContact_Jobs">
+          <DataField>BilltoContact_Jobs</DataField>
+        </Field>
+        <Field Name="PlanningDateFilter_Jobs">
+          <DataField>PlanningDateFilter_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostAmount_Jobs">
+          <DataField>TotalWIPCostAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostAmount_JobsFormat">
+          <DataField>TotalWIPCostAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPCostGLAmount_Jobs">
+          <DataField>TotalWIPCostGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostGLAmount_JobsFormat">
+          <DataField>TotalWIPCostGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="WIPPostedToGL_Jobs">
+          <DataField>WIPPostedToGL_Jobs</DataField>
+        </Field>
+        <Field Name="WIPPostingDate_Jobs">
+          <DataField>WIPPostingDate_Jobs</DataField>
+        </Field>
+        <Field Name="WIPGLPostingDate_Jobs">
+          <DataField>WIPGLPostingDate_Jobs</DataField>
+        </Field>
+        <Field Name="PostedWIPMethodUsed_Jobs">
+          <DataField>PostedWIPMethodUsed_Jobs</DataField>
+        </Field>
+        <Field Name="InvoiceCurrencyCode_Jobs">
+          <DataField>InvoiceCurrencyCode_Jobs</DataField>
+        </Field>
+        <Field Name="ExchCalculationCost_Jobs">
+          <DataField>ExchCalculationCost_Jobs</DataField>
+        </Field>
+        <Field Name="ExchCalculationPrice_Jobs">
+          <DataField>ExchCalculationPrice_Jobs</DataField>
+        </Field>
+        <Field Name="AllowScheduleContractLines_Jobs">
+          <DataField>AllowScheduleContractLines_Jobs</DataField>
+        </Field>
+        <Field Name="Complete_Jobs">
+          <DataField>Complete_Jobs</DataField>
+        </Field>
+        <Field Name="CalcWIPMethodUsed_Jobs">
+          <DataField>CalcWIPMethodUsed_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesAmount_Jobs">
+          <DataField>RecogSalesAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesAmount_JobsFormat">
+          <DataField>RecogSalesAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogSalesGLAmount_Jobs">
+          <DataField>RecogSalesGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesGLAmount_JobsFormat">
+          <DataField>RecogSalesGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogCostsAmount_Jobs">
+          <DataField>RecogCostsAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogCostsAmount_JobsFormat">
+          <DataField>RecogCostsAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogCostsGLAmount_Jobs">
+          <DataField>RecogCostsGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogCostsGLAmount_JobsFormat">
+          <DataField>RecogCostsGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesAmount_Jobs">
+          <DataField>TotalWIPSalesAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesAmount_JobsFormat">
+          <DataField>TotalWIPSalesAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesGLAmount_Jobs">
+          <DataField>TotalWIPSalesGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesGLAmount_JobsFormat">
+          <DataField>TotalWIPSalesGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="CompletionCalculated_Jobs">
+          <DataField>CompletionCalculated_Jobs</DataField>
+        </Field>
+        <Field Name="NextInvoiceDate_Jobs">
+          <DataField>NextInvoiceDate_Jobs</DataField>
+        </Field>
+        <Field Name="GrantPhases_Jobs">
+          <DataField>GrantPhases_Jobs</DataField>
+        </Field>
+        <Field Name="ApprovalStatus_Jobs">
+          <DataField>ApprovalStatus_Jobs</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_Jobs">
+          <DataField>ResponsibilityCenter_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCost_Jobs">
+          <DataField>TotalCost_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCost_JobsFormat">
+          <DataField>TotalCost_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_Jobs">
+          <DataField>TotalCostLCY_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobsFormat">
+          <DataField>TotalCostLCY_JobsFormat</DataField>
+        </Field>
+        <Field Name="ContractDescription_Jobs">
+          <DataField>ContractDescription_Jobs</DataField>
+        </Field>
+        <Field Name="ContractType_Jobs">
+          <DataField>ContractType_Jobs</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_Jobs">
+          <DataField>DisbursedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobsFormat">
+          <DataField>DisbursedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="AllowOverExpenditure_Jobs">
+          <DataField>AllowOverExpenditure_Jobs</DataField>
+        </Field>
+        <Field Name="AccountedAmount_Jobs">
+          <DataField>AccountedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="AccountedAmount_JobsFormat">
+          <DataField>AccountedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="ReceivedAmount_Jobs">
+          <DataField>ReceivedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="ReceivedAmount_JobsFormat">
+          <DataField>ReceivedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="ProposalNo_Jobs">
+          <DataField>ProposalNo_Jobs</DataField>
+        </Field>
+        <Field Name="ConvertedToProposal_Jobs">
+          <DataField>ConvertedToProposal_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectNo_Jobs">
+          <DataField>ProjectNo_Jobs</DataField>
+        </Field>
+        <Field Name="ConvertedToProject_Jobs">
+          <DataField>ConvertedToProject_Jobs</DataField>
+        </Field>
+        <Field Name="ConceptNumber_Jobs">
+          <DataField>ConceptNumber_Jobs</DataField>
+        </Field>
+        <Field Name="Objective_Jobs">
+          <DataField>Objective_Jobs</DataField>
+        </Field>
+        <Field Name="ContractNo_Jobs">
+          <DataField>ContractNo_Jobs</DataField>
+        </Field>
+        <Field Name="Reportingdatesgenerated_Jobs">
+          <DataField>Reportingdatesgenerated_Jobs</DataField>
+        </Field>
+        <Field Name="Conditionforbudgetrealloca_Jobs">
+          <DataField>Conditionforbudgetrealloca_Jobs</DataField>
+        </Field>
+        <Field Name="PrincipalInvestigator_Jobs">
+          <DataField>PrincipalInvestigator_Jobs</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptAmount_Jobs">
+          <DataField>ExpectedReceiptAmount_Jobs</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptAmount_JobsFormat">
+          <DataField>ExpectedReceiptAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="Partners_Jobs">
+          <DataField>Partners_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectLocation_Jobs">
+          <DataField>ProjectLocation_Jobs</DataField>
+        </Field>
+        <Field Name="IncomeAccount_Jobs">
+          <DataField>IncomeAccount_Jobs</DataField>
+        </Field>
+        <Field Name="ConceptApprovalDate_Jobs">
+          <DataField>ConceptApprovalDate_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectFilter_Jobs">
+          <DataField>ProjectFilter_Jobs</DataField>
+        </Field>
+        <Field Name="Title_Jobs">
+          <DataField>Title_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectCoordinator_Jobs">
+          <DataField>ProjectCoordinator_Jobs</DataField>
+        </Field>
+        <Field Name="Task_Jobs">
+          <DataField>Task_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectStatus_Jobs">
+          <DataField>ProjectStatus_Jobs</DataField>
+        </Field>
+        <Field Name="AuditIndicator_Jobs">
+          <DataField>AuditIndicator_Jobs</DataField>
+        </Field>
+        <Field Name="ContractStartDate_Jobs">
+          <DataField>ContractStartDate_Jobs</DataField>
+        </Field>
+        <Field Name="ContractExpiryDate_Jobs">
+          <DataField>ContractExpiryDate_Jobs</DataField>
+        </Field>
+        <Field Name="JustificationNarration_Jobs">
+          <DataField>JustificationNarration_Jobs</DataField>
+        </Field>
+        <Field Name="AmountInvoiced_Jobs">
+          <DataField>AmountInvoiced_Jobs</DataField>
+        </Field>
+        <Field Name="AmountInvoiced_JobsFormat">
+          <DataField>AmountInvoiced_JobsFormat</DataField>
+        </Field>
+        <Field Name="GrantLevel_Jobs">
+          <DataField>GrantLevel_Jobs</DataField>
+        </Field>
+        <Field Name="RSPONo_Jobs">
+          <DataField>RSPONo_Jobs</DataField>
+        </Field>
+        <Field Name="Alertsent_Jobs">
+          <DataField>Alertsent_Jobs</DataField>
+        </Field>
+        <Field Name="ProposalApplicationdueDate_Jobs">
+          <DataField>ProposalApplicationdueDate_Jobs</DataField>
+        </Field>
+        <Field Name="Submission_Jobs">
+          <DataField>Submission_Jobs</DataField>
+        </Field>
+        <Field Name="PIName_Jobs">
+          <DataField>PIName_Jobs</DataField>
+        </Field>
+        <Field Name="PIAddress_Jobs">
+          <DataField>PIAddress_Jobs</DataField>
+        </Field>
+        <Field Name="PITelephone_Jobs">
+          <DataField>PITelephone_Jobs</DataField>
+        </Field>
+        <Field Name="PIEMail_Jobs">
+          <DataField>PIEMail_Jobs</DataField>
+        </Field>
+        <Field Name="CollaborativeGrant_Jobs">
+          <DataField>CollaborativeGrant_Jobs</DataField>
+        </Field>
+        <Field Name="IRECApproval_Jobs">
+          <DataField>IRECApproval_Jobs</DataField>
+        </Field>
+        <Field Name="IRECApprovalDate_Jobs">
+          <DataField>IRECApprovalDate_Jobs</DataField>
+        </Field>
+        <Field Name="CostShare_Jobs">
+          <DataField>CostShare_Jobs</DataField>
+        </Field>
+        <Field Name="CostShareDetails_Jobs">
+          <DataField>CostShareDetails_Jobs</DataField>
+        </Field>
+        <Field Name="Matching_Jobs">
+          <DataField>Matching_Jobs</DataField>
+        </Field>
+        <Field Name="MatchingDetails_Jobs">
+          <DataField>MatchingDetails_Jobs</DataField>
+        </Field>
+        <Field Name="ApplicationdispositionStatus_Jobs">
+          <DataField>ApplicationdispositionStatus_Jobs</DataField>
+        </Field>
+        <Field Name="SubAwardNo_Jobs">
+          <DataField>SubAwardNo_Jobs</DataField>
+        </Field>
+        <Field Name="PaymentMethods_Jobs">
+          <DataField>PaymentMethods_Jobs</DataField>
+        </Field>
+        <Field Name="Schools_Jobs">
+          <DataField>Schools_Jobs</DataField>
+        </Field>
+        <Field Name="ApplicationDueDate_Jobs">
+          <DataField>ApplicationDueDate_Jobs</DataField>
+        </Field>
+        <Field Name="FundingRequest_Jobs">
+          <DataField>FundingRequest_Jobs</DataField>
+        </Field>
+        <Field Name="Budget_Jobs">
+          <DataField>Budget_Jobs</DataField>
+        </Field>
+        <Field Name="BudgetJustification_Jobs">
+          <DataField>BudgetJustification_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectSummaryAbstract_Jobs">
+          <DataField>ProjectSummaryAbstract_Jobs</DataField>
+        </Field>
+        <Field Name="RSPOCompletionList_Jobs">
+          <DataField>RSPOCompletionList_Jobs</DataField>
+        </Field>
+        <Field Name="Donors_Jobs">
+          <DataField>Donors_Jobs</DataField>
+        </Field>
+        <Field Name="Workplan_Jobs">
+          <DataField>Workplan_Jobs</DataField>
+        </Field>
+        <Field Name="PeriodofPerformance_Jobs">
+          <DataField>PeriodofPerformance_Jobs</DataField>
+        </Field>
+        <Field Name="MainDonor_Jobs">
+          <DataField>MainDonor_Jobs</DataField>
+        </Field>
+        <Field Name="ContactPersonNM">
+          <DataField>ContactPersonNM</DataField>
+        </Field>
+        <Field Name="custAddress">
+          <DataField>custAddress</DataField>
+        </Field>
+        <Field Name="ReportForNavId_126">
+          <DataField>ReportForNavId_126</DataField>
+        </Field>
+        <Field Name="PartnerID_ProjectPartners">
+          <DataField>PartnerID_ProjectPartners</DataField>
+        </Field>
+        <Field Name="PartnerName_ProjectPartners">
+          <DataField>PartnerName_ProjectPartners</DataField>
+        </Field>
+        <Field Name="PartnerBudget_ProjectPartners">
+          <DataField>PartnerBudget_ProjectPartners</DataField>
+        </Field>
+        <Field Name="PartnerBudget_ProjectPartnersFormat">
+          <DataField>PartnerBudget_ProjectPartnersFormat</DataField>
+        </Field>
+        <Field Name="GrantNo_ProjectPartners">
+          <DataField>GrantNo_ProjectPartners</DataField>
+        </Field>
+        <Field Name="ReportingDate_ProjectPartners">
+          <DataField>ReportingDate_ProjectPartners</DataField>
+        </Field>
+        <Field Name="DisbursedAmountLCY_ProjectPartners">
+          <DataField>DisbursedAmountLCY_ProjectPartners</DataField>
+        </Field>
+        <Field Name="DisbursedAmountLCY_ProjectPartnersFormat">
+          <DataField>DisbursedAmountLCY_ProjectPartnersFormat</DataField>
+        </Field>
+        <Field Name="Balance_ProjectPartners">
+          <DataField>Balance_ProjectPartners</DataField>
+        </Field>
+        <Field Name="Balance_ProjectPartnersFormat">
+          <DataField>Balance_ProjectPartnersFormat</DataField>
+        </Field>
+        <Field Name="AccountedAmount_ProjectPartners">
+          <DataField>AccountedAmount_ProjectPartners</DataField>
+        </Field>
+        <Field Name="AccountedAmount_ProjectPartnersFormat">
+          <DataField>AccountedAmount_ProjectPartnersFormat</DataField>
+        </Field>
+        <Field Name="ContractorType_ProjectPartners">
+          <DataField>ContractorType_ProjectPartners</DataField>
+        </Field>
+        <Field Name="ReportForNavId_136">
+          <DataField>ReportForNavId_136</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_ProjectDonors">
+          <DataField>ShortcutDimension1Code_ProjectDonors</DataField>
+        </Field>
+        <Field Name="DonorName_ProjectDonors">
+          <DataField>DonorName_ProjectDonors</DataField>
+        </Field>
+        <Field Name="ExpectedDonation_ProjectDonors">
+          <DataField>ExpectedDonation_ProjectDonors</DataField>
+        </Field>
+        <Field Name="ExpectedDonation_ProjectDonorsFormat">
+          <DataField>ExpectedDonation_ProjectDonorsFormat</DataField>
+        </Field>
+        <Field Name="GrantNo_ProjectDonors">
+          <DataField>GrantNo_ProjectDonors</DataField>
+        </Field>
+        <Field Name="ReportingDate_ProjectDonors">
+          <DataField>ReportingDate_ProjectDonors</DataField>
+        </Field>
+        <Field Name="DonatedAmount_ProjectDonors">
+          <DataField>DonatedAmount_ProjectDonors</DataField>
+        </Field>
+        <Field Name="DonatedAmount_ProjectDonorsFormat">
+          <DataField>DonatedAmount_ProjectDonorsFormat</DataField>
+        </Field>
+        <Field Name="Balance_ProjectDonors">
+          <DataField>Balance_ProjectDonors</DataField>
+        </Field>
+        <Field Name="Balance_ProjectDonorsFormat">
+          <DataField>Balance_ProjectDonorsFormat</DataField>
+        </Field>
+        <Field Name="IndirectCost_ProjectDonors">
+          <DataField>IndirectCost_ProjectDonors</DataField>
+        </Field>
+        <Field Name="Percentage_ProjectDonors">
+          <DataField>Percentage_ProjectDonors</DataField>
+        </Field>
+        <Field Name="Percentage_ProjectDonorsFormat">
+          <DataField>Percentage_ProjectDonorsFormat</DataField>
+        </Field>
+        <Field Name="AllowedIndirectCost_ProjectDonors">
+          <DataField>AllowedIndirectCost_ProjectDonors</DataField>
+        </Field>
+        <Field Name="AllowedIndirectCost_ProjectDonorsFormat">
+          <DataField>AllowedIndirectCost_ProjectDonorsFormat</DataField>
+        </Field>
+        <Field Name="ChargeType_ProjectDonors">
+          <DataField>ChargeType_ProjectDonors</DataField>
+        </Field>
+        <Field Name="ReportForNavId_151">
+          <DataField>ReportForNavId_151</DataField>
+        </Field>
+        <Field Name="LineNo_JobPlanningLine">
+          <DataField>LineNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GrantNo_JobPlanningLine">
+          <DataField>GrantNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="PlanningDate_JobPlanningLine">
+          <DataField>PlanningDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DocumentNo_JobPlanningLine">
+          <DataField>DocumentNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Type_JobPlanningLine">
+          <DataField>Type_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="No_JobPlanningLine">
+          <DataField>No_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Description_JobPlanningLine">
+          <DataField>Description_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Quantity_JobPlanningLine">
+          <DataField>Quantity_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Quantity_JobPlanningLineFormat">
+          <DataField>Quantity_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="DirectUnitCostLCY_JobPlanningLine">
+          <DataField>DirectUnitCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DirectUnitCostLCY_JobPlanningLineFormat">
+          <DataField>DirectUnitCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_JobPlanningLine">
+          <DataField>UnitCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_JobPlanningLineFormat">
+          <DataField>UnitCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobPlanningLine">
+          <DataField>TotalCostLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobPlanningLineFormat">
+          <DataField>TotalCostLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_JobPlanningLine">
+          <DataField>UnitPriceLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_JobPlanningLineFormat">
+          <DataField>UnitPriceLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalPriceLCY_JobPlanningLine">
+          <DataField>TotalPriceLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalPriceLCY_JobPlanningLineFormat">
+          <DataField>TotalPriceLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="ResourceGroupNo_JobPlanningLine">
+          <DataField>ResourceGroupNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitofMeasureCode_JobPlanningLine">
+          <DataField>UnitofMeasureCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LocationCode_JobPlanningLine">
+          <DataField>LocationCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LastDateModified_JobPlanningLine">
+          <DataField>LastDateModified_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UserID_JobPlanningLine">
+          <DataField>UserID_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="WorkTypeCode_JobPlanningLine">
+          <DataField>WorkTypeCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CustomerPriceGroup_JobPlanningLine">
+          <DataField>CustomerPriceGroup_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_JobPlanningLine">
+          <DataField>GlobalDimension1Code_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code_JobPlanningLine">
+          <DataField>GlobalDimension2Code_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CountryRegionCode_JobPlanningLine">
+          <DataField>CountryRegionCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GenBusPostingGroup_JobPlanningLine">
+          <DataField>GenBusPostingGroup_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GenProdPostingGroup_JobPlanningLine">
+          <DataField>GenProdPostingGroup_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DocumentDate_JobPlanningLine">
+          <DataField>DocumentDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GrantTaskNo_JobPlanningLine">
+          <DataField>GrantTaskNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmountLCY_JobPlanningLine">
+          <DataField>LineAmountLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmountLCY_JobPlanningLineFormat">
+          <DataField>LineAmountLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCost_JobPlanningLine">
+          <DataField>UnitCost_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitCost_JobPlanningLineFormat">
+          <DataField>UnitCost_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalCost_JobPlanningLine">
+          <DataField>TotalCost_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalCost_JobPlanningLineFormat">
+          <DataField>TotalCost_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPrice_JobPlanningLine">
+          <DataField>UnitPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnitPrice_JobPlanningLineFormat">
+          <DataField>UnitPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalPrice_JobPlanningLine">
+          <DataField>TotalPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalPrice_JobPlanningLineFormat">
+          <DataField>TotalPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LineAmount_JobPlanningLine">
+          <DataField>LineAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineAmount_JobPlanningLineFormat">
+          <DataField>LineAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LineDiscountAmount_JobPlanningLine">
+          <DataField>LineDiscountAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineDiscountAmount_JobPlanningLineFormat">
+          <DataField>LineDiscountAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LineDiscountAmountLCY_JobPlanningLine">
+          <DataField>LineDiscountAmountLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineDiscountAmountLCY_JobPlanningLineFormat">
+          <DataField>LineDiscountAmountLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="CostFactor_JobPlanningLine">
+          <DataField>CostFactor_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CostFactor_JobPlanningLineFormat">
+          <DataField>CostFactor_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="SerialNo_JobPlanningLine">
+          <DataField>SerialNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LotNo_JobPlanningLine">
+          <DataField>LotNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineDiscount_JobPlanningLine">
+          <DataField>LineDiscount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LineDiscount_JobPlanningLineFormat">
+          <DataField>LineDiscount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LineType_JobPlanningLine">
+          <DataField>LineType_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CurrencyCode_JobPlanningLine">
+          <DataField>CurrencyCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CurrencyDate_JobPlanningLine">
+          <DataField>CurrencyDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_JobPlanningLine">
+          <DataField>CurrencyFactor_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_JobPlanningLineFormat">
+          <DataField>CurrencyFactor_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="ScheduleLine_JobPlanningLine">
+          <DataField>ScheduleLine_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="ContractLine_JobPlanningLine">
+          <DataField>ContractLine_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Invoiced_JobPlanningLine">
+          <DataField>Invoiced_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Transferred_JobPlanningLine">
+          <DataField>Transferred_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GrantContractEntryNo_JobPlanningLine">
+          <DataField>GrantContractEntryNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoiceType_JobPlanningLine">
+          <DataField>InvoiceType_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoiceNo_JobPlanningLine">
+          <DataField>InvoiceNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TransferredDate_JobPlanningLine">
+          <DataField>TransferredDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoicedDate_JobPlanningLine">
+          <DataField>InvoicedDate_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoicedAmountLCY_JobPlanningLine">
+          <DataField>InvoicedAmountLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoicedAmountLCY_JobPlanningLineFormat">
+          <DataField>InvoicedAmountLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="InvoicedCostAmountLCY_JobPlanningLine">
+          <DataField>InvoicedCostAmountLCY_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoicedCostAmountLCY_JobPlanningLineFormat">
+          <DataField>InvoicedCostAmountLCY_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="VATUnitPrice_JobPlanningLine">
+          <DataField>VATUnitPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="VATUnitPrice_JobPlanningLineFormat">
+          <DataField>VATUnitPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="VATLineDiscountAmount_JobPlanningLine">
+          <DataField>VATLineDiscountAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="VATLineDiscountAmount_JobPlanningLineFormat">
+          <DataField>VATLineDiscountAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="VATLineAmount_JobPlanningLine">
+          <DataField>VATLineAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="VATLineAmount_JobPlanningLineFormat">
+          <DataField>VATLineAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="VAT_JobPlanningLine">
+          <DataField>VAT_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="VAT_JobPlanningLineFormat">
+          <DataField>VAT_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="Description2_JobPlanningLine">
+          <DataField>Description2_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GrantLedgerEntryNo_JobPlanningLine">
+          <DataField>GrantLedgerEntryNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvCurrUnitPrice_JobPlanningLine">
+          <DataField>InvCurrUnitPrice_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvCurrUnitPrice_JobPlanningLineFormat">
+          <DataField>InvCurrUnitPrice_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="InvCurrLineAmount_JobPlanningLine">
+          <DataField>InvCurrLineAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvCurrLineAmount_JobPlanningLineFormat">
+          <DataField>InvCurrLineAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="InvoiceCurrency_JobPlanningLine">
+          <DataField>InvoiceCurrency_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoiceCurrencyCode_JobPlanningLine">
+          <DataField>InvoiceCurrencyCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Status_JobPlanningLine">
+          <DataField>Status_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoiceCurrencyFactor_JobPlanningLine">
+          <DataField>InvoiceCurrencyFactor_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="InvoiceCurrencyFactor_JobPlanningLineFormat">
+          <DataField>InvoiceCurrencyFactor_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="LedgerEntryType_JobPlanningLine">
+          <DataField>LedgerEntryType_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="LedgerEntryNo_JobPlanningLine">
+          <DataField>LedgerEntryNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="SystemCreatedEntry_JobPlanningLine">
+          <DataField>SystemCreatedEntry_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UsageLink_JobPlanningLine">
+          <DataField>UsageLink_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="VariantCode_JobPlanningLine">
+          <DataField>VariantCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="BinCode_JobPlanningLine">
+          <DataField>BinCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="QtyperUnitofMeasure_JobPlanningLine">
+          <DataField>QtyperUnitofMeasure_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="QtyperUnitofMeasure_JobPlanningLineFormat">
+          <DataField>QtyperUnitofMeasure_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="QuantityBase_JobPlanningLine">
+          <DataField>QuantityBase_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="QuantityBase_JobPlanningLineFormat">
+          <DataField>QuantityBase_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="ServiceOrderNo_JobPlanningLine">
+          <DataField>ServiceOrderNo_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="GrantPhase_JobPlanningLine">
+          <DataField>GrantPhase_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="AccountedAmount_JobPlanningLine">
+          <DataField>AccountedAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="AccountedAmount_JobPlanningLineFormat">
+          <DataField>AccountedAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="IncomeAccount_JobPlanningLine">
+          <DataField>IncomeAccount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Description3_JobPlanningLine">
+          <DataField>Description3_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="AuditProvision_JobPlanningLine">
+          <DataField>AuditProvision_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="SpecialConditionforTravel_JobPlanningLine">
+          <DataField>SpecialConditionforTravel_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="PendingdonorIssues_JobPlanningLine">
+          <DataField>PendingdonorIssues_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DisbursmentDuedates_JobPlanningLine">
+          <DataField>DisbursmentDuedates_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="Partner_JobPlanningLine">
+          <DataField>Partner_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="BudgetPeriod_JobPlanningLine">
+          <DataField>BudgetPeriod_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear1_JobPlanningLine">
+          <DataField>TotalYear1_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear1_JobPlanningLineFormat">
+          <DataField>TotalYear1_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear2_JobPlanningLine">
+          <DataField>TotalYear2_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear2_JobPlanningLineFormat">
+          <DataField>TotalYear2_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear3_JobPlanningLine">
+          <DataField>TotalYear3_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear3_JobPlanningLineFormat">
+          <DataField>TotalYear3_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TransferedToBudget_JobPlanningLine">
+          <DataField>TransferedToBudget_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="BudgetGroupingCode_JobPlanningLine">
+          <DataField>BudgetGroupingCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="ICIPEContribution_JobPlanningLine">
+          <DataField>ICIPEContribution_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="ICIPEContribution_JobPlanningLineFormat">
+          <DataField>ICIPEContribution_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="UnaccountedAmount_JobPlanningLine">
+          <DataField>UnaccountedAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="UnaccountedAmount_JobPlanningLineFormat">
+          <DataField>UnaccountedAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobPlanningLine">
+          <DataField>DisbursedAmount_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobPlanningLineFormat">
+          <DataField>DisbursedAmount_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="Restriction_JobPlanningLine">
+          <DataField>Restriction_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="DonorExpenseCode_JobPlanningLine">
+          <DataField>DonorExpenseCode_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear4_JobPlanningLine">
+          <DataField>TotalYear4_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear4_JobPlanningLineFormat">
+          <DataField>TotalYear4_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear5_JobPlanningLine">
+          <DataField>TotalYear5_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear5_JobPlanningLineFormat">
+          <DataField>TotalYear5_JobPlanningLineFormat</DataField>
+        </Field>
+        <Field Name="TotalYear6_JobPlanningLine">
+          <DataField>TotalYear6_JobPlanningLine</DataField>
+        </Field>
+        <Field Name="TotalYear6_JobPlanningLineFormat">
+          <DataField>TotalYear6_JobPlanningLineFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

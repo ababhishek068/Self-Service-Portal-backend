@@ -1,0 +1,260 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1000000000">
+          <DataField>ReportForNavId_1000000000</DataField>
+        </Field>
+        <Field Name="ProjectTitle">
+          <DataField>ProjectTitle</DataField>
+        </Field>
+        <Field Name="PrinicipleINvestigatorName">
+          <DataField>PrinicipleINvestigatorName</DataField>
+        </Field>
+        <Field Name="CollborativeInstitution">
+          <DataField>CollborativeInstitution</DataField>
+        </Field>
+        <Field Name="PIPostalAddress">
+          <DataField>PIPostalAddress</DataField>
+        </Field>
+        <Field Name="PITelephone">
+          <DataField>PITelephone</DataField>
+        </Field>
+        <Field Name="PIAddress">
+          <DataField>PIAddress</DataField>
+        </Field>
+        <Field Name="CoPIName">
+          <DataField>CoPIName</DataField>
+        </Field>
+        <Field Name="CoPIAddress">
+          <DataField>CoPIAddress</DataField>
+        </Field>
+        <Field Name="CoPITelephone">
+          <DataField>CoPITelephone</DataField>
+        </Field>
+        <Field Name="CoPIEmail">
+          <DataField>CoPIEmail</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000011">
+          <DataField>ReportForNavId_1000000011</DataField>
+        </Field>
+        <Field Name="ConsortiumCollaborator">
+          <DataField>ConsortiumCollaborator</DataField>
+        </Field>
+        <Field Name="StudyType">
+          <DataField>StudyType</DataField>
+        </Field>
+        <Field Name="Objectives">
+          <DataField>Objectives</DataField>
+        </Field>
+        <Field Name="ProjectDescription">
+          <DataField>ProjectDescription</DataField>
+        </Field>
+        <Field Name="FundingStatus">
+          <DataField>FundingStatus</DataField>
+        </Field>
+        <Field Name="SupportDescription">
+          <DataField>SupportDescription</DataField>
+        </Field>
+        <Field Name="FundingApplicationDeadline">
+          <DataField>FundingApplicationDeadline</DataField>
+        </Field>
+        <Field Name="ResearchWorkingGroupApproval">
+          <DataField>ResearchWorkingGroupApproval</DataField>
+        </Field>
+        <Field Name="AmpathDataAnalysisTeamApproval">
+          <DataField>AmpathDataAnalysisTeamApproval</DataField>
+        </Field>
+        <Field Name="IRECApproval">
+          <DataField>IRECApproval</DataField>
+        </Field>
+        <Field Name="EIPLApproval">
+          <DataField>EIPLApproval</DataField>
+        </Field>
+        <Field Name="StudyPopulation">
+          <DataField>StudyPopulation</DataField>
+        </Field>
+        <Field Name="SamplingMethods">
+          <DataField>SamplingMethods</DataField>
+        </Field>
+        <Field Name="DependantVariables">
+          <DataField>DependantVariables</DataField>
+        </Field>
+        <Field Name="IndependentVariables">
+          <DataField>IndependentVariables</DataField>
+        </Field>
+        <Field Name="StatisticianName">
+          <DataField>StatisticianName</DataField>
+        </Field>
+        <Field Name="StatisticianInstitutionalAffiliation">
+          <DataField>StatisticianInstitutionalAffiliation</DataField>
+        </Field>
+        <Field Name="StatisticianAddress">
+          <DataField>StatisticianAddress</DataField>
+        </Field>
+        <Field Name="StatisticianTelephone">
+          <DataField>StatisticianTelephone</DataField>
+        </Field>
+        <Field Name="StatisticianFax">
+          <DataField>StatisticianFax</DataField>
+        </Field>
+        <Field Name="StatisticianEmail">
+          <DataField>StatisticianEmail</DataField>
+        </Field>
+        <Field Name="LabTestingAlgorithm">
+          <DataField>LabTestingAlgorithm</DataField>
+        </Field>
+        <Field Name="LTASubmission">
+          <DataField>LTASubmission</DataField>
+        </Field>
+        <Field Name="LTADescription">
+          <DataField>LTADescription</DataField>
+        </Field>
+        <Field Name="CoveredTests">
+          <DataField>CoveredTests</DataField>
+        </Field>
+        <Field Name="SpecialProccessingRequirements">
+          <DataField>SpecialProccessingRequirements</DataField>
+        </Field>
+        <Field Name="SPRDescription">
+          <DataField>SPRDescription</DataField>
+        </Field>
+        <Field Name="SampleStorageRequirements">
+          <DataField>SampleStorageRequirements</DataField>
+        </Field>
+        <Field Name="SampleStoragePeriod">
+          <DataField>SampleStoragePeriod</DataField>
+        </Field>
+        <Field Name="SampleDestructionProtocol">
+          <DataField>SampleDestructionProtocol</DataField>
+        </Field>
+        <Field Name="SampleShipment">
+          <DataField>SampleShipment</DataField>
+        </Field>
+        <Field Name="SampleShipmentRequirements">
+          <DataField>SampleShipmentRequirements</DataField>
+        </Field>
+        <Field Name="DataStorageRequiremets">
+          <DataField>DataStorageRequiremets</DataField>
+        </Field>
+        <Field Name="DataStorageRequirementsDescription">
+          <DataField>DataStorageRequirementsDescription</DataField>
+        </Field>
+        <Field Name="SpecialRequirements">
+          <DataField>SpecialRequirements</DataField>
+        </Field>
+        <Field Name="OddWorkingHours">
+          <DataField>OddWorkingHours</DataField>
+        </Field>
+        <Field Name="OddWorkingHoursDescription">
+          <DataField>OddWorkingHoursDescription</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000048">
+          <DataField>ReportForNavId_1000000048</DataField>
+        </Field>
+        <Field Name="DeadlineDate">
+          <DataField>DeadlineDate</DataField>
+        </Field>
+        <Field Name="DeadlineDescription">
+          <DataField>DeadlineDescription</DataField>
+        </Field>
+        <Field Name="DeadlineStudyCode">
+          <DataField>DeadlineStudyCode</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000049">
+          <DataField>ReportForNavId_1000000049</DataField>
+        </Field>
+        <Field Name="DeliverableDescription">
+          <DataField>DeliverableDescription</DataField>
+        </Field>
+        <Field Name="DeliverableStudyCode">
+          <DataField>DeliverableStudyCode</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000050">
+          <DataField>ReportForNavId_1000000050</DataField>
+        </Field>
+        <Field Name="ProjectAreasOfFocus">
+          <DataField>ProjectAreasOfFocus</DataField>
+        </Field>
+        <Field Name="ProjectAreasStudyCode">
+          <DataField>ProjectAreasStudyCode</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000051">
+          <DataField>ReportForNavId_1000000051</DataField>
+        </Field>
+        <Field Name="DataSourceForms">
+          <DataField>DataSourceForms</DataField>
+        </Field>
+        <Field Name="SourceFormStudyCode">
+          <DataField>SourceFormStudyCode</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

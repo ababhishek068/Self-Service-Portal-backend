@@ -1,0 +1,572 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="No_ImprestSurrenderHeader">
+          <DataField>No_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="SurrenderDate_ImprestSurrenderHeader">
+          <DataField>SurrenderDate_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Type_ImprestSurrenderHeader">
+          <DataField>Type_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="PayMode_ImprestSurrenderHeader">
+          <DataField>PayMode_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ChequeNo_ImprestSurrenderHeader">
+          <DataField>ChequeNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ChequeDate_ImprestSurrenderHeader">
+          <DataField>ChequeDate_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ChequeType_ImprestSurrenderHeader">
+          <DataField>ChequeType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="BankCode_ImprestSurrenderHeader">
+          <DataField>BankCode_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ReceivedFrom_ImprestSurrenderHeader">
+          <DataField>ReceivedFrom_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="OnBehalfOf_ImprestSurrenderHeader">
+          <DataField>OnBehalfOf_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Cashier_ImprestSurrenderHeader">
+          <DataField>Cashier_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="AccountType_ImprestSurrenderHeader">
+          <DataField>AccountType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="AccountNo_ImprestSurrenderHeader">
+          <DataField>AccountNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="NoSeries_ImprestSurrenderHeader">
+          <DataField>NoSeries_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="AccountName_ImprestSurrenderHeader">
+          <DataField>AccountName_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Posted_ImprestSurrenderHeader">
+          <DataField>Posted_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="DatePosted_ImprestSurrenderHeader">
+          <DataField>DatePosted_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TimePosted_ImprestSurrenderHeader">
+          <DataField>TimePosted_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="PostedBy_ImprestSurrenderHeader">
+          <DataField>PostedBy_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Amount_ImprestSurrenderHeader">
+          <DataField>Amount_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Amount_ImprestSurrenderHeaderFormat">
+          <DataField>Amount_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="Remarks_ImprestSurrenderHeader">
+          <DataField>Remarks_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TransactionName_ImprestSurrenderHeader">
+          <DataField>TransactionName_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="NetAmount_ImprestSurrenderHeader">
+          <DataField>NetAmount_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="NetAmount_ImprestSurrenderHeaderFormat">
+          <DataField>NetAmount_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="PayingBankAccount_ImprestSurrenderHeader">
+          <DataField>PayingBankAccount_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Payee_ImprestSurrenderHeader">
+          <DataField>Payee_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_ImprestSurrenderHeader">
+          <DataField>GlobalDimension1Code_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code_ImprestSurrenderHeader">
+          <DataField>GlobalDimension2Code_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="BankAccountNo_ImprestSurrenderHeader">
+          <DataField>BankAccountNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CashierBankAccount_ImprestSurrenderHeader">
+          <DataField>CashierBankAccount_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Status_ImprestSurrenderHeader">
+          <DataField>Status_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Grouping_ImprestSurrenderHeader">
+          <DataField>Grouping_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="PaymentType_ImprestSurrenderHeader">
+          <DataField>PaymentType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="BankType_ImprestSurrenderHeader">
+          <DataField>BankType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="PVType_ImprestSurrenderHeader">
+          <DataField>PVType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ApplytoID_ImprestSurrenderHeader">
+          <DataField>ApplytoID_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="NoPrinted_ImprestSurrenderHeader">
+          <DataField>NoPrinted_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ImprestIssueDate_ImprestSurrenderHeader">
+          <DataField>ImprestIssueDate_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Surrendered_ImprestSurrenderHeader">
+          <DataField>Surrendered_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ImprestIssueDocNo_ImprestSurrenderHeader">
+          <DataField>ImprestIssueDocNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="VoteBook_ImprestSurrenderHeader">
+          <DataField>VoteBook_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TotalAllocation_ImprestSurrenderHeader">
+          <DataField>TotalAllocation_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TotalAllocation_ImprestSurrenderHeaderFormat">
+          <DataField>TotalAllocation_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="TotalExpenditure_ImprestSurrenderHeader">
+          <DataField>TotalExpenditure_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TotalExpenditure_ImprestSurrenderHeaderFormat">
+          <DataField>TotalExpenditure_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="TotalCommitments_ImprestSurrenderHeader">
+          <DataField>TotalCommitments_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="TotalCommitments_ImprestSurrenderHeaderFormat">
+          <DataField>TotalCommitments_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="Balance_ImprestSurrenderHeader">
+          <DataField>Balance_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Balance_ImprestSurrenderHeaderFormat">
+          <DataField>Balance_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="BalanceLessthisEntry_ImprestSurrenderHeader">
+          <DataField>BalanceLessthisEntry_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="BalanceLessthisEntry_ImprestSurrenderHeaderFormat">
+          <DataField>BalanceLessthisEntry_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="PettyCash_ImprestSurrenderHeader">
+          <DataField>PettyCash_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ShortcutDimension2Code_ImprestSurrenderHeader">
+          <DataField>ShortcutDimension2Code_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="FunctionName_ImprestSurrenderHeader">
+          <DataField>FunctionName_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="BudgetCenterName_ImprestSurrenderHeader">
+          <DataField>BudgetCenterName_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="UserID_ImprestSurrenderHeader">
+          <DataField>UserID_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="IssueVoucherType_ImprestSurrenderHeader">
+          <DataField>IssueVoucherType_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ShortcutDimension3Code_ImprestSurrenderHeader">
+          <DataField>ShortcutDimension3Code_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ShortcutDimension4Code_ImprestSurrenderHeader">
+          <DataField>ShortcutDimension4Code_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Dim3_ImprestSurrenderHeader">
+          <DataField>Dim3_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="Dim4_ImprestSurrenderHeader">
+          <DataField>Dim4_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_ImprestSurrenderHeader">
+          <DataField>CurrencyFactor_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_ImprestSurrenderHeaderFormat">
+          <DataField>CurrencyFactor_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="CurrencyCode_ImprestSurrenderHeader">
+          <DataField>CurrencyCode_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_ImprestSurrenderHeader">
+          <DataField>ResponsibilityCenter_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="AmountSurrenderedLCY_ImprestSurrenderHeader">
+          <DataField>AmountSurrenderedLCY_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="AmountSurrenderedLCY_ImprestSurrenderHeaderFormat">
+          <DataField>AmountSurrenderedLCY_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="PVNo_ImprestSurrenderHeader">
+          <DataField>PVNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="PrintNo_ImprestSurrenderHeader">
+          <DataField>PrintNo_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmt_ImprestSurrenderHeader">
+          <DataField>CashSurrenderAmt_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmt_ImprestSurrenderHeaderFormat">
+          <DataField>CashSurrenderAmt_ImprestSurrenderHeaderFormat</DataField>
+        </Field>
+        <Field Name="FinancialPeriod_ImprestSurrenderHeader">
+          <DataField>FinancialPeriod_ImprestSurrenderHeader</DataField>
+        </Field>
+        <Field Name="CompanyName">
+          <DataField>CompanyName</DataField>
+        </Field>
+        <Field Name="CompanyPicture">
+          <DataField>CompanyPicture</DataField>
+        </Field>
+        <Field Name="CompanyAddr1">
+          <DataField>CompanyAddr1</DataField>
+        </Field>
+        <Field Name="CompanyAddr2">
+          <DataField>CompanyAddr2</DataField>
+        </Field>
+        <Field Name="CompanyPhone">
+          <DataField>CompanyPhone</DataField>
+        </Field>
+        <Field Name="CompanyName2">
+          <DataField>CompanyName2</DataField>
+        </Field>
+        <Field Name="PF_No_">
+          <DataField>PF_No_</DataField>
+        </Field>
+        <Field Name="ReportForNavId_65">
+          <DataField>ReportForNavId_65</DataField>
+        </Field>
+        <Field Name="SurrenderDocNo_ImprestSurrenderDetails">
+          <DataField>SurrenderDocNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="AccountNo_ImprestSurrenderDetails">
+          <DataField>AccountNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="AccountName_ImprestSurrenderDetails">
+          <DataField>AccountName_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="Amount_ImprestSurrenderDetails">
+          <DataField>Amount_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="Amount_ImprestSurrenderDetailsFormat">
+          <DataField>Amount_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="DueDate_ImprestSurrenderDetails">
+          <DataField>DueDate_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ImprestHolder_ImprestSurrenderDetails">
+          <DataField>ImprestHolder_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ActualSpent_ImprestSurrenderDetails">
+          <DataField>ActualSpent_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ActualSpent_ImprestSurrenderDetailsFormat">
+          <DataField>ActualSpent_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="Applyto_ImprestSurrenderDetails">
+          <DataField>Applyto_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ApplytoID_ImprestSurrenderDetails">
+          <DataField>ApplytoID_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="SurrenderDate_ImprestSurrenderDetails">
+          <DataField>SurrenderDate_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="Surrendered_ImprestSurrenderDetails">
+          <DataField>Surrendered_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashReceiptNo_ImprestSurrenderDetails">
+          <DataField>CashReceiptNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="DateIssued_ImprestSurrenderDetails">
+          <DataField>DateIssued_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="TypeofSurrender_ImprestSurrenderDetails">
+          <DataField>TypeofSurrender_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="DeptVchNo_ImprestSurrenderDetails">
+          <DataField>DeptVchNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmt_ImprestSurrenderDetails">
+          <DataField>CashSurrenderAmt_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmt_ImprestSurrenderDetailsFormat">
+          <DataField>CashSurrenderAmt_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="BankPettyCash_ImprestSurrenderDetails">
+          <DataField>BankPettyCash_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="DocNo_ImprestSurrenderDetails">
+          <DataField>DocNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension1Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension2Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension2Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension3Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension3Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension4Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension4Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension5Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension5Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension6Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension6Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension7Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension7Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ShortcutDimension8Code_ImprestSurrenderDetails">
+          <DataField>ShortcutDimension8Code_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="VATProdPostingGroup_ImprestSurrenderDetails">
+          <DataField>VATProdPostingGroup_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ImprestType_ImprestSurrenderDetails">
+          <DataField>ImprestType_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_ImprestSurrenderDetails">
+          <DataField>CurrencyFactor_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CurrencyFactor_ImprestSurrenderDetailsFormat">
+          <DataField>CurrencyFactor_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="CurrencyCode_ImprestSurrenderDetails">
+          <DataField>CurrencyCode_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="AmountLCY_ImprestSurrenderDetails">
+          <DataField>AmountLCY_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="AmountLCY_ImprestSurrenderDetailsFormat">
+          <DataField>AmountLCY_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmtLCY_ImprestSurrenderDetails">
+          <DataField>CashSurrenderAmtLCY_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashSurrenderAmtLCY_ImprestSurrenderDetailsFormat">
+          <DataField>CashSurrenderAmtLCY_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="ImprestReqAmtLCY_ImprestSurrenderDetails">
+          <DataField>ImprestReqAmtLCY_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ImprestReqAmtLCY_ImprestSurrenderDetailsFormat">
+          <DataField>ImprestReqAmtLCY_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="CashReceiptAmount_ImprestSurrenderDetails">
+          <DataField>CashReceiptAmount_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashReceiptAmount_ImprestSurrenderDetailsFormat">
+          <DataField>CashReceiptAmount_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="ChequeDepositSlipNo_ImprestSurrenderDetails">
+          <DataField>ChequeDepositSlipNo_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ChequeDepositSlipDate_ImprestSurrenderDetails">
+          <DataField>ChequeDepositSlipDate_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ChequeDepositSlipType_ImprestSurrenderDetails">
+          <DataField>ChequeDepositSlipType_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="ChequeDepositSlipBank_ImprestSurrenderDetails">
+          <DataField>ChequeDepositSlipBank_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="CashPayMode_ImprestSurrenderDetails">
+          <DataField>CashPayMode_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="OverExpenditure_ImprestSurrenderDetails">
+          <DataField>OverExpenditure_ImprestSurrenderDetails</DataField>
+        </Field>
+        <Field Name="OverExpenditure_ImprestSurrenderDetailsFormat">
+          <DataField>OverExpenditure_ImprestSurrenderDetailsFormat</DataField>
+        </Field>
+        <Field Name="NumberText">
+          <DataField>NumberText</DataField>
+        </Field>
+        <Field Name="NumberText1">
+          <DataField>NumberText1</DataField>
+        </Field>
+        <Field Name="Balance">
+          <DataField>Balance</DataField>
+        </Field>
+        <Field Name="BalanceFormat">
+          <DataField>BalanceFormat</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup">
+          <DataField>Signature_UserSetup</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup">
+          <DataField>ApprovalDesignation_UserSetup</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup2">
+          <DataField>Signature_UserSetup2</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup2">
+          <DataField>ApprovalDesignation_UserSetup2</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup3">
+          <DataField>Signature_UserSetup3</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup3">
+          <DataField>ApprovalDesignation_UserSetup3</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup4">
+          <DataField>Signature_UserSetup4</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup4">
+          <DataField>ApprovalDesignation_UserSetup4</DataField>
+        </Field>
+        <Field Name="Signature_UserSetup5">
+          <DataField>Signature_UserSetup5</DataField>
+        </Field>
+        <Field Name="ApprovalDesignation_UserSetup5">
+          <DataField>ApprovalDesignation_UserSetup5</DataField>
+        </Field>
+        <Field Name="UserDesign1">
+          <DataField>UserDesign1</DataField>
+        </Field>
+        <Field Name="UserDesign2">
+          <DataField>UserDesign2</DataField>
+        </Field>
+        <Field Name="UserDesign3">
+          <DataField>UserDesign3</DataField>
+        </Field>
+        <Field Name="UserDesign4">
+          <DataField>UserDesign4</DataField>
+        </Field>
+        <Field Name="UserDesign5">
+          <DataField>UserDesign5</DataField>
+        </Field>
+        <Field Name="ApprovalDate1">
+          <DataField>ApprovalDate1</DataField>
+        </Field>
+        <Field Name="ApprovalDate2">
+          <DataField>ApprovalDate2</DataField>
+        </Field>
+        <Field Name="ApprovalDate3">
+          <DataField>ApprovalDate3</DataField>
+        </Field>
+        <Field Name="ApprovalDate4">
+          <DataField>ApprovalDate4</DataField>
+        </Field>
+        <Field Name="ApprovalDate5">
+          <DataField>ApprovalDate5</DataField>
+        </Field>
+        <Field Name="UserName1">
+          <DataField>UserName1</DataField>
+        </Field>
+        <Field Name="UserName2">
+          <DataField>UserName2</DataField>
+        </Field>
+        <Field Name="UserName3">
+          <DataField>UserName3</DataField>
+        </Field>
+        <Field Name="UserName4">
+          <DataField>UserName4</DataField>
+        </Field>
+        <Field Name="UserName5">
+          <DataField>UserName5</DataField>
+        </Field>
+        <Field Name="SendDate">
+          <DataField>SendDate</DataField>
+        </Field>
+        <Field Name="SenderDesign">
+          <DataField>SenderDesign</DataField>
+        </Field>
+        <Field Name="SenderName">
+          <DataField>SenderName</DataField>
+        </Field>
+        <Field Name="SenderSignature">
+          <DataField>SenderSignature</DataField>
+        </Field>
+        <Field Name="Grade">
+          <DataField>Grade</DataField>
+        </Field>
+        <Field Name="Designation">
+          <DataField>Designation</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

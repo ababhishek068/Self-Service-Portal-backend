@@ -29,6 +29,7 @@ import {
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
   soapCancelOk,
+  soapLeaveActionOk,
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
@@ -40,6 +41,7 @@ import {
   resolveLeaveCardBalances,
   leaveCardBalancesFromRecord,
   mergeLeaveCardBalances,
+  parseEmployeeLeaveBalancesReturn,
   resolveNonAnnualLeaveBalance,
   employeeLeaveWorkflowCodes,
   leaveRowHasWorkflowCodes,
@@ -288,6 +290,37 @@ describe('resolveLeaveBalance', () => {
 })
 
 describe('resolveLeaveCardBalances', () => {
+  it('parses balances returned directly by the Staff Portal SOAP codeunit', () => {
+    assert.deepEqual(
+      parseEmployeeLeaveBalancesReturn(
+        'LeaveBalance=20.08#EarnedLeaveDays=10.82#AnnualLeaveBalance=0#CarryForward=18.08',
+      ),
+      {
+        allocatedDays: null,
+        currentLeaveBalance: 20.08,
+        earnedLeaveDays: 10.82,
+      },
+    )
+  })
+
+  it('prefers current employee-card balances over stale leave applications', () => {
+    const employeeCard = leaveCardBalancesFromRecord({
+      Leave_Balance: 20.08,
+      Earned_Leave_Days: 10.82,
+    })
+    const oldApplication = leaveCardBalancesFromRecord({
+      Allocated_Days: 16,
+      Current_Leave_Balance: 16,
+      Earned_Leave_Days: 16,
+    })
+
+    assert.deepEqual(mergeLeaveCardBalances(employeeCard, oldApplication), {
+      allocatedDays: 16,
+      currentLeaveBalance: 20.08,
+      earnedLeaveDays: 10.82,
+    })
+  })
+
   it('prefers OData Current Leave Balance over computed values', () => {
     const metrics = { generalLeaveBalance: null, earnedLeaveDays: 15.96, annualLeaveBalance: null }
     const odata = { allocatedDays: 16, currentLeaveBalance: 16, earnedLeaveDays: 15.96 }
@@ -365,6 +398,17 @@ describe('soapCancelOk', () => {
     assert.equal(soapCancelOk('LV00029'), false)
     assert.equal(soapCancelOk('LV-00001'), false)
     assert.equal(soapCancelOk('ABH-PQ000012'), false)
+  })
+})
+
+describe('soapLeaveActionOk', () => {
+  it('accepts the hyphenated application numbers returned by Business Central', () => {
+    assert.equal(soapLeaveActionOk('LV-00008'), true)
+    assert.equal(soapLeaveActionOk('LV00008'), true)
+  })
+
+  it('does not accept an error message as a successful leave number', () => {
+    assert.equal(soapLeaveActionOk('Leave application failed'), false)
   })
 })
 

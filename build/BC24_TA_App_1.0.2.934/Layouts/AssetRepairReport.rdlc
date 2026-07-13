@@ -1,0 +1,161 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="RequestNo_AssetRepairHeader">
+          <DataField>RequestNo_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="Description_AssetRepairHeader">
+          <DataField>Description_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="RequestedBy_AssetRepairHeader">
+          <DataField>RequestedBy_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="RequestDate_AssetRepairHeader">
+          <DataField>RequestDate_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_AssetRepairHeader">
+          <DataField>GlobalDimension1Code_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code_AssetRepairHeader">
+          <DataField>GlobalDimension2Code_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="Status_AssetRepairHeader">
+          <DataField>Status_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="Comments_AssetRepairHeader">
+          <DataField>Comments_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="picture">
+          <DataField>picture</DataField>
+        </Field>
+        <Field Name="TotalCost_AssetRepairHeader">
+          <DataField>TotalCost_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="TotalCost_AssetRepairHeaderFormat">
+          <DataField>TotalCost_AssetRepairHeaderFormat</DataField>
+        </Field>
+        <Field Name="IncidentNo_AssetRepairHeader">
+          <DataField>IncidentNo_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="AssetType_AssetRepairHeader">
+          <DataField>AssetType_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="DocumentDate_AssetRepairHeader">
+          <DataField>DocumentDate_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="TotalAssets_AssetRepairHeader">
+          <DataField>TotalAssets_AssetRepairHeader</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="RequestNo_AssetRepairLines">
+          <DataField>RequestNo_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="LineNo_AssetRepairLines">
+          <DataField>LineNo_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="FixedAssetNo_AssetRepairLines">
+          <DataField>FixedAssetNo_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Description_AssetRepairLines">
+          <DataField>Description_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Location_AssetRepairLines">
+          <DataField>Location_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="SerialNo_AssetRepairLines">
+          <DataField>SerialNo_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Dimension1Code_AssetRepairLines">
+          <DataField>Dimension1Code_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Dimension2Code_AssetRepairLines">
+          <DataField>Dimension2Code_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="RepairDate_AssetRepairLines">
+          <DataField>RepairDate_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Cost_AssetRepairLines">
+          <DataField>Cost_AssetRepairLines</DataField>
+        </Field>
+        <Field Name="Cost_AssetRepairLinesFormat">
+          <DataField>Cost_AssetRepairLinesFormat</DataField>
+        </Field>
+        <Field Name="AssetType_AssetRepairLines">
+          <DataField>AssetType_AssetRepairLines</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

@@ -1,0 +1,638 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="RegTransactonID_StudentUnits">
+          <DataField>RegTransactonID_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentNo_StudentUnits">
+          <DataField>StudentNo_StudentUnits</DataField>
+        </Field>
+        <Field Name="Semester_StudentUnits">
+          <DataField>Semester_StudentUnits</DataField>
+        </Field>
+        <Field Name="Programme_StudentUnits">
+          <DataField>Programme_StudentUnits</DataField>
+        </Field>
+        <Field Name="Registerfor_StudentUnits">
+          <DataField>Registerfor_StudentUnits</DataField>
+        </Field>
+        <Field Name="Stage_StudentUnits">
+          <DataField>Stage_StudentUnits</DataField>
+        </Field>
+        <Field Name="Unit_StudentUnits">
+          <DataField>Unit_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProgrammeFilter_StudentUnits">
+          <DataField>ProgrammeFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="StageFilter_StudentUnits">
+          <DataField>StageFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitFilter_StudentUnits">
+          <DataField>UnitFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="SemesterFilter_StudentUnits">
+          <DataField>SemesterFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitType_StudentUnits">
+          <DataField>UnitType_StudentUnits</DataField>
+        </Field>
+        <Field Name="Taken_StudentUnits">
+          <DataField>Taken_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentTypeFilter_StudentUnits">
+          <DataField>StudentTypeFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="CategoryFilter_StudentUnits">
+          <DataField>CategoryFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitCount_StudentUnits">
+          <DataField>UnitCount_StudentUnits</DataField>
+        </Field>
+        <Field Name="TotalScore_StudentUnits">
+          <DataField>TotalScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="TotalScore_StudentUnitsFormat">
+          <DataField>TotalScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Exempted_StudentUnits">
+          <DataField>Exempted_StudentUnits</DataField>
+        </Field>
+        <Field Name="Attendance_StudentUnits">
+          <DataField>Attendance_StudentUnits</DataField>
+        </Field>
+        <Field Name="Attendance_StudentUnitsFormat">
+          <DataField>Attendance_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="AllowSupplementary_StudentUnits">
+          <DataField>AllowSupplementary_StudentUnits</DataField>
+        </Field>
+        <Field Name="SatSupplementary_StudentUnits">
+          <DataField>SatSupplementary_StudentUnits</DataField>
+        </Field>
+        <Field Name="RepeatUnit_StudentUnits">
+          <DataField>RepeatUnit_StudentUnits</DataField>
+        </Field>
+        <Field Name="Remarks_StudentUnits">
+          <DataField>Remarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitStage_StudentUnits">
+          <DataField>UnitStage_StudentUnits</DataField>
+        </Field>
+        <Field Name="Failed_StudentUnits">
+          <DataField>Failed_StudentUnits</DataField>
+        </Field>
+        <Field Name="CourseType_StudentUnits">
+          <DataField>CourseType_StudentUnits</DataField>
+        </Field>
+        <Field Name="Audit_StudentUnits">
+          <DataField>Audit_StudentUnits</DataField>
+        </Field>
+        <Field Name="Status_StudentUnits">
+          <DataField>Status_StudentUnits</DataField>
+        </Field>
+        <Field Name="DetailsCount_StudentUnits">
+          <DataField>DetailsCount_StudentUnits</DataField>
+        </Field>
+        <Field Name="NoOfUnits_StudentUnits">
+          <DataField>NoOfUnits_StudentUnits</DataField>
+        </Field>
+        <Field Name="NoOfUnits_StudentUnitsFormat">
+          <DataField>NoOfUnits_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ProjectStatus_StudentUnits">
+          <DataField>ProjectStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="FinalScore_StudentUnits">
+          <DataField>FinalScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="FinalScore_StudentUnitsFormat">
+          <DataField>FinalScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Createdby_StudentUnits">
+          <DataField>Createdby_StudentUnits</DataField>
+        </Field>
+        <Field Name="EditedBy_StudentUnits">
+          <DataField>EditedBy_StudentUnits</DataField>
+        </Field>
+        <Field Name="Datecreated_StudentUnits">
+          <DataField>Datecreated_StudentUnits</DataField>
+        </Field>
+        <Field Name="DateEdited_StudentUnits">
+          <DataField>DateEdited_StudentUnits</DataField>
+        </Field>
+        <Field Name="CummulativeYearFilter_StudentUnits">
+          <DataField>CummulativeYearFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="TotalMarks_StudentUnits">
+          <DataField>TotalMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="TotalMarks_StudentUnitsFormat">
+          <DataField>TotalMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ExternalUnit_StudentUnits">
+          <DataField>ExternalUnit_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExternalUnits_StudentUnits">
+          <DataField>ExternalUnits_StudentUnits</DataField>
+        </Field>
+        <Field Name="SystemCreated_StudentUnits">
+          <DataField>SystemCreated_StudentUnits</DataField>
+        </Field>
+        <Field Name="Multiple_StudentUnits">
+          <DataField>Multiple_StudentUnits</DataField>
+        </Field>
+        <Field Name="EntryNo_StudentUnits">
+          <DataField>EntryNo_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentClass_StudentUnits">
+          <DataField>StudentClass_StudentUnits</DataField>
+        </Field>
+        <Field Name="ENo_StudentUnits">
+          <DataField>ENo_StudentUnits</DataField>
+        </Field>
+        <Field Name="SystemTaken_StudentUnits">
+          <DataField>SystemTaken_StudentUnits</DataField>
+        </Field>
+        <Field Name="RepeatMarks_StudentUnits">
+          <DataField>RepeatMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="RepeatMarks_StudentUnitsFormat">
+          <DataField>RepeatMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ReTake_StudentUnits">
+          <DataField>ReTake_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProposalStatus_StudentUnits">
+          <DataField>ProposalStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProposalDate_StudentUnits">
+          <DataField>ProposalDate_StudentUnits</DataField>
+        </Field>
+        <Field Name="SenateProposal_StudentUnits">
+          <DataField>SenateProposal_StudentUnits</DataField>
+        </Field>
+        <Field Name="Research_StudentUnits">
+          <DataField>Research_StudentUnits</DataField>
+        </Field>
+        <Field Name="SenateResearch_StudentUnits">
+          <DataField>SenateResearch_StudentUnits</DataField>
+        </Field>
+        <Field Name="Examiners_StudentUnits">
+          <DataField>Examiners_StudentUnits</DataField>
+        </Field>
+        <Field Name="Defense_StudentUnits">
+          <DataField>Defense_StudentUnits</DataField>
+        </Field>
+        <Field Name="CategoryCode_StudentUnits">
+          <DataField>CategoryCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProgressReport_StudentUnits">
+          <DataField>ProgressReport_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProgressDate_StudentUnits">
+          <DataField>ProgressDate_StudentUnits</DataField>
+        </Field>
+        <Field Name="DefenceOutCome_StudentUnits">
+          <DataField>DefenceOutCome_StudentUnits</DataField>
+        </Field>
+        <Field Name="Description_StudentUnits">
+          <DataField>Description_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentType_StudentUnits">
+          <DataField>StudentType_StudentUnits</DataField>
+        </Field>
+        <Field Name="MainProgramme_StudentUnits">
+          <DataField>MainProgramme_StudentUnits</DataField>
+        </Field>
+        <Field Name="RegisteredPrograme_StudentUnits">
+          <DataField>RegisteredPrograme_StudentUnits</DataField>
+        </Field>
+        <Field Name="SemesterRegistered_StudentUnits">
+          <DataField>SemesterRegistered_StudentUnits</DataField>
+        </Field>
+        <Field Name="MarksStatus_StudentUnits">
+          <DataField>MarksStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentName_StudentUnits">
+          <DataField>StudentName_StudentUnits</DataField>
+        </Field>
+        <Field Name="CAT1_StudentUnits">
+          <DataField>CAT1_StudentUnits</DataField>
+        </Field>
+        <Field Name="CAT1_StudentUnitsFormat">
+          <DataField>CAT1_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="CAT2_StudentUnits">
+          <DataField>CAT2_StudentUnits</DataField>
+        </Field>
+        <Field Name="CAT2_StudentUnitsFormat">
+          <DataField>CAT2_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ResultStatus_StudentUnits">
+          <DataField>ResultStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="RegistrationStatus_StudentUnits">
+          <DataField>RegistrationStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="AssTotalMarks_StudentUnits">
+          <DataField>AssTotalMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="AssTotalMarks_StudentUnitsFormat">
+          <DataField>AssTotalMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="CATTotalMarks_StudentUnits">
+          <DataField>CATTotalMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="CATTotalMarks_StudentUnitsFormat">
+          <DataField>CATTotalMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ExamMarks_StudentUnits">
+          <DataField>ExamMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamMarks_StudentUnitsFormat">
+          <DataField>ExamMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Category_StudentUnits">
+          <DataField>Category_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamType_StudentUnits">
+          <DataField>ExamType_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamPeriod_StudentUnits">
+          <DataField>ExamPeriod_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamStatus_StudentUnits">
+          <DataField>ExamStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="StaffFilter_StudentUnits">
+          <DataField>StaffFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="Lecturer_StudentUnits">
+          <DataField>Lecturer_StudentUnits</DataField>
+        </Field>
+        <Field Name="Grade_StudentUnits">
+          <DataField>Grade_StudentUnits</DataField>
+        </Field>
+        <Field Name="SuppTaken_StudentUnits">
+          <DataField>SuppTaken_StudentUnits</DataField>
+        </Field>
+        <Field Name="FailedUnitsCount_StudentUnits">
+          <DataField>FailedUnitsCount_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitRegCount_StudentUnits">
+          <DataField>UnitRegCount_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamPeriodFilter_StudentUnits">
+          <DataField>ExamPeriodFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitFees_StudentUnits">
+          <DataField>UnitFees_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitFees_StudentUnitsFormat">
+          <DataField>UnitFees_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ActualFees_StudentUnits">
+          <DataField>ActualFees_StudentUnits</DataField>
+        </Field>
+        <Field Name="ActualFees_StudentUnitsFormat">
+          <DataField>ActualFees_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="RegReversed_StudentUnits">
+          <DataField>RegReversed_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitsRegStatus_StudentUnits">
+          <DataField>UnitsRegStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="ASS1_StudentUnits">
+          <DataField>ASS1_StudentUnits</DataField>
+        </Field>
+        <Field Name="ASS1_StudentUnitsFormat">
+          <DataField>ASS1_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ASS2_StudentUnits">
+          <DataField>ASS2_StudentUnits</DataField>
+        </Field>
+        <Field Name="ASS2_StudentUnitsFormat">
+          <DataField>ASS2_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Reversed_StudentUnits">
+          <DataField>Reversed_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitName_StudentUnits">
+          <DataField>UnitName_StudentUnits</DataField>
+        </Field>
+        <Field Name="SessionFilter_StudentUnits">
+          <DataField>SessionFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="LecturerFilter_StudentUnits">
+          <DataField>LecturerFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="IntakeCode_StudentUnits">
+          <DataField>IntakeCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitDescription_StudentUnits">
+          <DataField>UnitDescription_StudentUnits</DataField>
+        </Field>
+        <Field Name="Blocked_StudentUnits">
+          <DataField>Blocked_StudentUnits</DataField>
+        </Field>
+        <Field Name="SessionCode_StudentUnits">
+          <DataField>SessionCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="CustExist_StudentUnits">
+          <DataField>CustExist_StudentUnits</DataField>
+        </Field>
+        <Field Name="Registered_StudentUnits">
+          <DataField>Registered_StudentUnits</DataField>
+        </Field>
+        <Field Name="CFScore_StudentUnits">
+          <DataField>CFScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="CFScore_StudentUnitsFormat">
+          <DataField>CFScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="IgnoreinFinalAverage_StudentUnits">
+          <DataField>IgnoreinFinalAverage_StudentUnits</DataField>
+        </Field>
+        <Field Name="IgnoreinCummAverage_StudentUnits">
+          <DataField>IgnoreinCummAverage_StudentUnits</DataField>
+        </Field>
+        <Field Name="AttachmentUnit_StudentUnits">
+          <DataField>AttachmentUnit_StudentUnits</DataField>
+        </Field>
+        <Field Name="RegResultsStatus_StudentUnits">
+          <DataField>RegResultsStatus_StudentUnits</DataField>
+        </Field>
+        <Field Name="AcademicYear_StudentUnits">
+          <DataField>AcademicYear_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentCode_StudentUnits">
+          <DataField>StudentCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="CampusCode_StudentUnits">
+          <DataField>CampusCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="CampusFilter_StudentUnits">
+          <DataField>CampusFilter_StudentUnits</DataField>
+        </Field>
+        <Field Name="RegOption_StudentUnits">
+          <DataField>RegOption_StudentUnits</DataField>
+        </Field>
+        <Field Name="Examiner1_StudentUnits">
+          <DataField>Examiner1_StudentUnits</DataField>
+        </Field>
+        <Field Name="Examiner2_StudentUnits">
+          <DataField>Examiner2_StudentUnits</DataField>
+        </Field>
+        <Field Name="Examiner3_StudentUnits">
+          <DataField>Examiner3_StudentUnits</DataField>
+        </Field>
+        <Field Name="Examiner4_StudentUnits">
+          <DataField>Examiner4_StudentUnits</DataField>
+        </Field>
+        <Field Name="Show_StudentUnits">
+          <DataField>Show_StudentUnits</DataField>
+        </Field>
+        <Field Name="SettlementType_StudentUnits">
+          <DataField>SettlementType_StudentUnits</DataField>
+        </Field>
+        <Field Name="CreditedHours_StudentUnits">
+          <DataField>CreditedHours_StudentUnits</DataField>
+        </Field>
+        <Field Name="CreditedHours_StudentUnitsFormat">
+          <DataField>CreditedHours_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="UnitPoints_StudentUnits">
+          <DataField>UnitPoints_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitPoints_StudentUnitsFormat">
+          <DataField>UnitPoints_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="CreditHours_StudentUnits">
+          <DataField>CreditHours_StudentUnits</DataField>
+        </Field>
+        <Field Name="CreditHours_StudentUnitsFormat">
+          <DataField>CreditHours_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="CancelledScore_StudentUnits">
+          <DataField>CancelledScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="CancelledScore_StudentUnitsFormat">
+          <DataField>CancelledScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Supervisor_StudentUnits">
+          <DataField>Supervisor_StudentUnits</DataField>
+        </Field>
+        <Field Name="ReleasedResults_StudentUnits">
+          <DataField>ReleasedResults_StudentUnits</DataField>
+        </Field>
+        <Field Name="GradeAcquired_StudentUnits">
+          <DataField>GradeAcquired_StudentUnits</DataField>
+        </Field>
+        <Field Name="CATsMarks_StudentUnits">
+          <DataField>CATsMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="CATsMarks_StudentUnitsFormat">
+          <DataField>CATsMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="EXAMsMarks_StudentUnits">
+          <DataField>EXAMsMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="EXAMsMarks_StudentUnitsFormat">
+          <DataField>EXAMsMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="GradeFin_StudentUnits">
+          <DataField>GradeFin_StudentUnits</DataField>
+        </Field>
+        <Field Name="OldUnit_StudentUnits">
+          <DataField>OldUnit_StudentUnits</DataField>
+        </Field>
+        <Field Name="OldUnitLk_StudentUnits">
+          <DataField>OldUnitLk_StudentUnits</DataField>
+        </Field>
+        <Field Name="CregRegisterfor_StudentUnits">
+          <DataField>CregRegisterfor_StudentUnits</DataField>
+        </Field>
+        <Field Name="CregExists_StudentUnits">
+          <DataField>CregExists_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProgOnlineReleased_StudentUnits">
+          <DataField>ProgOnlineReleased_StudentUnits</DataField>
+        </Field>
+        <Field Name="CFLk_StudentUnits">
+          <DataField>CFLk_StudentUnits</DataField>
+        </Field>
+        <Field Name="CFLk_StudentUnitsFormat">
+          <DataField>CFLk_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="StageUnitLK_StudentUnits">
+          <DataField>StageUnitLK_StudentUnits</DataField>
+        </Field>
+        <Field Name="SettlementTypeCode_StudentUnits">
+          <DataField>SettlementTypeCode_StudentUnits</DataField>
+        </Field>
+        <Field Name="RegistrationType_StudentUnits">
+          <DataField>RegistrationType_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitExamCategory_StudentUnits">
+          <DataField>UnitExamCategory_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProgrammeExamCategory_StudentUnits">
+          <DataField>ProgrammeExamCategory_StudentUnits</DataField>
+        </Field>
+        <Field Name="CregStage_StudentUnits">
+          <DataField>CregStage_StudentUnits</DataField>
+        </Field>
+        <Field Name="CregStage1_StudentUnits">
+          <DataField>CregStage1_StudentUnits</DataField>
+        </Field>
+        <Field Name="Balance_StudentUnits">
+          <DataField>Balance_StudentUnits</DataField>
+        </Field>
+        <Field Name="Balance_StudentUnitsFormat">
+          <DataField>Balance_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="AllowExamAttendance_StudentUnits">
+          <DataField>AllowExamAttendance_StudentUnits</DataField>
+        </Field>
+        <Field Name="ProjectUnit_StudentUnits">
+          <DataField>ProjectUnit_StudentUnits</DataField>
+        </Field>
+        <Field Name="GradePrefix_StudentUnits">
+          <DataField>GradePrefix_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitResultsCount_StudentUnits">
+          <DataField>UnitResultsCount_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModerationTempScore_StudentUnits">
+          <DataField>ModerationTempScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModerationTempScore_StudentUnitsFormat">
+          <DataField>ModerationTempScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ModerationFactor_StudentUnits">
+          <DataField>ModerationFactor_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModerationFactor_StudentUnitsFormat">
+          <DataField>ModerationFactor_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Moderated_StudentUnits">
+          <DataField>Moderated_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModerationDate_StudentUnits">
+          <DataField>ModerationDate_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModeratedBy_StudentUnits">
+          <DataField>ModeratedBy_StudentUnits</DataField>
+        </Field>
+        <Field Name="Released_StudentUnits">
+          <DataField>Released_StudentUnits</DataField>
+        </Field>
+        <Field Name="ModeofStudy_StudentUnits">
+          <DataField>ModeofStudy_StudentUnits</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="CompAddr">
+          <DataField>CompAddr</DataField>
+        </Field>
+        <Field Name="CompLogo">
+          <DataField>CompLogo</DataField>
+        </Field>
+        <Field Name="SchoolName">
+          <DataField>SchoolName</DataField>
+        </Field>
+        <Field Name="ProgName">
+          <DataField>ProgName</DataField>
+        </Field>
+        <Field Name="DeptName">
+          <DataField>DeptName</DataField>
+        </Field>
+        <Field Name="ClassCode">
+          <DataField>ClassCode</DataField>
+        </Field>
+        <Field Name="Lecturer">
+          <DataField>Lecturer</DataField>
+        </Field>
+        <Field Name="LecturerName">
+          <DataField>LecturerName</DataField>
+        </Field>
+        <Field Name="Student_Congregation">
+          <DataField>Student_Congregation</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

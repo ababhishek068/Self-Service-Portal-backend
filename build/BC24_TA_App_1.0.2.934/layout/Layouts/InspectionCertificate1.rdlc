@@ -1,0 +1,566 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="BuyfromVendorNo_PurchRcptHeader">
+          <DataField>BuyfromVendorNo_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="No_PurchRcptHeader">
+          <DataField>No_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="OrderDate_PurchRcptHeader">
+          <DataField>OrderDate_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="PostingDate_PurchRcptHeader">
+          <DataField>PostingDate_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_PurchRcptHeader">
+          <DataField>ShortcutDimension1Code_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="ShortcutDimension2Code_PurchRcptHeader">
+          <DataField>ShortcutDimension2Code_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="OrderNo_PurchRcptHeader">
+          <DataField>OrderNo_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="BuyfromVendorName_PurchRcptHeader">
+          <DataField>BuyfromVendorName_PurchRcptHeader</DataField>
+        </Field>
+        <Field Name="ReportForNavId_10">
+          <DataField>ReportForNavId_10</DataField>
+        </Field>
+        <Field Name="BuyfromVendorNo_PurchRcptLine">
+          <DataField>BuyfromVendorNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DocumentNo_PurchRcptLine">
+          <DataField>DocumentNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="LineNo_PurchRcptLine">
+          <DataField>LineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Type_PurchRcptLine">
+          <DataField>Type_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="No_PurchRcptLine">
+          <DataField>No_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="LocationCode_PurchRcptLine">
+          <DataField>LocationCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="PostingGroup_PurchRcptLine">
+          <DataField>PostingGroup_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptDate_PurchRcptLine">
+          <DataField>ExpectedReceiptDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Description_PurchRcptLine">
+          <DataField>Description_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Description2_PurchRcptLine">
+          <DataField>Description2_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitofMeasure_PurchRcptLine">
+          <DataField>UnitofMeasure_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Quantity_PurchRcptLine">
+          <DataField>Quantity_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Quantity_PurchRcptLineFormat">
+          <DataField>Quantity_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="DirectUnitCost_PurchRcptLine">
+          <DataField>DirectUnitCost_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DirectUnitCost_PurchRcptLineFormat">
+          <DataField>DirectUnitCost_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_PurchRcptLine">
+          <DataField>UnitCostLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitCostLCY_PurchRcptLineFormat">
+          <DataField>UnitCostLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="VAT_PurchRcptLine">
+          <DataField>VAT_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VAT_PurchRcptLineFormat">
+          <DataField>VAT_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="LineDiscount_PurchRcptLine">
+          <DataField>LineDiscount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="LineDiscount_PurchRcptLineFormat">
+          <DataField>LineDiscount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_PurchRcptLine">
+          <DataField>UnitPriceLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitPriceLCY_PurchRcptLineFormat">
+          <DataField>UnitPriceLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="AllowInvoiceDisc_PurchRcptLine">
+          <DataField>AllowInvoiceDisc_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="GrossWeight_PurchRcptLine">
+          <DataField>GrossWeight_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="GrossWeight_PurchRcptLineFormat">
+          <DataField>GrossWeight_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="NetWeight_PurchRcptLine">
+          <DataField>NetWeight_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="NetWeight_PurchRcptLineFormat">
+          <DataField>NetWeight_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitsperParcel_PurchRcptLine">
+          <DataField>UnitsperParcel_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitsperParcel_PurchRcptLineFormat">
+          <DataField>UnitsperParcel_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitVolume_PurchRcptLine">
+          <DataField>UnitVolume_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitVolume_PurchRcptLineFormat">
+          <DataField>UnitVolume_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="AppltoItemEntry_PurchRcptLine">
+          <DataField>AppltoItemEntry_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ItemRcptEntryNo_PurchRcptLine">
+          <DataField>ItemRcptEntryNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ShortcutDimension1Code_PurchRcptLine">
+          <DataField>ShortcutDimension1Code_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ShortcutDimension2Code_PurchRcptLine">
+          <DataField>ShortcutDimension2Code_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobNo_PurchRcptLine">
+          <DataField>JobNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="IndirectCost_PurchRcptLine">
+          <DataField>IndirectCost_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="IndirectCost_PurchRcptLineFormat">
+          <DataField>IndirectCost_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="QtyRcdNotInvoiced_PurchRcptLine">
+          <DataField>QtyRcdNotInvoiced_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QtyRcdNotInvoiced_PurchRcptLineFormat">
+          <DataField>QtyRcdNotInvoiced_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="QuantityInvoiced_PurchRcptLine">
+          <DataField>QuantityInvoiced_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QuantityInvoiced_PurchRcptLineFormat">
+          <DataField>QuantityInvoiced_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="OrderNo_PurchRcptLine">
+          <DataField>OrderNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="OrderLineNo_PurchRcptLine">
+          <DataField>OrderLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="PaytoVendorNo_PurchRcptLine">
+          <DataField>PaytoVendorNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VendorItemNo_PurchRcptLine">
+          <DataField>VendorItemNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SalesOrderNo_PurchRcptLine">
+          <DataField>SalesOrderNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SalesOrderLineNo_PurchRcptLine">
+          <DataField>SalesOrderLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="GenBusPostingGroup_PurchRcptLine">
+          <DataField>GenBusPostingGroup_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="GenProdPostingGroup_PurchRcptLine">
+          <DataField>GenProdPostingGroup_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VATCalculationType_PurchRcptLine">
+          <DataField>VATCalculationType_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TransactionType_PurchRcptLine">
+          <DataField>TransactionType_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TransportMethod_PurchRcptLine">
+          <DataField>TransportMethod_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="AttachedtoLineNo_PurchRcptLine">
+          <DataField>AttachedtoLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="EntryPoint_PurchRcptLine">
+          <DataField>EntryPoint_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Area_PurchRcptLine">
+          <DataField>Area_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TransactionSpecification_PurchRcptLine">
+          <DataField>TransactionSpecification_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TaxAreaCode_PurchRcptLine">
+          <DataField>TaxAreaCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TaxLiable_PurchRcptLine">
+          <DataField>TaxLiable_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="TaxGroupCode_PurchRcptLine">
+          <DataField>TaxGroupCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UseTax_PurchRcptLine">
+          <DataField>UseTax_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VATBusPostingGroup_PurchRcptLine">
+          <DataField>VATBusPostingGroup_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VATProdPostingGroup_PurchRcptLine">
+          <DataField>VATProdPostingGroup_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="CurrencyCode_PurchRcptLine">
+          <DataField>CurrencyCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="BlanketOrderNo_PurchRcptLine">
+          <DataField>BlanketOrderNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="BlanketOrderLineNo_PurchRcptLine">
+          <DataField>BlanketOrderLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VATBaseAmount_PurchRcptLine">
+          <DataField>VATBaseAmount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VATBaseAmount_PurchRcptLineFormat">
+          <DataField>VATBaseAmount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitCost_PurchRcptLine">
+          <DataField>UnitCost_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitCost_PurchRcptLineFormat">
+          <DataField>UnitCost_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="PostingDate_PurchRcptLine">
+          <DataField>PostingDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DimensionSetID_PurchRcptLine">
+          <DataField>DimensionSetID_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobTaskNo_PurchRcptLine">
+          <DataField>JobTaskNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineType_PurchRcptLine">
+          <DataField>JobLineType_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobUnitPrice_PurchRcptLine">
+          <DataField>JobUnitPrice_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobUnitPrice_PurchRcptLineFormat">
+          <DataField>JobUnitPrice_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobTotalPrice_PurchRcptLine">
+          <DataField>JobTotalPrice_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobTotalPrice_PurchRcptLineFormat">
+          <DataField>JobTotalPrice_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobLineAmount_PurchRcptLine">
+          <DataField>JobLineAmount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineAmount_PurchRcptLineFormat">
+          <DataField>JobLineAmount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobLineDiscountAmount_PurchRcptLine">
+          <DataField>JobLineDiscountAmount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineDiscountAmount_PurchRcptLineFormat">
+          <DataField>JobLineDiscountAmount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobLineDiscount_PurchRcptLine">
+          <DataField>JobLineDiscount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineDiscount_PurchRcptLineFormat">
+          <DataField>JobLineDiscount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobUnitPriceLCY_PurchRcptLine">
+          <DataField>JobUnitPriceLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobUnitPriceLCY_PurchRcptLineFormat">
+          <DataField>JobUnitPriceLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobTotalPriceLCY_PurchRcptLine">
+          <DataField>JobTotalPriceLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobTotalPriceLCY_PurchRcptLineFormat">
+          <DataField>JobTotalPriceLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobLineAmountLCY_PurchRcptLine">
+          <DataField>JobLineAmountLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineAmountLCY_PurchRcptLineFormat">
+          <DataField>JobLineAmountLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobLineDiscAmountLCY_PurchRcptLine">
+          <DataField>JobLineDiscAmountLCY_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobLineDiscAmountLCY_PurchRcptLineFormat">
+          <DataField>JobLineDiscAmountLCY_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobCurrencyFactor_PurchRcptLine">
+          <DataField>JobCurrencyFactor_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="JobCurrencyFactor_PurchRcptLineFormat">
+          <DataField>JobCurrencyFactor_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="JobCurrencyCode_PurchRcptLine">
+          <DataField>JobCurrencyCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ProdOrderNo_PurchRcptLine">
+          <DataField>ProdOrderNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="VariantCode_PurchRcptLine">
+          <DataField>VariantCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="BinCode_PurchRcptLine">
+          <DataField>BinCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QtyperUnitofMeasure_PurchRcptLine">
+          <DataField>QtyperUnitofMeasure_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QtyperUnitofMeasure_PurchRcptLineFormat">
+          <DataField>QtyperUnitofMeasure_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="UnitofMeasureCode_PurchRcptLine">
+          <DataField>UnitofMeasureCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QuantityBase_PurchRcptLine">
+          <DataField>QuantityBase_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QuantityBase_PurchRcptLineFormat">
+          <DataField>QuantityBase_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="QtyInvoicedBase_PurchRcptLine">
+          <DataField>QtyInvoicedBase_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="QtyInvoicedBase_PurchRcptLineFormat">
+          <DataField>QtyInvoicedBase_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="FAPostingDate_PurchRcptLine">
+          <DataField>FAPostingDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="FAPostingType_PurchRcptLine">
+          <DataField>FAPostingType_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DepreciationBookCode_PurchRcptLine">
+          <DataField>DepreciationBookCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SalvageValue_PurchRcptLine">
+          <DataField>SalvageValue_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SalvageValue_PurchRcptLineFormat">
+          <DataField>SalvageValue_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="DepruntilFAPostingDate_PurchRcptLine">
+          <DataField>DepruntilFAPostingDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DeprAcquisitionCost_PurchRcptLine">
+          <DataField>DeprAcquisitionCost_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="MaintenanceCode_PurchRcptLine">
+          <DataField>MaintenanceCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="InsuranceNo_PurchRcptLine">
+          <DataField>InsuranceNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="BudgetedFANo_PurchRcptLine">
+          <DataField>BudgetedFANo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="DuplicateinDepreciationBook_PurchRcptLine">
+          <DataField>DuplicateinDepreciationBook_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UseDuplicationList_PurchRcptLine">
+          <DataField>UseDuplicationList_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_PurchRcptLine">
+          <DataField>ResponsibilityCenter_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="CrossReferenceNo_PurchRcptLine">
+          <DataField>CrossReferenceNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="UnitofMeasureCrossRef_PurchRcptLine">
+          <DataField>UnitofMeasureCrossRef_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="CrossReferenceType_PurchRcptLine">
+          <DataField>CrossReferenceType_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="CrossReferenceTypeNo_PurchRcptLine">
+          <DataField>CrossReferenceTypeNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ItemCategoryCode_PurchRcptLine">
+          <DataField>ItemCategoryCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Nonstock_PurchRcptLine">
+          <DataField>Nonstock_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="PurchasingCode_PurchRcptLine">
+          <DataField>PurchasingCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SpecialOrderSalesNo_PurchRcptLine">
+          <DataField>SpecialOrderSalesNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="SpecialOrderSalesLineNo_PurchRcptLine">
+          <DataField>SpecialOrderSalesLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="RequestedReceiptDate_PurchRcptLine">
+          <DataField>RequestedReceiptDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="PromisedReceiptDate_PurchRcptLine">
+          <DataField>PromisedReceiptDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="LeadTimeCalculation_PurchRcptLine">
+          <DataField>LeadTimeCalculation_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="InboundWhseHandlingTime_PurchRcptLine">
+          <DataField>InboundWhseHandlingTime_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="PlannedReceiptDate_PurchRcptLine">
+          <DataField>PlannedReceiptDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="OrderDate_PurchRcptLine">
+          <DataField>OrderDate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ItemChargeBaseAmount_PurchRcptLine">
+          <DataField>ItemChargeBaseAmount_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ItemChargeBaseAmount_PurchRcptLineFormat">
+          <DataField>ItemChargeBaseAmount_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="Correction_PurchRcptLine">
+          <DataField>Correction_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Description_2">
+          <DataField>Description_2</DataField>
+        </Field>
+        <Field Name="ReturnReasonCode_PurchRcptLine">
+          <DataField>ReturnReasonCode_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Desc2_PurchRcptLine">
+          <DataField>Desc2_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="RoutingNo_PurchRcptLine">
+          <DataField>RoutingNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="OperationNo_PurchRcptLine">
+          <DataField>OperationNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="WorkCenterNo_PurchRcptLine">
+          <DataField>WorkCenterNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="ProdOrderLineNo_PurchRcptLine">
+          <DataField>ProdOrderLineNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="OverheadRate_PurchRcptLine">
+          <DataField>OverheadRate_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="OverheadRate_PurchRcptLineFormat">
+          <DataField>OverheadRate_PurchRcptLineFormat</DataField>
+        </Field>
+        <Field Name="RoutingReferenceNo_PurchRcptLine">
+          <DataField>RoutingReferenceNo_PurchRcptLine</DataField>
+        </Field>
+        <Field Name="Order_Amount">
+          <DataField>Order_Amount</DataField>
+        </Field>
+        <Field Name="Order_AmountFormat">
+          <DataField>Order_AmountFormat</DataField>
+        </Field>
+        <Field Name="CompanyINfoName">
+          <DataField>CompanyINfoName</DataField>
+        </Field>
+        <Field Name="CompanyINfoAdd">
+          <DataField>CompanyINfoAdd</DataField>
+        </Field>
+        <Field Name="CompanyINfoPicture">
+          <DataField>CompanyINfoPicture</DataField>
+        </Field>
+        <Field Name="Order_Amount_Including_VAT">
+          <DataField>Order_Amount_Including_VAT</DataField>
+        </Field>
+        <Field Name="Order_Amount_Including_VATFormat">
+          <DataField>Order_Amount_Including_VATFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

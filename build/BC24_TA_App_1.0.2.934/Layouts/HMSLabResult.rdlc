@@ -1,0 +1,167 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="LaboratoryNo_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryNo_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="LaboratoryTestCode_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryTestCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SpecimenCode_HMSLaboratoryResultsEntry">
+          <DataField>SpecimenCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SpecimenName_HMSLaboratoryResultsEntry">
+          <DataField>SpecimenName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="MeasuringUnitCode_HMSLaboratoryResultsEntry">
+          <DataField>MeasuringUnitCode_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="MeasuringUnitName_HMSLaboratoryResultsEntry">
+          <DataField>MeasuringUnitName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="TestNormalRanges_HMSLaboratoryResultsEntry">
+          <DataField>TestNormalRanges_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="CountValue_HMSLaboratoryResultsEntry">
+          <DataField>CountValue_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="CountValue_HMSLaboratoryResultsEntryFormat">
+          <DataField>CountValue_HMSLaboratoryResultsEntryFormat</DataField>
+        </Field>
+        <Field Name="Remarks_HMSLaboratoryResultsEntry">
+          <DataField>Remarks_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Positive_HMSLaboratoryResultsEntry">
+          <DataField>Positive_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Completed_HMSLaboratoryResultsEntry">
+          <DataField>Completed_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="PatNo">
+          <DataField>PatNo</DataField>
+        </Field>
+        <Field Name="PatNames">
+          <DataField>PatNames</DataField>
+        </Field>
+        <Field Name="DoctID">
+          <DataField>DoctID</DataField>
+        </Field>
+        <Field Name="ReceivedDate">
+          <DataField>ReceivedDate</DataField>
+        </Field>
+        <Field Name="CompletionDate">
+          <DataField>CompletionDate</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="CompLogo">
+          <DataField>CompLogo</DataField>
+        </Field>
+        <Field Name="TestDesc">
+          <DataField>TestDesc</DataField>
+        </Field>
+        <Field Name="Flag_HMSLaboratoryResultsEntry">
+          <DataField>Flag_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="SupervisorID">
+          <DataField>SupervisorID</DataField>
+        </Field>
+        <Field Name="AgeinYrs">
+          <DataField>AgeinYrs</DataField>
+        </Field>
+        <Field Name="PatGender">
+          <DataField>PatGender</DataField>
+        </Field>
+        <Field Name="LaboratoryTestName_HMSLaboratoryResultsEntry">
+          <DataField>LaboratoryTestName_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Reactive_HMSLaboratoryResultsEntry">
+          <DataField>Reactive_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="Results">
+          <DataField>Results</DataField>
+        </Field>
+        <Field Name="Counts">
+          <DataField>Counts</DataField>
+        </Field>
+        <Field Name="SortTest_HMSLaboratoryResultsEntry">
+          <DataField>SortTest_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+        <Field Name="AssignedUserID_HMSLaboratoryResultsEntry">
+          <DataField>AssignedUserID_HMSLaboratoryResultsEntry</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

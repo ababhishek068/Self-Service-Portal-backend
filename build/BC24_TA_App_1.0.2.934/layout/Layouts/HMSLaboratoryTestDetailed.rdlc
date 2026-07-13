@@ -1,0 +1,179 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_7278">
+          <DataField>ReportForNavId_7278</DataField>
+        </Field>
+        <Field Name="Date_Printed______FORMAT_TODAY_0_4_">
+          <DataField>Date_Printed______FORMAT_TODAY_0_4_</DataField>
+        </Field>
+        <Field Name="COMPANYNAME">
+          <DataField>COMPANYNAME</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENO">
+          <DataField>CurrReport_PAGENO</DataField>
+        </Field>
+        <Field Name="Printed_By______USERID">
+          <DataField>Printed_By______USERID</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header__Laboratory_No__">
+          <DataField>HMS_Laboratory_Form_Header__Laboratory_No__</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header__Laboratory_Date_">
+          <DataField>HMS_Laboratory_Form_Header__Laboratory_Date_</DataField>
+        </Field>
+        <Field Name="PFNo">
+          <DataField>PFNo</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header__Supervisor_ID_">
+          <DataField>HMS_Laboratory_Form_Header__Supervisor_ID_</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header_Status">
+          <DataField>HMS_Laboratory_Form_Header_Status</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header__Patient_Type_">
+          <DataField>HMS_Laboratory_Form_Header__Patient_Type_</DataField>
+        </Field>
+        <Field Name="PatientName">
+          <DataField>PatientName</DataField>
+        </Field>
+        <Field Name="Number_of_Laboratory_Tests_Listed______FORMAT__HMS_Laboratory_Form_Header__COUNT_">
+          <DataField>Number_of_Laboratory_Tests_Listed______FORMAT__HMS_Laboratory_Form_Header__COUNT_</DataField>
+        </Field>
+        <Field Name="UNIVERSITY_HEALTH_SERVICESCaption">
+          <DataField>UNIVERSITY_HEALTH_SERVICESCaption</DataField>
+        </Field>
+        <Field Name="CurrReport_PAGENOCaption">
+          <DataField>CurrReport_PAGENOCaption</DataField>
+        </Field>
+        <Field Name="LABORATORY_TESTS_LISTINGCaption">
+          <DataField>LABORATORY_TESTS_LISTINGCaption</DataField>
+        </Field>
+        <Field Name="No_Caption">
+          <DataField>No_Caption</DataField>
+        </Field>
+        <Field Name="DateCaption">
+          <DataField>DateCaption</DataField>
+        </Field>
+        <Field Name="PF_No_Caption">
+          <DataField>PF_No_Caption</DataField>
+        </Field>
+        <Field Name="ResponsibleCaption">
+          <DataField>ResponsibleCaption</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header_StatusCaption">
+          <DataField>HMS_Laboratory_Form_Header_StatusCaption</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Form_Header__Patient_Type_Caption">
+          <DataField>HMS_Laboratory_Form_Header__Patient_Type_Caption</DataField>
+        </Field>
+        <Field Name="Patient_nameCaption">
+          <DataField>Patient_nameCaption</DataField>
+        </Field>
+        <Field Name="Test_PackageCaption">
+          <DataField>Test_PackageCaption</DataField>
+        </Field>
+        <Field Name="TestCaption">
+          <DataField>TestCaption</DataField>
+        </Field>
+        <Field Name="SpecimenCaption">
+          <DataField>SpecimenCaption</DataField>
+        </Field>
+        <Field Name="StatusCaption">
+          <DataField>StatusCaption</DataField>
+        </Field>
+        <Field Name="ReportForNavId_7451">
+          <DataField>ReportForNavId_7451</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line__HMS_Laboratory_Test_Line___Laboratory_Test_Name_">
+          <DataField>HMS_Laboratory_Test_Line__HMS_Laboratory_Test_Line___Laboratory_Test_Name_</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line__Laboratory_Test_Name_">
+          <DataField>HMS_Laboratory_Test_Line__Laboratory_Test_Name_</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line__Specimen_Name_">
+          <DataField>HMS_Laboratory_Test_Line__Specimen_Name_</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line_Completed">
+          <DataField>HMS_Laboratory_Test_Line_Completed</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line_Laboratory_No_">
+          <DataField>HMS_Laboratory_Test_Line_Laboratory_No_</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line_Laboratory_Test_Code">
+          <DataField>HMS_Laboratory_Test_Line_Laboratory_Test_Code</DataField>
+        </Field>
+        <Field Name="HMS_Laboratory_Test_Line_Specimen_Code">
+          <DataField>HMS_Laboratory_Test_Line_Specimen_Code</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

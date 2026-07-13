@@ -2736,6 +2736,21 @@ codeunit 50049 "Staff Portal Codeunit"
         returValue := Format(TbHRLeaveRequisition."Return Date") + '##' + Format(TbHRLeaveRequisition."Days Applied");
     end;
 
+    procedure FnGetEmployeeLeaveBalances(employeeNo: Code[30]) return_value: Text
+    var
+        HREmployee: Record "HR-Employee";
+    begin
+        if not HREmployee.Get(employeeNo) then
+            Error('Employee %1 was not found.', employeeNo);
+
+        HREmployee.CalcFields("Leave Balance", "Annual Leave balance", "Carry forward");
+        return_value :=
+          'LeaveBalance=' + Format(HREmployee."Leave Balance", 0, 9) +
+          '#EarnedLeaveDays=' + Format(HREmployee."Earned Leave Days", 0, 9) +
+          '#AnnualLeaveBalance=' + Format(HREmployee."Annual Leave balance", 0, 9) +
+          '#CarryForward=' + Format(HREmployee."Carry forward", 0, 9);
+    end;
+
     procedure GetLeaveDates(empNo: Code[30]; leaveType: code[30]; startDate: Date; noOfDays: Decimal) return_value: text
     var
         TbleaveApp: record "HR Leave Application";
@@ -2844,7 +2859,7 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(return_value);
     end;
 
-    procedure FnCheckinCheckout(employeeNo: Code[30]; type: Text; myUserID: Code[10]; location: Text) return_value: Text
+    procedure FnCheckinCheckout(employeeNo: Code[30]; type: Text; myUserID: Code[50]; location: Text) return_value: Text
     var
         TbHrAtteLedg2: Record "HR Attendance Ledger";
         TbHrAtteLedg: Record "HR Attendance Ledger";
@@ -2977,11 +2992,13 @@ codeunit 50049 "Staff Portal Codeunit"
             'create':
                 begin
                     StaffAdvanceHeader.Init();
+                    ApplyPortalStaffAdvanceNo(StaffAdvanceHeader);
                     StaffAdvanceHeader."Staff ID" := staffNo;
                     StaffAdvanceHeader.Validate("Staff ID");
                     StaffAdvanceHeader.Purpose := purpose;
                     // StaffAdvanceHeader.Status := StaffAdvanceHeader.Status::Approved;
                     if StaffAdvanceHeader.Insert(true) then begin
+                        EnsurePortalSalaryAdvanceType();
                         StaffAdvanceLines.Init();
                         StaffAdvanceLines.No := StaffAdvanceHeader."No.";
                         StaffAdvanceLines."Advance Type" := 'SALARY';
@@ -3050,11 +3067,9 @@ codeunit 50049 "Staff Portal Codeunit"
         LeaveApp.Validate("Leave Type");
         LeaveApp."Reason for leave" := reason;
 
-        if isHalfDayLeave then
-            LeaveApp."Days Applied" := 0.5
-        else
-            LeaveApp."Days Applied" := daysApplied;
-
+        // Start Date validation in the table extension revalidates any existing Days Applied.
+        // Clear it first so the broken accrued-days calculation cannot reject an otherwise valid request.
+        Clear(LeaveApp."Days Applied");
         LeaveApp."Start Date" := Dt2Date(startDate);
         LeaveApp.Validate("Start Date");
 
@@ -3062,17 +3077,22 @@ codeunit 50049 "Staff Portal Codeunit"
             LeaveApp."End Date" := Dt2Date(endDate);
 
         ApplyPortalReturnDate(LeaveApp, returnDate, LeaveApp."End Date");
-        if LeaveApp.Annual or LeaveApp.Mourning then
-            LeaveApp.Validate("Days Applied")
+        if isHalfDayLeave then
+            LeaveApp."Days Applied" := 0.5
         else
-            PortalValidateDaysApplied(LeaveApp);
+            LeaveApp."Days Applied" := daysApplied;
+
+        // The standard validation calculates annual entitlement from an accrued value whose
+        // sign is reversed in the current BC table extension. Validate against the posted
+        // allocation/balance used by the portal for every leave type instead.
+        PortalValidateDaysApplied(LeaveApp);
         LeaveApp.Reliever := reliever;
         LeaveApp.Validate(Reliever);
         LeaveApp."Request Leave Allowance" := isRequestLeaveAllowance;
     end;
 
-    /// Non-annual leave (sick, compassionate, etc.): BC table validation only counts HR Leave Allocation
-    /// rows. When HR has not posted allocation yet, fall back to Leave Types.Days so portal matches policy.
+    /// Validate portal requests against posted HR Leave Allocation rows. When HR has not posted an
+    /// allocation yet, fall back to Leave Types.Days so the portal continues to match leave policy.
     local procedure PortalValidateDaysApplied(var LeaveApp: Record "HR Leave Application")
     var
         HRLeaveCal: Record "HR Leave Calendar";
@@ -3151,5 +3171,50 @@ codeunit 50049 "Staff Portal Codeunit"
             exit;
 
         LeaveApp."Return Date" := portalReturn;
+    end;
+
+    /// Use the configured BC number series when available. If it is not configured, assign a
+    /// portal draft number before Insert(true), so the table insert trigger does not fail.
+    local procedure ApplyPortalStaffAdvanceNo(var StaffAdvanceHeader: Record "Staff Advance Header")
+    var
+        CashOfficeSetup: Record "Cash Office Setup";
+        ExistingAdvance: Record "Staff Advance Header";
+        PortalAdvanceNo: Code[20];
+    begin
+        if CashOfficeSetup.Get() then
+            if CashOfficeSetup."Other Staff Advance No" <> '' then
+                exit;
+
+        ExistingAdvance.LockTable();
+        ExistingAdvance.Reset();
+        ExistingAdvance.SetFilter("No.", 'SA-*');
+        if ExistingAdvance.FindLast() then
+            PortalAdvanceNo := IncStr(ExistingAdvance."No.")
+        else
+            PortalAdvanceNo := 'SA-00001';
+
+        if PortalAdvanceNo = '' then
+            Error('Unable to generate the next salary advance number. Configure Other Staff Advance No in Cash Office Setup.');
+
+        StaffAdvanceHeader."No." := PortalAdvanceNo;
+    end;
+
+    local procedure EnsurePortalSalaryAdvanceType()
+    var
+        AdvanceType: Record "Receipts and Payment Types";
+    begin
+        if AdvanceType.Get('SALARY', AdvanceType.Type::Advance) then begin
+            if AdvanceType.Blocked then
+                Error('The SALARY advance type is blocked in Receipts and Payment Types.');
+            exit;
+        end;
+
+        AdvanceType.Init();
+        AdvanceType.Code := 'SALARY';
+        AdvanceType.Type := AdvanceType.Type::Advance;
+        AdvanceType.Description := 'Salary Advance';
+        AdvanceType."Account Type" := AdvanceType."Account Type"::Staff;
+        AdvanceType."Transation Remarks" := 'Salary Advance';
+        AdvanceType.Insert(true);
     end;
 }

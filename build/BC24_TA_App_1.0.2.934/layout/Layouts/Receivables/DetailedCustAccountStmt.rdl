@@ -1,0 +1,437 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="EntryNo">
+          <DataField>EntryNo</DataField>
+        </Field>
+        <Field Name="CustomerNo">
+          <DataField>CustomerNo</DataField>
+        </Field>
+        <Field Name="PostingDate">
+          <DataField>PostingDate</DataField>
+        </Field>
+        <Field Name="DocumentType">
+          <DataField>DocumentType</DataField>
+        </Field>
+        <Field Name="DocumentNo">
+          <DataField>DocumentNo</DataField>
+        </Field>
+        <Field Name="Description">
+          <DataField>Description</DataField>
+        </Field>
+        <Field Name="CustomerName">
+          <DataField>CustomerName</DataField>
+        </Field>
+        <Field Name="YourReference">
+          <DataField>YourReference</DataField>
+        </Field>
+        <Field Name="CurrencyCode">
+          <DataField>CurrencyCode</DataField>
+        </Field>
+        <Field Name="Amount">
+          <DataField>Amount</DataField>
+        </Field>
+        <Field Name="AmountFormat">
+          <DataField>AmountFormat</DataField>
+        </Field>
+        <Field Name="RemainingAmount">
+          <DataField>RemainingAmount</DataField>
+        </Field>
+        <Field Name="RemainingAmountFormat">
+          <DataField>RemainingAmountFormat</DataField>
+        </Field>
+        <Field Name="OriginalAmtLCY">
+          <DataField>OriginalAmtLCY</DataField>
+        </Field>
+        <Field Name="OriginalAmtLCYFormat">
+          <DataField>OriginalAmtLCYFormat</DataField>
+        </Field>
+        <Field Name="RemainingAmtLCY">
+          <DataField>RemainingAmtLCY</DataField>
+        </Field>
+        <Field Name="RemainingAmtLCYFormat">
+          <DataField>RemainingAmtLCYFormat</DataField>
+        </Field>
+        <Field Name="AmountLCY">
+          <DataField>AmountLCY</DataField>
+        </Field>
+        <Field Name="AmountLCYFormat">
+          <DataField>AmountLCYFormat</DataField>
+        </Field>
+        <Field Name="SalesLCY">
+          <DataField>SalesLCY</DataField>
+        </Field>
+        <Field Name="SalesLCYFormat">
+          <DataField>SalesLCYFormat</DataField>
+        </Field>
+        <Field Name="ProfitLCY">
+          <DataField>ProfitLCY</DataField>
+        </Field>
+        <Field Name="ProfitLCYFormat">
+          <DataField>ProfitLCYFormat</DataField>
+        </Field>
+        <Field Name="InvDiscountLCY">
+          <DataField>InvDiscountLCY</DataField>
+        </Field>
+        <Field Name="InvDiscountLCYFormat">
+          <DataField>InvDiscountLCYFormat</DataField>
+        </Field>
+        <Field Name="SelltoCustomerNo">
+          <DataField>SelltoCustomerNo</DataField>
+        </Field>
+        <Field Name="CustomerPostingGroup">
+          <DataField>CustomerPostingGroup</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code">
+          <DataField>GlobalDimension1Code</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code">
+          <DataField>GlobalDimension2Code</DataField>
+        </Field>
+        <Field Name="SalespersonCode">
+          <DataField>SalespersonCode</DataField>
+        </Field>
+        <Field Name="UserID">
+          <DataField>UserID</DataField>
+        </Field>
+        <Field Name="SourceCode">
+          <DataField>SourceCode</DataField>
+        </Field>
+        <Field Name="OnHold">
+          <DataField>OnHold</DataField>
+        </Field>
+        <Field Name="AppliestoDocType">
+          <DataField>AppliestoDocType</DataField>
+        </Field>
+        <Field Name="AppliestoDocNo">
+          <DataField>AppliestoDocNo</DataField>
+        </Field>
+        <Field Name="Open">
+          <DataField>Open</DataField>
+        </Field>
+        <Field Name="DueDate">
+          <DataField>DueDate</DataField>
+        </Field>
+        <Field Name="PmtDiscountDate">
+          <DataField>PmtDiscountDate</DataField>
+        </Field>
+        <Field Name="OriginalPmtDiscPossible">
+          <DataField>OriginalPmtDiscPossible</DataField>
+        </Field>
+        <Field Name="OriginalPmtDiscPossibleFormat">
+          <DataField>OriginalPmtDiscPossibleFormat</DataField>
+        </Field>
+        <Field Name="PmtDiscGivenLCY">
+          <DataField>PmtDiscGivenLCY</DataField>
+        </Field>
+        <Field Name="PmtDiscGivenLCYFormat">
+          <DataField>PmtDiscGivenLCYFormat</DataField>
+        </Field>
+        <Field Name="OrigPmtDiscPossibleLCY">
+          <DataField>OrigPmtDiscPossibleLCY</DataField>
+        </Field>
+        <Field Name="OrigPmtDiscPossibleLCYFormat">
+          <DataField>OrigPmtDiscPossibleLCYFormat</DataField>
+        </Field>
+        <Field Name="Positive">
+          <DataField>Positive</DataField>
+        </Field>
+        <Field Name="ClosedbyEntryNo">
+          <DataField>ClosedbyEntryNo</DataField>
+        </Field>
+        <Field Name="ClosedatDate">
+          <DataField>ClosedatDate</DataField>
+        </Field>
+        <Field Name="ClosedbyAmount">
+          <DataField>ClosedbyAmount</DataField>
+        </Field>
+        <Field Name="ClosedbyAmountFormat">
+          <DataField>ClosedbyAmountFormat</DataField>
+        </Field>
+        <Field Name="AppliestoID">
+          <DataField>AppliestoID</DataField>
+        </Field>
+        <Field Name="JournalTemplName">
+          <DataField>JournalTemplName</DataField>
+        </Field>
+        <Field Name="JournalBatchName">
+          <DataField>JournalBatchName</DataField>
+        </Field>
+        <Field Name="ReasonCode">
+          <DataField>ReasonCode</DataField>
+        </Field>
+        <Field Name="BalAccountType">
+          <DataField>BalAccountType</DataField>
+        </Field>
+        <Field Name="BalAccountNo">
+          <DataField>BalAccountNo</DataField>
+        </Field>
+        <Field Name="TransactionNo">
+          <DataField>TransactionNo</DataField>
+        </Field>
+        <Field Name="ClosedbyAmountLCY">
+          <DataField>ClosedbyAmountLCY</DataField>
+        </Field>
+        <Field Name="ClosedbyAmountLCYFormat">
+          <DataField>ClosedbyAmountLCYFormat</DataField>
+        </Field>
+        <Field Name="DebitAmount">
+          <DataField>DebitAmount</DataField>
+        </Field>
+        <Field Name="DebitAmountFormat">
+          <DataField>DebitAmountFormat</DataField>
+        </Field>
+        <Field Name="CreditAmount">
+          <DataField>CreditAmount</DataField>
+        </Field>
+        <Field Name="CreditAmountFormat">
+          <DataField>CreditAmountFormat</DataField>
+        </Field>
+        <Field Name="DebitAmountLCY">
+          <DataField>DebitAmountLCY</DataField>
+        </Field>
+        <Field Name="DebitAmountLCYFormat">
+          <DataField>DebitAmountLCYFormat</DataField>
+        </Field>
+        <Field Name="CreditAmountLCY">
+          <DataField>CreditAmountLCY</DataField>
+        </Field>
+        <Field Name="CreditAmountLCYFormat">
+          <DataField>CreditAmountLCYFormat</DataField>
+        </Field>
+        <Field Name="DocumentDate">
+          <DataField>DocumentDate</DataField>
+        </Field>
+        <Field Name="ExternalDocumentNo">
+          <DataField>ExternalDocumentNo</DataField>
+        </Field>
+        <Field Name="CalculateInterest">
+          <DataField>CalculateInterest</DataField>
+        </Field>
+        <Field Name="ClosingInterestCalculated">
+          <DataField>ClosingInterestCalculated</DataField>
+        </Field>
+        <Field Name="NoSeries">
+          <DataField>NoSeries</DataField>
+        </Field>
+        <Field Name="ClosedbyCurrencyCode">
+          <DataField>ClosedbyCurrencyCode</DataField>
+        </Field>
+        <Field Name="ClosedbyCurrencyAmount">
+          <DataField>ClosedbyCurrencyAmount</DataField>
+        </Field>
+        <Field Name="ClosedbyCurrencyAmountFormat">
+          <DataField>ClosedbyCurrencyAmountFormat</DataField>
+        </Field>
+        <Field Name="AdjustedCurrencyFactor">
+          <DataField>AdjustedCurrencyFactor</DataField>
+        </Field>
+        <Field Name="AdjustedCurrencyFactorFormat">
+          <DataField>AdjustedCurrencyFactorFormat</DataField>
+        </Field>
+        <Field Name="OriginalCurrencyFactor">
+          <DataField>OriginalCurrencyFactor</DataField>
+        </Field>
+        <Field Name="OriginalCurrencyFactorFormat">
+          <DataField>OriginalCurrencyFactorFormat</DataField>
+        </Field>
+        <Field Name="OriginalAmount">
+          <DataField>OriginalAmount</DataField>
+        </Field>
+        <Field Name="OriginalAmountFormat">
+          <DataField>OriginalAmountFormat</DataField>
+        </Field>
+        <Field Name="RemainingPmtDiscPossible">
+          <DataField>RemainingPmtDiscPossible</DataField>
+        </Field>
+        <Field Name="RemainingPmtDiscPossibleFormat">
+          <DataField>RemainingPmtDiscPossibleFormat</DataField>
+        </Field>
+        <Field Name="PmtDiscToleranceDate">
+          <DataField>PmtDiscToleranceDate</DataField>
+        </Field>
+        <Field Name="MaxPaymentTolerance">
+          <DataField>MaxPaymentTolerance</DataField>
+        </Field>
+        <Field Name="MaxPaymentToleranceFormat">
+          <DataField>MaxPaymentToleranceFormat</DataField>
+        </Field>
+        <Field Name="LastIssuedReminderLevel">
+          <DataField>LastIssuedReminderLevel</DataField>
+        </Field>
+        <Field Name="AcceptedPaymentTolerance">
+          <DataField>AcceptedPaymentTolerance</DataField>
+        </Field>
+        <Field Name="AcceptedPaymentToleranceFormat">
+          <DataField>AcceptedPaymentToleranceFormat</DataField>
+        </Field>
+        <Field Name="AcceptedPmtDiscTolerance">
+          <DataField>AcceptedPmtDiscTolerance</DataField>
+        </Field>
+        <Field Name="PmtToleranceLCY">
+          <DataField>PmtToleranceLCY</DataField>
+        </Field>
+        <Field Name="PmtToleranceLCYFormat">
+          <DataField>PmtToleranceLCYFormat</DataField>
+        </Field>
+        <Field Name="AmounttoApply">
+          <DataField>AmounttoApply</DataField>
+        </Field>
+        <Field Name="AmounttoApplyFormat">
+          <DataField>AmounttoApplyFormat</DataField>
+        </Field>
+        <Field Name="ICPartnerCode">
+          <DataField>ICPartnerCode</DataField>
+        </Field>
+        <Field Name="ApplyingEntry">
+          <DataField>ApplyingEntry</DataField>
+        </Field>
+        <Field Name="Reversed">
+          <DataField>Reversed</DataField>
+        </Field>
+        <Field Name="ReversedbyEntryNo">
+          <DataField>ReversedbyEntryNo</DataField>
+        </Field>
+        <Field Name="ReversedEntryNo">
+          <DataField>ReversedEntryNo</DataField>
+        </Field>
+        <Field Name="Prepayment">
+          <DataField>Prepayment</DataField>
+        </Field>
+        <Field Name="PaymentReference">
+          <DataField>PaymentReference</DataField>
+        </Field>
+        <Field Name="PaymentMethodCode">
+          <DataField>PaymentMethodCode</DataField>
+        </Field>
+        <Field Name="AppliestoExtDocNo">
+          <DataField>AppliestoExtDocNo</DataField>
+        </Field>
+        <Field Name="RecipientBankAccount">
+          <DataField>RecipientBankAccount</DataField>
+        </Field>
+        <Field Name="MessagetoRecipient">
+          <DataField>MessagetoRecipient</DataField>
+        </Field>
+        <Field Name="ExportedtoPaymentFile">
+          <DataField>ExportedtoPaymentFile</DataField>
+        </Field>
+        <Field Name="DimensionSetID">
+          <DataField>DimensionSetID</DataField>
+        </Field>
+        <Field Name="ShortcutDimension3Code">
+          <DataField>ShortcutDimension3Code</DataField>
+        </Field>
+        <Field Name="ShortcutDimension4Code">
+          <DataField>ShortcutDimension4Code</DataField>
+        </Field>
+        <Field Name="ShortcutDimension5Code">
+          <DataField>ShortcutDimension5Code</DataField>
+        </Field>
+        <Field Name="ShortcutDimension6Code">
+          <DataField>ShortcutDimension6Code</DataField>
+        </Field>
+        <Field Name="ShortcutDimension7Code">
+          <DataField>ShortcutDimension7Code</DataField>
+        </Field>
+        <Field Name="ShortcutDimension8Code">
+          <DataField>ShortcutDimension8Code</DataField>
+        </Field>
+        <Field Name="RunningBalance">
+          <DataField>RunningBalance</DataField>
+        </Field>
+        <Field Name="RunningBalanceFormat">
+          <DataField>RunningBalanceFormat</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Name">
+          <DataField>CompanyInfo_Name</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Email">
+          <DataField>CompanyInfo_Email</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Address">
+          <DataField>CompanyInfo_Address</DataField>
+        </Field>
+        <Field Name="CompanyInfo_City">
+          <DataField>CompanyInfo_City</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Picture">
+          <DataField>CompanyInfo_Picture</DataField>
+        </Field>
+        <Field Name="CompanyInfo_Phone">
+          <DataField>CompanyInfo_Phone</DataField>
+        </Field>
+        <Field Name="CompanyInfo_HomePage">
+          <DataField>CompanyInfo_HomePage</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

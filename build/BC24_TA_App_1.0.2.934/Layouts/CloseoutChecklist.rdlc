@@ -1,0 +1,155 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1000000000">
+          <DataField>ReportForNavId_1000000000</DataField>
+        </Field>
+        <Field Name="GrantNo_CloseOutCheckList">
+          <DataField>GrantNo_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="ComplianceCode_CloseOutCheckList">
+          <DataField>ComplianceCode_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Description_CloseOutCheckList">
+          <DataField>Description_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Compliance_CloseOutCheckList">
+          <DataField>Compliance_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="User_CloseOutCheckList">
+          <DataField>User_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Amount_CloseOutCheckList">
+          <DataField>Amount_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Amount_CloseOutCheckListFormat">
+          <DataField>Amount_CloseOutCheckListFormat</DataField>
+        </Field>
+        <Field Name="Comments_CloseOutCheckList">
+          <DataField>Comments_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Status_CloseOutCheckList">
+          <DataField>Status_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="CloseoutNo_CloseOutCheckList">
+          <DataField>CloseoutNo_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_CloseOutCheckList">
+          <DataField>ResponsibilityCenter_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="NoSeries_CloseOutCheckList">
+          <DataField>NoSeries_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="DonorSponsorCode_CloseOutCheckList">
+          <DataField>DonorSponsorCode_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Subcontractorno_CloseOutCheckList">
+          <DataField>Subcontractorno_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Date_CloseOutCheckList">
+          <DataField>Date_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="Subcontractor_CloseOutCheckList">
+          <DataField>Subcontractor_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="PI_CloseOutCheckList">
+          <DataField>PI_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="PIName_CloseOutCheckList">
+          <DataField>PIName_CloseOutCheckList</DataField>
+        </Field>
+        <Field Name="ReportForNavId_1000000018">
+          <DataField>ReportForNavId_1000000018</DataField>
+        </Field>
+        <Field Name="LineNo_CloseoutChecklistLines">
+          <DataField>LineNo_CloseoutChecklistLines</DataField>
+        </Field>
+        <Field Name="CloseoutNos_CloseoutChecklistLines">
+          <DataField>CloseoutNos_CloseoutChecklistLines</DataField>
+        </Field>
+        <Field Name="Sections_CloseoutChecklistLines">
+          <DataField>Sections_CloseoutChecklistLines</DataField>
+        </Field>
+        <Field Name="Options_CloseoutChecklistLines">
+          <DataField>Options_CloseoutChecklistLines</DataField>
+        </Field>
+        <Field Name="Amount_CloseoutChecklistLines">
+          <DataField>Amount_CloseoutChecklistLines</DataField>
+        </Field>
+        <Field Name="Amount_CloseoutChecklistLinesFormat">
+          <DataField>Amount_CloseoutChecklistLinesFormat</DataField>
+        </Field>
+        <Field Name="Reason_CloseoutChecklistLines">
+          <DataField>Reason_CloseoutChecklistLines</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

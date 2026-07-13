@@ -1,0 +1,185 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="Requester_ID">
+          <DataField>Requester_ID</DataField>
+        </Field>
+        <Field Name="Employee_No">
+          <DataField>Employee_No</DataField>
+        </Field>
+        <Field Name="Store_Issue_No">
+          <DataField>Store_Issue_No</DataField>
+        </Field>
+        <Field Name="ReportForNavId_37">
+          <DataField>ReportForNavId_37</DataField>
+        </Field>
+        <Field Name="CompInfo">
+          <DataField>CompInfo</DataField>
+        </Field>
+        <Field Name="CompInformationPic">
+          <DataField>CompInformationPic</DataField>
+        </Field>
+        <Field Name="CompAddr">
+          <DataField>CompAddr</DataField>
+        </Field>
+        <Field Name="CompPhone">
+          <DataField>CompPhone</DataField>
+        </Field>
+        <Field Name="CompFax">
+          <DataField>CompFax</DataField>
+        </Field>
+        <Field Name="dept">
+          <DataField>dept</DataField>
+        </Field>
+        <Field Name="Reqdate">
+          <DataField>Reqdate</DataField>
+        </Field>
+        <Field Name="isuedate">
+          <DataField>isuedate</DataField>
+        </Field>
+        <Field Name="issueno">
+          <DataField>issueno</DataField>
+        </Field>
+        <Field Name="Requistion_No">
+          <DataField>Requistion_No</DataField>
+        </Field>
+        <Field Name="reqno">
+          <DataField>reqno</DataField>
+        </Field>
+        <Field Name="UserId">
+          <DataField>UserId</DataField>
+        </Field>
+        <Field Name="pics">
+          <DataField>pics</DataField>
+        </Field>
+        <Field Name="seq">
+          <DataField>seq</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__No__">
+          <DataField>Store_Requistion_Lines__No__</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines_Description">
+          <DataField>Store_Requistion_Lines_Description</DataField>
+        </Field>
+        <Field Name="LineNo_StoreRequistionLines">
+          <DataField>LineNo_StoreRequistionLines</DataField>
+        </Field>
+        <Field Name="Issue_Quantity">
+          <DataField>Issue_Quantity</DataField>
+        </Field>
+        <Field Name="Issue_QuantityFormat">
+          <DataField>Issue_QuantityFormat</DataField>
+        </Field>
+        <Field Name="Requested">
+          <DataField>Requested</DataField>
+        </Field>
+        <Field Name="RequestedFormat">
+          <DataField>RequestedFormat</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__Unit_of_Measure_">
+          <DataField>Store_Requistion_Lines__Unit_of_Measure_</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__Line_Amount_">
+          <DataField>Store_Requistion_Lines__Line_Amount_</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__Line_Amount_Format">
+          <DataField>Store_Requistion_Lines__Line_Amount_Format</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__Unit_Cost_">
+          <DataField>Store_Requistion_Lines__Unit_Cost_</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines__Unit_Cost_Format">
+          <DataField>Store_Requistion_Lines__Unit_Cost_Format</DataField>
+        </Field>
+        <Field Name="Store_Requistion_Lines_Requistion_No">
+          <DataField>Store_Requistion_Lines_Requistion_No</DataField>
+        </Field>
+        <Field Name="QtyRequested">
+          <DataField>QtyRequested</DataField>
+        </Field>
+        <Field Name="QtyRequestedFormat">
+          <DataField>QtyRequestedFormat</DataField>
+        </Field>
+        <Field Name="Quantity_Issued">
+          <DataField>Quantity_Issued</DataField>
+        </Field>
+        <Field Name="Quantity_IssuedFormat">
+          <DataField>Quantity_IssuedFormat</DataField>
+        </Field>
+        <Field Name="TotalAmount">
+          <DataField>TotalAmount</DataField>
+        </Field>
+        <Field Name="TotalAmountFormat">
+          <DataField>TotalAmountFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

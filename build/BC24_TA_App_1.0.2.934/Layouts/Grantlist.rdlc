@@ -1,0 +1,143 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="No_Jobs">
+          <DataField>No_Jobs</DataField>
+        </Field>
+        <Field Name="FileName">
+          <DataField>FileName</DataField>
+        </Field>
+        <Field Name="Title_Jobs">
+          <DataField>Title_Jobs</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_Jobs">
+          <DataField>GlobalDimension1Code_Jobs</DataField>
+        </Field>
+        <Field Name="FundingAgencyNo_Jobs">
+          <DataField>FundingAgencyNo_Jobs</DataField>
+        </Field>
+        <Field Name="Objective_Jobs">
+          <DataField>Objective_Jobs</DataField>
+        </Field>
+        <Field Name="PrimeInstitution_Jobs">
+          <DataField>PrimeInstitution_Jobs</DataField>
+        </Field>
+        <Field Name="TypeOfFunding_Jobs">
+          <DataField>TypeOfFunding_Jobs</DataField>
+        </Field>
+        <Field Name="ContractedTo_Jobs">
+          <DataField>ContractedTo_Jobs</DataField>
+        </Field>
+        <Field Name="AmountAwarded_Jobs">
+          <DataField>AmountAwarded_Jobs</DataField>
+        </Field>
+        <Field Name="AmountAwarded_JobsFormat">
+          <DataField>AmountAwarded_JobsFormat</DataField>
+        </Field>
+        <Field Name="PaymentMethods_Jobs">
+          <DataField>PaymentMethods_Jobs</DataField>
+        </Field>
+        <Field Name="AllowedIndirectCost_Jobs">
+          <DataField>AllowedIndirectCost_Jobs</DataField>
+        </Field>
+        <Field Name="StartingDate_Jobs">
+          <DataField>StartingDate_Jobs</DataField>
+        </Field>
+        <Field Name="EndingDate_Jobs">
+          <DataField>EndingDate_Jobs</DataField>
+        </Field>
+        <Field Name="PrincipalInvestigator_Jobs">
+          <DataField>PrincipalInvestigator_Jobs</DataField>
+        </Field>
+        <Field Name="strEmailPI">
+          <DataField>strEmailPI</DataField>
+        </Field>
+        <Field Name="STRAcc">
+          <DataField>STRAcc</DataField>
+        </Field>
+        <Field Name="StrProjectManager">
+          <DataField>StrProjectManager</DataField>
+        </Field>
+        <Field Name="strEmailPM">
+          <DataField>strEmailPM</DataField>
+        </Field>
+        <Field Name="Code_Logos">
+          <DataField>Code_Logos</DataField>
+        </Field>
+        <Field Name="Picture">
+          <DataField>Picture</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

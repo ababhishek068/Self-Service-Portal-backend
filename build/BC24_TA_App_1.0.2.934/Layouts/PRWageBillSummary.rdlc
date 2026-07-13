@@ -1,0 +1,184 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportParameters>
+    <ReportParameter Name="LblCertifiedBy">
+      <DataType>String</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>LblCertifiedBy</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>LblCertifiedBy</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="LblApprovedBy">
+      <DataType>String</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>LblApprovedBy</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>LblApprovedBy</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="LblTypingSpace">
+      <DataType>String</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>LblTypingSpace</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>LblTypingSpace</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="LblPrintedby">
+      <DataType>String</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>LblPrintedby</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>LblPrintedby</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="LblPage">
+      <DataType>String</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>LblPage</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>LblPage</Prompt>
+    </ReportParameter>
+  </ReportParameters>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1102755000">
+          <DataField>ReportForNavId_1102755000</DataField>
+        </Field>
+        <Field Name="Num">
+          <DataField>Num</DataField>
+        </Field>
+        <Field Name="Code_DimensionValue">
+          <DataField>Code_DimensionValue</DataField>
+        </Field>
+        <Field Name="TotGPAY">
+          <DataField>TotGPAY</DataField>
+        </Field>
+        <Field Name="TotGPAYFormat">
+          <DataField>TotGPAYFormat</DataField>
+        </Field>
+        <Field Name="TotMedAll">
+          <DataField>TotMedAll</DataField>
+        </Field>
+        <Field Name="TotMedAllFormat">
+          <DataField>TotMedAllFormat</DataField>
+        </Field>
+        <Field Name="TotGPAY_TotMedAll">
+          <DataField>TotGPAY_TotMedAll</DataField>
+        </Field>
+        <Field Name="TotGPAY_TotMedAllFormat">
+          <DataField>TotGPAY_TotMedAllFormat</DataField>
+        </Field>
+        <Field Name="TotPFund">
+          <DataField>TotPFund</DataField>
+        </Field>
+        <Field Name="TotPFundFormat">
+          <DataField>TotPFundFormat</DataField>
+        </Field>
+        <Field Name="TotEmpPension">
+          <DataField>TotEmpPension</DataField>
+        </Field>
+        <Field Name="TotEmpPensionFormat">
+          <DataField>TotEmpPensionFormat</DataField>
+        </Field>
+        <Field Name="TotSalary">
+          <DataField>TotSalary</DataField>
+        </Field>
+        <Field Name="TotSalaryFormat">
+          <DataField>TotSalaryFormat</DataField>
+        </Field>
+        <Field Name="TotScheme">
+          <DataField>TotScheme</DataField>
+        </Field>
+        <Field Name="TotSchemeFormat">
+          <DataField>TotSchemeFormat</DataField>
+        </Field>
+        <Field Name="COMPANYNAME">
+          <DataField>COMPANYNAME</DataField>
+        </Field>
+        <Field Name="CompInfoPicture">
+          <DataField>CompInfoPicture</DataField>
+        </Field>
+        <Field Name="PeriodName">
+          <DataField>PeriodName</DataField>
+        </Field>
+        <Field Name="ReportTitle">
+          <DataField>ReportTitle</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

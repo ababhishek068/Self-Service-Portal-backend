@@ -1,0 +1,152 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="No_AssetTransfer">
+          <DataField>No_AssetTransfer</DataField>
+        </Field>
+        <Field Name="RaisedBy_AssetTransfer">
+          <DataField>RaisedBy_AssetTransfer</DataField>
+        </Field>
+        <Field Name="AssettoTransfer_AssetTransfer">
+          <DataField>AssettoTransfer_AssetTransfer</DataField>
+        </Field>
+        <Field Name="AssetDescription_AssetTransfer">
+          <DataField>AssetDescription_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromDimension1Code_AssetTransfer">
+          <DataField>FromDimension1Code_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromDimension1Description_AssetTransfer">
+          <DataField>FromDimension1Description_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromDimension2Code_AssetTransfer">
+          <DataField>FromDimension2Code_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromDimension2Description_AssetTransfer">
+          <DataField>FromDimension2Description_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromLocation_AssetTransfer">
+          <DataField>FromLocation_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromResponsibleEmployee_AssetTransfer">
+          <DataField>FromResponsibleEmployee_AssetTransfer</DataField>
+        </Field>
+        <Field Name="FromEmployeeName_AssetTransfer">
+          <DataField>FromEmployeeName_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToDimension1Code_AssetTransfer">
+          <DataField>ToDimension1Code_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToDimension1Description_AssetTransfer">
+          <DataField>ToDimension1Description_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToDimension2Code_AssetTransfer">
+          <DataField>ToDimension2Code_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToDimension2Description_AssetTransfer">
+          <DataField>ToDimension2Description_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToLocation_AssetTransfer">
+          <DataField>ToLocation_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToResponsibleEmployee_AssetTransfer">
+          <DataField>ToResponsibleEmployee_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ToEmployeeName_AssetTransfer">
+          <DataField>ToEmployeeName_AssetTransfer</DataField>
+        </Field>
+        <Field Name="Status_AssetTransfer">
+          <DataField>Status_AssetTransfer</DataField>
+        </Field>
+        <Field Name="Transferred_AssetTransfer">
+          <DataField>Transferred_AssetTransfer</DataField>
+        </Field>
+        <Field Name="Comments_AssetTransfer">
+          <DataField>Comments_AssetTransfer</DataField>
+        </Field>
+        <Field Name="NoSeries_AssetTransfer">
+          <DataField>NoSeries_AssetTransfer</DataField>
+        </Field>
+        <Field Name="TransferType_AssetTransfer">
+          <DataField>TransferType_AssetTransfer</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_AssetTransfer">
+          <DataField>ResponsibilityCenter_AssetTransfer</DataField>
+        </Field>
+        <Field Name="picture">
+          <DataField>picture</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

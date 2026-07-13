@@ -1,0 +1,134 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="SchemeNo_HRMedicalDependants">
+          <DataField>SchemeNo_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="EmployeeNo_HRMedicalDependants">
+          <DataField>EmployeeNo_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="FirstName_HRMedicalDependants">
+          <DataField>FirstName_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="LastName_HRMedicalDependants">
+          <DataField>LastName_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Designation_HRMedicalDependants">
+          <DataField>Designation_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Department_HRMedicalDependants">
+          <DataField>Department_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="SchemeJoinDate_HRMedicalDependants">
+          <DataField>SchemeJoinDate_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="SchemeAnniversary_HRMedicalDependants">
+          <DataField>SchemeAnniversary_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="DateofBirth_HRMedicalDependants">
+          <DataField>DateofBirth_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Above18Yrs_HRMedicalDependants">
+          <DataField>Above18Yrs_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="SecondName_HRMedicalDependants">
+          <DataField>SecondName_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Twins_HRMedicalDependants">
+          <DataField>Twins_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="PolicyNo_HRMedicalDependants">
+          <DataField>PolicyNo_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Names_HRMedicalDependants">
+          <DataField>Names_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Relation_HRMedicalDependants">
+          <DataField>Relation_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Contact_HRMedicalDependants">
+          <DataField>Contact_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="LineNo_HRMedicalDependants">
+          <DataField>LineNo_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="DependantName_HRMedicalDependants">
+          <DataField>DependantName_HRMedicalDependants</DataField>
+        </Field>
+        <Field Name="Gender_HRMedicalDependants">
+          <DataField>Gender_HRMedicalDependants</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

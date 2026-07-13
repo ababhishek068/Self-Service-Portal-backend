@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-transitional.xsd">
+  <file datatype="xml" source-language="en-US" target-language="en-US" original="TextDataApp">
+    <body>
+      <group id="body">
+        <trans-unit id="Table 1750748448 - Field 3004954119 - Property 1295455071" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Shows the policy code</source>
+          <target>Shows the policy code</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Table HR Policies - Field Code - Property ToolTip</note>
+        </trans-unit>
+        <trans-unit id="TableExtension 156412750 - Field 3049772726 - Property 1295455071" size-unit="char" translate="yes" xml:space="preserve" al-object-target="Table 3469146285">
+          <source>Input Company TIN No</source>
+          <target>Input Company TIN No</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">TableExtension Compinfoexten - Field TIN No - Property ToolTip</note>
+        </trans-unit>
+        <trans-unit id="TableExtension 1994964448 - Field 3049772726 - Property 1295455071" size-unit="char" translate="yes" xml:space="preserve" al-object-target="Table 1994964448">
+          <source>Input Customer TIN No</source>
+          <target>Input Customer TIN No</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">TableExtension CustExtension - Field TIN No - Property ToolTip</note>
+        </trans-unit>
+        <trans-unit id="TableExtension 2863198142 - Field 3049772726 - Property 1295455071" size-unit="char" translate="yes" xml:space="preserve" al-object-target="Table 1936001480">
+          <source>Input Vendor TIN No</source>
+          <target>Input Vendor TIN No</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">TableExtension Vendorext - Field TIN No - Property ToolTip</note>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>

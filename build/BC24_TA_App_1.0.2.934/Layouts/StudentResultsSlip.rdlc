@@ -1,0 +1,254 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Stage_StudentUnits">
+          <DataField>Stage_StudentUnits</DataField>
+        </Field>
+        <Field Name="StudentNo_StudentUnits">
+          <DataField>StudentNo_StudentUnits</DataField>
+        </Field>
+        <Field Name="Unit_StudentUnits">
+          <DataField>Unit_StudentUnits</DataField>
+        </Field>
+        <Field Name="UnitName_StudentUnits">
+          <DataField>UnitName_StudentUnits</DataField>
+        </Field>
+        <Field Name="CATTotalMarks_StudentUnits">
+          <DataField>CATTotalMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="CATTotalMarks_StudentUnitsFormat">
+          <DataField>CATTotalMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="ExamMarks_StudentUnits">
+          <DataField>ExamMarks_StudentUnits</DataField>
+        </Field>
+        <Field Name="ExamMarks_StudentUnitsFormat">
+          <DataField>ExamMarks_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="TotalScore_StudentUnits">
+          <DataField>TotalScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="TotalScore_StudentUnitsFormat">
+          <DataField>TotalScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Grade_StudentUnits">
+          <DataField>Grade_StudentUnits</DataField>
+        </Field>
+        <Field Name="FinalScore_StudentUnits">
+          <DataField>FinalScore_StudentUnits</DataField>
+        </Field>
+        <Field Name="FinalScore_StudentUnitsFormat">
+          <DataField>FinalScore_StudentUnitsFormat</DataField>
+        </Field>
+        <Field Name="Semester">
+          <DataField>Semester</DataField>
+        </Field>
+        <Field Name="No__Of_Units">
+          <DataField>No__Of_Units</DataField>
+        </Field>
+        <Field Name="No__Of_UnitsFormat">
+          <DataField>No__Of_UnitsFormat</DataField>
+        </Field>
+        <Field Name="CF_Lk">
+          <DataField>CF_Lk</DataField>
+        </Field>
+        <Field Name="CF_LkFormat">
+          <DataField>CF_LkFormat</DataField>
+        </Field>
+        <Field Name="Main_Programme">
+          <DataField>Main_Programme</DataField>
+        </Field>
+        <Field Name="Names">
+          <DataField>Names</DataField>
+        </Field>
+        <Field Name="CompName">
+          <DataField>CompName</DataField>
+        </Field>
+        <Field Name="Logo">
+          <DataField>Logo</DataField>
+        </Field>
+        <Field Name="ProgName">
+          <DataField>ProgName</DataField>
+        </Field>
+        <Field Name="SchoolName">
+          <DataField>SchoolName</DataField>
+        </Field>
+        <Field Name="DateReg">
+          <DataField>DateReg</DataField>
+        </Field>
+        <Field Name="SemDesc">
+          <DataField>SemDesc</DataField>
+        </Field>
+        <Field Name="Allow_Online_Results_Semester">
+          <DataField>Allow_Online_Results_Semester</DataField>
+        </Field>
+        <Field Name="AverageGrade">
+          <DataField>AverageGrade</DataField>
+        </Field>
+        <Field Name="GPA">
+          <DataField>GPA</DataField>
+        </Field>
+        <Field Name="GPAFormat">
+          <DataField>GPAFormat</DataField>
+        </Field>
+        <Field Name="Supp_Taken">
+          <DataField>Supp_Taken</DataField>
+        </Field>
+        <Field Name="CF_GPA">
+          <DataField>CF_GPA</DataField>
+        </Field>
+        <Field Name="CF_GPAFormat">
+          <DataField>CF_GPAFormat</DataField>
+        </Field>
+        <Field Name="StudentStatus">
+          <DataField>StudentStatus</DataField>
+        </Field>
+        <Field Name="Intake">
+          <DataField>Intake</DataField>
+        </Field>
+        <Field Name="Left">
+          <DataField>Left</DataField>
+        </Field>
+        <Field Name="Final_Score">
+          <DataField>Final_Score</DataField>
+        </Field>
+        <Field Name="Final_ScoreFormat">
+          <DataField>Final_ScoreFormat</DataField>
+        </Field>
+        <Field Name="Grade_Prefix">
+          <DataField>Grade_Prefix</DataField>
+        </Field>
+        <Field Name="Re_Taken">
+          <DataField>Re_Taken</DataField>
+        </Field>
+        <Field Name="AcademicYear">
+          <DataField>AcademicYear</DataField>
+        </Field>
+        <Field Name="SemCount">
+          <DataField>SemCount</DataField>
+        </Field>
+        <Field Name="Disable_Inc_Rule">
+          <DataField>Disable_Inc_Rule</DataField>
+        </Field>
+        <Field Name="BacklogSemester">
+          <DataField>BacklogSemester</DataField>
+        </Field>
+        <Field Name="GLabel1">
+          <DataField>GLabel1</DataField>
+        </Field>
+        <Field Name="GLabel2">
+          <DataField>GLabel2</DataField>
+        </Field>
+        <Field Name="GLabel3">
+          <DataField>GLabel3</DataField>
+        </Field>
+        <Field Name="GLabel4">
+          <DataField>GLabel4</DataField>
+        </Field>
+        <Field Name="GLabel5">
+          <DataField>GLabel5</DataField>
+        </Field>
+        <Field Name="GLabel6">
+          <DataField>GLabel6</DataField>
+        </Field>
+        <Field Name="GLabel7">
+          <DataField>GLabel7</DataField>
+        </Field>
+        <Field Name="GLabel8">
+          <DataField>GLabel8</DataField>
+        </Field>
+        <Field Name="GLabel9">
+          <DataField>GLabel9</DataField>
+        </Field>
+        <Field Name="GLabel10">
+          <DataField>GLabel10</DataField>
+        </Field>
+        <Field Name="GLabel11">
+          <DataField>GLabel11</DataField>
+        </Field>
+        <Field Name="GLabel12">
+          <DataField>GLabel12</DataField>
+        </Field>
+        <Field Name="GLabel13">
+          <DataField>GLabel13</DataField>
+        </Field>
+        <Field Name="GLabel14">
+          <DataField>GLabel14</DataField>
+        </Field>
+        <Field Name="GLabel15">
+          <DataField>GLabel15</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

@@ -1,0 +1,140 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="MaintenanceNo_ActualMaintenance">
+          <DataField>MaintenanceNo_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="Description_ActualMaintenance">
+          <DataField>Description_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="CreatedBy_ActualMaintenance">
+          <DataField>CreatedBy_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="PlannedDate_ActualMaintenance">
+          <DataField>PlannedDate_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="Comments_ActualMaintenance">
+          <DataField>Comments_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="picture">
+          <DataField>picture</DataField>
+        </Field>
+        <Field Name="Dimension1Code_ActualMaintenance">
+          <DataField>Dimension1Code_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="Dimension2Code_ActualMaintenance">
+          <DataField>Dimension2Code_ActualMaintenance</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="MaintenanceNo_ActualMaintenanceLines">
+          <DataField>MaintenanceNo_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="LineNo_ActualMaintenanceLines">
+          <DataField>LineNo_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="FixedAssetNo_ActualMaintenanceLines">
+          <DataField>FixedAssetNo_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Description_ActualMaintenanceLines">
+          <DataField>Description_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Location_ActualMaintenanceLines">
+          <DataField>Location_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="SerialNo_ActualMaintenanceLines">
+          <DataField>SerialNo_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Dimension1Code_ActualMaintenanceLines">
+          <DataField>Dimension1Code_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Dimension2Code_ActualMaintenanceLines">
+          <DataField>Dimension2Code_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="ActualServiceDate_ActualMaintenanceLines">
+          <DataField>ActualServiceDate_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="ServiceProvider_ActualMaintenanceLines">
+          <DataField>ServiceProvider_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Cost_ActualMaintenanceLines">
+          <DataField>Cost_ActualMaintenanceLines</DataField>
+        </Field>
+        <Field Name="Cost_ActualMaintenanceLinesFormat">
+          <DataField>Cost_ActualMaintenanceLinesFormat</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

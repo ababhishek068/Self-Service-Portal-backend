@@ -1,0 +1,593 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="No_Jobs">
+          <DataField>No_Jobs</DataField>
+        </Field>
+        <Field Name="SearchDescription_Jobs">
+          <DataField>SearchDescription_Jobs</DataField>
+        </Field>
+        <Field Name="Description_Jobs">
+          <DataField>Description_Jobs</DataField>
+        </Field>
+        <Field Name="Description2_Jobs">
+          <DataField>Description2_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoPartnerNo_Jobs">
+          <DataField>BilltoPartnerNo_Jobs</DataField>
+        </Field>
+        <Field Name="CreationDate_Jobs">
+          <DataField>CreationDate_Jobs</DataField>
+        </Field>
+        <Field Name="StartingDate_Jobs">
+          <DataField>StartingDate_Jobs</DataField>
+        </Field>
+        <Field Name="EndingDate_Jobs">
+          <DataField>EndingDate_Jobs</DataField>
+        </Field>
+        <Field Name="Status_Jobs">
+          <DataField>Status_Jobs</DataField>
+        </Field>
+        <Field Name="PersonResponsible_Jobs">
+          <DataField>PersonResponsible_Jobs</DataField>
+        </Field>
+        <Field Name="GlobalDimension1Code_Jobs">
+          <DataField>GlobalDimension1Code_Jobs</DataField>
+        </Field>
+        <Field Name="GlobalDimension2Code_Jobs">
+          <DataField>GlobalDimension2Code_Jobs</DataField>
+        </Field>
+        <Field Name="JobPostingGroup_Jobs">
+          <DataField>JobPostingGroup_Jobs</DataField>
+        </Field>
+        <Field Name="Blocked_Jobs">
+          <DataField>Blocked_Jobs</DataField>
+        </Field>
+        <Field Name="LastDateModified_Jobs">
+          <DataField>LastDateModified_Jobs</DataField>
+        </Field>
+        <Field Name="Comment_Jobs">
+          <DataField>Comment_Jobs</DataField>
+        </Field>
+        <Field Name="CustomerDiscGroup_Jobs">
+          <DataField>CustomerDiscGroup_Jobs</DataField>
+        </Field>
+        <Field Name="CustomerPriceGroup_Jobs">
+          <DataField>CustomerPriceGroup_Jobs</DataField>
+        </Field>
+        <Field Name="LanguageCode_Jobs">
+          <DataField>LanguageCode_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResQty_Jobs">
+          <DataField>ScheduledResQty_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResQty_JobsFormat">
+          <DataField>ScheduledResQty_JobsFormat</DataField>
+        </Field>
+        <Field Name="ResourceFilter_Jobs">
+          <DataField>ResourceFilter_Jobs</DataField>
+        </Field>
+        <Field Name="PostingDateFilter_Jobs">
+          <DataField>PostingDateFilter_Jobs</DataField>
+        </Field>
+        <Field Name="ResourceGrFilter_Jobs">
+          <DataField>ResourceGrFilter_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResGrQty_Jobs">
+          <DataField>ScheduledResGrQty_Jobs</DataField>
+        </Field>
+        <Field Name="ScheduledResGrQty_JobsFormat">
+          <DataField>ScheduledResGrQty_JobsFormat</DataField>
+        </Field>
+        <Field Name="Picture_Jobs">
+          <DataField>Picture_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoName_Jobs">
+          <DataField>BilltoName_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoAddress_Jobs">
+          <DataField>BilltoAddress_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoAddress2_Jobs">
+          <DataField>BilltoAddress2_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoCity_Jobs">
+          <DataField>BilltoCity_Jobs</DataField>
+        </Field>
+        <Field Name="Region_Jobs">
+          <DataField>Region_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoPostCode_Jobs">
+          <DataField>BilltoPostCode_Jobs</DataField>
+        </Field>
+        <Field Name="NoSeries_Jobs">
+          <DataField>NoSeries_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoCountryRegionCode_Jobs">
+          <DataField>BilltoCountryRegionCode_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoName2_Jobs">
+          <DataField>BilltoName2_Jobs</DataField>
+        </Field>
+        <Field Name="WIPMethod_Jobs">
+          <DataField>WIPMethod_Jobs</DataField>
+        </Field>
+        <Field Name="CurrencyCode_Jobs">
+          <DataField>CurrencyCode_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoContactNo_Jobs">
+          <DataField>BilltoContactNo_Jobs</DataField>
+        </Field>
+        <Field Name="BilltoContact_Jobs">
+          <DataField>BilltoContact_Jobs</DataField>
+        </Field>
+        <Field Name="PlanningDateFilter_Jobs">
+          <DataField>PlanningDateFilter_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostAmount_Jobs">
+          <DataField>TotalWIPCostAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostAmount_JobsFormat">
+          <DataField>TotalWIPCostAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPCostGLAmount_Jobs">
+          <DataField>TotalWIPCostGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPCostGLAmount_JobsFormat">
+          <DataField>TotalWIPCostGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="WIPPostedToGL_Jobs">
+          <DataField>WIPPostedToGL_Jobs</DataField>
+        </Field>
+        <Field Name="WIPPostingDate_Jobs">
+          <DataField>WIPPostingDate_Jobs</DataField>
+        </Field>
+        <Field Name="WIPGLPostingDate_Jobs">
+          <DataField>WIPGLPostingDate_Jobs</DataField>
+        </Field>
+        <Field Name="PostedWIPMethodUsed_Jobs">
+          <DataField>PostedWIPMethodUsed_Jobs</DataField>
+        </Field>
+        <Field Name="InvoiceCurrencyCode_Jobs">
+          <DataField>InvoiceCurrencyCode_Jobs</DataField>
+        </Field>
+        <Field Name="ExchCalculationCost_Jobs">
+          <DataField>ExchCalculationCost_Jobs</DataField>
+        </Field>
+        <Field Name="ExchCalculationPrice_Jobs">
+          <DataField>ExchCalculationPrice_Jobs</DataField>
+        </Field>
+        <Field Name="AllowScheduleContractLines_Jobs">
+          <DataField>AllowScheduleContractLines_Jobs</DataField>
+        </Field>
+        <Field Name="Complete_Jobs">
+          <DataField>Complete_Jobs</DataField>
+        </Field>
+        <Field Name="CalcWIPMethodUsed_Jobs">
+          <DataField>CalcWIPMethodUsed_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesAmount_Jobs">
+          <DataField>RecogSalesAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesAmount_JobsFormat">
+          <DataField>RecogSalesAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogSalesGLAmount_Jobs">
+          <DataField>RecogSalesGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogSalesGLAmount_JobsFormat">
+          <DataField>RecogSalesGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogCostsAmount_Jobs">
+          <DataField>RecogCostsAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogCostsAmount_JobsFormat">
+          <DataField>RecogCostsAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="RecogCostsGLAmount_Jobs">
+          <DataField>RecogCostsGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="RecogCostsGLAmount_JobsFormat">
+          <DataField>RecogCostsGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesAmount_Jobs">
+          <DataField>TotalWIPSalesAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesAmount_JobsFormat">
+          <DataField>TotalWIPSalesAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesGLAmount_Jobs">
+          <DataField>TotalWIPSalesGLAmount_Jobs</DataField>
+        </Field>
+        <Field Name="TotalWIPSalesGLAmount_JobsFormat">
+          <DataField>TotalWIPSalesGLAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="CompletionCalculated_Jobs">
+          <DataField>CompletionCalculated_Jobs</DataField>
+        </Field>
+        <Field Name="NextInvoiceDate_Jobs">
+          <DataField>NextInvoiceDate_Jobs</DataField>
+        </Field>
+        <Field Name="GrantPhases_Jobs">
+          <DataField>GrantPhases_Jobs</DataField>
+        </Field>
+        <Field Name="ApprovalStatus_Jobs">
+          <DataField>ApprovalStatus_Jobs</DataField>
+        </Field>
+        <Field Name="ResponsibilityCenter_Jobs">
+          <DataField>ResponsibilityCenter_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCost_Jobs">
+          <DataField>TotalCost_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCost_JobsFormat">
+          <DataField>TotalCost_JobsFormat</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_Jobs">
+          <DataField>TotalCostLCY_Jobs</DataField>
+        </Field>
+        <Field Name="TotalCostLCY_JobsFormat">
+          <DataField>TotalCostLCY_JobsFormat</DataField>
+        </Field>
+        <Field Name="ContractDescription_Jobs">
+          <DataField>ContractDescription_Jobs</DataField>
+        </Field>
+        <Field Name="ContractType_Jobs">
+          <DataField>ContractType_Jobs</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_Jobs">
+          <DataField>DisbursedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="DisbursedAmount_JobsFormat">
+          <DataField>DisbursedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="AllowOverExpenditure_Jobs">
+          <DataField>AllowOverExpenditure_Jobs</DataField>
+        </Field>
+        <Field Name="AccountedAmount_Jobs">
+          <DataField>AccountedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="AccountedAmount_JobsFormat">
+          <DataField>AccountedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="ReceivedAmount_Jobs">
+          <DataField>ReceivedAmount_Jobs</DataField>
+        </Field>
+        <Field Name="ReceivedAmount_JobsFormat">
+          <DataField>ReceivedAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="ProposalNo_Jobs">
+          <DataField>ProposalNo_Jobs</DataField>
+        </Field>
+        <Field Name="ConvertedToProposal_Jobs">
+          <DataField>ConvertedToProposal_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectNo_Jobs">
+          <DataField>ProjectNo_Jobs</DataField>
+        </Field>
+        <Field Name="ConvertedToProject_Jobs">
+          <DataField>ConvertedToProject_Jobs</DataField>
+        </Field>
+        <Field Name="ConceptNumber_Jobs">
+          <DataField>ConceptNumber_Jobs</DataField>
+        </Field>
+        <Field Name="Objective_Jobs">
+          <DataField>Objective_Jobs</DataField>
+        </Field>
+        <Field Name="ContractNo_Jobs">
+          <DataField>ContractNo_Jobs</DataField>
+        </Field>
+        <Field Name="Reportingdatesgenerated_Jobs">
+          <DataField>Reportingdatesgenerated_Jobs</DataField>
+        </Field>
+        <Field Name="Conditionforbudgetrealloca_Jobs">
+          <DataField>Conditionforbudgetrealloca_Jobs</DataField>
+        </Field>
+        <Field Name="PrincipalInvestigator_Jobs">
+          <DataField>PrincipalInvestigator_Jobs</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptAmount_Jobs">
+          <DataField>ExpectedReceiptAmount_Jobs</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptAmount_JobsFormat">
+          <DataField>ExpectedReceiptAmount_JobsFormat</DataField>
+        </Field>
+        <Field Name="Partners_Jobs">
+          <DataField>Partners_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectLocation_Jobs">
+          <DataField>ProjectLocation_Jobs</DataField>
+        </Field>
+        <Field Name="IncomeAccount_Jobs">
+          <DataField>IncomeAccount_Jobs</DataField>
+        </Field>
+        <Field Name="ConceptApprovalDate_Jobs">
+          <DataField>ConceptApprovalDate_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectFilter_Jobs">
+          <DataField>ProjectFilter_Jobs</DataField>
+        </Field>
+        <Field Name="Title_Jobs">
+          <DataField>Title_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectCoordinator_Jobs">
+          <DataField>ProjectCoordinator_Jobs</DataField>
+        </Field>
+        <Field Name="Task_Jobs">
+          <DataField>Task_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectStatus_Jobs">
+          <DataField>ProjectStatus_Jobs</DataField>
+        </Field>
+        <Field Name="AuditIndicator_Jobs">
+          <DataField>AuditIndicator_Jobs</DataField>
+        </Field>
+        <Field Name="ContractStartDate_Jobs">
+          <DataField>ContractStartDate_Jobs</DataField>
+        </Field>
+        <Field Name="ContractExpiryDate_Jobs">
+          <DataField>ContractExpiryDate_Jobs</DataField>
+        </Field>
+        <Field Name="JustificationNarration_Jobs">
+          <DataField>JustificationNarration_Jobs</DataField>
+        </Field>
+        <Field Name="AmountInvoiced_Jobs">
+          <DataField>AmountInvoiced_Jobs</DataField>
+        </Field>
+        <Field Name="AmountInvoiced_JobsFormat">
+          <DataField>AmountInvoiced_JobsFormat</DataField>
+        </Field>
+        <Field Name="GrantLevel_Jobs">
+          <DataField>GrantLevel_Jobs</DataField>
+        </Field>
+        <Field Name="RSPONo_Jobs">
+          <DataField>RSPONo_Jobs</DataField>
+        </Field>
+        <Field Name="Alertsent_Jobs">
+          <DataField>Alertsent_Jobs</DataField>
+        </Field>
+        <Field Name="ProposalApplicationdueDate_Jobs">
+          <DataField>ProposalApplicationdueDate_Jobs</DataField>
+        </Field>
+        <Field Name="Submission_Jobs">
+          <DataField>Submission_Jobs</DataField>
+        </Field>
+        <Field Name="PIName_Jobs">
+          <DataField>PIName_Jobs</DataField>
+        </Field>
+        <Field Name="PIAddress_Jobs">
+          <DataField>PIAddress_Jobs</DataField>
+        </Field>
+        <Field Name="PITelephone_Jobs">
+          <DataField>PITelephone_Jobs</DataField>
+        </Field>
+        <Field Name="PIEMail_Jobs">
+          <DataField>PIEMail_Jobs</DataField>
+        </Field>
+        <Field Name="CollaborativeGrant_Jobs">
+          <DataField>CollaborativeGrant_Jobs</DataField>
+        </Field>
+        <Field Name="IRECApproval_Jobs">
+          <DataField>IRECApproval_Jobs</DataField>
+        </Field>
+        <Field Name="IRECApprovalDate_Jobs">
+          <DataField>IRECApprovalDate_Jobs</DataField>
+        </Field>
+        <Field Name="CostShare_Jobs">
+          <DataField>CostShare_Jobs</DataField>
+        </Field>
+        <Field Name="CostShareDetails_Jobs">
+          <DataField>CostShareDetails_Jobs</DataField>
+        </Field>
+        <Field Name="Matching_Jobs">
+          <DataField>Matching_Jobs</DataField>
+        </Field>
+        <Field Name="MatchingDetails_Jobs">
+          <DataField>MatchingDetails_Jobs</DataField>
+        </Field>
+        <Field Name="ApplicationdispositionStatus_Jobs">
+          <DataField>ApplicationdispositionStatus_Jobs</DataField>
+        </Field>
+        <Field Name="SubAwardNo_Jobs">
+          <DataField>SubAwardNo_Jobs</DataField>
+        </Field>
+        <Field Name="PaymentMethods_Jobs">
+          <DataField>PaymentMethods_Jobs</DataField>
+        </Field>
+        <Field Name="Schools_Jobs">
+          <DataField>Schools_Jobs</DataField>
+        </Field>
+        <Field Name="ApplicationDueDate_Jobs">
+          <DataField>ApplicationDueDate_Jobs</DataField>
+        </Field>
+        <Field Name="FundingRequest_Jobs">
+          <DataField>FundingRequest_Jobs</DataField>
+        </Field>
+        <Field Name="Budget_Jobs">
+          <DataField>Budget_Jobs</DataField>
+        </Field>
+        <Field Name="BudgetJustification_Jobs">
+          <DataField>BudgetJustification_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectSummaryAbstract_Jobs">
+          <DataField>ProjectSummaryAbstract_Jobs</DataField>
+        </Field>
+        <Field Name="RSPOCompletionList_Jobs">
+          <DataField>RSPOCompletionList_Jobs</DataField>
+        </Field>
+        <Field Name="Donors_Jobs">
+          <DataField>Donors_Jobs</DataField>
+        </Field>
+        <Field Name="Workplan_Jobs">
+          <DataField>Workplan_Jobs</DataField>
+        </Field>
+        <Field Name="PeriodofPerformance_Jobs">
+          <DataField>PeriodofPerformance_Jobs</DataField>
+        </Field>
+        <Field Name="PrincipalInvestigatorname_Jobs">
+          <DataField>PrincipalInvestigatorname_Jobs</DataField>
+        </Field>
+        <Field Name="ResponseTofundOpportunity_Jobs">
+          <DataField>ResponseTofundOpportunity_Jobs</DataField>
+        </Field>
+        <Field Name="MainDonor_Jobs">
+          <DataField>MainDonor_Jobs</DataField>
+        </Field>
+        <Field Name="MainSub_Jobs">
+          <DataField>MainSub_Jobs</DataField>
+        </Field>
+        <Field Name="SpecialContractProvision_Jobs">
+          <DataField>SpecialContractProvision_Jobs</DataField>
+        </Field>
+        <Field Name="FundingAgencyNo_Jobs">
+          <DataField>FundingAgencyNo_Jobs</DataField>
+        </Field>
+        <Field Name="TypeOfFunding_Jobs">
+          <DataField>TypeOfFunding_Jobs</DataField>
+        </Field>
+        <Field Name="ResponsibleOfficer_Jobs">
+          <DataField>ResponsibleOfficer_Jobs</DataField>
+        </Field>
+        <Field Name="RFAAReceiptDate_Jobs">
+          <DataField>RFAAReceiptDate_Jobs</DataField>
+        </Field>
+        <Field Name="ProjectTeam_Jobs">
+          <DataField>ProjectTeam_Jobs</DataField>
+        </Field>
+        <Field Name="Institution_Jobs">
+          <DataField>Institution_Jobs</DataField>
+        </Field>
+        <Field Name="MoiMTRHCollaborator_Jobs">
+          <DataField>MoiMTRHCollaborator_Jobs</DataField>
+        </Field>
+        <Field Name="AMPATHAffiliationConsortium_Jobs">
+          <DataField>AMPATHAffiliationConsortium_Jobs</DataField>
+        </Field>
+        <Field Name="PreviousMUConsortiumSchool_Jobs">
+          <DataField>PreviousMUConsortiumSchool_Jobs</DataField>
+        </Field>
+        <Field Name="WhichMUConsortiumSchool_Jobs">
+          <DataField>WhichMUConsortiumSchool_Jobs</DataField>
+        </Field>
+        <Field Name="ASANTECollaborator_Jobs">
+          <DataField>ASANTECollaborator_Jobs</DataField>
+        </Field>
+        <Field Name="ASANTECollaboratorDetails_Jobs">
+          <DataField>ASANTECollaboratorDetails_Jobs</DataField>
+        </Field>
+        <Field Name="AssistidentifyingCollabotor_Jobs">
+          <DataField>AssistidentifyingCollabotor_Jobs</DataField>
+        </Field>
+        <Field Name="StudyType_Jobs">
+          <DataField>StudyType_Jobs</DataField>
+        </Field>
+        <Field Name="StudyTypeDetails_Jobs">
+          <DataField>StudyTypeDetails_Jobs</DataField>
+        </Field>
+        <Field Name="BriefDescriptionofStudy_Jobs">
+          <DataField>BriefDescriptionofStudy_Jobs</DataField>
+        </Field>
+        <Field Name="StudyFunded_Jobs">
+          <DataField>StudyFunded_Jobs</DataField>
+        </Field>
+        <Field Name="FundingSourceFundingSought_Jobs">
+          <DataField>FundingSourceFundingSought_Jobs</DataField>
+        </Field>
+        <Field Name="ApplicationDeadline_Jobs">
+          <DataField>ApplicationDeadline_Jobs</DataField>
+        </Field>
+        <Field Name="LabServices_Jobs">
+          <DataField>LabServices_Jobs</DataField>
+        </Field>
+        <Field Name="AMPATHDataMgtCoreRequired_Jobs">
+          <DataField>AMPATHDataMgtCoreRequired_Jobs</DataField>
+        </Field>
+        <Field Name="AMPATHDataMgtCoreDesc_Jobs">
+          <DataField>AMPATHDataMgtCoreDesc_Jobs</DataField>
+        </Field>
+        <Field Name="BiostatsCoreRequired_Jobs">
+          <DataField>BiostatsCoreRequired_Jobs</DataField>
+        </Field>
+        <Field Name="BiostatsCoreRequiredDetails_Jobs">
+          <DataField>BiostatsCoreRequiredDetails_Jobs</DataField>
+        </Field>
+        <Field Name="WorkgroupRecomendation_Jobs">
+          <DataField>WorkgroupRecomendation_Jobs</DataField>
+        </Field>
+        <Field Name="RecomendationDescription_Jobs">
+          <DataField>RecomendationDescription_Jobs</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-transitional.xsd">
+  <file datatype="xml" source-language="en-US" target-language="en-US" original="Please update this value">
+    <body>
+      <group id="body">
+        <trans-unit id="Report 2829858424 - Property 2879900210" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Trial Balance</source>
+          <target>Trial Balance</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - Property Caption</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - Control 2346885236 - Property 2879900210" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Options</source>
+          <target>Options</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - Control Options - Property Caption</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - Control 612632567 - Property 2879900210" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Print to Excel</source>
+          <target>Print to Excel</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - Control PrintToExcel - Property Caption</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 2476940767" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Period: %1</source>
+          <target>Period: %1</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text000</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3018268105" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Trial Balance</source>
+          <target>Trial Balance</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Trial_BalanceCaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 1987762555" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Page</source>
+          <target>Page</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType CurrReport_PAGENOCaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 998290390" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Net Change</source>
+          <target>Net Change</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Net_ChangeCaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3211442742" size-unit="char" translate="yes" xml:space="preserve">
+          <source>No.</source>
+          <target>No.</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType No_CaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 4045138178" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Name</source>
+          <target>Name</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType PADSTR_____G_L_Account__Indentation___3___G_L_Account__NameCaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 961667924" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Debit</source>
+          <target>Debit</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType G_L_Account___Net_Change_CaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 2700747540" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Credit</source>
+          <target>Credit</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType G_L_Account___Net_Change__Control22CaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 4221438143" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Totals</source>
+          <target>Totals</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType TotalsCaptionLbl</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3114637384" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Trial Balance</source>
+          <target>Trial Balance</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text001</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3752334001" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Data</source>
+          <target>Data</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text002</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 95063322" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Debit</source>
+          <target>Debit</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text003</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 732759939" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Credit</source>
+          <target>Credit</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text004</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 1370456556" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Company Name</source>
+          <target>Company Name</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text005</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 2008153173" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Report No.</source>
+          <target>Report No.</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text006</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 2645849790" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Report Name</source>
+          <target>Report Name</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text007</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3283546407" size-unit="char" translate="yes" xml:space="preserve">
+          <source>User ID</source>
+          <target>User ID</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text008</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 3921243024" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Date</source>
+          <target>Date</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text009</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 1664139952" size-unit="char" translate="yes" xml:space="preserve">
+          <source>G/L Filter</source>
+          <target>G/L Filter</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text010</note>
+        </trans-unit>
+        <trans-unit id="Report 2829858424 - NamedType 1026443335" size-unit="char" translate="yes" xml:space="preserve">
+          <source>Period Filter</source>
+          <target>Period Filter</target>
+          <note from="Developer" annotates="general" priority="2"></note>
+          <note from="Xliff Generator" annotates="general" priority="3">Report Trial BalanceX - NamedType Text011</note>
+        </trans-unit>
+      </group>
+    </body>
+  </file>
+</xliff>

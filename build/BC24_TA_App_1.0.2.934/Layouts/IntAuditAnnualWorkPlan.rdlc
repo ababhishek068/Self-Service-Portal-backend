@@ -1,0 +1,254 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="Code_IntAuditWorkPlans">
+          <DataField>Code_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="Description_IntAuditWorkPlans">
+          <DataField>Description_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="DateCreated_IntAuditWorkPlans">
+          <DataField>DateCreated_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="CreatedBy_IntAuditWorkPlans">
+          <DataField>CreatedBy_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="LastEdited_IntAuditWorkPlans">
+          <DataField>LastEdited_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="LastEditor_IntAuditWorkPlans">
+          <DataField>LastEditor_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="Status_IntAuditWorkPlans">
+          <DataField>Status_IntAuditWorkPlans</DataField>
+        </Field>
+        <Field Name="Address_companyInfo">
+          <DataField>Address_companyInfo</DataField>
+        </Field>
+        <Field Name="Address2_companyInfo">
+          <DataField>Address2_companyInfo</DataField>
+        </Field>
+        <Field Name="City_companyInfo">
+          <DataField>City_companyInfo</DataField>
+        </Field>
+        <Field Name="PhoneNo_companyInfo">
+          <DataField>PhoneNo_companyInfo</DataField>
+        </Field>
+        <Field Name="Picture_companyInfo">
+          <DataField>Picture_companyInfo</DataField>
+        </Field>
+        <Field Name="EMail_companyInfo">
+          <DataField>EMail_companyInfo</DataField>
+        </Field>
+        <Field Name="Name_companyInfo">
+          <DataField>Name_companyInfo</DataField>
+        </Field>
+        <Field Name="website_companyInfo">
+          <DataField>website_companyInfo</DataField>
+        </Field>
+        <Field Name="dateToday">
+          <DataField>dateToday</DataField>
+        </Field>
+        <Field Name="ReportForNavId_49">
+          <DataField>ReportForNavId_49</DataField>
+        </Field>
+        <Field Name="Code_IntAudits">
+          <DataField>Code_IntAudits</DataField>
+        </Field>
+        <Field Name="WorkPlan_IntAudits">
+          <DataField>WorkPlan_IntAudits</DataField>
+        </Field>
+        <Field Name="AuditArea_IntAudits">
+          <DataField>AuditArea_IntAudits</DataField>
+        </Field>
+        <Field Name="auditAreaName">
+          <DataField>auditAreaName</DataField>
+        </Field>
+        <Field Name="RiskLevel_IntAudits">
+          <DataField>RiskLevel_IntAudits</DataField>
+        </Field>
+        <Field Name="Objectives1_IntAudits">
+          <DataField>Objectives1_IntAudits</DataField>
+        </Field>
+        <Field Name="Indicators1_IntAudits">
+          <DataField>Indicators1_IntAudits</DataField>
+        </Field>
+        <Field Name="DateCreated_IntAudits">
+          <DataField>DateCreated_IntAudits</DataField>
+        </Field>
+        <Field Name="CreatedBy_IntAudits">
+          <DataField>CreatedBy_IntAudits</DataField>
+        </Field>
+        <Field Name="DateEdited_IntAudits">
+          <DataField>DateEdited_IntAudits</DataField>
+        </Field>
+        <Field Name="LastEditor_IntAudits">
+          <DataField>LastEditor_IntAudits</DataField>
+        </Field>
+        <Field Name="Status_IntAudits">
+          <DataField>Status_IntAudits</DataField>
+        </Field>
+        <Field Name="Comments_IntAudits">
+          <DataField>Comments_IntAudits</DataField>
+        </Field>
+        <Field Name="WorkPlanName_IntAudits">
+          <DataField>WorkPlanName_IntAudits</DataField>
+        </Field>
+        <Field Name="AuditAreaName_IntAudits">
+          <DataField>AuditAreaName_IntAudits</DataField>
+        </Field>
+        <Field Name="ReportForNavId_2">
+          <DataField>ReportForNavId_2</DataField>
+        </Field>
+        <Field Name="Code_IntAuditQuarters">
+          <DataField>Code_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="Audit_IntAuditQuarters">
+          <DataField>Audit_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="Quarter_IntAuditQuarters">
+          <DataField>Quarter_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="Stage_IntAuditQuarters">
+          <DataField>Stage_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="ExpectedSubmissionDate_IntAuditQuarters">
+          <DataField>ExpectedSubmissionDate_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="ActualSubmissionDate_IntAuditQuarters">
+          <DataField>ActualSubmissionDate_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="Comments_IntAuditQuarters">
+          <DataField>Comments_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="Objectives1_IntAuditQuarters">
+          <DataField>Objectives1_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="DateCreated_IntAuditQuarters">
+          <DataField>DateCreated_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="CreatedBy_IntAuditQuarters">
+          <DataField>CreatedBy_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="LastEdited_IntAuditQuarters">
+          <DataField>LastEdited_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="LastEditor_IntAuditQuarters">
+          <DataField>LastEditor_IntAuditQuarters</DataField>
+        </Field>
+        <Field Name="ReportForNavId_3">
+          <DataField>ReportForNavId_3</DataField>
+        </Field>
+        <Field Name="QuarterCode_IntAuditAuditors">
+          <DataField>QuarterCode_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="AuditorID_IntAuditAuditors">
+          <DataField>AuditorID_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="AuditorName_IntAuditAuditors">
+          <DataField>AuditorName_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="Findings1_IntAuditAuditors">
+          <DataField>Findings1_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="Risk1_IntAuditAuditors">
+          <DataField>Risk1_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="Remommendation1_IntAuditAuditors">
+          <DataField>Remommendation1_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="DateCreated_IntAuditAuditors">
+          <DataField>DateCreated_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="CreatedBy_IntAuditAuditors">
+          <DataField>CreatedBy_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="LastEdited_IntAuditAuditors">
+          <DataField>LastEdited_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="LastEditor_IntAuditAuditors">
+          <DataField>LastEditor_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="Auditee_IntAuditAuditors">
+          <DataField>Auditee_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="AuditeeResponse1_IntAuditAuditors">
+          <DataField>AuditeeResponse1_IntAuditAuditors</DataField>
+        </Field>
+        <Field Name="AuditeeResponseStatus_IntAuditAuditors">
+          <DataField>AuditeeResponseStatus_IntAuditAuditors</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

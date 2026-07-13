@@ -1,0 +1,140 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="StrNames">
+          <DataField>StrNames</DataField>
+        </Field>
+        <Field Name="logos">
+          <DataField>logos</DataField>
+        </Field>
+        <Field Name="gender">
+          <DataField>gender</DataField>
+        </Field>
+        <Field Name="tel1">
+          <DataField>tel1</DataField>
+        </Field>
+        <Field Name="ageinyear">
+          <DataField>ageinyear</DataField>
+        </Field>
+        <Field Name="todaysDate">
+          <DataField>todaysDate</DataField>
+        </Field>
+        <Field Name="TreatmentNo_HMSTreatmentFormDrug">
+          <DataField>TreatmentNo_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="DrugNo_HMSTreatmentFormDrug">
+          <DataField>DrugNo_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="DrugName_HMSTreatmentFormDrug">
+          <DataField>DrugName_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Quantity_HMSTreatmentFormDrug">
+          <DataField>Quantity_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="UnitOfMeasure_HMSTreatmentFormDrug">
+          <DataField>UnitOfMeasure_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Remarks_HMSTreatmentFormDrug">
+          <DataField>Remarks_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="ActualQuantity_HMSTreatmentFormDrug">
+          <DataField>ActualQuantity_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="ActualQuantity_HMSTreatmentFormDrugFormat">
+          <DataField>ActualQuantity_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="Take_HMSTreatmentFormDrug">
+          <DataField>Take_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Take_HMSTreatmentFormDrugFormat">
+          <DataField>Take_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="Route_HMSTreatmentFormDrug">
+          <DataField>Route_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Frequency_HMSTreatmentFormDrug">
+          <DataField>Frequency_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Dosage_HMSTreatmentFormDrug">
+          <DataField>Dosage_HMSTreatmentFormDrug</DataField>
+        </Field>
+        <Field Name="Dosage_HMSTreatmentFormDrugFormat">
+          <DataField>Dosage_HMSTreatmentFormDrugFormat</DataField>
+        </Field>
+        <Field Name="NumberofDays_HMSTreatmentFormDrug">
+          <DataField>NumberofDays_HMSTreatmentFormDrug</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

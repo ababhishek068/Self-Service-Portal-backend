@@ -1,0 +1,146 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:SecurityType>None</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>6.5in</Width>
+      <Page>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <Code>Public Function BlankZero(ByVal Value As Decimal)
+    if Value = 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankPos(ByVal Value As Decimal)
+    if Value &gt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankZeroAndPos(ByVal Value As Decimal)
+    if Value &gt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNeg(ByVal Value As Decimal)
+    if Value &lt; 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+
+Public Function BlankNegAndZero(ByVal Value As Decimal)
+    if Value &lt;= 0 then
+        Return ""
+    end if
+    Return Value
+End Function
+</Code>
+  <Language>=User!Language</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>0eeb6585-38ae-40f1-885b-8d50088d51b4</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="ReportForNavId_1">
+          <DataField>ReportForNavId_1</DataField>
+        </Field>
+        <Field Name="ExitClearanceNo_HREmployeeExitInterviews">
+          <DataField>ExitClearanceNo_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DateOfClearance_HREmployeeExitInterviews">
+          <DataField>DateOfClearance_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="ClearanceRequester_HREmployeeExitInterviews">
+          <DataField>ClearanceRequester_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="ReEmployInFuture_HREmployeeExitInterviews">
+          <DataField>ReEmployInFuture_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="NatureOfSeparation_HREmployeeExitInterviews">
+          <DataField>NatureOfSeparation_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="ReasonForLeavingOther_HREmployeeExitInterviews">
+          <DataField>ReasonForLeavingOther_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DateOfLeaving_HREmployeeExitInterviews">
+          <DataField>DateOfLeaving_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DepartmentCode_HREmployeeExitInterviews">
+          <DataField>DepartmentCode_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="Comment_HREmployeeExitInterviews">
+          <DataField>Comment_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="EmployeeNo_HREmployeeExitInterviews">
+          <DataField>EmployeeNo_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="NoSeries_HREmployeeExitInterviews">
+          <DataField>NoSeries_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="FormSubmitted_HREmployeeExitInterviews">
+          <DataField>FormSubmitted_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="EmployeeName_HREmployeeExitInterviews">
+          <DataField>EmployeeName_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="ClearerName_HREmployeeExitInterviews">
+          <DataField>ClearerName_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="Status_HREmployeeExitInterviews">
+          <DataField>Status_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="StationName_HREmployeeExitInterviews">
+          <DataField>StationName_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DirectorateName_HREmployeeExitInterviews">
+          <DataField>DirectorateName_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DepartmentName_HREmployeeExitInterviews">
+          <DataField>DepartmentName_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DepartmentFilter_HREmployeeExitInterviews">
+          <DataField>DepartmentFilter_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="StationFilter_HREmployeeExitInterviews">
+          <DataField>StationFilter_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="DirectorateFilter_HREmployeeExitInterviews">
+          <DataField>DirectorateFilter_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="EmployeeType_HREmployeeExitInterviews">
+          <DataField>EmployeeType_HREmployeeExitInterviews</DataField>
+        </Field>
+        <Field Name="AppointmentDate_HREmployeeExitInterviews">
+          <DataField>AppointmentDate_HREmployeeExitInterviews</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>
