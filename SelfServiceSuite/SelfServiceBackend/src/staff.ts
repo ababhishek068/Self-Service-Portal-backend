@@ -213,8 +213,8 @@ export function resolveAnnualLeaveBalance(
   metrics: ReturnType<typeof employeeLeaveMetrics>,
   ledgerNet: number,
 ) {
-  if (metrics.employeeCardLeaveBalance !== null) return metrics.employeeCardLeaveBalance
   if (metrics.leaveBalance !== null) return metrics.leaveBalance
+  if (metrics.employeeCardLeaveBalance !== null) return metrics.employeeCardLeaveBalance
   return ledgerNet
 }
 
@@ -1595,11 +1595,7 @@ export function buildStaffRouter() {
       const entitlement = roundLeaveValue(
         isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
       )
-      const applicationLimit = roundLeaveValue(
-        isAnnual && metrics.earnedLeaveDays !== null
-          ? Math.max(0, Math.min(balance, metrics.earnedLeaveDays))
-          : balance,
-      )
+      const applicationLimit = balance
 
       res.json({
         balance,

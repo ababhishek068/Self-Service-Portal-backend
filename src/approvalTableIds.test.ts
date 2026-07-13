@@ -238,9 +238,9 @@ describe('employeeLeaveMetrics', () => {
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('uses the balance displayed on the Employee Card', () => {
+  it('uses the Employee Card annual leave balance for annual applications', () => {
     const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32, employeeCardLeaveBalance: -2.68 }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 0), -2.68)
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 18.32)
   })
 
   it('falls back to ledger when employee card fields are absent', () => {

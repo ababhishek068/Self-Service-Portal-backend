@@ -709,7 +709,7 @@ export function LeaveRequest() {
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label>Employee Card Balance</Label>
+              <Label>Available Balance (Employee Card)</Label>
               <div className="flex h-10 items-center">
                 {balanceLoading ? (
                   <Skeleton className="h-6 w-16" />
@@ -735,10 +735,6 @@ export function LeaveRequest() {
               {applicationLimit !== null && applicationLimit <= 0 ? (
                 <div className="rounded border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   Business Central currently allows no days for this leave type. The Employee Card balance and earned leave are shown above for reference.
-                </div>
-              ) : earnedLeaveDays !== null && applicationLimit !== null && applicationLimit < balance ? (
-                <div className="rounded border-l-4 border-sky-500 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                  BC application limit: {formatDays(applicationLimit)} day(s), based on the lower of Employee Card Balance and Earned Leave Days.
                 </div>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
