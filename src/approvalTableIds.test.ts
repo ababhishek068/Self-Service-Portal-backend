@@ -32,6 +32,7 @@ import {
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
+  bcLeaveDaysApplied,
   employeeLeaveMetrics,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
@@ -201,6 +202,15 @@ describe('halfDayRequiresAnnualLeave', () => {
     assert.equal(halfDayRequiresAnnualLeave('0'), false)
     assert.equal(halfDayRequiresAnnualLeave('1'), true)
     assert.equal(halfDayRequiresAnnualLeave('2'), true)
+  })
+})
+
+describe('bcLeaveDaysApplied', () => {
+  it('sends an integer day count and carries half-day through the Boolean flag', () => {
+    assert.equal(bcLeaveDaysApplied(1, '0'), 1)
+    assert.equal(bcLeaveDaysApplied(2.2, '0'), 2)
+    assert.equal(bcLeaveDaysApplied(0.5, '1'), 1)
+    assert.equal(bcLeaveDaysApplied(0.5, '2'), 1)
   })
 })
 

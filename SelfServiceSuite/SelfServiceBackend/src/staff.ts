@@ -134,6 +134,13 @@ export function halfDayRequiresAnnualLeave(value: string) {
   return halfDayOptionValue(value) !== 0
 }
 
+/** BC LeaveApplication declares daysApplied as Integer; half-day is carried by its Boolean flag. */
+export function bcLeaveDaysApplied(appliedDays: number, halfDayLeave: string) {
+  if (halfDayRequiresAnnualLeave(halfDayLeave)) return 1
+  const rounded = Math.round(appliedDays)
+  return rounded > 0 ? rounded : 1
+}
+
 function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback = '') {
   if (!row) return fallback
   for (const key of keys) {
@@ -834,14 +841,20 @@ async function tryCancelLeaveSoap(
   ]
 
   if (leaveIsOpenInBc(row) && !options.cancelOnly) {
+    const today = new Date().toISOString().slice(0, 10)
+    const startDate = formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])) || today
+    const endDate = formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])) || startDate
+    const returnDate =
+      formatBcSoapDate(fieldText(row, ['ReturnDate', 'Return_Date'])) || nextWorkingDayIso(endDate)
     paramSets.unshift({
       action: 'delete',
       leaveNo: candidate,
       employeeNo: user.employeeNo,
       myUserID: user.userID,
-      daysApplied: fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 0,
-      startDate: formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date'])),
-      endDate: formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])),
+      daysApplied: Math.max(1, Math.round(fieldNumber(row, ['DaysApplied', 'Days_Applied']) ?? 1)),
+      startDate,
+      endDate,
+      returnDate,
       reason: fieldText(row, ['Reasonforleave', 'Reason_for_leave', 'Reason']),
       reliever: fieldText(row, ['Reliever', 'Duties_Taken_Over_By', 'RelieverNo']),
       leaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
@@ -1873,17 +1886,21 @@ export function buildStaffRouter() {
       }
 
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
-      const { endDate } = await resolveLeaveDatesFromBc(
+      const { endDate, returnDate } = await resolveLeaveDatesFromBc(
         user,
         body.leaveType,
         body.appliedDays,
         body.startDate,
         body.isHalfDayLeave,
       )
-      if (!endDate) {
+      const formattedStartDate = formatBcSoapDate(body.startDate)
+      const formattedEndDate = formatBcSoapDate(endDate)
+      const formattedReturnDate =
+        formatBcSoapDate(returnDate) || (formattedEndDate ? nextWorkingDayIso(formattedEndDate) : '')
+      if (!formattedStartDate || !formattedEndDate || !formattedReturnDate) {
         res.status(422).json({
           ok: false,
-          message: 'Could not compute end date — please verify start date and applied days.',
+          message: 'Could not compute leave dates — please verify start date and applied days.',
         })
         return
       }
@@ -1892,9 +1909,10 @@ export function buildStaffRouter() {
         action,
         leaveNo: body.requisitionNo,
         employeeNo: user.employeeNo,
-        daysApplied: body.appliedDays,
-        startDate: formatBcSoapDate(body.startDate),
-        endDate: formatBcSoapDate(endDate),
+        daysApplied: bcLeaveDaysApplied(body.appliedDays, body.isHalfDayLeave),
+        startDate: formattedStartDate,
+        endDate: formattedEndDate,
+        returnDate: formattedReturnDate,
         reason: body.reason,
         reliever: body.reliever,
         myUserID: user.userID,
