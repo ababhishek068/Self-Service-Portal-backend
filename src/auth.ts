@@ -188,6 +188,14 @@ export { resolveEmployeeJobTitle } from './employeeProfile.js'
 
 export type AuthProfileRefreshMode = 'fast' | 'full'
 
+/** A role label or raw BC job code is not a usable employee job title. */
+export function jobTitleNeedsRefresh(value: unknown) {
+  const title = String(value ?? '').trim()
+  if (!title) return true
+  if (title.toLowerCase() === 'staff') return true
+  return !title.includes(' ') && /^[a-z0-9_-]{2,15}$/i.test(title)
+}
+
 /** Enrich session user from BC. Default `fast` — suitable for login and /me. */
 export async function refreshAuthUserProfile(
   user: AuthUser,
@@ -199,7 +207,7 @@ export async function refreshAuthUserProfile(
       ? employeeAccountNoFromRecord(fast)
       : user.accountNumber || (await fetchEmployeeCustomerAccountNo(user.employeeNo))
     let jobTitle = user.jobTitle
-    if (!jobTitle && fast) {
+    if (jobTitleNeedsRefresh(jobTitle) && fast) {
       jobTitle =
         (await resolveAuthUserJobTitle(fast, user.employeeNo, user.email ?? '')) ||
         configuredJobTitleByEmployeeNo(user.employeeNo) ||
@@ -469,8 +477,22 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
+  const rawJobTitle = employeeFieldText(employee as Record<string, unknown>, [
+    'JobTitle',
+    'Job_Title',
+    'Job Title',
+    'JobTitleDescription',
+    'Job_Title_Description',
+  ])
+  const resolvedJobTitle = jobTitleNeedsRefresh(rawJobTitle)
+    ? await resolveAuthUserJobTitle(
+        employee as Record<string, unknown>,
+        employeeNo,
+        email,
+      )
+    : rawJobTitle
   const jobTitle =
-    employee.JobTitle || configuredJobTitleByEmployeeNo(employeeNo) || employee.JobID || ''
+    resolvedJobTitle || configuredJobTitleByEmployeeNo(employeeNo) || ''
 
   return {
     employeeNo,
@@ -751,13 +773,22 @@ export function buildAuthRouter() {
     })
   })
 
-  router.get('/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
-  })
+  const currentUser = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const existing = req.session.authUser!
+      const refreshed = jobTitleNeedsRefresh(existing.jobTitle)
+        ? await refreshAuthUserProfile(existing, 'full')
+        : existing
+      req.session.authUser = refreshed
+      res.json({ user: refreshed, token: signAuthToken(refreshed) })
+    } catch (error) {
+      next(error)
+    }
+  }
 
-  router.get('/auth/me', requireAuth, (req, res) => {
-    res.json({ user: req.session.authUser })
-  })
+  router.get('/me', requireAuth, currentUser)
+
+  router.get('/auth/me', requireAuth, currentUser)
 
   router.post('/auth/logout', requireAuth, (_req, res) => {
     res.json({ message: 'Logged out' })

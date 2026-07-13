@@ -684,12 +684,14 @@ function configuredJobTitle(jobId: string) {
   const abhDefaults: Record<string, string> = {
     ITM: 'IT Manger',
     FAD: 'Finance and Admin Director',
+    DHM: 'Human Resource Manager',
   }
   return abhDefaults[code] ?? ''
 }
 
 const ABH_EMPLOYEE_JOB_TITLES: Record<string, string> = {
   'ABH-029': 'Finance and Admin Director',
+  'ABH-032': 'Human Resource Manager',
   'ABH-114': 'IT Manger',
 }
 

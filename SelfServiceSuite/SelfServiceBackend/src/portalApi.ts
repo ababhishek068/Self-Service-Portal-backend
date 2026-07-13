@@ -744,7 +744,7 @@ function mapPurchaseLine(row: ODataRecord, index: number) {
     lineNo,
     type: purchaseLineTypeLabel(rawType),
     typeCode: purchaseLineTypeCode(rawType),
-    itemNo: text(row, ['No', 'itemNo', 'ItemNo', 'Item_No']),
+    itemNo: text(row, ['No', 'No_', 'itemNo', 'ItemNo', 'Item_No', 'Item_No_']),
     description: text(row, ['Description', 'description']),
     location: text(row, ['Location_Code', 'LocationCode', 'Location', 'location']),
     quantity: number(row, ['Quantity', 'quantity']),

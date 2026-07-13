@@ -44,6 +44,7 @@ import {
   employeeResetToken,
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
+  jobTitleNeedsRefresh,
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
@@ -61,6 +62,18 @@ import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+
+describe('jobTitleNeedsRefresh', () => {
+  it('refreshes missing titles, the STAFF fallback, and raw BC job codes', () => {
+    assert.equal(jobTitleNeedsRefresh(''), true)
+    assert.equal(jobTitleNeedsRefresh('STAFF'), true)
+    assert.equal(jobTitleNeedsRefresh('DHM'), true)
+  })
+
+  it('keeps a resolved Business Central job title', () => {
+    assert.equal(jobTitleNeedsRefresh('Human Resource Manager'), false)
+  })
+})
 
 describe('approvalTableIds', () => {
   it('uses canonical ESS table IDs', () => {
