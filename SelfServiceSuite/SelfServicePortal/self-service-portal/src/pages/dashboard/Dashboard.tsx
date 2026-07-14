@@ -137,7 +137,11 @@ export function Dashboard() {
   })
   const firstName = employee?.displayName?.split(' ')[0] ?? 'there'
   const rawJobTitle = employee?.jobTitle?.trim() ?? ''
-  const profileSubtitle = rawJobTitle.toLowerCase() === 'staff' ? '' : rawJobTitle
+  const profileSubtitle =
+    rawJobTitle.toLowerCase() === 'staff' ||
+    (!rawJobTitle.includes(' ') && /^[a-z0-9_-]{2,15}$/i.test(rawJobTitle))
+      ? ''
+      : rawJobTitle
   const data = summary.data ?? null
   const tileValues = (data ?? {}) as Record<string, number | undefined>
   const summaryError =

@@ -10,7 +10,11 @@ export function Topbar() {
   const { employee, logout } = useAuth()
   const displayName = employee?.displayName?.split(' ')[0] ?? 'User'
   const rawJobTitle = employee?.jobTitle?.trim() ?? ''
-  const profileSubtitle = rawJobTitle.toLowerCase() === 'staff' ? '' : rawJobTitle
+  const profileSubtitle =
+    rawJobTitle.toLowerCase() === 'staff' ||
+    (!rawJobTitle.includes(' ') && /^[a-z0-9_-]{2,15}$/i.test(rawJobTitle))
+      ? ''
+      : rawJobTitle
   const subtitleUsesJobTitle = Boolean(profileSubtitle)
   const [loggingOut, setLoggingOut] = useState(false)
 

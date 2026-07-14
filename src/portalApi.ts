@@ -10,7 +10,12 @@ import {
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
-import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
+import {
+  jobTitleNeedsRefresh,
+  requireAuth,
+  resolveEmployeeJobTitle,
+  type AuthUser,
+} from './auth.js'
 import {
   fetchEmployeeSalaryBaseFast,
   probeEmployeeSalarySources,
@@ -2123,9 +2128,17 @@ export function buildPortalApiRouter() {
         }).catch(() => [] as ODataRecord[]),
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
-      const jobTitle =
-        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'], authUser.jobTitle) ||
-        (await resolveEmployeeJobTitleByNo(authUser.employeeNo))
+      const directJobTitle = text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'])
+      let jobTitle = jobTitleNeedsRefresh(directJobTitle) ? '' : directJobTitle
+      if (!jobTitle) {
+        jobTitle = await resolveEmployeeJobTitle(employee, authUser.employeeNo)
+      }
+      if (jobTitleNeedsRefresh(jobTitle)) {
+        jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
+      }
+      if (jobTitleNeedsRefresh(jobTitle)) {
+        jobTitle = jobTitleNeedsRefresh(authUser.jobTitle) ? '' : authUser.jobTitle
+      }
       res.json({
         jobTitle,
         sector: text(employee, ['Sector', 'GlobalDimension1Code']),

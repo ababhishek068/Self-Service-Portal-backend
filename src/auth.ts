@@ -207,16 +207,21 @@ export async function refreshAuthUserProfile(
       ? employeeAccountNoFromRecord(fast)
       : user.accountNumber || (await fetchEmployeeCustomerAccountNo(user.employeeNo))
     let jobTitle = user.jobTitle
-    if (jobTitleNeedsRefresh(jobTitle) && fast) {
-      jobTitle =
-        (await resolveAuthUserJobTitle(fast, user.employeeNo, user.email ?? '')) ||
-        configuredJobTitleByEmployeeNo(user.employeeNo) ||
-        ''
+    if (jobTitleNeedsRefresh(jobTitle)) {
+      jobTitle = fast
+        ? await resolveAuthUserJobTitle(fast, user.employeeNo, user.email ?? '')
+        : ''
+      if (jobTitleNeedsRefresh(jobTitle)) {
+        jobTitle = await resolveEmployeeJobTitleByNo(user.employeeNo)
+      }
+      if (jobTitleNeedsRefresh(jobTitle)) {
+        jobTitle = configuredJobTitleByEmployeeNo(user.employeeNo)
+      }
     }
     return {
       ...user,
       ...(accountNumber ? { accountNumber, imprestNo: accountNumber } : {}),
-      ...(jobTitle ? { jobTitle } : {}),
+      jobTitle: jobTitleNeedsRefresh(jobTitle) ? '' : jobTitle,
     }
   }
 
