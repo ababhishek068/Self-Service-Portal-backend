@@ -97,13 +97,13 @@ function soapTruthy(value: string | null | undefined) {
 }
 
 /** Leave create/update should not treat arbitrary BC error text as success. */
-function soapLeaveActionOk(value: unknown) {
+export function soapLeaveActionOk(value: unknown) {
   const raw = String(value ?? '').trim()
   if (!raw) return false
   const normalized = raw.toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   if (['true', '1', 'yes'].includes(normalized)) return true
-  if (/^lv\d+/i.test(raw)) return true
+  if (/^lv-?\d+/i.test(raw)) return true
   return /^[a-z]{1,6}\d{2,}$/i.test(raw)
 }
 

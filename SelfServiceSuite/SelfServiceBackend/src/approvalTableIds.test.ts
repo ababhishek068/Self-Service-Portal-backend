@@ -37,6 +37,7 @@ import {
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
   parseEmployeeLeaveBalancesReturn,
+  soapLeaveActionOk,
 } from './staff.js'
 import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
 import {
@@ -211,6 +212,15 @@ describe('bcLeaveDaysApplied', () => {
     assert.equal(bcLeaveDaysApplied(2.2, '0'), 2)
     assert.equal(bcLeaveDaysApplied(0.5, '1'), 1)
     assert.equal(bcLeaveDaysApplied(0.5, '2'), 1)
+  })
+})
+
+describe('soapLeaveActionOk', () => {
+  it('accepts the hyphenated document number returned by BC LeaveApplication', () => {
+    assert.equal(soapLeaveActionOk('LV-00015'), true)
+    assert.equal(soapLeaveActionOk('LV00015'), true)
+    assert.equal(soapLeaveActionOk('false'), false)
+    assert.equal(soapLeaveActionOk('Leave application failed'), false)
   })
 })
 
