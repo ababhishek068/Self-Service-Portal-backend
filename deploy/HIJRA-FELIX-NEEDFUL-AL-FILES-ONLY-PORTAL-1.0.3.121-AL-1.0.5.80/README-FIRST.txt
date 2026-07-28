@@ -1,0 +1,182 @@
+HIJRA SSP — NEEDFUL AL FILES ONLY — PORTAL 1.0.3.121 / AL 1.0.5.80
+====================================================================
+
+IMPORTANT
+---------
+Portal v1.0.3.121 contains the UI/backend fixes. The following BC objects in
+this package must also be present in the synchronized AL source:
+
+1. FILES\staffPortal\query\HrEmployee.Query.al exposes Basic_Pay. Without it,
+   Monthly Basic Salary remains blank and Salary Advance cannot calculate an
+   amount when BC stores only Percentage of Salary.
+2. FILES\staffPortal\training\... stores the full Training Need Assessment.
+   The install/upgrade codeunits publish CuPortalTraining, and
+   PortalHr.PermissionSet.al grants the required access.
+3. FILES\Query\ImprestHeaders.Query.al exposes Date Required, travel dates and
+   Travel Destination for Imprest Surrender.
+4. FILES\Query\ImprestLines2.Query.al exposes Daily Rate, Destination and Duty
+   Area for Imprest and Imprest Surrender.
+5. FILES\Query\ReceiptPaymentTypes.Query.al exposes the G/L Account and Rate
+   Source used by Staff Claims and Imprest.
+6. FILES\HR-DEEP\StaffPortalCodeunit.Codeunit.al accepts and stores a manually
+   entered daily rate before Business Central validates No. of Days.
+7. FILES\Query\GatePass.Query.al exposes AssetNo and ReturnDate instead of
+   leaving those Gate Pass Log columns blank.
+8. FILES\staffPortal\query\QyGatePassReturns.Query.al exposes the actual
+   returned movement and DateIn from the Gate Pass Return table.
+9. FILES\staffPortal\facilityUat\PortalFacility.PermissionSet.al plus the
+   Install and Upgrade codeunits grant access and publish QyGatePassReturns
+   during both new installs and normal app upgrades.
+10. FILES\HR-DEEP\StaffPortalCodeunit.Codeunit.al keeps the Purchase
+    Requisition header and lines on the same Requesting Department, checks the
+    correct finalized departmental budget, and reports the real item/service
+    number rather than the free-text specification. Budget control is not
+    bypassed.
+11. FILES\staffPortal\facilityUat\PortalAssetTransferMgt.Codeunit.al invokes
+    the same Custom Approvals workflow as Asset Transfer Card page 50584.
+    Request Approval now creates real Approval Entry rows and Cancel Approval
+    cancels that workflow; it no longer only changes the document status.
+12. FILES\HR-DEEP\StaffPortalCodeunit.Codeunit.al restores the logged-in
+    employee's Customer/Imprest account after Imprest Header.OnInsert and uses
+    that employee account when resolving the job group for ERP daily rates.
+
+Portal v1.0.3.121 also presents Store Requisition according to the complete
+operational flow: Request, Items, Approval, Store Issue and Receipt
+Confirmation. It displays requester/organisation fields, available stock,
+requested/to-issue/issued/received quantities, variance reasons, SRN, issue
+date and values. These fields already exist in QyStoreRequisitionHeader and
+QyStoreRequisitionLines, so no additional AL object is required beyond 1.0.5.80.
+
+Portal v1.0.3.121 fixes Facility list values without requiring another AL
+change. Store and Purchase totals fall back to their saved Business Central
+line values when the header FlowField returns zero. Fuel cost falls back to
+litres multiplied by price per litre. Non-financial workflows now display the
+correct passenger, quantity, asset, or maintenance metric instead of a
+misleading ETB 0.
+
+Portal v1.0.3.121 also corrects Maintenance Request detail presentation. It
+translates raw request-type codes into readable labels, uses NextServiceKM from
+the existing QyPortalFuelMaintExtra service, displays odometer cards only for
+vehicle maintenance, and explains Open/Pending/Approved/receipt workflow
+states instead of rendering an empty workflow box. No new AL object is needed.
+
+The package contains 33 AL files: only the cumulative AL files needed for the
+previously identified UAT fixes and their required dependencies. It
+intentionally excludes the frontend, backend and unrelated full-module copies.
+
+Unlike the portal-only display fixes, Asset Transfer approval requires the
+1.0.5.80 AL merge and normal app upgrade before portal 1.0.3.121 is tested.
+
+Portal v1.0.3.121 corrects the browser timeout for Business Central-backed
+password reset/email and approval operations. The browser now allows the full
+sequential BC operation window instead of aborting at 20 seconds. This timeout
+correction is portal/backend code only and adds no AL file beyond 1.0.5.80.
+
+Portal v1.0.3.121 also fixes the user-specific Staff Claim creation error where
+Business Central reported that the ClaimRequisitionHeader department parameter
+was null. The Staff Claim table actually fills Global Dimension 1 from the
+employee Sector. The backend now reads Sector/SectorCode/SectorName before the
+legacy GD1 and department aliases and refreshes alternate employee-card pages
+when the sector value is absent from the first response. HrEmployee.Query.al
+already exposes Sector and the GD1 aliases, so this correction requires no
+additional AL object beyond the cumulative 1.0.5.80 source set.
+
+Portal v1.0.3.121 corrects Leave Approval Detail without another AL change.
+The quantity card now reads DaysApplied and displays a day count instead of
+ETB 0. The portal resolves the LeaveType code through the existing
+QyHRLeaveType service and displays its description (for example Sick Leave),
+then shows the existing start, end, return, reliever and department fields.
+
+Portal v1.0.3.121 also keeps the employee-side Approval Workflow visible for
+Paternity Leave and every other submitted leave type. It uses the real BC
+Approval Entry chain when available; while BC is still assigning or exposing
+the entry, the portal shows an explicit pending-assignment step instead of
+hiding the entire workflow. It also resolves leave code 0002 to its description
+through the existing QyHRLeaveType service. No additional AL object is required.
+
+Portal v1.0.3.121 removes Location / Coordinates, Sign-in Location and Sign-out
+Location columns from the employee and HOD Attendance tables. Attendance
+recording and the remaining Business Central data are unchanged. This is a
+portal-only presentation change and requires no additional AL object.
+
+Portal v1.0.3.121 fixes Training Need Assessment course selection. The
+Business Central field named "Course Title" is related to HR Training Courses
+by "Course Code", so the portal now displays "Course Tittle" but submits the
+real CourseCode. Closed and individual courses are excluded, and the portal's
+Other option is not sent as a fake related-table value. This is a portal/backend
+mapping correction and requires no additional AL object beyond 1.0.5.80.
+
+Portal v1.0.3.121 / AL v1.0.5.80 fixes the Imprest ERP daily-rate identity
+flow. Business Central's Imprest Header.OnInsert can stamp the SOAP service
+account; the portal AL now restores the requesting employee's Customer/Imprest
+account and uses that account to resolve the employee job group for
+FetchImprestLineAmount and ImprestRequisitionLine. The portal also starts a
+fresh ERP calculation for every draft and clears stale daily-rate/amount
+values before the response arrives. This fix requires merging the supplied
+StaffPortalCodeunit.Codeunit.al and performing a normal app upgrade.
+
+Portal v1.0.3.121 cleans the Imprest Surrender selection preview. Fields that
+Business Central does not supply are omitted instead of showing dash-only
+placeholders, and Division, Department, District and Branch are not repeated
+below the organisation panel. This is a portal-only presentation change and
+requires no AL object beyond the cumulative v1.0.5.80 source set.
+
+Portal v1.0.3.121 makes Staff Claim line columns follow the selected claim
+flow. Non-medical claims no longer show Hospital Category, Medical Amount or
+Amount to Refund zero values. Account Name falls back to the Business Central
+G/L Account lookup and is omitted when no name can be resolved. Claim type and
+expenditure date are also shown in readable form. This is a portal-only
+presentation fix and requires no AL object beyond cumulative v1.0.5.80.
+
+Portal v1.0.3.121 reduces the Store Requisition line table to the employee's
+essential fields: Item/Asset, Description, Unit when supplied, Requested
+quantity, Status and Line Value when costed. Issued, Received, issue date,
+variance reasons and remarks appear only when Business Central has populated
+them for that workflow stage. Internal zero-only issue/receipt calculation
+columns and repeated header values are no longer displayed. This is portal-only
+and requires no AL object beyond cumulative v1.0.5.80.
+
+Portal v1.0.3.121 closes the remaining Training Need Assessment relation path.
+The browser sends the selected Course Code explicitly, and the backend resolves
+a title submitted by an older cached browser build (for example EXCUSION
+EXCELLENCE) back to the active QyTrainingCourses CourseCode before calling
+SaveTrainingHeader. Closed, individual or removed courses receive a readable
+refresh-and-select message instead of the raw BC TableRelation fault. This is a
+portal/backend correction and requires no AL object beyond cumulative v1.0.5.80.
+
+Portal v1.0.3.121 adds the same protection to every shared Business
+Central-backed dropdown in HR, Finance and Facilities. A cached display caption
+is converted to its current BC key before submission; a value removed from the
+live BC lookup is blocked in the form with a refresh-and-select message. The
+backend also translates generic BC related-table faults into the same recovery
+instruction instead of exposing the raw SOAP error. This audit guard is
+portal/backend-only and adds no AL object beyond cumulative v1.0.5.80.
+
+DO NOT COPY OR COMPILE BEFORE SYNCHRONIZATION
+---------------------------------------------
+1. Felix first synchronizes/pulls the latest Hijra AL source.
+2. Create a backup/branch from that synchronized source.
+3. Compare and merge each file in FILES; do not blindly replace a newer file.
+4. Review FILES-TO-REMOVE.txt and remove only confirmed obsolete duplicates.
+5. Review table changes carefully, especially HRLeaveApplication.Table.al and
+   GatePass.Table.al, before packaging.
+6. Confirm the six Query files above are included before compiling. Missing
+   query files cause blank salary, imprest, staff-claim and Gate Pass Log fields.
+7. Confirm Web Services contains CuPortalTraining and QyGatePassReturns. The
+   supplied install/upgrade codeunits register them during app deployment.
+8. Compile/package once after the merge is complete.
+9. Publish as a normal app upgrade/schema synchronization. Do not uninstall,
+   clean the schema, or use ForceSync.
+
+STRUCTURE
+---------
+FILES\staffPortal\... and FILES\Query\... map below the Hijra project's src
+folder with the same relative path.
+
+The deeply nested legacy files must be found by filename after synchronization:
+  FILES\HR-DEEP\StaffPortalCodeunit.Codeunit.al
+  FILES\HR-DEEP\HRLeaveApplication.Table.al
+  FILES\BASE-DEEP\GatePass.Table.al
+
+There is deliberately no automatic apply or version-bump script in this
+package. Felix should merge these files into his synchronized source.

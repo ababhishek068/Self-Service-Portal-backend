@@ -475,9 +475,8 @@ export function soapFaultMessage(xml: string) {
   return match ? decodeXml(match[1]!.trim()) : ''
 }
 
-function soapFaultError(status: number, xml: string) {
-  const fault = soapFaultMessage(xml)
-  const friendlyFault = /not supported by related approval workflow/i.test(fault)
+export function friendlySoapFaultMessage(fault: string) {
+  return /not supported by related approval workflow/i.test(fault)
     ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting or cancelling approval.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
@@ -500,7 +499,21 @@ function soapFaultError(status: number, xml: string) {
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
+    : /contains a value \(([^)]+)\) that cannot be found in the related table \(([^)]+)\)/i.test(fault)
+      ? (() => {
+          const match = fault.match(
+            /contains a value \(([^)]+)\) that cannot be found in the related table \(([^)]+)\)/i,
+          )
+          const value = match?.[1]?.trim() ?? 'selected value'
+          const table = match?.[2]?.trim() ?? 'related table'
+          return `The selected value "${value}" is no longer available in Business Central (${table}). Refresh the page and select it again from the current list.`
+        })()
       : fault
+}
+
+function soapFaultError(status: number, xml: string) {
+  const fault = soapFaultMessage(xml)
+  const friendlyFault = friendlySoapFaultMessage(fault)
   const message = friendlyFault
     ? `Business Central rejected the request: ${friendlyFault}`
     : `Business Central SOAP request failed with status ${status}`

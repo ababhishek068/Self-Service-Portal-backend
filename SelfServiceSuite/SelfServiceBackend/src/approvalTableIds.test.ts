@@ -23,6 +23,7 @@ import {
 import {
   codeunitSoapNamespace,
   deriveCodeunitSoapUrl,
+  friendlySoapFaultMessage,
   soapFaultMessage,
 } from './bcClient.js'
 import {
@@ -394,6 +395,15 @@ describe('soapFaultMessage', () => {
   it('extracts a readable Business Central fault without returning the envelope', () => {
     const xml = '<s:Fault><faultstring xml:lang="en-US">The value &quot;0&quot; cannot be evaluated.</faultstring></s:Fault>'
     assert.equal(soapFaultMessage(xml), 'The value "0" cannot be evaluated.')
+  })
+
+  it('explains how to recover from a stale Business Central relation value', () => {
+    assert.equal(
+      friendlySoapFaultMessage(
+        'The field Course Title of table HR Training Applications contains a value (BSC) that cannot be found in the related table (HR Training Courses).',
+      ),
+      'The selected value "BSC" is no longer available in Business Central (HR Training Courses). Refresh the page and select it again from the current list.',
+    )
   })
 })
 

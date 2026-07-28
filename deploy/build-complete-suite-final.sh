@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.3.120"
+VERSION="1.0.3.121"
 AL_PATCH_VERSION="1.0.5.80"
 BUNDLE="HIJRA-${VERSION}-COMPLETE-SUITE-FINAL"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,7 +16,7 @@ cd "$SUITE/SelfServiceBackend"
 rm -rf "$SUITE/SelfServiceBackend/dist"
 npm run build
 npm run build:portal
-echo "hijra-portal-${VERSION}-FINAL-2026-07-29-training-course-code-resolution" > dist/BUILD_ID.txt
+echo "hijra-portal-${VERSION}-FINAL-2026-07-29-select-relation-guard" > dist/BUILD_ID.txt
 
 echo "==> Staging $BUNDLE..."
 rm -rf "$STAGE"
@@ -330,6 +330,7 @@ HR: Leave request → cancel does not block new leave; Profile shows division/da
 HR: Leave approval → leave type name and requested number of days are visible
 HR: HOD → staff on leave shows own department only; Training list shows applications
 HR: Training submits the selected BC Course Code even when an older cached form sends its title
+All modules: stale dropdown captions normalize to BC keys; removed lookup values are blocked before SOAP
 Finance: Imprest daily rate + travel destination dropdown; Petty cash profile dims
 Finance: Imprest Surrender hides unavailable fields and does not repeat organisation details
 Finance: Staff claim creation for users with Sector-only employee profiles + medical refund
@@ -338,7 +339,7 @@ Facility: Purchase spec attach, Asset Transfer post
 Facility: Store/Purchase/Fuel list totals; Transport/Transfer/Asset list metrics
 Facility: Store line table shows core fields plus only populated issue/receipt-stage values
 
-BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-29-training-course-code-resolution
+BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-29-select-relation-guard
 EOF
 
 cat > "$ROOT/FIX-NETWORK-ERROR.txt" << 'EOF'

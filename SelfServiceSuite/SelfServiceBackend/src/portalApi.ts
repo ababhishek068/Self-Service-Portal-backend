@@ -304,7 +304,7 @@ function workTicketFlight(row: ODataRecord | undefined) {
  * dist/portalApi.js is stale.
  */
 export const PORTAL_API_BUILD =
-  'v1.0.3.120 — 2026-07-29 (training course titles resolve to valid BC course codes)'
+  'v1.0.3.121 — 2026-07-29 (BC dropdown captions normalize to keys and stale values are blocked)'
 
 interface LookupSpec {
   service: string
