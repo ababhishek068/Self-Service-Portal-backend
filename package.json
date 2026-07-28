@@ -12,7 +12,7 @@
     "dry-run": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh",
     "dry-run:dev": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh --dev",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/approvalTableIds.test.js"
+    "test": "npm run build && node --import ./scripts/test-env.mjs --import tsx --test src/approvalTableIds.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

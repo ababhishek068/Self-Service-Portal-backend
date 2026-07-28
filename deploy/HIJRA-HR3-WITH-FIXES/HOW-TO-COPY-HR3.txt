@@ -1,0 +1,55 @@
+HIJRA — HR3 FOLDER WITH FIXES (v1.0.3.68)
+==========================================
+
+Felix project:
+  C:\Users\erp\Desktop\apps_erp\hijraERP\Hijra\src\HR3\
+
+STEP 1 — Copy this HR3 folder
+------------------------------
+Copy everything inside:
+  COPY-INTO-Hijra-Project\src\HR3\
+
+Paste into:
+  C:\Users\erp\Desktop\apps_erp\hijraERP\Hijra\src\HR3\
+
+Click YES TO ALL when asked to replace.
+
+STEP 2 — What gets fixed/replaced
+----------------------------------
+NewChanges\
+  StaffPortalCodeunit.Codeunit.al              ← REPLACE (main portal codeunit 50049)
+
+HR\
+  HRLeaveApplication.Table.al                  ← REPLACE (leave balance / LV00127)
+
+NewChanges\Codeunit\                           ← NEW (3 files)
+  PortalAttachmentsMgt.Codeunit.al
+  PortalFacilityMgt.Codeunit.al
+  PortalAssetTransferMgt.Codeunit.al
+
+NewChanges\Table\                              ← NEW (4 files)
+  PortalWorkTicketFlight.Table.al
+  PortalFuelMaintExtra.Table.al
+  PortalProcurementPlanHeader.Table.al
+  PortalProcurementPlanLine.Table.al
+
+NewChanges\Query\                              ← NEW (7 files)
+  QyAssetTransfer.Query.al
+  QyWorkTicketFlight.Query.al
+  QyPortalFuelMaintExtra.Query.al
+  QyProcurementPlanHeader.Query.al
+  QyProcurementPlanLines.Query.al
+  QyGatePassTransferShipments.Query.al
+  QyGatePassAssetTransfers.Query.al
+
+NOTE: Your existing NewChanges files (HRAppraisalHeaderCard, HRwebportal, etc.)
+      are NOT in this zip — keep them. Only add/replace the files above.
+
+DEPLOY ORDER
+------------
+1. staffPortal zip first  (HIJRA-staffPortal-WITH-FIXES-v1.0.3.68.zip)
+2. This HR3 zip second
+3. Bump app.json version
+4. AL Package → 0 errors → Publish .app
+5. Web Services (see DO-NOT-COPY-REFERENCE-ONLY\FELIX-PUBLISH-CHECKLIST.txt)
+6. TA deploy portal v1.0.3.68

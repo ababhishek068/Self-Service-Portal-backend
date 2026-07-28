@@ -1,0 +1,20 @@
+/**
+ * Central brand configuration for the Self-Service Portal.
+ *
+ * Keep all company/product naming here so the brand can be changed in one
+ * place rather than scattered across components.
+ */
+export const brand = {
+  /** Full legal company name shown in headers and footers. */
+  company: 'Hijra Bank',
+  /** Shorter form for tight spaces. */
+  companyShort: 'Hijra Bank',
+  /** Monogram used inside the circular logo badge. */
+  monogram: 'HB',
+  /** Product name. */
+  product: 'Self Service Portal',
+  /** Product name without the "Portal" suffix (used in the sidebar). */
+  productShort: 'Self Service',
+  /** Exact copyright notice requested for login and every portal page. */
+  copyrightNotice: 'Copy Rights @ Technology Associates East Africa Limited',
+} as const

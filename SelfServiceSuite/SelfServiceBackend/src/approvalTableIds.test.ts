@@ -15,10 +15,15 @@ import {
   gatePassSourceFromRow,
   isMedicalClaimType,
   passengerTypeCode,
+  transportRequestTypeCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
 } from './staffModules.js'
-import { soapFaultMessage } from './bcClient.js'
+import {
+  codeunitSoapNamespace,
+  deriveCodeunitSoapUrl,
+  soapFaultMessage,
+} from './bcClient.js'
 import {
   normalizeSequentialApprovalStatuses,
   resolveLeaveApprovalSteps,
@@ -36,7 +41,13 @@ import {
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
 } from './staff.js'
-import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
+import {
+  approvalModule,
+  enrichGatePassRowDimensions,
+  mapApprovalSteps,
+  mapModuleLines,
+  transportRequestTypeLabel,
+} from './portalApi.js'
 import {
   cachedPasswordResetTokenMatches,
   cachePasswordResetToken,
@@ -83,6 +94,7 @@ describe('approvalTableIds', () => {
     assert.equal(APPROVAL_TABLE_IDS.fuel, 50865)
     assert.equal(APPROVAL_TABLE_IDS.transferOrder, 5740)
     assert.equal(APPROVAL_TABLE_IDS.salaryAdvance, 50880)
+    assert.equal(APPROVAL_TABLE_IDS.assetTransfer, 50278)
   })
 
   it('includes legacy imprest IDs in filters', () => {
@@ -98,6 +110,7 @@ describe('approvalTableIds', () => {
     assert.equal(resolveApprovalModuleFromTableId(50865), 'fuelRequest')
     assert.equal(resolveApprovalModuleFromTableId(5740), 'transferOrder')
     assert.equal(resolveApprovalModuleFromTableId(50880), 'salaryAdvance')
+    assert.equal(resolveApprovalModuleFromTableId(50278), 'assetTransfer')
     assert.equal(resolveApprovalModuleFromTableId(52202786), 'imprest')
     assert.equal(resolveApprovalModuleFromTableId(0, 'Transport Request'), 'transport')
     assert.equal(resolveApprovalModuleFromTableId(0, 'Training Request'), 'training')
@@ -113,19 +126,35 @@ describe('passengerTypeCode', () => {
   })
 })
 
+describe('transport request type mapping', () => {
+  it('preserves City and Field Trip as distinct Business Central option values', () => {
+    assert.equal(transportRequestTypeCode('City'), 0)
+    assert.equal(transportRequestTypeCode('Field Trip'), 1)
+    assert.equal(transportRequestTypeCode('1'), 1)
+  })
+
+  it('presents Business Central option values as readable labels', () => {
+    assert.equal(transportRequestTypeLabel(0), 'City')
+    assert.equal(transportRequestTypeLabel('1'), 'Field Trip')
+    assert.equal(transportRequestTypeLabel('Field'), 'Field Trip')
+  })
+})
+
 describe('gatePassFilters', () => {
   const user = { employeeNo: 'E0083' } as Parameters<typeof gatePassListFilterParts>[1]
 
-  it('matches the three ESS Gate Pass source values', () => {
+  it('matches the four ESS Gate Pass source values', () => {
     assert.equal(gatePassSourceFromQuery('storeIssue'), 'storeIssue')
     assert.equal(gatePassSourceFromQuery('transferOrder'), 'transferOrder')
     assert.equal(gatePassSourceFromQuery('assetTransfer'), 'assetTransfer')
+    assert.equal(gatePassSourceFromQuery('maintenance'), 'maintenance')
     assert.equal(gatePassSourceFromRow({ Linkto: 'Store Issue' }), 'storeIssue')
     assert.equal(gatePassSourceFromRow({ LinkTo: 'Transfer Order' }), 'transferOrder')
     assert.equal(gatePassSourceFromRow({ Link_To: 'Asset Transfer' }), 'assetTransfer')
+    assert.equal(gatePassSourceFromRow({ Link_To: 'Maintenance' }), 'maintenance')
   })
 
-  it('scopes only Store Issue gate passes to the employee', () => {
+  it('scopes employee-owned Store Issue and Maintenance gate passes', () => {
     assert.deepEqual(gatePassListFilterParts('storeIssue', user), [
       "EmployeeNo eq 'E0083'",
       "Linkto eq 'Store Issue'",
@@ -136,6 +165,51 @@ describe('gatePassFilters', () => {
     assert.deepEqual(gatePassListFilterParts('assetTransfer', user), [
       "Linkto eq 'Asset Transfer'",
     ])
+    assert.deepEqual(gatePassListFilterParts('maintenance', user), [
+      "EmployeeNo eq 'E0083'",
+      "Linkto eq 'Maintenance'",
+    ])
+  })
+})
+
+describe('gate pass employee dimensions', () => {
+  it('uses each gate-pass owner employee card for department and sector', () => {
+    const row = enrichGatePassRowDimensions(
+      {
+        GatePassNo: 'IS000015',
+        EmployeeNo: 'E0021',
+        EmployeeName: 'Meseret Awoke Admassie',
+        Linkto: 'Asset Transfer',
+      },
+      {
+        No: 'E0021',
+        GlobalDimension1Code: 'TRR',
+        DepartmentName: 'Total Reward and Recognition',
+        GlobalDimension2Code: 'CS',
+        BranchName: 'Corporate Services',
+      },
+    )
+
+    assert.equal(row.DistrictDepartmentName, 'Total Reward and Recognition')
+    assert.equal(row.SectorName, 'Corporate Services')
+  })
+
+  it('preserves dimensions already supplied by QyGatePass', () => {
+    const row = enrichGatePassRowDimensions(
+      {
+        GatePassNo: 'IS000016',
+        EmployeeNo: 'E0083',
+        DistrictDepartmentName: 'Learning and Development',
+        SectorName: 'Human Capital',
+      },
+      {
+        DepartmentName: 'Wrong fallback',
+        BranchName: 'Wrong fallback',
+      },
+    )
+
+    assert.equal(row.DistrictDepartmentName, 'Learning and Development')
+    assert.equal(row.SectorName, 'Human Capital')
   })
 })
 
@@ -167,6 +241,22 @@ describe('soapFaultMessage', () => {
   it('extracts a readable Business Central fault without returning the envelope', () => {
     const xml = '<s:Fault><faultstring xml:lang="en-US">The value &quot;0&quot; cannot be evaluated.</faultstring></s:Fault>'
     assert.equal(soapFaultMessage(xml), 'The value "0" cannot be evaluated.')
+  })
+})
+
+describe('dedicated codeunit SOAP endpoints', () => {
+  it('replaces only the final service and preserves tenant parameters', () => {
+    assert.equal(
+      deriveCodeunitSoapUrl(
+        'http://erp-app:2447/BC240/WS/HIJRA%20BANK/Codeunit/CuStaffPortal/?tenant=uat',
+        'CuPortalAssetTransfer',
+      ),
+      'http://erp-app:2447/BC240/WS/HIJRA%20BANK/Codeunit/CuPortalAssetTransfer?tenant=uat',
+    )
+    assert.equal(
+      codeunitSoapNamespace('CuPortalAssetTransfer'),
+      'urn:microsoft-dynamics-schemas/codeunit/CuPortalAssetTransfer',
+    )
   })
 })
 
@@ -521,6 +611,17 @@ describe('ESS request mutation contracts', () => {
     }
   })
 
+  it('uses the dedicated Asset Transfer controller and readback query', () => {
+    const spec = findFrontendModuleSpec('assetTransfer')
+    assert.ok(spec)
+    assert.equal(spec.headerService, 'QyAssetTransfer')
+    assert.equal(spec.headerTableId, 50278)
+    assert.equal(spec.soap.saveHeader, 'CreateAssetTransfer')
+    assert.equal(spec.soap.editHeader, 'UpdateAssetTransfer')
+    assert.equal(spec.soap.submit, 'AssetTransferApprovalAction')
+    assert.match(spec.soapEndpoint?.url ?? '', /CuPortalAssetTransfer/)
+  })
+
   it('wires create and delete methods for ESS line modules', () => {
     for (const module of ['imprest', 'claim', 'petty-cash', 'store-requisition', 'purchase-requisition', 'transport', 'transfer-order']) {
       const spec = findModuleSpec(module)
@@ -551,6 +652,7 @@ describe('mapModuleLines', () => {
       accountName: 'Travel',
       amount: 1200,
       noOfDays: 2,
+      dailyRate: 600,
     })
   })
 
@@ -563,11 +665,45 @@ describe('mapModuleLines', () => {
     }])
     const passenger = line as Record<string, unknown>
     assert.equal(passenger.id, 'passenger-guid')
+    assert.equal(passenger.passengerName, 'Visitor')
+    assert.equal(passenger.passengerOrganization, 'Partner')
     assert.equal(passenger.externalPassName, 'Visitor')
+  })
+
+  it('shows the Business Central name for an internal staff passenger', () => {
+    const [line] = mapModuleLines('transport', {}, [{
+      PassengerType: 'Staff',
+      EmployeeNo: '010',
+      PassengerName: 'Beza Yoseff Abrehamm',
+      PassengerOrganization: 'District Director',
+      RecId: 'staff-passenger-guid',
+    }])
+    const passenger = line as Record<string, unknown>
+    assert.equal(passenger.employeeNo, '010')
+    assert.equal(passenger.passengerName, 'Beza Yoseff Abrehamm')
+    assert.equal(passenger.passengerOrganization, 'District Director')
+    assert.equal(passenger.externalPassName, '')
   })
 })
 
 describe('mapRequest status', () => {
+  it('uses the real transport requisition number in list rows and routes', () => {
+    const mapped = mapRequest(
+      {
+        No: 'A00052',
+        Transport_Requisition_No: 'TR0023',
+        Date_of_Request: '2026-07-28',
+        Purpose_of_Trip: 'District visit',
+        Status: 'Open',
+      },
+      'transport',
+    )
+    assert.equal(mapped.requestNo, 'TR0023')
+    assert.equal(mapped.id, 'transport-TR0023')
+    assert.equal(mapped.createdAt, '2026-07-28')
+    assert.equal(mapped.title, 'District visit')
+  })
+
   it('prefers ApprovalStatus for transfer orders', () => {
     const mapped = mapRequest(
       {

@@ -451,6 +451,19 @@ export async function fetchEmployeeSalaryBaseForAdvance(
   return 0
 }
 
+/**
+ * Resolve a trustworthy monthly salary value for HR service-letter requests.
+ * Prefer the authenticated/session value, then use the same BC lookup chain as salary advances.
+ */
+export async function resolveEmployeeMonthlySalaryBase(
+  employeeNo: string,
+  hints: { customerNo?: string; existing?: number } = {},
+) {
+  const existing = Number(hints.existing ?? 0)
+  if (Number.isFinite(existing) && existing > 0) return existing
+  return fetchEmployeeSalaryBaseForAdvance(employeeNo, { customerNo: hints.customerNo })
+}
+
 const DIMENSION_SERVICES = ['QyDimensionValues', 'DimensionValue', 'Dimension_Values']
 const DIMENSION_LIST_FILTERS = [
   "Dimension_Code eq 'DEPARTMENTS'",

@@ -1,0 +1,33 @@
+HIJRA — 2 FOLDERS TO REPLACE (v1.0.3.68)
+========================================
+
+BEFORE PASTE — DELETE BAD COPIES:
+---------------------------------
+1. Open staffPortal\facilityUat\ → delete ANY Qy*.Query.al files
+2. Open src\Table\ → delete PortalFuelMaintExtra, PortalProcurementPlanHeader,
+   PortalProcurementPlanLine, PortalWorkTicketFlight (if there)
+3. Open src\Query\ → delete ALL Qy*.Query.al (if there)
+
+FOLDER 1 — facilityUat (7 files, NO queries)
+---------------------------------------------
+Copy folder: 1-REPLACE-staffPortal-facilityUat
+Paste into:   ...\Hijra\src\...\staffPortal\facilityUat
+              (delete old facilityUat folder first, then paste)
+
+FOLDER 2 — query (9 files)
+--------------------------
+Copy folder: 2-REPLACE-staffPortal-query
+Paste into:   ...\Hijra\src\...\staffPortal\query
+              (delete old query folder first, then paste)
+
+AFTER PASTE — copy back from staffPortal_OLD\query\ if you had these:
+  ApprovalCommentLine, EmployeeDependants, FuelCardSetup, HrLeaeveLedger,
+  HrLeaveTypes, ItemLedgerEntryQuery, LeaveApplications, LeaveCalendarquery,
+  Leavetypes, PayrollPeriods, PettyCashLimitDepartment
+  (Do NOT copy Qy* from old folder)
+
+STILL NEED (HR3 — 2 files):
+  HR3\NewChanges\StaffPortalCodeunit.Codeunit.al
+  HR3\HR\HRLeaveApplication.Table.al
+
+Then: app.json bump → AL Package → 0 errors → Publish

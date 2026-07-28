@@ -35,6 +35,7 @@ const OPEN_STATUS_MODULES = new Set([
   'fuel',
   'maintenance',
   'gate-pass',
+  'asset-transfer',
 ])
 
 /**

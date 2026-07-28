@@ -1,0 +1,18 @@
+HIJRA UAT — DEPLOY ONCE (25 Jul 2026, AL-aligned build)
+========================================================
+
+1. Stop portal on 10.30.4.23 (STOP-HIJRA-PORTAL.bat)
+2. Backup C:\TA\SelfServiceSuite (copy the folder)
+3. From this zip:
+   SelfServiceBackend\dist\*   -> server SelfServiceBackend\dist\   (delete old contents first)
+   SelfServiceBackend\public\* -> server SelfServiceBackend\public\ (delete old contents first)
+4. Do NOT touch .env
+5. Start portal, then Ctrl+Shift+R in the browser
+
+VERIFY (Profile page):
+  Build line: "UAT final: AL-aligned finance+HR, letters, comments, claims"
+  Bundle: index-CBC2hPBf.js
+  dist\BUILD_ID.txt = hijra-portal-1.0.3.44-uat-final-al-aligned-2026-07-25
+
+BC side: give Felix the file HIJRA-AL-CHANGES-2026-07-25.md from the AL repo
+("Hijra Al ERP V2/hijraERP/Hijra"). One publish registers everything automatically.

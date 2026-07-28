@@ -1,0 +1,24 @@
+HIJRA PORTAL UAT UPDATE — 1.0.3.44 (25 Jul 2026)
+=================================================
+
+WHAT IS IN THIS PACKAGE
+- SelfServiceBackend/dist   = compiled Node API (portalApi.js, staffModules.js, …)
+- SelfServiceBackend/public = compiled React UI (served by the backend)
+
+ON THE SERVER (10.30.4.23)
+1. Stop the portal (stop-suite.ps1 or STOP-HIJRA-PORTAL.bat)
+2. Backup C:\TA\SelfServiceSuite to C:\TA\SelfServiceSuite-backup-2026-07-25
+3. Copy ONLY these folders from this zip:
+   - SelfServiceSuite/SelfServiceBackend/dist/*  → server dist\
+   - SelfServiceSuite/SelfServiceBackend/public/* → server public\
+4. Do NOT overwrite your existing .env file
+5. Start the portal (START-HIJRA-PORTAL.bat)
+6. In browser: Ctrl+Shift+R on http://10.30.4.23:4000
+
+VERIFY DEPLOY WORKED
+- Profile page build line contains: "UAT: finance+HR profile"
+- Browser loads bundle: index-D8baAk-k.js
+- dist/BUILD_ID.txt = hijra-portal-1.0.3.44-uat-final-2026-07-25
+- staffModules.js size about 99 KB (full build)
+
+See BC-ADMIN-STEPS.txt for Business Central changes still needed.

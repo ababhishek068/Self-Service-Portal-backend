@@ -17,7 +17,9 @@ export const APPROVAL_TABLE_IDS = {
   fuel: 50865,
   transferOrder: 5740,
   gatePass: 50296,
+  assetTransfer: 50278,
   transport: 61801,
+  workTicket: 50866,
   salaryAdvance: 50880,
   paymentVoucher: 50000,
 } as const
@@ -37,9 +39,11 @@ export const SUPPORTED_FRONTEND_MODULES = [
   'transport',
   'maintenance',
   'transferOrder',
+  'workTickets',
   'training',
   'salaryAdvance',
   'gatePass',
+  'assetTransfer',
   'leave',
 ] as const
 
@@ -102,8 +106,10 @@ export function resolveApprovalModuleFromTableId(
   if (tableId === APPROVAL_TABLE_IDS.pettyCashReplenishment) return 'pettyCashReplenishment'
   if (tableId === APPROVAL_TABLE_IDS.salaryAdvance) return 'salaryAdvance'
   if (tableId === APPROVAL_TABLE_IDS.gatePass) return 'gatePass'
+  if (tableId === APPROVAL_TABLE_IDS.assetTransfer) return 'assetTransfer'
   if (tableId === APPROVAL_TABLE_IDS.transport) return 'transport'
   if (tableId === APPROVAL_TABLE_IDS.transferOrder) return 'transferOrder'
+  if (tableId === APPROVAL_TABLE_IDS.workTicket) return 'workTickets'
   if (tableId === APPROVAL_TABLE_IDS.fuel) return 'fuelRequest'
   if (doc.includes('imprest surrender')) return 'imprestSurrender'
   if (doc.includes('imprest')) return 'imprest'
@@ -111,7 +117,9 @@ export function resolveApprovalModuleFromTableId(
   if (doc.includes('inter bank') || doc.includes('replenishment')) return 'pettyCashReplenishment'
   if (doc.includes('salary advance')) return 'salaryAdvance'
   if (doc.includes('gate pass')) return 'gatePass'
+  if (doc.includes('asset transfer')) return 'assetTransfer'
   if (doc.includes('transfer order')) return 'transferOrder'
+  if (doc.includes('work ticket') || doc.includes('flight booking')) return 'workTickets'
   if (doc.includes('fuel')) return 'fuelRequest'
   if (doc.includes('training')) return 'training'
   if (doc.includes('transport')) return 'transport'

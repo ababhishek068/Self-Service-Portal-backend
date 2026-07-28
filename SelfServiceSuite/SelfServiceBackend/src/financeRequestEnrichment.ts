@@ -127,6 +127,48 @@ export function enrichFinanceHeaderRow(
   ])
   const linesTotal = sumLineAmounts(lines)
   const totalNetAmount = headerAmount > 0 ? headerAmount : linesTotal
+  const travelDate = text(row, [
+    'TravelDate',
+    'Travel_Date',
+    'TravelStartDate',
+    'Travel_Start_Date',
+    'StartDate',
+  ])
+  const returnDate = text(row, ['ReturnDate', 'Return_Date', 'TravelEndDate', 'Travel_End_Date'])
+  const durationDate = text(
+    row,
+    ['DurationDate', 'Duration_Date'],
+    travelDate && returnDate ? `${travelDate} — ${returnDate}` : travelDate || returnDate,
+  )
+  const travelDestination = text(
+    row,
+    ['TravelDestination', 'Travel_Destination', 'Destination', 'DestinationCode'],
+    text((lines[0] ?? {}) as ODataRecord, [
+      'destination',
+      'Destination',
+      'DestinationCode',
+      'Destination_Code',
+    ]),
+  )
+  const directRemainingText = text(row, [
+    'RemainingUnsettledAmount',
+    'RemainingNotSettledAmount',
+    'OutstandingBalance',
+    'Balance',
+    'BalanceLessThisEntry',
+  ])
+  const settledAmount = number(row, [
+    'SettledAmount',
+    'SurrenderedAmount',
+    'AmountSurrendered',
+    'ActualSpent',
+  ])
+  const remainingUnsettled =
+    directRemainingText !== ''
+      ? Number(directRemainingText)
+      : totalNetAmount > 0 && settledAmount > 0
+        ? Math.max(0, totalNetAmount - settledAmount)
+        : 0
 
   const enriched: ODataRecord = { ...row }
   if (departmentCode) {
@@ -144,6 +186,13 @@ export function enrichFinanceHeaderRow(
     enriched.CustomerNo = employeeAccountNo
   }
   if (totalNetAmount > 0) enriched.TotalNetAmount = totalNetAmount
+  if (travelDate) enriched.TravelDate = travelDate
+  if (returnDate) enriched.ReturnDate = returnDate
+  if (durationDate) enriched.DurationDate = durationDate
+  if (travelDestination) enriched.TravelDestination = travelDestination
+  if (Number.isFinite(remainingUnsettled) && (directRemainingText !== '' || remainingUnsettled > 0)) {
+    enriched.RemainingUnsettledAmount = remainingUnsettled
+  }
 
   return enriched
 }

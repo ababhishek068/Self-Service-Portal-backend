@@ -3,6 +3,30 @@ import { execFile } from 'node:child_process'
 import { completeBcCall, failBcCall, startBcCall } from './requestLogger.js'
 
 export type ODataRecord = Record<string, unknown>
+export type SoapEndpoint = {
+  url: string
+  namespace: string
+}
+
+/** Standard Microsoft Dynamics SOAP namespace for a published codeunit service. */
+export function codeunitSoapNamespace(serviceName: string) {
+  return `urn:microsoft-dynamics-schemas/codeunit/${serviceName.trim()}`
+}
+
+/**
+ * Replace only the published codeunit service at the end of a SOAP URL.
+ * URL handles trailing slashes, escaped company names, query strings and tenants safely.
+ */
+export function deriveCodeunitSoapUrl(baseUrl: string, serviceName: string) {
+  const url = new URL(baseUrl)
+  const pathParts = url.pathname.split('/').filter(Boolean)
+  if (pathParts.length === 0) {
+    throw new Error(`Cannot derive a Business Central codeunit URL from ${baseUrl}`)
+  }
+  pathParts[pathParts.length - 1] = serviceName.trim()
+  url.pathname = `/${pathParts.join('/')}`
+  return url.toString()
+}
 
 function authHeaders(): Record<string, string> {
   if (config.BC_AUTH_MODE !== 'basic') return {}
@@ -407,7 +431,11 @@ function escapeXml(value: unknown) {
     .replaceAll("'", '&apos;')
 }
 
-function soapEnvelope(methodName: string, params: Record<string, unknown>) {
+function soapEnvelope(
+  methodName: string,
+  params: Record<string, unknown>,
+  namespace = config.BC_SOAP_NAMESPACE,
+) {
   const body = Object.entries(params)
     .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
     .join('')
@@ -415,7 +443,7 @@ function soapEnvelope(methodName: string, params: Record<string, unknown>) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
-    <${methodName} xmlns="${config.BC_SOAP_NAMESPACE}">
+    <${methodName} xmlns="${namespace}">
       ${body}
     </${methodName}>
   </soap:Body>
@@ -483,19 +511,26 @@ function soapFaultError(status: number, xml: string) {
   })
 }
 
-export async function callSoapMethod(methodName: string, params: Record<string, unknown>) {
-  const body = soapEnvelope(methodName, params)
+export async function callSoapMethod(
+  methodName: string,
+  params: Record<string, unknown>,
+  endpoint: SoapEndpoint = {
+    url: config.BC_SOAP_CODEUNIT_URL,
+    namespace: config.BC_SOAP_NAMESPACE,
+  },
+) {
+  const body = soapEnvelope(methodName, params, endpoint.namespace)
   const headers = {
     Accept: 'text/xml',
     'Content-Type': 'text/xml; charset=utf-8',
-    SOAPAction: `${config.BC_SOAP_NAMESPACE}:${methodName}`,
+    SOAPAction: `${endpoint.namespace}:${methodName}`,
   }
 
   const call = startBcCall({
     protocol: 'SOAP',
     method: 'POST',
     operation: methodName,
-    target: logTarget(config.BC_SOAP_CODEUNIT_URL),
+    target: logTarget(endpoint.url),
     metadata: `paramKeys=${Object.keys(params).sort().join(',') || '-'}`,
   })
   let statusCode: number | undefined
@@ -504,7 +539,7 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
     if (config.BC_AUTH_MODE === 'ntlm') {
       const response = await requestWithCurlNtlm({
         method: 'POST',
-        url: config.BC_SOAP_CODEUNIT_URL,
+        url: endpoint.url,
         headers,
         body,
       })
@@ -519,7 +554,7 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
       }
     }
 
-    const response = await fetch(config.BC_SOAP_CODEUNIT_URL, {
+    const response = await fetch(endpoint.url, {
       method: 'POST',
       headers: {
         ...headers,

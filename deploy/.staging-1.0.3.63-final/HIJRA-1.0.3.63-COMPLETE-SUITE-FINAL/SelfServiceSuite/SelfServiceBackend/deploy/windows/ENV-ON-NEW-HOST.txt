@@ -1,0 +1,38 @@
+SELF SERVICE BACKEND — .env ON HIJRA UAT WINDOWS HOST
+=====================================================
+
+This package is HIJRA Bank only. Edit SelfServiceBackend\.env if BC endpoints change.
+
+ALWAYS SET ON EVERY NEW HOST
+----------------------------
+  CORS_ORIGIN=http://10.30.4.23:4000
+
+Also in SelfServicePortal\server\.env:
+  CORS_ORIGINS=http://10.30.4.23:4000
+
+DELETE from .env if present (invalid — copied from Laravel app.php):
+  cuStaffPortal => ...
+  odataBaseUrl => ...
+  soapPageBaseUrl => ...
+
+HIJRA UAT — Business Central (10.30.7.14)
+-----------------------------------------
+  Test-NetConnection 10.30.7.14 -Port 2447
+  Test-NetConnection 10.30.7.14 -Port 2448
+
+  BC_ODATA_BASE_URL=http://10.30.7.14:2448/BC240/ODataV4/Company('HIJRA%20BANK')/
+  BC_SOAP_CODEUNIT_URL=http://10.30.7.14:2447/BC240/WS/HIJRA%20BANK/Codeunit/CuStaffPortal
+  BC_SOAP_PAGE_BASE_URL=http://10.30.7.14:2447/BC240/ODataV4/Company('HIJRA%20BANK')/
+  BC_SOAP_NAMESPACE=urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal
+
+  BC_AUTH_MODE=basic
+  BC_NAV_USER=Admin
+  BC_NAV_PASSWORD=...
+
+  Bundled .env: SelfServiceBackend\.env
+  Template (IP): deploy\windows\host.env.hijra-uat-ip.example
+  Template (hostname erp-app-uat): deploy\windows\host.env.hijra-uat.example
+
+Restart after editing:
+  SelfServicePortal\deploy\windows\stop-suite.ps1
+  SelfServicePortal\deploy\windows\start-suite.bat

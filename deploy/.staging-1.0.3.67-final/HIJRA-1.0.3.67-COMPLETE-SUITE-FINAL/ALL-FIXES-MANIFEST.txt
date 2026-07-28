@@ -1,0 +1,46 @@
+HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v1.0.3.67)
+=====================================================
+Deploy ONCE. Felix publishes BC-AL ONCE. Then portal zip ONCE.
+
+HR — SSP HR HB Update Jul 26 2026 (July 27 failures)
+----------------------------------------------------
+  Leave: canceled leave no longer counts as pending; modify application on Open/Draft
+  Leave: balance form matches statement (cancelled excluded from pending count)
+  Leave statement: balance uses same resolver as request form
+  HOD attendance: department staff roster (code + name matching)
+  HOD staff-on-leave: scoped to supervisor department only
+  Profile: job details (department, division, job title, grade)
+  Profile: important dates (years of service, last promotion, retirement)
+  Profile: next of kin name from BC OData
+  HR letters: experience letter self-service enabled
+  Medical claim types: Govt / Non-Govt / Online (Outline) aligned with BC
+  Training: department dropdown from BC; multiple trainings per request
+  Training: application list columns (period, provider, cost)
+
+FINANCE — portal issues.docx (Jul 28)
+---------------------------------------
+  Imprest: daily rate displays on line list (OData map + BC Validate No of Days)
+  Imprest: travel destination BC dropdown; duration date on header + detail
+  Staff claims: amount to refund on medical/OTHER; line list shows refund
+  Petty cash request: sector / division / department auto-filled from employee profile
+
+FACILITY — SSP Facility HB July 21 2026 (39 items)
+--------------------------------------------------
+  Purchase spec + file attachments; Store receive; Fuel detail fields
+  Transport Field Trip; Maintenance template + technician assign
+  Work ticket flight booking; Asset Transfer (separate from Transfer Order)
+  Gate pass source refs; Procurement plan; Salary advance amounts
+  Emergency staff loan salary hint; Imprest surrender amounts
+
+BC AL REQUIRED (Felix — before portal deploy)
+----------------------------------------------
+  StaffPortalCodeunit — imprest daily rate line save, claim edit medical/refund,
+                        purchase spec, imprest surrender Validate, training, leave
+  CuPortalFacility, CuPortalAssetTransfer, CuPortalAttachments
+  QyAssetTransfer, QyPortalFuelMaintExtra, QyWorkTicketFlight, procurement/gate pass queries
+
+VERIFY AFTER DEPLOY
+-------------------
+  http://10.30.4.23:4000/api/health → v1.0.3.67
+  Profile → Portal build shows "FULL ALL MODULES"
+  Run VERIFY-DEPLOY.bat — all [OK]

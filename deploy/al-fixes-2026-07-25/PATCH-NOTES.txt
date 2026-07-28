@@ -1,0 +1,60 @@
+PATCH 1 — FnTrainingRequest (StaffPortalCodeunit.Codeunit.al)
+=============================================================
+
+FIND the FnTrainingRequest procedure. After the training header record is
+created/opened and BEFORE Modify(), ensure Employee No. is stamped:
+
+    // Portal list filters QyTrainingApplicationHeader by EmployeeNo — must be set on header.
+    if TrainingHeader."Employee No." = '' then
+        TrainingHeader."Employee No." := EmployeeNo;
+
+Use the same EmployeeNo variable already passed into the SOAP call from the portal
+(employeeNo in the portal payload maps to this parameter).
+
+If your code only adds a participant line but never sets the header field, this
+one assignment fixes:
+  - draft missing from portal list
+  - detail/approval load issues for new documents
+
+
+PATCH 2 — QyHREmployee query (employee OData used by portal profile)
+====================================================================
+
+In the QyHREmployee query definition:
+
+REMOVE or comment out the ambiguous column:
+    EmployeesType
+
+KEEP / ADD the readable field:
+    EmployeeContractType
+
+The portal backend (v1.0.3.44) maps numeric option indices to labels, but the
+preferred source is EmployeeContractType text from BC.
+
+
+PATCH 3 — ImprestSurrenderHeader (StaffPortalCodeunit.Codeunit.al)
+==================================================================
+
+FIND the ImprestSurrenderHeader SOAP procedure. After the surrender header is
+created/updated and imprestIssueDocNo is known, BEFORE returning docNo:
+
+    if imprestIssueDocNo <> '' then begin
+        if SurrenderHeader."Imprest Issue Doc. No" <> imprestIssueDocNo then
+            SurrenderHeader."Imprest Issue Doc. No" := imprestIssueDocNo;
+        SurrenderHeader.Validate("Imprest Issue Doc. No");
+        SurrenderHeader.Modify(true);
+    end;
+
+See ImprestSurrenderHeader-SNIPPET.al for comments.
+
+This fixes:
+  - Imprest Amount / Balance / Cash Surrender showing ETB 0 on portal detail
+  - Missing surrender lines after portal create (lines are copied in OnValidate)
+
+Also confirm QyImprestSurrenderHeader OData query exposes:
+  Amount, Balance, Balance_Less_this_Entry, Cash_Surrender_Amt, Imprest_Issue_Doc_No
+
+
+OPTIONAL — bump app.json
+========================
+  "version": "1.0.2.345"

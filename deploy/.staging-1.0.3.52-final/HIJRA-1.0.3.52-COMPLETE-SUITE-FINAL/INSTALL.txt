@@ -1,0 +1,70 @@
+HIJRA 1.0.3.52 COMPLETE SUITE FINAL — ONE-TIME DEPLOY
+=====================================================
+Server: 10.30.4.23 (UAT) — adjust paths if different.
+
+BEFORE YOU START
+----------------
+1. Felix must publish BC AL files in BC-AL/ (see BC-ADMIN-STEPS.txt)
+   Critical leave files:
+     - HRLeaveApplication.Table.al
+     - StaffPortalCodeunit.Codeunit.al
+     - PortalEmployeeDataMgt.Codeunit.al
+     - HrLeaveAllocationPortal.Query.al  (query ID 52133, NOT 50095)
+
+2. Have your EXISTING .env ready — you MUST keep it.
+
+DEPLOY STEPS (WINDOWS)
+----------------------
+1. STOP the running portal
+   - Close the CMD window running node, OR stop the scheduled task
+
+2. BACKUP current install
+   Copy C:\TA\SelfServiceSuite  →  C:\TA\SelfServiceSuite-backup-2026-07-26
+
+3. EXTRACT this zip to a temp folder (e.g. C:\Temp\HIJRA-1.0.3.52)
+
+4. COPY files (overwrite dist and public only if full replace):
+   Option A — Full replace (recommended):
+     Copy SelfServiceSuite\  →  C:\TA\SelfServiceSuite\
+     Then restore your .env:
+     Copy C:\TA\SelfServiceSuite-backup-2026-07-26\SelfServiceBackend\.env
+           → C:\TA\SelfServiceSuite\SelfServiceBackend\.env
+
+   Option B — Minimal patch:
+     Copy SelfServiceBackend\dist\   →  ...\SelfServiceBackend\dist\
+     Copy SelfServiceBackend\public\ →  ...\SelfServiceBackend\public\
+
+5. START portal
+   Run START-HIJRA-PORTAL.bat from the extracted folder
+   OR from C:\TA\SelfServiceSuite if you copied START-HIJRA-PORTAL.bat there
+
+6. VERIFY
+   Run VERIFY-DEPLOY.bat — all lines should show [OK]
+   Browser: http://10.30.4.23:4000/api/health
+     → must contain "1.0.3.52"
+   Browser: Ctrl+F5 hard refresh on login page
+
+7. TEST LEAVE
+   a) Dashboard → Annual leave balance should NOT be 0 (if BC has balance)
+   b) HR → Leave Requisition → select leave type → balance matches BC
+   c) Create leave with Start Date, Reliever, Reason
+   d) Row appears in BC HR Leave Applications (open list)
+   e) Request Approval separately
+
+TROUBLESHOOTING
+---------------
+Network Error on login:
+  F12 → Console → paste:
+    localStorage.setItem('ssp.apiBaseUrl', window.location.origin)
+  Then Ctrl+F5. If still failing, backend is not running — check CMD window.
+
+Leave balance wrong:
+  BC AL not published — give BC-AL/ folder to Felix.
+
+.env must contain (examples — use YOUR values):
+  PORT=4000
+  HOST=0.0.0.0
+  BC_ODATA_BASE_URL=http://10.30.7.14:2448/BC240/ODataV4/Company('HIJRA%20BANK')/
+  BC_SOAP_CODEUNIT_URL=http://10.30.7.14:2448/BC240/WS/HIJRA%20BANK/Codeunit/CuStaffPortal
+
+BUILD_ID=hijra-portal-1.0.3.52-FINAL-2026-07-26

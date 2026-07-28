@@ -13,7 +13,9 @@ export const requestServices = {
   transport: 'QyTransportRequisition',
   maintenance: 'QyFuelMaintenanceRequests',
   transferOrder: 'QyTransferOrderHeader',
+  workTickets: 'QyWorkTickets',
   gatePass: 'QyGatePass',
+  assetTransfer: 'QyAssetTransfer',
   leave: 'QyHRLeaveApplications',
   overtime: 'QyHRLeaveApplications',
   travel: 'QyTransportRequisition',
@@ -35,7 +37,9 @@ const moduleLabels: Record<PortalModuleKey, string> = {
   transport: 'Transport Requisition',
   maintenance: 'Maintenance Request',
   transferOrder: 'Transfer Orders',
+  workTickets: 'Work Tickets / Flight Booking',
   gatePass: 'Gate Pass',
+  assetTransfer: 'Asset Transfer',
   leave: 'Leave Requisition',
   overtime: 'Overtime Request',
   travel: 'Travel Request',
@@ -223,6 +227,8 @@ const OPEN_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
   'fuelRequest',
   'maintenance',
   'gatePass',
+  'assetTransfer',
+  'workTickets',
 ])
 
 function approvalEntryStatus(entry: ODataRecord) {
@@ -441,6 +447,16 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'Application_Code',
     'No',
     'ApplicationNo',
+  ] : requestType === 'transport' ? [
+    // QyTransportRequisition also exposes a generic `No` that contains the
+    // employee/application number (for example A00052). The transport document
+    // key is Transport_Requisition_No (for example TR0023), and must win in both
+    // list labels and the View route.
+    'Transport_Requisition_No',
+    'TransportRequisitionNo',
+    'RequisitionNo',
+    'Requisition_No',
+    'No',
   ] : [
     'No',
     'ApplicationCode',
@@ -453,9 +469,17 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'GatePassNo',
     'InterBankTransferNo',
   ])
-  const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'UserID'])
-  const title = text(row, ['Purpose', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
-  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
+  const makerEmployeeNo = text(row, [
+    'EmployeeNo',
+    'StaffNo',
+    'RequesterID',
+    'Requested_By',
+    'UserID',
+    'RaisedBy',
+    'Raised_By',
+  ])
+  const title = text(row, ['Purpose', 'Purpose_of_Trip', 'PurposeOfTrip', 'Description', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
+  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date_of_Request', 'DateOfRequest', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {
     id: `${requestType}-${requestNo || crypto.randomUUID()}`,
@@ -464,9 +488,22 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     title,
     status: statusFromBc(documentStatusFromBc(row, requestType)),
     makerEmployeeNo,
-    makerName: text(row, ['EmployeeName', 'StaffName', 'RequesterName'], makerEmployeeNo),
-    departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code', 'DistrictDepartmentCode']),
-    departmentName: text(row, ['DepartmentName', 'Department_Name', 'DistrictDepartmentName']),
+    makerName: text(row, ['EmployeeName', 'Employee_Name', 'StaffName', 'RequesterName'], makerEmployeeNo),
+    departmentCode: text(row, [
+      'Department',
+      'DepartmentCode',
+      'Department_Code',
+      'GlobalDimension1Code',
+      'Global_Dimension_1_Code',
+      'DistrictDepartmentCode',
+      'District_Department_Code',
+    ]),
+    departmentName: text(row, [
+      'DepartmentName',
+      'Department_Name',
+      'DistrictDepartmentName',
+      'District_Department_Name',
+    ]),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
     amount:
       requestType === 'salaryAdvance'

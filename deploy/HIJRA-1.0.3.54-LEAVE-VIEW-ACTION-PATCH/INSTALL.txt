@@ -1,0 +1,8 @@
+HIJRA 1.0.3.54 — LEAVE VIEW + APPROVAL FIX
+==========================================
+- View button back on Leave Statement and Leave Requisition lists
+- Request Approval button no longer hidden by placeholder workflow step
+- Includes 1.0.3.53 approval workflow display fix
+
+Copy dist\ and public\ to SelfServiceBackend. Keep .env. Ctrl+F5.
+/api/health → 1.0.3.54

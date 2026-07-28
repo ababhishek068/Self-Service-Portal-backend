@@ -1,0 +1,16 @@
+HIJRA PORTAL UPDATE 1.0.3.44 (2026-07-25 HR + Finance)
+========================================================
+
+HR fixes:
+- Profile: job grade, employment type, important dates (merged BC OData)
+- Leave Statement: per-type balance, summary card, Print button
+- Training list: department, period, provider, cost columns
+- Employee transfer: type of transfer field; exit interview has no transfer type
+- HR Service Letters + Employee Exit: ERP routes active (needs BC codeunits)
+
+Finance fixes: imprest dates/rates, surrender rejection comments, staff-claim approvals
+
+Deploy: copy dist/* and public/* to server SelfServiceBackend/
+Verify: index-DEi2dTkD.js and PORTAL_API_BUILD contains "HR: profile merge"
+
+BUILD_ID=hijra-portal-1.0.3.44-hr-finance-2026-07-25

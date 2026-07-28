@@ -1,0 +1,115 @@
+================================================================================
+HIJRA SSP — FELIX ONE-TIME BC PUBLISH CHECKLIST (27 Jul 2026)
+Do this BEFORE the portal zip is deployed on UAT (10.30.4.23).
+================================================================================
+
+ORDER OF WORK
+-------------
+1. Merge ALL .al files from this folder into the HIJRA portal BC extension project
+   (same extension app that already has StaffPortalCodeunit / CuStaffPortal).
+2. AL: Download Symbols → AL: Package → upload the new .app to Extension Management.
+3. Publish the web services below (names must match EXACTLY).
+4. Tell TA to deploy HIJRA-1.0.3.67-COMPLETE-SUITE-FINAL.zip (ONE zip — HR + Finance + Facility).
+
+================================================================================
+A. ADD / UPDATE THESE AL OBJECTS IN THE EXTENSION
+================================================================================
+
+LEAVE + EMPLOYEE (already in production path — keep if not yet merged)
+  StaffPortalCodeunit.Codeunit.al          — CuStaffPortal (LV00127 + purchase spec)
+  HRLeaveApplication.Table.al
+  PortalEmployeeDataMgt.Codeunit.al        — CuPortalEmployeeData
+  HrLeaveAllocationPortal.Query.al         — query 52133
+
+FACILITY — TABLES (new)
+  52122  PortalWorkTicketFlight.Table.al
+  52123  PortalFuelMaintExtra.Table.al
+  52124  PortalProcurementPlanHeader.Table.al
+  52125  PortalProcurementPlanLine.Table.al
+
+FACILITY — CODEUNITS (new)
+  52106  PortalAttachmentsMgt.Codeunit.al
+  52120  PortalAssetTransferMgt.Codeunit.al
+  52122  PortalFacilityMgt.Codeunit.al
+
+FACILITY — QUERIES (new)
+  50126  QyGatePassTransferShipments.Query.al
+  50127  QyGatePassAssetTransfers.Query.al
+  52121  QyAssetTransfer.Query.al
+  52122  QyWorkTicketFlight.Query.al
+  52123  QyPortalFuelMaintExtra.Query.al
+  52124  QyProcurementPlanHeader.Query.al
+  52125  QyProcurementPlanLines.Query.al
+
+If any object ID is already taken, renumber the object — the portal only depends
+on the published SERVICE NAMES in section B.
+
+================================================================================
+B. PUBLISH THESE WEB SERVICES (Web Services page)
+================================================================================
+
+SOAP — Object Type = Codeunit, put each on the existing HIJRA OData company URL
+  CuStaffPortal          → Staff Portal Codeunit (existing — must include purchase
+                           specification + requestingDepartment params)
+  CuPortalEmployeeData   → Portal Employee Data Mgt. (existing)
+  CuPortalFacility       → Portal Facility Mgt. (52122)          *** NEW ***
+  CuPortalAssetTransfer  → Portal Asset Transfer Mgt. (52120)      *** NEW ***
+  CuPortalAttachments    → Portal Attachments Mgt. (52106)         *** NEW ***
+
+OData — Object Type = Query
+  QyAssetTransfer              → query 52121                         *** NEW ***
+  QyWorkTicketFlight           → query 52122                         *** NEW ***
+  QyPortalFuelMaintExtra       → query 52123                         *** NEW ***
+  QyProcurementPlanHeader      → query 52124                         *** NEW ***
+  QyProcurementPlanLines       → query 52125                         *** NEW ***
+  QyGatePassTransferShipments  → query 50126                         *** NEW ***
+  QyGatePassAssetTransfers     → query 50127                         *** NEW ***
+  HrLeaveAllocationPortal      → query 52133 (if not already live)
+
+================================================================================
+C. WHAT EACH PUBLISH FIXES (UAT spreadsheet)
+================================================================================
+
+CuStaffPortal (updated)     Purchase spec text on lines; PR approver label
+CuPortalAttachments         Purchase specification FILE attachments (R4)
+CuPortalFacility            Maintenance template R35-R44; Work ticket flight R45-R48;
+                            Procurement plan R59-R61
+CuPortalAssetTransfer       Asset Transfer create/approve/post R49-R54
+QyAssetTransfer             Asset Transfer list/detail in portal
+QyPortalFuelMaintExtra      Maintenance technician, odometer, FA receipt readback
+QyWorkTicketFlight          Flight booking fields on work tickets
+QyProcurementPlan*          Procurement budget template
+QyGatePassTransfer*         Gate pass dropdown for transfer orders (R55-R58)
+QyGatePassAssetTransfers    Gate pass dropdown for asset transfers (R55-R58)
+
+================================================================================
+D. QUICK BC SMOKE TEST (after publish, before portal deploy)
+================================================================================
+
+Open in browser (replace company URL if needed):
+
+1) QyAssetTransfer — should return JSON (may be empty array):
+   .../ODataV4/Company('HIJRA%20BANK')/QyAssetTransfer?$top=1
+
+2) QyPortalFuelMaintExtra — should NOT 404:
+   .../ODataV4/Company('HIJRA%20BANK')/QyPortalFuelMaintExtra?$top=1
+
+3) CuPortalFacility WSDL should load:
+   .../WS/HIJRA%20BANK/Codeunit/CuPortalFacility
+
+If any of the above 404, the web service name or .app upload is wrong.
+
+================================================================================
+E. FIELD-NAME NOTES (only if compiler complains)
+================================================================================
+
+- QyGatePassTransferShipments uses "Gate Pass No." on Transfer Shipment Header.
+  Add the field to the base app if missing, or adjust the query source name.
+- QyGatePassAssetTransfers / QyAssetTransfer target table 50278 "Asset Transfer".
+- Portal Asset Transfer Mgt. uses RecordRef field lookup — align field names in
+  ApplyTransferFields() if a SOAP call succeeds but fields stay blank.
+- SendForApproval / PostTransfer in Portal Asset Transfer Mgt. are minimal stubs;
+  paste card 50584 action code if the bank workflow needs the full BC routine.
+
+No portal redeploy is needed after publishing — v1.0.3.64 already calls these.
+================================================================================

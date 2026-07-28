@@ -9,14 +9,25 @@ import {
   resolveAttendanceIdentifier,
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
-import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
-import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
 import {
+  callSoapMethod,
+  codeunitSoapNamespace,
+  deriveCodeunitSoapUrl,
+  fetchOData,
+  fetchODataCount,
+  odataString,
+  type ODataRecord,
+} from './bcClient.js'
+import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
+import { config } from './config.js'
+import {
+  fetchEmployeeRecordFast,
   fetchEmployeeSalaryBaseFast,
   probeEmployeeSalarySources,
   resolveEmployeeJobTitleByNo,
 } from './employeeProfile.js'
 import {
+  APPROVAL_TABLE_IDS,
   approvalModuleFromEntry,
   approvalTableFilter,
   approvalTableIdsFor,
@@ -55,6 +66,8 @@ import {
   listPortalModuleRows,
   listPortalModuleLines,
   portalApprovalEntryFilter,
+  postPortalAssetTransfer,
+  getPortalPettyCashDepartmentLimit,
   fetchPortalApprovalEntries,
   savePortalModuleLine,
   setPortalModuleLines,
@@ -66,6 +79,21 @@ import {
   hospitalCategoryCode,
   resolveAttachmentDocNo,
 } from './staffModules.js'
+import {
+  createEmployeeExitRequest,
+  listEmployeeExitRequests,
+  requestEmployeeExitCancellation,
+  withdrawEmployeeExitRequest,
+  EMPLOYEE_EXIT_REQUEST_TYPES,
+  type EmployeeExitRequestType,
+} from './employeeExit.js'
+import {
+  cancelHrServiceLetterRequest,
+  createHrServiceLetterRequest,
+  listHrServiceLetterRequests,
+  REQUESTABLE_HR_SERVICE_LETTER_TYPES,
+  type RequestableHrServiceLetterType,
+} from './hrServiceLetters.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
   return async (
@@ -105,13 +133,46 @@ function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
 }
 
+const FACILITY_SERVICE_NAME = 'CuPortalFacility'
+const facilitySoapEndpoint = {
+  url: deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, FACILITY_SERVICE_NAME),
+  namespace: codeunitSoapNamespace(FACILITY_SERVICE_NAME),
+}
+
+const TRAINING_SERVICE_NAME = 'CuPortalTraining'
+const trainingSoapEndpoint = {
+  url: deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, TRAINING_SERVICE_NAME),
+  namespace: codeunitSoapNamespace(TRAINING_SERVICE_NAME),
+}
+
+function workTicketFlight(row: ODataRecord | undefined) {
+  return {
+    bookingType: text(row ?? {}, ['BookingType'], 'Flight'),
+    travelerEmployeeNo: text(row ?? {}, ['TravelerEmployeeNo']),
+    travelerName: text(row ?? {}, ['TravelerName']),
+    flightFrom: text(row ?? {}, ['FlightFrom']),
+    flightTo: text(row ?? {}, ['FlightTo']),
+    departureDate: text(row ?? {}, ['DepartureDate']),
+    returnDate: text(row ?? {}, ['ReturnDate']),
+    ticketClass: text(row ?? {}, ['TicketClass']),
+    airlinePreference: text(row ?? {}, ['AirlinePreference']),
+    justification: text(row ?? {}, ['BookingJustification']),
+    bookingConfirmationNo: text(row ?? {}, ['BookingConfirmationNo']),
+    bookingConfirmed: ['true', 'yes', '1'].includes(
+      text(row ?? {}, ['BookingConfirmed']).trim().toLowerCase(),
+    ),
+    bookingConfirmedDate: text(row ?? {}, ['BookingConfirmedDate']),
+  }
+}
+
 /**
  * Deploy-tracking stamp. Bumped on every build of this file so the running
  * version is visible in the portal (Profile page) and via GET /api/portal-build.
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v7 — 2026-07-13 01:55 (gate pass source-document dropdowns)'
+export const PORTAL_API_BUILD =
+  'v1.0.3.79 — 2026-07-28 (all existing modules preserved + universal list search + BC workflow fixes)'
 
 interface LookupSpec {
   service: string
@@ -209,11 +270,21 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     service: 'QyVehicleHeader',
     valueKeys: ['RegistrationNo', 'Registration_No'],
     labelKeys: ['Description', 'RegistrationNo', 'Registration_No'],
+    meta: {
+      currentReading: ['CurrentReading', 'Current_Reading', 'CurrentMiliege'],
+      fuelRating: ['FuelRating', 'Fuel_Rating'],
+      nextServiceKm: ['NextServiceKilometers', 'Next_Service_Kilometers'],
+    },
   },
   'fuel-cards': {
     service: 'QyFuelCardSetups',
     valueKeys: ['CardNo', 'Card_No'],
     labelKeys: ['CardNo', 'Card_No'],
+    meta: {
+      vehicleNo: ['VehicleAssigned', 'Vehicle_Assigned'],
+      vendorNo: ['Vendor', 'VendorNo', 'Vendor_No'],
+      vendorName: ['VendorName', 'Vendor_Name'],
+    },
   },
   vendors: {
     service: 'QyVendorsList',
@@ -300,6 +371,12 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     labelKeys: ['AssetDescription'],
     filter: `Status eq 'Approved'`,
   },
+  'gate-pass-maintenance': {
+    service: 'QyFuelMaintenanceRequests',
+    valueKeys: ['RequisitionNo', 'Requisition_No'],
+    labelKeys: ['Description', 'VehicleRegNo', 'Vehicle_Reg_No'],
+    filter: `Status eq 'Approved' and Type eq 'Maintenance'`,
+  },
 }
 
 function lookupLabel(row: ODataRecord, spec: LookupSpec, value: string) {
@@ -325,9 +402,11 @@ const frontendModules = [
   'transport',
   'maintenance',
   'transferOrder',
+  'workTickets',
   'training',
   'salaryAdvance',
   'gatePass',
+  'assetTransfer',
   'leave',
 ] as const satisfies readonly SupportedFrontendModule[]
 
@@ -660,6 +739,15 @@ function lineIdentity(row: ODataRecord, index: number) {
 
 function mapImprestLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
+  const amount = number(row, ['amount', 'Amount'])
+  const noOfDays = number(row, ['noOfDays', 'NoOfDays', 'No_of_Days'])
+  const bcDailyRate = number(row, [
+    'dailyRate',
+    'DailyRate',
+    'DailyRateAmount',
+    'Daily_Rate_Amount',
+    'Daily_Rate_Amount_',
+  ])
   return {
     id: lineNo,
     lineNo,
@@ -668,8 +756,9 @@ function mapImprestLine(row: ODataRecord, index: number) {
     dutyArea: text(row, ['dutyArea', 'DutyArea', 'Duty_Area']),
     accountNo: text(row, ['accountNo', 'AccountNo', 'Account_No']),
     accountName: text(row, ['accountName', 'AccountName', 'Account_Name']),
-    amount: number(row, ['amount', 'Amount']),
-    noOfDays: number(row, ['noOfDays', 'NoOfDays', 'No_of_Days']),
+    dailyRate: bcDailyRate > 0 ? bcDailyRate : noOfDays > 0 ? amount / noOfDays : 0,
+    amount,
+    noOfDays,
   }
 }
 
@@ -755,19 +844,41 @@ function mapPurchaseLine(row: ODataRecord, index: number) {
   }
 }
 
+export function transportRequestTypeLabel(value: unknown) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === '0' || normalized === 'city' || normalized === 'city transport') return 'City'
+  if (
+    normalized === '1' ||
+    normalized === 'field' ||
+    normalized === 'field trip' ||
+    normalized === 'field transport'
+  ) {
+    return 'Field Trip'
+  }
+  return String(value ?? '').trim()
+}
+
 function mapTransportPassenger(row: ODataRecord, index: number) {
   const recId = text(row, ['RecId', 'recId', 'SystemId', 'SystemID'], lineIdentity(row, index))
   const passengerType = text(row, ['PassengerType', 'passengerType', 'Type'])
+  const passengerName = text(row, ['PassengerName', 'Passenger_Names', 'Name'])
+  const passengerOrganization = text(row, [
+    'PassengerOrganization',
+    'Passenger_Organization',
+    'Position',
+  ])
   return {
     id: recId,
     lineNo: recId,
     recId,
     passengerType,
     employeeNo: text(row, ['EmployeeNo', 'employeeNo', 'No']),
+    passengerName,
+    passengerOrganization,
     externalPassName: passengerType.toLowerCase() === 'external'
-      ? text(row, ['PassengerName', 'Passenger_Names', 'Name'])
+      ? passengerName
       : '',
-    externalPassOrganization: text(row, ['PassengerOrganization', 'Passenger_Organization', 'Position']),
+    externalPassOrganization: passengerOrganization,
   }
 }
 
@@ -790,6 +901,22 @@ export function mapModuleLines(
   }
   if (module === 'gatePass') {
     const source = gatePassSourceFromRow(header)
+    if (source === 'maintenance') {
+      return rows.map((row, index) => ({
+        id: lineIdentity(row, index),
+        lineNo: lineIdentity(row, index),
+        itemNo: text(row, [
+          'VehicleRegNo',
+          'Vehicle_Reg_No',
+          'VehicleNo',
+          'FixedAssetNo',
+          'Fixed_Asset_No',
+        ]),
+        description: text(row, ['Description', 'Purpose', 'MaintenanceDescription']),
+        quantity: number(row, ['Quantity', 'QuantityofFuelLitres'], 1),
+        unitOfMeasure: 'Request',
+      }))
+    }
     return source === 'storeIssue'
       ? rows.map(mapStoreLine)
       : rows.map(mapTransferLine)
@@ -798,6 +925,146 @@ export function mapModuleLines(
     return rows.map((row) => mapSalaryAdvanceLine(row, header))
   }
   return rows
+}
+
+const GATE_PASS_EMPLOYEE_NO_FIELDS = [
+  'EmployeeNo',
+  'Employee_No',
+  'StaffNo',
+  'Staff_No',
+  'RequesterID',
+  'Requested_By',
+]
+const GATE_PASS_DEPARTMENT_CODE_FIELDS = [
+  'Department',
+  'DepartmentCode',
+  'Department_Code',
+  'GlobalDimension1Code',
+  'Global_Dimension_1_Code',
+  'DistrictDepartmentCode',
+  'District_Department_Code',
+]
+const GATE_PASS_DEPARTMENT_NAME_FIELDS = [
+  'DistrictDepartmentName',
+  'District_Department_Name',
+  'DepartmentName',
+  'Department_Name',
+]
+const GATE_PASS_SECTOR_CODE_FIELDS = [
+  'Sector',
+  'SectorCode',
+  'Sector_Code',
+  'Branch',
+  'BranchCode',
+  'Branch_Code',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+]
+const GATE_PASS_SECTOR_NAME_FIELDS = [
+  'SectorName',
+  'Sector_Name',
+  'BranchName',
+  'Branch_Name',
+]
+
+/**
+ * QyGatePass does not consistently expose the Department/Sector FlowFields.
+ * Populate the display aliases from the row first, then the gate-pass owner's
+ * employee card. This keeps unscoped Transfer/Asset lists accurate per row.
+ */
+export function enrichGatePassRowDimensions(
+  row: ODataRecord,
+  employeeRecord: ODataRecord | null = null,
+  currentUser?: AuthUser,
+) {
+  const employeeNo = text(row, GATE_PASS_EMPLOYEE_NO_FIELDS)
+  const employeeName = text(row, ['EmployeeName', 'Employee_Name', 'StaffName'])
+  const belongsToCurrentUser =
+    Boolean(currentUser) &&
+    (
+      employeeNo.toLowerCase() === currentUser!.employeeNo.toLowerCase() ||
+      (!employeeNo &&
+        employeeName.trim().toLowerCase() ===
+          (currentUser!.displayName || currentUser!.name).trim().toLowerCase())
+    )
+  const userFallback: ODataRecord | null = belongsToCurrentUser
+    ? {
+        Department: currentUser!.department,
+        DepartmentName: currentUser!.departmentName,
+        BranchCode: currentUser!.branchCode,
+        BranchName: currentUser!.branchName,
+      }
+    : null
+  const employee = employeeRecord ?? userFallback
+
+  const departmentCode = text(
+    row,
+    GATE_PASS_DEPARTMENT_CODE_FIELDS,
+    employee ? text(employee, GATE_PASS_DEPARTMENT_CODE_FIELDS) : '',
+  )
+  const departmentName = text(
+    row,
+    GATE_PASS_DEPARTMENT_NAME_FIELDS,
+    employee
+      ? text(employee, GATE_PASS_DEPARTMENT_NAME_FIELDS, departmentCode)
+      : departmentCode,
+  )
+  const sectorCode = text(
+    row,
+    GATE_PASS_SECTOR_CODE_FIELDS,
+    employee ? text(employee, GATE_PASS_SECTOR_CODE_FIELDS) : '',
+  )
+  const sectorName = text(
+    row,
+    GATE_PASS_SECTOR_NAME_FIELDS,
+    employee ? text(employee, GATE_PASS_SECTOR_NAME_FIELDS, sectorCode) : sectorCode,
+  )
+
+  return {
+    ...row,
+    ...(departmentCode ? { Department: departmentCode, DepartmentCode: departmentCode } : {}),
+    ...(departmentName
+      ? {
+          DepartmentName: departmentName,
+          DistrictDepartmentName: departmentName,
+        }
+      : {}),
+    ...(sectorCode ? { Sector: sectorCode, BranchCode: sectorCode } : {}),
+    ...(sectorName ? { SectorName: sectorName, BranchName: sectorName } : {}),
+  }
+}
+
+async function enrichGatePassRowsWithEmployeeDimensions(
+  rows: ODataRecord[],
+  currentUser: AuthUser,
+) {
+  const recordsByEmployeeNo = new Map<string, Promise<ODataRecord | null>>()
+  const recordFor = (employeeNo: string) => {
+    const key = employeeNo.trim().toLowerCase()
+    if (!key || key === currentUser.employeeNo.trim().toLowerCase()) {
+      return Promise.resolve(null)
+    }
+    const existing = recordsByEmployeeNo.get(key)
+    if (existing) return existing
+    const pending = fetchEmployeeRecordFast(employeeNo).catch(() => null)
+    recordsByEmployeeNo.set(key, pending)
+    return pending
+  }
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const hasDepartment = Boolean(
+        text(row, [...GATE_PASS_DEPARTMENT_NAME_FIELDS, ...GATE_PASS_DEPARTMENT_CODE_FIELDS]),
+      )
+      const hasSector = Boolean(
+        text(row, [...GATE_PASS_SECTOR_NAME_FIELDS, ...GATE_PASS_SECTOR_CODE_FIELDS]),
+      )
+      const employeeNo = text(row, GATE_PASS_EMPLOYEE_NO_FIELDS)
+      const employeeRecord =
+        hasDepartment && hasSector ? null : await recordFor(employeeNo)
+      return enrichGatePassRowDimensions(row, employeeRecord, currentUser)
+    }),
+  )
 }
 
 async function mappedModuleRows(
@@ -838,7 +1105,11 @@ async function mappedModuleRows(
       })
       .filter((row) => true)
   }
-  return rows
+  const displayRows =
+    module === 'gatePass'
+      ? await enrichGatePassRowsWithEmployeeDimensions(rows, authUser)
+      : rows
+  return displayRows
     .map((row) => {
       const mapped = mapRequest(row, module as PortalModuleKey)
       return {
@@ -1128,29 +1399,114 @@ async function requestDetail(
   if (!spec) throw portalError(`${module} is not supported`, 501)
 
   // ESS showHeader / approval viewDocument load by document number only (no owner filter).
-  const row = await getPortalModuleDocument(spec, authUser, no, false)
-  if (!row) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
+  const sourceRow = await getPortalModuleDocument(spec, authUser, no, false)
+  if (!sourceRow) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
+  const row =
+    module === 'gatePass'
+      ? (await enrichGatePassRowsWithEmployeeDimensions([sourceRow], authUser))[0]!
+      : sourceRow
   const attachmentDocNo = resolveAttachmentDocNo(spec, row, no)
   const gatePassBinding = module === 'gatePass' ? gatePassLineBinding(row, no) : null
-  const [lines, approvers, attachments] = await Promise.all([
+  const [lines, approvers, attachments, maintenanceExtras] = await Promise.all([
     listPortalModuleLines(spec, row, no),
     fetchPortalApprovalEntries(spec, no, row),
     spec.headerTableId > 0
       ? fetchDocumentAttachments(attachmentDocNo, spec.headerTableId).catch(() => [] as ODataRecord[])
+      : Promise.resolve([] as ODataRecord[]),
+    module === 'maintenance' || module === 'fuelRequest'
+      ? fetchOData('QyPortalFuelMaintExtra', {
+          $filter: `RequisitionNo eq '${odataString(no)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[])
       : Promise.resolve([] as ODataRecord[]),
   ])
   let headerForMapping: ODataRecord = row
   let mappedLines = mapModuleLines(module, row, Array.isArray(lines) ? lines : [])
   let enrichedSalaryBase = 0
   let payloadRow: ODataRecord = row
+  if (module === 'workTickets') {
+    const flights = (await fetchOData('QyWorkTicketFlight', {
+      $filter: `TicketNo eq '${odataString(no)}'`,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    payloadRow = {
+      ...payloadRow,
+      ...workTicketFlight(Array.isArray(flights) ? flights[0] : undefined),
+    }
+  }
+  if (module === 'training') {
+    const assessmentResult = await callSoapMethod(
+      'GetTrainingAssessment',
+      { applicationNo: no },
+      trainingSoapEndpoint,
+    ).catch(() => ({ returnValue: '{}' }))
+    try {
+      const assessment = JSON.parse(String(assessmentResult.returnValue ?? '{}')) as ODataRecord
+      payloadRow = { ...payloadRow, ...assessment }
+    } catch {
+      // A legacy training header must remain readable even before the companion
+      // assessment web service is installed.
+    }
+  }
+  if (
+    (module === 'maintenance' || module === 'fuelRequest') &&
+    Array.isArray(maintenanceExtras) &&
+    maintenanceExtras[0]
+  ) {
+    payloadRow = { ...payloadRow, ...maintenanceExtras[0] }
+  }
   if (isFinanceDetailModule(module)) {
+    let financeRow = row
+    if (module === 'imprestSurrender') {
+      const sourceNo = text(row, [
+        'ImprestIssueDocNo',
+        'Imprest_Issue_Doc_No',
+        'ImprestNo',
+        'Imprest_No',
+      ])
+      const imprestSpec = findFrontendModuleSpec('imprest')
+      const source =
+        sourceNo && imprestSpec
+          ? await getPortalModuleDocument(imprestSpec, authUser, sourceNo, false).catch(() => null)
+          : null
+      if (source) {
+        financeRow = {
+          ...row,
+          SourceImprestNo: sourceNo,
+          TravelDate:
+            text(row, ['TravelDate', 'Travel_Date']) ||
+            text(source, ['TravelDate', 'Travel_Date', 'TravelStartDate', 'Travel_Start_Date']),
+          ReturnDate:
+            text(row, ['ReturnDate', 'Return_Date']) ||
+            text(source, ['ReturnDate', 'Return_Date', 'TravelEndDate', 'Travel_End_Date']),
+          TravelDestination:
+            text(row, ['TravelDestination', 'Travel_Destination', 'Destination']) ||
+            text(source, ['TravelDestination', 'Travel_Destination', 'Destination']),
+          PlaceofDuty:
+            text(row, ['PlaceofDuty', 'PlaceOfDuty', 'DutyArea']) ||
+            text(source, ['PlaceofDuty', 'PlaceOfDuty', 'DutyArea']),
+          Purpose:
+            text(row, ['Purpose']) ||
+            text(source, ['Purpose', 'Description']),
+        }
+      }
+    }
     headerForMapping = await enrichFinanceHeaderFromEmployee(
       module as PortalModuleKey,
-      row,
+      financeRow,
       authUser,
       mappedLines,
     )
     payloadRow = headerForMapping
+    if (module === 'pettyCash') {
+      const departmentLimit = await getPortalPettyCashDepartmentLimit(authUser)
+      payloadRow = {
+        ...payloadRow,
+        PettyCashDepartmentLimit: departmentLimit.limit,
+        PettyCashLimitConfigured: departmentLimit.configured,
+        PettyCashLimitDepartment: departmentLimit.departmentName,
+      }
+    }
   }
   if (module === 'salaryAdvance') {
     const staffNo =
@@ -1186,6 +1542,10 @@ async function requestDetail(
         ? salaryAdvanceAmount
         : mapped.amount
       : salaryAdvanceAmount
+  const rawTransportRequestType =
+    module === 'transport'
+      ? text(payloadRow, ['RequestType', 'Request_Type', 'VehicleType', 'Vehicle_Type'])
+      : ''
   return {
     ...mapped,
     status: resolvedStatus,
@@ -1200,6 +1560,12 @@ async function requestDetail(
             gatePassSource: gatePassBinding.source,
             gatePassSourceLabel: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].label,
             gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
+          }
+        : {}),
+      ...(module === 'transport' && rawTransportRequestType !== ''
+        ? {
+            transportRequestType: rawTransportRequestType,
+            transportRequestTypeLabel: transportRequestTypeLabel(rawTransportRequestType),
           }
         : {}),
       lines: mappedLines,
@@ -1532,8 +1898,150 @@ export function buildPortalApiRouter() {
           'DEDICATED_MODULE_ENDPOINT',
         )
       }
-      const no = await createPortalModuleRequest(spec, user(req), req.body ?? {})
-      res.status(201).json(await requestDetail(`${module}-${no}`, user(req), { fast: true }))
+      const authUser = user(req)
+      if (module === 'transport') {
+        const tripDate = String(req.body?.dateOfTrip ?? req.body?.tripDate ?? '').slice(0, 10)
+        const origin = String(
+          req.body?.commencement ?? req.body?.commenceFrom ?? req.body?.startingFrom ?? '',
+        )
+          .trim()
+          .toLocaleLowerCase()
+        const destination = String(req.body?.destination ?? '').trim().toLocaleLowerCase()
+        const existing = await listPortalModuleRows(spec, authUser)
+        const duplicate = existing.find((row) => {
+          const status = resolveModuleRequestStatus(row, 'transport')
+          if (['Cancelled', 'Rejected'].includes(status)) return false
+          const existingDate = text(row, ['Date_of_Trip', 'DateOfTrip', 'TripDate']).slice(0, 10)
+          const existingOrigin = text(row, [
+            'Commencement',
+            'CommenceFrom',
+            'StartingFrom',
+          ])
+            .trim()
+            .toLocaleLowerCase()
+          const existingDestination = text(row, ['Destination']).trim().toLocaleLowerCase()
+          return (
+            Boolean(tripDate) &&
+            existingDate === tripDate &&
+            existingOrigin === origin &&
+            existingDestination === destination
+          )
+        })
+        if (duplicate) {
+          throw portalError(
+            `A transport request already exists for ${tripDate}, ${origin || 'the same origin'} to ${destination || 'the same destination'}. Cancel or update the existing request instead.`,
+            409,
+            'DUPLICATE_TRANSPORT_REQUEST',
+          )
+        }
+      }
+      const no =
+        module === 'training'
+          ? String(
+              (
+                await callSoapMethod(
+                  'SaveTrainingHeader',
+                  {
+                    requesterUserId: authUser.userID,
+                    myAction: 'create',
+                    docNo: '',
+                    trainingCourseCode:
+                      req.body?.trainingNeed ??
+                      req.body?.trainingCourseCode ??
+                      req.body?.trainingTitle ??
+                      '',
+                    purpose:
+                      req.body?.purpose ??
+                      req.body?.comments ??
+                      req.body?.justification ??
+                      '',
+                    employeeNo: authUser.employeeNo,
+                  },
+                  trainingSoapEndpoint,
+                )
+              ).returnValue ?? '',
+            ).trim()
+          : await createPortalModuleRequest(spec, authUser, req.body ?? {})
+      if (!no) {
+        throw portalError(`Business Central did not create the ${module} request`, 502)
+      }
+      if (module === 'maintenance') {
+        const result = await callSoapMethod(
+          'MarkAsMaintenanceRequest',
+          {
+            requisitionNo: no,
+            employeeNo: authUser.employeeNo,
+            requestType: Number(req.body?.requestType ?? 1),
+            faTagNumber: req.body?.faTagNumber ?? '',
+            vehicleNo: req.body?.vehicleNo ?? '',
+            item: req.body?.item ?? '',
+            quantity: Number(req.body?.quantity ?? 0),
+            priority: req.body?.priority ?? '',
+            location: req.body?.location ?? '',
+            issueDescription: req.body?.issueDescription ?? req.body?.purpose ?? '',
+            currentOdometer: Number(req.body?.odometer ?? 0),
+            lastServiceOdometer: Number(req.body?.lastServiceOdometer ?? 0),
+          },
+          facilitySoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the maintenance details', 502)
+        }
+      }
+      if (module === 'fuelRequest') {
+        const result = await callSoapMethod(
+          'SaveFuelRequestStandard',
+          {
+            requisitionNo: no,
+            employeeNo: authUser.employeeNo,
+            vehicleNo: req.body?.vehicleNo ?? '',
+            currentOdometer: Number(req.body?.odometer ?? 0),
+            requestedLitres: Number(req.body?.quantity ?? 0),
+          },
+          facilitySoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the fuel standard/odometer details', 502)
+        }
+      }
+      if (module === 'training') {
+        const result = await callSoapMethod(
+          'SaveTrainingAssessment',
+          {
+            applicationNo: no,
+            employeeNo: authUser.employeeNo,
+            requesterUserId: authUser.userID,
+            detailsJson: JSON.stringify({
+              trainingNeed:
+                req.body?.trainingNeed ??
+                req.body?.trainingCourseCode ??
+                req.body?.trainingTitle ??
+                '',
+              purpose: req.body?.purpose ?? req.body?.comments ?? req.body?.justification ?? '',
+              otherTrainingName:
+                req.body?.otherTrainingName ?? req.body?.additionalTrainingNeeds ?? '',
+              trainingType: req.body?.trainingType ?? '',
+              durationDays: Number(req.body?.durationDays ?? 0),
+              targetGroup: req.body?.targetGroup ?? '',
+              participants: Number(req.body?.participants ?? 0),
+              quarter: req.body?.quarter ?? '',
+              priority: req.body?.priority ?? '',
+              vendor: req.body?.vendor ?? req.body?.provider ?? '',
+              estimatedBudget:
+                req.body?.estimatedBudget ?? req.body?.estimatedCost ?? '',
+              remark: req.body?.remark ?? '',
+              department: req.body?.department ?? authUser.department ?? '',
+              periodStart: req.body?.periodStart ?? '',
+              periodEnd: req.body?.periodEnd ?? '',
+            }),
+          },
+          trainingSoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the complete training assessment', 502)
+        }
+      }
+      res.status(201).json(await requestDetail(`${module}-${no}`, authUser, { fast: true }))
     }),
   )
 
@@ -1547,9 +2055,21 @@ export function buildPortalApiRouter() {
       }
       const spec = findFrontendModuleSpec(module)
       if (!spec) throw portalError(`${module} is not supported`, 501)
-      await submitPortalModuleRequest(spec, user(req), no)
+      const authUser = user(req)
+      if (module === 'training') {
+        const result = await callSoapMethod(
+          'RequestTrainingApproval',
+          { applicationNo: no, requesterUserId: authUser.userID },
+          trainingSoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not submit the training request for approval', 502)
+        }
+      } else {
+        await submitPortalModuleRequest(spec, authUser, no)
+      }
       res.json(
-        await requestDetail(requestId, user(req)).catch(() => ({
+        await requestDetail(requestId, authUser).catch(() => ({
           id: requestId,
           status: 'Pending Approval',
         })),
@@ -1723,6 +2243,127 @@ export function buildPortalApiRouter() {
         throw portalError('Business Central did not post the store requisition receipt', 502)
       }
       res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/post-asset-transfer',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'assetTransfer') {
+        throw portalError('Posting asset transfers is only supported for Asset Transfer', 422)
+      }
+      await postPortalAssetTransfer(user(req), no)
+      res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/assign-technician',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'maintenance') {
+        throw portalError('Technician assignment is only supported for Maintenance Request', 422)
+      }
+      const authUser = user(req)
+      if (!authUser.canApprove) {
+        throw portalError(
+          'Only an authorized maintenance approver or technical manager can assign a technician',
+          403,
+          'MAINTENANCE_ASSIGN_FORBIDDEN',
+        )
+      }
+      const technicianNo = String(req.body?.technicianNo ?? '').trim()
+      if (!technicianNo) {
+        throw portalError('Select an internal technician', 422, 'TECHNICIAN_REQUIRED')
+      }
+      const detail = await requestDetail(requestId, authUser)
+      if (['Draft', 'Open', 'Pending Approval', 'Rejected', 'Cancelled'].includes(detail.status)) {
+        throw portalError(
+          `Maintenance ${no} must be approved before a technician can be assigned`,
+          422,
+          'MAINTENANCE_NOT_APPROVED',
+        )
+      }
+      const result = await callSoapMethod(
+        'AssignMaintenanceTechnician',
+        {
+          requisitionNo: no,
+          technicianNo,
+          myUserID: authUser.userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue ?? '').trim().toLowerCase() !== 'true') {
+        throw portalError('Business Central did not assign the maintenance technician', 502)
+      }
+      res.json(await requestDetail(requestId, authUser))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/confirm-maintenance-receipt',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'maintenance') {
+        throw portalError('Receipt confirmation is only supported for Maintenance Request', 422)
+      }
+      const authUser = user(req)
+      const detail = await requestDetail(requestId, authUser)
+      const payload = (detail.payload ?? {}) as Record<string, unknown>
+      const requesterNo = String(
+        detail.makerEmployeeNo ??
+          payload.EmployeeNo ??
+          payload.Employee_No ??
+          payload.employeeNo ??
+          '',
+      ).trim()
+      if (!requesterNo || requesterNo.toLocaleLowerCase() !== authUser.employeeNo.toLocaleLowerCase()) {
+        throw portalError(
+          'Only the employee who submitted this maintenance request can confirm receipt',
+          403,
+          'MAINTENANCE_RECEIPT_FORBIDDEN',
+        )
+      }
+      const assignedTechnician = String(
+        payload.AssignedTechnician ??
+          payload.Assigned_Technician ??
+          payload.assignedTechnician ??
+          '',
+      ).trim()
+      if (!assignedTechnician) {
+        throw portalError(
+          'A technician must be assigned before the requestor can confirm receipt',
+          422,
+          'MAINTENANCE_TECHNICIAN_REQUIRED',
+        )
+      }
+      const receivedDate = String(
+        payload.FAReceivedDate ??
+          payload.FA_Received_Date ??
+          payload.faReceivedDate ??
+          '',
+      ).trim()
+      if (receivedDate && !receivedDate.startsWith('0001-01-01')) {
+        throw portalError('Receipt has already been confirmed for this maintenance request', 409)
+      }
+      const remarks = String(req.body?.remarks ?? '').trim().slice(0, 100)
+      const result = await callSoapMethod(
+        'ConfirmMaintenanceReceipt',
+        {
+          requisitionNo: no,
+          remarks,
+          myUserID: authUser.userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue ?? '').trim().toLowerCase() !== 'true') {
+        throw portalError('Business Central did not save the maintenance receipt confirmation', 502)
+      }
+      res.json(await requestDetail(requestId, authUser))
     }),
   )
 
@@ -2038,6 +2679,13 @@ export function buildPortalApiRouter() {
   )
 
   router.get(
+    '/petty-cash/department-limit',
+    safe(async (req, res) => {
+      res.json(await getPortalPettyCashDepartmentLimit(user(req)))
+    }),
+  )
+
+  router.get(
     '/attendance',
     safe(async (req, res) => {
       const authUser = user(req)
@@ -2252,14 +2900,38 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const spec = findModuleSpec('work-tickets')
       if (!spec) throw portalError('Work tickets are not configured', 501)
-      const ticketNo = await createPortalModuleRequest(spec, user(req), req.body ?? {})
-      const [tickets] = await Promise.all([
+      const authUser = user(req)
+      const ticketNo = await createPortalModuleRequest(spec, authUser, req.body ?? {})
+      const flightResult = await callSoapMethod(
+        'SaveWorkTicketFlightDetails',
+        {
+          ticketNo,
+          travelerEmployeeNo: req.body?.travelerEmployeeNo ?? authUser.employeeNo,
+          flightFrom: req.body?.flightFrom ?? '',
+          flightTo: req.body?.flightTo ?? '',
+          departureDate: req.body?.departureDate ?? '',
+          returnDate: req.body?.returnDate ?? '',
+          ticketClass: Number(req.body?.ticketClass ?? 1),
+          airlinePreference: req.body?.airlinePreference ?? '',
+          justification: req.body?.justification ?? '',
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(flightResult.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not save the flight-booking details', 502)
+      }
+      const [tickets, flights] = await Promise.all([
         fetchOData('QyWorkTickets', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
           $top: 1,
         }) as Promise<ODataRecord[] | null>,
+        fetchOData('QyWorkTicketFlight', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[]) as Promise<ODataRecord[] | null>,
       ])
       const row = Array.isArray(tickets) ? tickets[0] : undefined
+      const flight = Array.isArray(flights) ? flights[0] : undefined
       res.status(201).json({
         id: ticketNo,
         ticketNo,
@@ -2268,6 +2940,7 @@ export function buildPortalApiRouter() {
         type: text(row ?? {}, ['Type']),
         department: text(row ?? {}, ['DepartmentName', 'Department']),
         status: text(row ?? {}, ['Status'], 'Open'),
+        ...workTicketFlight(flight),
         lines: [],
       })
     }),
@@ -2288,7 +2961,29 @@ export function buildPortalApiRouter() {
     '/work-tickets',
     safe(async (req, res) => {
       const authUser = user(req)
-      const rows = (await fetchOData('QyWorkTickets')) as ODataRecord[] | null
+      const [rows, flights, approvals] = await Promise.all([
+        fetchOData('QyWorkTickets') as Promise<ODataRecord[] | null>,
+        fetchOData('QyWorkTicketFlight').catch(() => [] as ODataRecord[]) as Promise<
+          ODataRecord[] | null
+        >,
+        fetchOData('QyApprovalEntry', {
+          $filter: `TableID eq ${APPROVAL_TABLE_IDS.workTicket}`,
+          $top: 1000,
+        }).catch(() => [] as ODataRecord[]) as Promise<ODataRecord[] | null>,
+      ])
+      const flightsByTicket = new Map(
+        (Array.isArray(flights) ? flights : []).map((flight) => [
+          text(flight, ['TicketNo']),
+          flight,
+        ]),
+      )
+      const approvalsByTicket = new Map<string, ODataRecord[]>()
+      for (const approval of Array.isArray(approvals) ? approvals : []) {
+        const documentNo = text(approval, ['DocumentNo', 'Document_No'])
+        const bucket = approvalsByTicket.get(documentNo) ?? []
+        bucket.push(approval)
+        approvalsByTicket.set(documentNo, bucket)
+      }
       res.json({
         rows: (Array.isArray(rows) ? rows : []).map((row) => {
           const ticketNo = text(row, ['TicketNo', 'No'])
@@ -2299,8 +2994,9 @@ export function buildPortalApiRouter() {
             gkNo: text(row, ['GKNo']),
             type: text(row, ['Type']),
             department: text(row, ['DepartmentName', 'Department']),
-            status: text(row, ['Status'], 'Open'),
+            status: resolveModuleRequestStatus(row, 'workTickets', approvalsByTicket.get(ticketNo) ?? []),
             employeeNo: text(row, ['EmployeeNo'], authUser.employeeNo),
+            ...workTicketFlight(flightsByTicket.get(ticketNo)),
           }
         }),
       })
@@ -2311,7 +3007,7 @@ export function buildPortalApiRouter() {
     '/work-tickets/:ticketNo',
     safe(async (req, res) => {
       const ticketNo = String(req.params.ticketNo)
-      const [tickets, lines] = await Promise.all([
+      const [tickets, lines, flights, approvals] = await Promise.all([
         fetchOData('QyWorkTickets', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
           $top: 1,
@@ -2319,8 +3015,18 @@ export function buildPortalApiRouter() {
         fetchOData('QyWorkTicketLines', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
         }).catch(() => [] as ODataRecord[]),
+        fetchOData('QyWorkTicketFlight', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[]),
+        fetchOData('QyApprovalEntry', {
+          $filter:
+            `DocumentNo eq '${odataString(ticketNo)}' and ` +
+            `TableID eq ${APPROVAL_TABLE_IDS.workTicket}`,
+        }).catch(() => [] as ODataRecord[]),
       ])
       const row = Array.isArray(tickets) ? tickets[0] : undefined
+      const flight = Array.isArray(flights) ? flights[0] : undefined
       if (!row) throw portalError('Work ticket was not found', 404)
       res.json({
         id: ticketNo,
@@ -2329,7 +3035,12 @@ export function buildPortalApiRouter() {
         gkNo: text(row, ['GKNo']),
         type: text(row, ['Type']),
         department: text(row, ['DepartmentName', 'Department']),
-        status: text(row, ['Status'], 'Open'),
+        status: resolveModuleRequestStatus(
+          row,
+          'workTickets',
+          Array.isArray(approvals) ? approvals : [],
+        ),
+        ...workTicketFlight(flight),
         lines: (Array.isArray(lines) ? lines : []).map((line, index) => ({
           id: text(line, ['LineNo', 'Line_No', 'SystemId'], String(index + 1)),
           lineNo: text(line, ['LineNo', 'Line_No'], String(index + 1)),
@@ -2340,6 +3051,57 @@ export function buildPortalApiRouter() {
           authorizingOfficerName: text(line, ['AuthorizingOfficerName']),
         })),
       })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/confirmation',
+    safe(async (req, res) => {
+      const confirmationNo = String(req.body?.confirmationNo ?? '').trim()
+      if (!confirmationNo) throw portalError('Booking confirmation number is required')
+      const result = await callSoapMethod(
+        'ConfirmWorkTicketBooking',
+        {
+          ticketNo: req.params.ticketNo,
+          confirmationNo,
+          myUserID: user(req).userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not confirm the flight booking', 502)
+      }
+      res.json({ ok: true })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/submit',
+    safe(async (req, res) => {
+      const result = await callSoapMethod(
+        'RequestWorkTicketApproval',
+        { ticketNo: req.params.ticketNo },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not submit the work ticket for approval', 502)
+      }
+      res.json({ ok: true })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/cancel',
+    safe(async (req, res) => {
+      const result = await callSoapMethod(
+        'CancelWorkTicketApproval',
+        { ticketNo: req.params.ticketNo },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not cancel the work-ticket approval', 502)
+      }
+      res.json({ ok: true })
     }),
   )
 
@@ -2685,6 +3447,105 @@ export function buildPortalApiRouter() {
         returnDate: text(row, ['ReturnDate'], '-'),
         status: text(row, ['Status']),
       })))
+    }),
+  )
+
+  router.get(
+    '/hr/employee-exit',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json({ rows: await listEmployeeExitRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.post(
+    '/hr/employee-exit',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const requestType = String(req.body?.requestType ?? '') as EmployeeExitRequestType
+      if (!EMPLOYEE_EXIT_REQUEST_TYPES.includes(requestType)) {
+        throw portalError('Invalid employee exit request type', 422, 'INVALID_EXIT_TYPE')
+      }
+      res.json(
+        await createEmployeeExitRequest({
+          requestType,
+          employeeNo: authUser.employeeNo,
+          employeeName: authUser.displayName,
+          departmentName: authUser.departmentName || authUser.department,
+          requesterUserId: authUser.userID,
+          details: (req.body?.details ?? {}) as Record<string, unknown>,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/employee-exit/:id/request-cancellation',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(
+        await requestEmployeeExitCancellation({
+          id: String(req.params.id ?? ''),
+          employeeNo: authUser.employeeNo,
+          reason: String(req.body?.reason ?? ''),
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/employee-exit/:id/cancel',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(
+        await withdrawEmployeeExitRequest({
+          id: String(req.params.id ?? ''),
+          employeeNo: authUser.employeeNo,
+        }),
+      )
+    }),
+  )
+
+  router.get(
+    '/hr/service-letters',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json({ rows: await listHrServiceLetterRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.post(
+    '/hr/service-letters',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const letterType = String(req.body?.letterType ?? '') as RequestableHrServiceLetterType
+      if (!REQUESTABLE_HR_SERVICE_LETTER_TYPES.includes(letterType)) {
+        throw portalError('Invalid HR service letter type', 422, 'INVALID_LETTER_TYPE')
+      }
+      res.json(
+        await createHrServiceLetterRequest({
+          letterType,
+          employeeNo: authUser.employeeNo,
+          employeeName: authUser.displayName,
+          departmentName: authUser.departmentName || authUser.department,
+          monthlySalaryBase: authUser.monthlySalaryBase,
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+          details: (req.body?.details ?? {}) as Record<string, unknown>,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/service-letters/:id/cancel',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(
+        await cancelHrServiceLetterRequest(
+          String(req.params.id ?? ''),
+          authUser.employeeNo,
+        ),
+      )
     }),
   )
 

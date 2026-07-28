@@ -62,6 +62,38 @@ const envSchema = z.object({
     z.string().url().optional(),
   ),
   BC_SOAP_NAMESPACE: z.string().default('urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal'),
+  BC_SOAP_EXIT_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_EXIT_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_LETTERS_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_LETTERS_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_ATTACHMENTS_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_ATTACHMENTS_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_ASSET_TRANSFER_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_ASSET_TRANSFER_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
   BC_AUTH_MODE: z.enum(['none', 'basic', 'ntlm']).default('ntlm'),
   BC_DOMAIN: z.string().optional().default(''),
   BC_NAV_USER: z.string().optional().default(''),

@@ -1,0 +1,106 @@
+HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v1.0.3.78)
+=====================================================
+Deploy ONCE. Felix publishes BC-AL ONCE. Then portal zip ONCE.
+No partial labels — HR Jul 27 + Finance Jul 27 + Facility Jul 21 checked off below.
+
+ALL MODULES — PORTAL LIST SEARCH
+---------------------------------
+  [x] Shared list search filters request/document number, employee, description,
+      department, date, and status across HR, Finance, Facility, and reports
+  [x] Multiple search words work together; formatted document numbers match
+  [x] No-match result, record count, and Clear Search restore the full list
+  [x] Approval workspace search includes all returned request fields
+
+HR — SSP HR HB Update Jul 26 2026 (column J = HB Status July 27)
+-----------------------------------------------------------------
+  Leave R10   [x] Canceled leave excluded from pending; modify on Open/Draft (staff.ts resolveLeaveStatus)
+  Leave R14   [x] Statement balance aligned with request form (leaveBalance.ts + shared resolver)
+  Leave R31   [x] Form vs statement balance mismatch fixed (same pending-leave counter)
+  Attend R21  [x] HOD team attendance roster scoped to supervisor department (/attendance/team)
+  Profile R23 [x] Job details: dept/division from QyHREmployee + dimension codes (portalApi /profile/details)
+  Profile R24 [x] Important dates: years of service, last promotion, retirement (portalApi importantDates)
+  Profile R26 [x] Next of kin name from QyHREmployeeKin OData (expanded name field paths)
+  Profile R28 [x] Experience letter self-service (/hr/request-letters/experience + CuPortalHrLetters)
+  HOD R32     [x] Staff on leave scoped to HOD department only (StaffOnLeave + fetchHodDepartmentStaff)
+  Obs R33     [x] Medical claim types Govt / Non Govt / Online (essOptions + staff claim line — Finance module)
+  Train R37   [x] Department dropdown from BC; ERP course list (TrainingRequest + CuPortalTraining)
+  Train R39   [x] Assessment captures full training need card fields (CuPortalTraining companion store)
+  Train R40   [x] Training application list columns (period, provider, cost, department)
+  Exit R41-43 [x] Transfer cancel, resignation, exit interview (EmployeeExit + CuPortalEmployeeExit)
+               [x] HR sidebar routes and API endpoints restored for all staff
+  Docs R28     [x] Existing Request Letters menu retained with BC-backed forms
+               [x] Existing standalone Emergency Staff Loan entry retained
+               [x] Guarantee, external, experience, mortgage, emergency loan, embassy
+
+FINANCE — SSP Finance HB Update July 27 2026 (20 fail rows → code mapped)
+--------------------------------------------------------------------------
+  Imprest R07  [x] Duration, dept, job title, place of duty, total net, employee account on detail
+               [x] Daily rate on line list (portal derive + BC Validate No of Days — Felix AL)
+  Imprest R11  [x] Approver sees duration, destination, rejection reason (approvalDetailFields)
+  Imprest R13  [x] Remaining unsettled amount on imprest list + detail (enrichment + list column)
+  Surrender R19 [x] Duration + travel destination on surrender detail (source imprest enrichment)
+  Surrender R23 [x] List status filter/search; send-for-approval on Open/Pending BC status
+  Claim R24    [x] Create claim — dept resolution soft-fail (no 422 on long dept name)
+  Claim R25    [x] Claim date = ERP working date (frontend schema + backend assert)
+  Claim R26-27 [x] Header detail: dept, job title, place of duty, total net, employee account
+  Claim R28    [x] Medical: hospital category + coverage % (BC validate + line column)
+  Claim R29    [x] Claim type auto-links GL account on line add
+  Claim R30    [x] Attachments (staffClaim in PORTAL_ATTACHMENT_MODULES)
+  Claim R31-32 [x] Pending / approved list with status filter chips
+  Claim R33    [x] Delete claim lines (Draft/Open — canDeleteRequestItems)
+  Claim R34    [x] Cancel before approval (FINANCE_CANCEL_STATUSES on StaffClaim)
+  Claim R35    [x] Multiple claim lines (MultiStepRequestPage)
+  Petty R38    [x] Settlement detail enriched from employee profile (dept, RC, account, total)
+  Petty R40    [x] Department petty cash limit on settlement lines + replenishment create
+  Petty R41    [x] Cancel petty cash settlement before approval (PettyCash cancelStatuses)
+
+FACILITY — SSP Facility HB July 21 2026
+----------------------------------------
+  [x] Purchase spec + file attachments; Store receive; Fuel detail fields
+  [x] Transport Field Trip; Maintenance template + technician assign
+  [x] Work ticket flight booking; Asset Transfer (separate from Transfer Order)
+  [x] Gate pass source references and portal Gate Pass log/detail
+  [x] Clear Gate Pass labels; actual Asset Transfer module is separately visible
+  [x] Gate Pass Log visible only to its authorized roles
+  [x] Business Central unset dates no longer display as 01 Jan 0001
+  [x] Store Issue Gate Pass department/sector fall back to the employee profile
+  [x] Transfer Order and Asset Transfer Gate Pass rows resolve each owner's
+      department/sector from that employee's Business Central profile
+  [x] The same owner-specific Department/Sector values appear in View details
+  [x] Work Tickets / Flight Booking restored to Facility navigation
+  [x] Maintenance Request restored to Facility navigation
+  [x] Asset / Vehicle / Tool Transfer restored to Facility navigation
+  [x] Work Ticket approval mapped to Business Central table 50866
+  [x] Asset Transfer approval mapped to Business Central table 50278
+  [x] Procurement Individual Budget Preparation rows 59-61 remain Out of Scope
+  [x] Purchase approval explains finalized-budget failures using the real item
+      number and requesting department; Business Central budget control remains enforced
+  [x] Transport Request Type displays City / Field Trip instead of raw 0 / 1
+  [x] Field Trip remains distinct through the Business Central SOAP mapping
+  [x] Internal and external passenger names/organization appear on requester
+      and approver detail screens
+  [x] Transport lists use Transport_Requisition_No (TRxxxx), not the unrelated
+      generic No (Axxxxx), and refresh immediately after creation/Back
+
+ROW-BY-ROW EVIDENCE
+-------------------
+  [x] 142 source test rows included in HIJRA-SSP-UAT-ROW-BY-ROW-EVIDENCE-2026-07-28.xlsx
+  [x] All HB remark/comment columns included
+  [x] Eight non-empty Facility legacy Excel comments included
+  [x] 73 remark-driven code/comment fixes mapped
+  [!] Those 73 rows remain Pending live BC UAT until Felix publishes and TA retests
+
+BC AL REQUIRED (Felix — before portal deploy)
+----------------------------------------------
+  StaffPortalCodeunit — ImprestRequisitionLine Validate("No of Days") for daily rate in ERP
+                        ClaimRequisitionHeader claimDate + department params
+                        FetchMedicalClaimAmount; Imprest surrender PrepareSurrender
+  CuPortalAttachments — staff claim / imprest / petty cash document uploads
+  CuPortalFacility, CuPortalAssetTransfer + Facility OData queries
+  Safe path-aware apply script: BC-AL/APPLY-HIJRA-PATCH.ps1
+
+VERIFY AFTER DEPLOY
+-------------------
+  http://10.30.4.23:4000/api/health → v1.0.3.78
+  Run VERIFY-DEPLOY.bat — all [OK]
+  Finance smoke: create staff claim, imprest line shows daily rate, petty cash cancel

@@ -1,0 +1,26 @@
+SELF SERVICE SUITE - REQUIRED UPDATE PROCEDURE
+================================================
+
+Do not merge this package into the existing SelfServiceSuite directory.
+
+1. Stop the current services:
+   powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+
+2. Rename the existing directory:
+   C:\TA\SelfServiceSuite -> C:\TA\SelfServiceSuite-backup
+
+3. Extract this ZIP under C:\TA so the result is:
+   C:\TA\SelfServiceSuite
+
+4. Start the corrected suite:
+   C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
+
+5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
+
+The corrected ESS navigation contains Facilities > Gate Pass with:
+- Asset Transfer
+- Store Requisition
+- Transfer Orders
+
+Document Requisition and Vehicle Transfer remain visible as "coming soon",
+matching the Laravel ESS sidebar. Extra non-ESS report links are hidden.

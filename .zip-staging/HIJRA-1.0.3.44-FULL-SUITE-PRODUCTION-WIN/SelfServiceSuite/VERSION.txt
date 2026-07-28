@@ -1,0 +1,16 @@
+HIJRA SSP v1.0.3.44 - 25 July 2026 (portal + backend) — RESTORED WORKING BUILD
+Based on morning 1.0.3.44 Desktop WORK build (restored 25-07-2026).
+
+INCLUDES:
+  - Training Need Assessment (full form + Others option)
+  - SaveTrainingAssessment backend (BC AL patch required)
+  - Imprest Surrender amount labels + enrichment
+  - Employment type label on Profile
+
+VERIFY AFTER DEPLOY:
+  - VERIFY-DEPLOY.bat -> must show index-k6-MjTel.js
+  - Profile -> Portal build contains "training + employment type"
+  - Training: use Others for custom course names
+
+BUILD_ID: desktop-recovery-2026-07-25
+Frontend bundle: index-k6-MjTel.js

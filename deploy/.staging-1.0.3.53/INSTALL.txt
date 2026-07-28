@@ -1,0 +1,3 @@
+HIJRA 1.0.3.53 — APPROVAL WORKFLOW DISPLAY FIX
+Copy dist\ and public\ to SelfServiceBackend. Keep .env. Ctrl+F5.
+/api/health must show 1.0.3.53
