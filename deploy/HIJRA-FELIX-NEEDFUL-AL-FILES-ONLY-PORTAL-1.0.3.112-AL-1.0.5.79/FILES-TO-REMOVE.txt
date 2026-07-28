@@ -1,0 +1,21 @@
+OBSOLETE/DUPLICATE FILES — VERIFY AFTER SYNCHRONIZATION, THEN REMOVE
+==================================================================
+
+src\staffPortal\facilityUat\PortalAttachmentsMgt.Codeunit.al
+src\staffPortal\facilityUat\QyAssetTransfer.Query.al
+src\staffPortal\facilityUat\QyFleetVehicles.Query.al
+src\staffPortal\facilityUat\QyPortalFuelMaint.Query.al
+src\staffPortal\facilityUat\QyProcurementPlan.Query.al
+src\staffPortal\facilityUat\QyProcurementPlanLines.Query.al
+src\staffPortal\facilityUat\QyWorkTicketFlight.Query.al
+src\Query\QyAssetTransfer.Query.al
+src\Query\QyPortalFuelMaintExtra.Query.al
+src\Query\QyProcurementPlanHeader.Query.al
+src\Query\QyProcurementPlanLines.Query.al
+src\Query\QyWorkTicketFlight.Query.al
+src\staffPortal\query\QyGatePassTransferShipments.Query.al
+src\staffPortal\query\QyGatePassAssetTransfers.Query.al
+
+Do not remove anything merely because it appears in this list. First confirm
+that the synchronized project contains the replacement object from FILES and
+that the old copy is genuinely obsolete or a duplicate.

@@ -176,9 +176,11 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
 import {
   configuredJobTitleByEmployeeNo,
   employeeAccountNoFromRecord,
+  employeeSalaryBaseFromRecord,
   fetchEmployeeCustomerAccountNo,
   fetchEmployeeRecordFast,
   fetchEmployeeSalaryBase,
+  fetchEmployeeSalaryBaseFast,
   fetchMergedEmployeeRecord,
   resolveAuthUserJobTitle,
   resolveEmployeeJobTitle,
@@ -457,6 +459,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     'Department',
   ])
   const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
+  const monthlySalaryBase = employeeSalaryBaseFromRecord(employee as Record<string, unknown>)
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
@@ -507,6 +510,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     responsibleCenter: employee.ResponsibilityCenter ?? '',
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,
+    ...(monthlySalaryBase > 0 ? { monthlySalaryBase } : {}),
     HOD: isHOD,
     CEO: isCEO,
     canApprove,
@@ -762,9 +766,18 @@ export function buildAuthRouter() {
   const currentUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const existing = req.session.authUser!
-      const refreshed = jobTitleNeedsRefresh(existing.jobTitle)
+      let refreshed = jobTitleNeedsRefresh(existing.jobTitle)
         ? await refreshAuthUserProfile(existing, 'full')
         : existing
+      // Tokens/sessions issued before salary was included in AuthUser do not contain
+      // monthlySalaryBase. Refresh it from QyHREmployee.Basic_Pay so users do not need
+      // to log out and back in after deploying the portal fix.
+      if (!(Number(refreshed.monthlySalaryBase) > 0)) {
+        const monthlySalaryBase = await fetchEmployeeSalaryBaseFast(refreshed.employeeNo, {
+          customerNo: refreshed.imprestNo || refreshed.accountNumber,
+        })
+        if (monthlySalaryBase > 0) refreshed = { ...refreshed, monthlySalaryBase }
+      }
       req.session.authUser = refreshed
       res.json({ user: refreshed, token: signAuthToken(refreshed) })
     } catch (error) {

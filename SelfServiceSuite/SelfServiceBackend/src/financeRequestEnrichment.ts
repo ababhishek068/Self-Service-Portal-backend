@@ -14,7 +14,12 @@ const FINANCE_DETAIL_MODULES = new Set<PortalModuleKey>([
 function text(row: ODataRecord, keys: string[], fallback = '') {
   for (const key of keys) {
     const value = row[key]
-    if (value !== undefined && value !== null && String(value) !== '') return String(value)
+    if (value === undefined || value === null) continue
+    const raw = String(value).trim()
+    // Business Central serializes an unset Date as 0001-01-01. Treat it as
+    // blank so a real value from another published query/alias can win.
+    if (!raw || raw.startsWith('0001-01-01')) continue
+    return raw
   }
   return fallback
 }
@@ -155,7 +160,14 @@ export function enrichFinanceHeaderRow(
 
   const district = text(
     row,
-    ['District', 'DistrictName', 'District_Name'],
+    [
+      'District',
+      'DistrictName',
+      'District_Name',
+      'GlobalDimension2Code',
+      'GlobalDimension2Name',
+      'ShortcutDimension2Code',
+    ],
     hints.district ?? '',
   )
 
@@ -280,10 +292,25 @@ export function enrichFinanceHeaderRow(
       'Destination',
       'DestinationCode',
       'Destination_Code',
+      'TravelDestination',
+      'Travel_Destination',
     ])
     if (lineDestination) {
       enriched.TravelDestination = lineDestination
       enriched.Destination = lineDestination
+    }
+  }
+  if (!placeOfDuty && lines.length > 0) {
+    const lineDutyArea = text(lines[0] as ODataRecord, [
+      'dutyArea',
+      'DutyArea',
+      'Duty_Area',
+      'PlaceofDuty',
+      'PlaceOfDuty',
+    ])
+    if (lineDutyArea) {
+      enriched.PlaceofDuty = lineDutyArea
+      enriched.PlaceOfDuty = lineDutyArea
     }
   }
   if (travelDate) {
@@ -341,7 +368,14 @@ export async function enrichFinanceHeaderFromEmployee(
           mapped.departmentName ||
           sessionHints.departmentName,
         division: text(emp, ['Division', 'DivisionName', 'Division_Name']),
-        district: text(emp, ['District', 'DistrictName', 'District_Name']),
+        district: text(emp, [
+          'District',
+          'DistrictName',
+          'District_Name',
+          'GlobalDimension2Code',
+          'GlobalDimension2Name',
+          'ShortcutDimension2Code',
+        ]),
         branchCode:
           text(emp, ['BranchCode', 'Branch_Code', 'GlobalDimension3Code', 'ShortcutDimension3Code']) ||
           authUser.branchCode,
@@ -385,7 +419,12 @@ async function fetchMergedSourceImprest(imprestNo: string): Promise<ODataRecord>
   for (const row of parts) {
     for (const [key, value] of Object.entries(row)) {
       if (value === undefined || value === null) continue
-      if (typeof value === 'string' && value.trim() === '') continue
+      if (
+        typeof value === 'string' &&
+        (!value.trim() || value.trim().startsWith('0001-01-01'))
+      ) {
+        continue
+      }
       merged[key] = value
     }
   }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.3.98"
-AL_PATCH_VERSION="1.0.5.75"
+VERSION="1.0.3.120"
+AL_PATCH_VERSION="1.0.5.80"
 BUNDLE="HIJRA-${VERSION}-COMPLETE-SUITE-FINAL"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUITE="$REPO_ROOT/SelfServiceSuite"
@@ -16,7 +16,7 @@ cd "$SUITE/SelfServiceBackend"
 rm -rf "$SUITE/SelfServiceBackend/dist"
 npm run build
 npm run build:portal
-echo "hijra-portal-${VERSION}-FINAL-2026-07-28-uat-spreadsheet-audit-fixes" > dist/BUILD_ID.txt
+echo "hijra-portal-${VERSION}-FINAL-2026-07-29-training-course-code-resolution" > dist/BUILD_ID.txt
 
 echo "==> Staging $BUNDLE..."
 rm -rf "$STAGE"
@@ -49,20 +49,16 @@ for folder in employeeExit hrLetter training facilityUat; do
 done
 mkdir -p "$ROOT/BC-AL/FILES/staffPortal/query" "$ROOT/BC-AL/FILES/HR-DEEP" "$ROOT/BC-AL/FILES/BASE-DEEP"
 cp "$AL_PROJECT/src/staffPortal/PortalHr.PermissionSet.al" "$ROOT/BC-AL/FILES/staffPortal/"
-for query in ApprovalCommentLine PettyCashLimitDepartment TrainingApplicationHeader TrainingApplicationLInes TrainingNeeds HrLeaveAllocationPortal QyAssetTransfer QyPortalFuelMaintExtra QyProcurementPlanHeader QyProcurementPlanLines QyWorkTicketFlight; do
+for query in ApprovalCommentLine HrEmployee PettyCashLimitDepartment TrainingApplicationHeader TrainingApplicationLInes TrainingNeeds HrLeaveAllocationPortal QyAssetTransfer QyGatePassReturns QyPortalFuelMaintExtra QyProcurementPlanHeader QyProcurementPlanLines QyWorkTicketFlight; do
   cp "$AL_PROJECT/src/staffPortal/query/${query}.Query.al" "$ROOT/BC-AL/FILES/staffPortal/query/"
 done
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
-# Imprest daily-rate fix — must win over the local AL project copy when present.
-PATCH_CU="$REPO_ROOT/deploy/HIJRA-FELIX-SAFE-PATCH-1.0.5.71/FILES/HR-DEEP/StaffPortalCodeunit.Codeunit.al"
-if [[ -f "$PATCH_CU" ]]; then
-  cp "$PATCH_CU" "$ROOT/BC-AL/FILES/HR-DEEP/StaffPortalCodeunit.Codeunit.al"
-fi
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplication.Table.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/Fleet/GatePass.Table.al" "$ROOT/BC-AL/FILES/BASE-DEEP/"
-cp "$AL_PROJECT/src/Query/GatePassAssetTransfers.Query.al" "$AL_PROJECT/src/Query/GatePassTransferShipments.Query.al" "$ROOT/BC-AL/FILES/Query/"
+cp "$AL_PROJECT/src/Query/GatePass.Query.al" "$AL_PROJECT/src/Query/GatePassAssetTransfers.Query.al" "$AL_PROJECT/src/Query/GatePassTransferShipments.Query.al" "$ROOT/BC-AL/FILES/Query/"
+cp "$AL_PROJECT/src/Query/ImprestHeaders.Query.al" "$AL_PROJECT/src/Query/ImprestLines2.Query.al" "$AL_PROJECT/src/Query/ReceiptPaymentTypes.Query.al" "$ROOT/BC-AL/FILES/Query/"
 
-echo "HIJRA Self Service Suite v${VERSION} FINAL — 28 July 2026" > "$ROOT/SelfServiceSuite/VERSION.txt"
+echo "HIJRA Self Service Suite v${VERSION} FINAL — 29 July 2026" > "$ROOT/SelfServiceSuite/VERSION.txt"
 cp "$REPO_ROOT/deploy/HIJRA-UAT-ROW-BY-ROW-IMPLEMENTATION-REPORT-2026-07-28.md" "$ROOT/"
 cp "$REPO_ROOT/outputs/hijra-uat-2026-07-28/HIJRA-SSP-UAT-ROW-BY-ROW-EVIDENCE-2026-07-28.xlsx" "$ROOT/"
 
@@ -105,16 +101,29 @@ findstr /M /C:"preferPageOriginWhenRemote" public\assets\*.js >nul 2>&1 && echo 
 findstr /M /C:"leave-request?application=" public\assets\*.js >nul 2>&1 && echo [OK] leave View action || echo [WARN] leave View
 findstr /M /C:"cannot apply a new leave while another" dist\staff.js >nul 2>&1 && echo [FAIL] duplicate block present || echo [OK] duplicate block removed
 findstr /M /C:"countResolvedPendingLeaveApplications" dist\staff.js >nul 2>&1 && echo [OK] HR leave pending fix || echo [WARN] HR leave pending fix
+findstr /M /C:"leaveTypeDescriptionForDisplay" dist\portalApi.js >nul 2>&1 && echo [OK] Leave approval type description || echo [WARN] Leave type description
+findstr /M /C:"Leave quantity" public\assets\*.js >nul 2>&1 && echo [OK] Leave approval quantity display || echo [WARN] Leave quantity display
+findstr /M /C:"Business Central has marked this application as pending" public\assets\*.js >nul 2>&1 && echo [OK] Pending leave approval workflow fallback || echo [WARN] Leave approval workflow fallback
+findstr /M /C:"Location / Coordinates" public\assets\*.js >nul 2>&1 && echo [FAIL] Attendance location column present || echo [OK] Attendance location column removed
+findstr /M /C:"trainingCourseLookupOption" dist\portalApi.js >nul 2>&1 && echo [OK] Training course code/title relation || echo [WARN] Training course relation
 findstr /M /C:"resolvePettyCashDefaultsFromEmployee" dist\portalApi.js >nul 2>&1 && echo [OK] Finance petty cash profile dims || echo [WARN] petty cash dims
 findstr /M /C:"dailyRate" dist\portalApi.js >nul 2>&1 && echo [OK] Finance imprest daily rate || echo [WARN] imprest daily rate
+findstr /M /C:"ERP returned no daily rate" public\assets\*.js >nul 2>&1 && echo [OK] Fresh ERP rate calculation per draft || echo [WARN] ERP rate draft reset
 findstr /M /C:"surrender-preview" dist\portalApi.js >nul 2>&1 && echo [OK] Finance imprest surrender preview || echo [WARN] surrender preview
 findstr /M /C:"enrichImprestSurrenderFromSourceImprest" dist\portalApi.js >nul 2>&1 && echo [OK] Finance surrender enrichment || echo [WARN] surrender enrichment
+findstr /M /C:"01 Jan 0001" public\assets\*.js >nul 2>&1 && echo [OK] Imprest surrender unavailable details hidden || echo [WARN] surrender empty-detail filter
+findstr /M /C:"employeeFinanceSectorFromRecord" dist\employeeProfile.js >nul 2>&1 && echo [OK] Staff Claim employee sector fallback || echo [WARN] Staff Claim sector fallback
+findstr /M /C:"Hospital Category" public\assets\*.js >nul 2>&1 && echo [OK] Staff Claim flow-aware line columns || echo [WARN] Staff Claim line columns
 findstr /M /C:"enrichApprovalStepsWithCommentLines" dist\leaveApprovalSteps.js >nul 2>&1 && echo [OK] Approval rejection notes || echo [WARN] rejection notes
 findstr /M /C:"profile/trainings" dist\portalApi.js >nul 2>&1 && echo [OK] HR profile trainings tab || echo [WARN] profile trainings
 findstr /M /C:"yearsOfService" dist\portalApi.js >nul 2>&1 && echo [OK] HR profile important dates || echo [WARN] profile dates
 findstr /M /C:"listStatusFilter" public\assets\*.js >nul 2>&1 && echo [OK] Finance list status filter || echo [WARN] list status filter
 findstr /M /C:"Requisition_Type" public\assets\*.js >nul 2>&1 && echo [OK] Facility fuel BC field aliases || echo [WARN] fuel field aliases
 findstr /M /C:"travel-destinations" dist\portalApi.js >nul 2>&1 && echo [OK] Finance travel destinations lookup || echo [WARN] travel destinations
+findstr /M /C:"QyGatePassReturns" dist\portalApi.js >nul 2>&1 && echo [OK] Gate Pass actual return details || echo [WARN] Gate Pass return details
+findstr /M /C:"Source document" public\assets\*.js >nul 2>&1 && echo [OK] Complete Gate Pass Log columns || echo [WARN] Gate Pass Log columns
+findstr /M /C:"PURCHASE_ITEM_NOT_IN_FINALIZED_BUDGET" dist\staffModules.js >nul 2>&1 && echo [OK] Purchase finalized-budget correction || echo [WARN] Purchase budget correction
+findstr /M /C:"Receipt confirmation" public\assets\*.js >nul 2>&1 && echo [OK] Complete Store Requisition flow || echo [WARN] Store Requisition flow
 findstr /M /C:"Search table records" public\assets\*.js >nul 2>&1 && echo [OK] shared list search || echo [WARN] shared list search
 if exist "public\index.html" (echo [OK] public) else (echo [FAIL] public)
 if exist ".env" (echo [OK] .env) else (echo [FAIL] .env MISSING)
@@ -124,7 +133,7 @@ pause
 BAT
 
 cat > "$ROOT/README-FIRST.txt" << EOF
-HIJRA COMPLETE SUITE FINAL v${VERSION} — 28 July 2026
+HIJRA COMPLETE SUITE FINAL v${VERSION} — 29 July 2026
 *** DEPLOY THIS ZIP ONCE — ALL MODULES INCLUDED ***
 
 Do NOT use older zips (including 1.0.3.70 through 1.0.3.79).
@@ -138,8 +147,8 @@ TWO-PART DEPLOY (order matters):
 Read ALL-FIXES-MANIFEST.txt for the full list mapped to UAT spreadsheets.
 EOF
 
-cat > "$ROOT/ALL-FIXES-MANIFEST.txt" << 'EOF'
-HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v1.0.3.80)
+cat > "$ROOT/ALL-FIXES-MANIFEST.txt" << EOF
+HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v${VERSION})
 =====================================================
 Deploy ONCE. Felix publishes BC-AL ONCE. Then portal zip ONCE.
 Regression restore: portal baseline v1.0.3.54 + backend baseline v1.0.3.44 merged with current ahead-of-staging fixes.
@@ -160,7 +169,12 @@ HR — SSP HR HB Update Jul 26 2026 (column J = HB Status July 27)
   Leave R10   [x] Canceled leave excluded from pending; modify on Open/Draft (staff.ts resolveLeaveStatus)
   Leave R14   [x] Statement balance aligned with request form (leaveBalance.ts + shared resolver)
   Leave R31   [x] Form vs statement balance mismatch fixed (same pending-leave counter)
+  Approval    [x] Leave approval shows requested days instead of ETB 0, plus
+                   leave type description, dates, reliever and department
+              [x] Pending Paternity Leave always shows the approval workflow;
+                  it displays BC's approver chain or an explicit assignment-pending step
   Attend R21  [x] HOD team attendance roster scoped to supervisor department (/attendance/team)
+              [x] Location/coordinate columns removed from employee and HOD attendance tables
   Profile R23 [x] Job details: dept/division from QyHREmployee + dimension codes (portalApi /profile/details)
   Profile R24 [x] Important dates: years of service, last promotion, retirement (portalApi importantDates)
   Profile R26 [x] Next of kin name from QyHREmployeeKin OData (expanded name field paths)
@@ -168,6 +182,8 @@ HR — SSP HR HB Update Jul 26 2026 (column J = HB Status July 27)
   HOD R32     [x] Staff on leave scoped to HOD department only (StaffOnLeave + fetchHodDepartmentStaff)
   Obs R33     [x] Medical claim types Govt / Non Govt / Online (essOptions + staff claim line — Finance module)
   Train R37   [x] Department dropdown from BC; ERP course list (TrainingRequest + CuPortalTraining)
+              [x] Training lookup submits CourseCode to BC while displaying CourseTittle;
+                  closed/individual courses are excluded and Other stays outside the relation
   Train R39   [x] Assessment captures full training need card fields (CuPortalTraining companion store)
   Train R40   [x] Training application list columns (period, provider, cost, department)
   Exit R41-43 [x] Transfer cancel, resignation, exit interview (EmployeeExit + CuPortalEmployeeExit)
@@ -180,11 +196,15 @@ FINANCE — SSP Finance HB Update July 27 2026 (20 fail rows → code mapped)
 --------------------------------------------------------------------------
   Imprest R07  [x] Duration, dept, job title, place of duty, total net, employee account on detail
                [x] Daily rate populated from BC line amount/days and shown to requester/approver
+               [x] Rate preview/save resolves the portal employee's own Customer/Imprest
+                   account and job group instead of the SOAP service account
+               [x] Every new draft performs a fresh ERP-rate request and clears stale amounts
   Imprest R11  [x] Approver sees duration, destination, rejection reason (approvalDetailFields)
   Imprest R13  [x] Remaining unsettled amount on imprest list + detail (enrichment + list column)
   Surrender R19 [x] Duration + travel destination on surrender detail (source imprest enrichment)
   Surrender R23 [x] List status filter/search; send-for-approval on Open/Pending BC status
-  Claim R24    [x] Create claim — dept resolution soft-fail (no 422 on long dept name)
+  Claim R24    [x] Create claim — Sector/GD1 resolved from every employee-card shape,
+                   including users whose department parameter was previously null
   Claim R25    [x] Claim date = ERP working date (frontend schema + backend assert)
   Claim R26-27 [x] Header detail: dept, job title, place of duty, total net, employee account
   Claim R28    [x] Medical: hospital category + coverage % (BC validate + line column)
@@ -206,8 +226,24 @@ FACILITY — SSP Facility HB July 21 2026
   [x] Gate Pass references Store Issue, Transfer Order, Asset Transfer, and Maintenance
   [x] Clear Gate Pass labels; actual Asset Transfer module is separately visible
   [x] Gate Pass Log visible only to its authorized roles
+  [x] Gate Pass Log shows source document, real asset/vehicle number,
+      description, from/to locations, date/time out, returnability, employee,
+      actual return date from QyGatePassReturns, and status
   [x] Business Central unset dates no longer display as 01 Jan 0001
   [x] Store Issue Gate Pass department/sector fall back to the employee profile
+  [x] Store Requisition detail follows Request, Items, Approval, Store Issue,
+      and Receipt Confirmation with requested/issued/received quantities,
+      item availability, requester/organisation fields, SRN, dates and values
+  [x] Store and Purchase list totals fall back to saved BC line values when
+      header FlowFields return zero; Fuel cost falls back to litres x price
+  [x] Non-financial Facility lists show passenger, quantity, asset, or
+      maintenance metrics instead of misleading ETB 0
+  [x] Maintenance detail translates BC type codes, reads NextServiceKM, keeps
+      vehicle odometers conditional, and explains each workflow state
+  [x] Asset Transfer accepts Business Central New/Open status and uses the
+      same Custom Approvals workflow as card 50584, creating real approval entries
+  [x] BC-backed password reset/email and approval operations allow the complete
+      sequential BC call window instead of failing at the browser's old 20-second limit
   [x] Transfer Order and Asset Transfer Gate Pass rows resolve each owner's
       department/sector from that employee's Business Central profile
   [x] The same owner-specific Department/Sector values appear in View details
@@ -246,7 +282,7 @@ BC AL REQUIRED (Felix — before portal deploy)
 
 VERIFY AFTER DEPLOY
 -------------------
-  http://10.30.4.23:4000/api/health → v1.0.3.79
+  http://10.30.4.23:4000/api/health → v${VERSION}
   Run VERIFY-DEPLOY.bat — all [OK]
   Finance smoke: create staff claim, imprest line shows daily rate, petty cash cancel
 EOF
@@ -266,7 +302,7 @@ Critical SOAP: CuStaffPortal, CuPortalFacility, CuPortalAssetTransfer, CuPortalA
   CuPortalEmployeeExit, CuPortalEmployeeData, CuPortalHrLetters, CuPortalTraining
 Critical OData: QyAssetTransfer, QyPortalFuelMaintExtra, QyWorkTicketFlight,
   QyProcurementPlanHeader, QyProcurementPlanLines, QyGatePassTransferShipments,
-  QyGatePassAssetTransfers, QyPettyCashLimitDepartment, QyApprovalCommentLine,
+  QyGatePassAssetTransfers, QyGatePassReturns, QyPettyCashLimitDepartment, QyApprovalCommentLine,
   PgDepartmentsList, QyTravelDestinations
 
 Felix smoke test (must not 404) before portal deploy:
@@ -291,11 +327,18 @@ Ctrl+F5 on login page
 
 *** STEP 6 — SMOKE TEST (all modules) ***
 HR: Leave request → cancel does not block new leave; Profile shows division/dates/kin
+HR: Leave approval → leave type name and requested number of days are visible
 HR: HOD → staff on leave shows own department only; Training list shows applications
+HR: Training submits the selected BC Course Code even when an older cached form sends its title
 Finance: Imprest daily rate + travel destination dropdown; Petty cash profile dims
-Finance: Staff claim medical refund; Facility: Purchase spec attach, Asset Transfer post
+Finance: Imprest Surrender hides unavailable fields and does not repeat organisation details
+Finance: Staff claim creation for users with Sector-only employee profiles + medical refund
+Finance: Staff Claim hides medical-only columns for non-medical claims and resolves G/L account names
+Facility: Purchase spec attach, Asset Transfer post
+Facility: Store/Purchase/Fuel list totals; Transport/Transfer/Asset list metrics
+Facility: Store line table shows core fields plus only populated issue/receipt-stage values
 
-BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-28-finance-department-imprest-erp-fixes
+BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-29-training-course-code-resolution
 EOF
 
 cat > "$ROOT/FIX-NETWORK-ERROR.txt" << 'EOF'
@@ -311,7 +354,7 @@ if [[ -f "$OLD_ZIP" ]]; then
 fi
 
 cat > "$ROOT/README-COMPLETE-SUITE.txt" << EOF
-HIJRA Complete Suite FINAL v${VERSION} — 28 Jul 2026
+HIJRA Complete Suite FINAL v${VERSION} — 29 Jul 2026
 FULL ALL MODULES — HR + Finance + Facility — deploy once.
 See ALL-FIXES-MANIFEST.txt inside the zip.
 EOF

@@ -24,6 +24,7 @@ import {
   fetchEmployeeRecordFast,
   fetchEmployeeSalaryBaseFast,
   probeEmployeeSalarySources,
+  resolveEmployeeMonthlySalaryBase,
   resolveEmployeeJobTitleByNo,
 } from './employeeProfile.js'
 import {
@@ -98,6 +99,11 @@ import {
   REQUESTABLE_HR_SERVICE_LETTER_TYPES,
   type RequestableHrServiceLetterType,
 } from './hrServiceLetters.js'
+import {
+  trainingCourseCodeForBc,
+  trainingCourseLookupOption,
+  trainingCourseOptionForBc,
+} from './trainingCourses.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
   return async (
@@ -202,6 +208,75 @@ const trainingSoapEndpoint = {
   namespace: codeunitSoapNamespace(TRAINING_SERVICE_NAME),
 }
 
+async function mapInBatches<T, R>(
+  rows: T[],
+  batchSize: number,
+  mapper: (row: T) => Promise<R>,
+) {
+  const mapped: R[] = []
+  for (let index = 0; index < rows.length; index += batchSize) {
+    mapped.push(...(await Promise.all(rows.slice(index, index + batchSize).map(mapper))))
+  }
+  return mapped
+}
+
+async function fetchTrainingAssessment(applicationNo: string) {
+  if (!applicationNo.trim()) return null
+  const result = await callSoapMethod(
+    'GetTrainingAssessment',
+    { applicationNo },
+    trainingSoapEndpoint,
+  )
+  const raw = String(result.returnValue ?? '').trim()
+  if (!raw) return null
+  const assessment = JSON.parse(raw) as ODataRecord
+  return assessment && typeof assessment === 'object' && Object.keys(assessment).length > 0
+    ? assessment
+    : null
+}
+
+function enrichTrainingRow(
+  row: ODataRecord,
+  assessment: ODataRecord | null,
+  authUser: AuthUser,
+) {
+  const saved = assessment ?? {}
+  const trainingNeed =
+    text(saved, ['otherTrainingName']) ||
+    text(saved, ['trainingNeed']) ||
+    text(row, ['CourseTitle', 'Course_Title', 'IndividualCourseDescription', 'Description'])
+  const department =
+    text(saved, ['department']) ||
+    text(row, [
+      'DepartmentName',
+      'Department_Name',
+      'Department',
+      'DepartmentCode',
+      'GlobalDimension1',
+      'GlobalDimension1Code',
+      'Dim1Name',
+    ]) ||
+    authUser.departmentName ||
+    authUser.department
+
+  return {
+    ...row,
+    ...saved,
+    trainingNeed,
+    department,
+    periodStart:
+      text(saved, ['periodStart']) || text(row, ['FromDate', 'From_Date', 'StartDate']),
+    periodEnd:
+      text(saved, ['periodEnd']) || text(row, ['ToDate', 'To_Date', 'EndDate']),
+    vendor:
+      text(saved, ['vendor']) ||
+      text(row, ['TrainingInstitution', 'Training_Institution', 'Trainer', 'Provider']),
+    estimatedBudget:
+      text(saved, ['estimatedBudget']) ||
+      text(row, ['CostOfTraining', 'Cost_Of_Training', 'EstimatedBudget', 'EstimatedCost']),
+  }
+}
+
 function workTicketFlight(row: ODataRecord | undefined) {
   return {
     bookingType: text(row ?? {}, ['BookingType'], 'Flight'),
@@ -229,7 +304,7 @@ function workTicketFlight(row: ODataRecord | undefined) {
  * dist/portalApi.js is stale.
  */
 export const PORTAL_API_BUILD =
-  'v1.0.3.79 — 2026-07-28 (all existing modules preserved + universal list search + BC workflow fixes)'
+  'v1.0.3.120 — 2026-07-29 (training course titles resolve to valid BC course codes)'
 
 interface LookupSpec {
   service: string
@@ -249,6 +324,10 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
     filter: `Description ne '' and Type eq 'Imprest'`,
+    meta: {
+      rateSource: ['RateSource', 'Rate_Source'],
+      manualAmount: ['ManualAmount', 'Manual_Amount'],
+    },
   },
   'travel-destinations': {
     service: 'QyTravelDestinations',
@@ -260,7 +339,19 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
     filter: `Description ne '' and Type eq 'Claim'`,
-    meta: { accountNo: ['GLAccount', 'GL_Account'] },
+    meta: {
+      accountNo: [
+        'GLAccount',
+        'GL_Account',
+        'G_L_Account',
+        'GLAccountNo',
+        'GL_Account_No',
+        'G_L_Account_No',
+        'AccountNo',
+        'Account_No',
+      ],
+      accountName: ['GLAccountName', 'GL_Account_Name', 'G_L_Account_Name'],
+    },
   },
   'petty-cash-types': {
     service: 'QyReceiptsPayments',
@@ -350,10 +441,11 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
   },
   'training-courses': {
     service: 'QyTrainingCourses',
-    // The target field is Course Title and is table-related by title in this
-    // BC tenant. Sending the display code (for example IND) is rejected.
-    valueKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'Description', 'CourseCode', 'Course_Code', 'Code'],
-    labelKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'Description', 'CourseName', 'CourseCode'],
+    // Despite its name, HR Training Applications."Course Title" relates to
+    // HR Training Courses."Course Code". CourseTittle is display text only.
+    valueKeys: ['CourseCode', 'Course_Code'],
+    labelKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'CourseName'],
+    filter: 'Closed eq false and IndividualCourse eq false',
     plainLabel: true,
   },
   'payroll-posting-groups': {
@@ -445,6 +537,157 @@ function lookupLabel(row: ODataRecord, spec: LookupSpec, value: string) {
 function lookupMatches(row: ODataRecord, spec: LookupSpec) {
   if (!spec.match) return true
   return text(row, spec.match.keys).trim().toUpperCase() === spec.match.value.toUpperCase()
+}
+
+async function resolveTrainingCourseCodeForBc(candidate: unknown) {
+  const submittedValue = trainingCourseCodeForBc(candidate)
+  if (!submittedValue) return ''
+
+  const rows = await fetchOData('QyTrainingCourses')
+  const option = trainingCourseOptionForBc(
+    submittedValue,
+    Array.isArray(rows) ? rows : [],
+  )
+  if (!option) {
+    throw portalError(
+      'The selected training course is not available in Business Central. Refresh the page and select an active course from the ERP list.',
+      422,
+      'TRAINING_COURSE_NOT_FOUND',
+    )
+  }
+  return option.value
+}
+
+function gatePassRecordIndex(rows: ODataRecord[], keys: string[]) {
+  const records = new Map<string, ODataRecord>()
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = text(row, [key]).trim().toUpperCase()
+      if (value && !records.has(value)) records.set(value, row)
+    }
+  }
+  return records
+}
+
+function gatePassOptionLabel(value: unknown, labels: Record<number, string>, fallback = '-') {
+  if (typeof value === 'boolean') return value ? labels[1] ?? 'Yes' : labels[0] ?? 'No'
+  const raw = String(value ?? '').trim()
+  if (!raw) return fallback
+  if (/^\d+$/.test(raw)) return labels[Number(raw)] ?? fallback
+  if (['true', 'yes'].includes(raw.toLowerCase())) return 'Yes'
+  if (['false', 'no'].includes(raw.toLowerCase())) return 'No'
+  return raw
+}
+
+export function mapGatePassLogRow(
+  row: ODataRecord,
+  sourceRecord: ODataRecord = {},
+  returnRecord: ODataRecord = {},
+) {
+  const sourceDocumentNo = text(row, [
+    'TransferNo',
+    'Transfer_No',
+    'SourceDocumentNo',
+    'Source_Document_No',
+    'ExternalDocumentNo',
+    'External_Document_No',
+  ])
+  const assetTag = text(
+    row,
+    [
+      'AssetNo',
+      'Asset_No',
+      'AssetTag',
+      'Asset_Tag',
+      'AssetTagNumber',
+      'Asset_Tag_Number',
+      'TagNo',
+      'Tag_No',
+      'SerialNo',
+      'Serial_No',
+      'ItemNo',
+      'Item_No',
+    ],
+    text(sourceRecord, [
+      'TagNo',
+      'Tag_No',
+      'AssetNo',
+      'Asset_No',
+      'AssetToTransfer',
+      'Asset_To_Transfer',
+      'VehicleRegNo',
+      'Vehicle_Reg_No',
+      'ItemNo',
+      'Item_No',
+    ]),
+  )
+  const returnDate =
+    filterBcDate(text(returnRecord, ['DateIn', 'Date_In', 'ReturnDate', 'Return_Date'])) ||
+    filterBcDate(text(row, ['ReturnDate', 'Return_Date', 'DateIn', 'Date_In']))
+  const returned = gatePassOptionLabel(
+    returnRecord.ReturnedStatus ??
+      returnRecord.Returned_Status ??
+      row.ReturnedStatus ??
+      row.Returned_Status,
+    { 0: 'No', 1: 'Yes' },
+  )
+
+  return {
+    gatePassNo: text(row, ['GatePassNo', 'Gate_Pass_No', 'No']),
+    sourceDocumentNo,
+    type: text(row, ['Linkto', 'LinkTo', 'Link_To'], 'Store Issue'),
+    assetTag: assetTag || '-',
+    description: text(
+      row,
+      ['Description', 'AssetDescription', 'Asset_Description'],
+      text(sourceRecord, [
+        'AssetDescription',
+        'Asset_Description',
+        'RequestDescription',
+        'Request_Description',
+        'Description',
+      ]),
+    ) || '-',
+    fromLocation: text(
+      row,
+      ['FromLocation', 'From_Location', 'AssetFromLocation', 'Asset_From_Location'],
+      text(sourceRecord, [
+        'FromLocation',
+        'From_Location',
+        'TransferfromCode',
+        'Transfer_from_Code',
+        'Location',
+      ]),
+    ) || '-',
+    destination: text(
+      row,
+      ['ToLocation', 'To_Location', 'AssetToLocation', 'Asset_To_Location'],
+      text(sourceRecord, [
+        'ToLocation',
+        'To_Location',
+        'DestinationLocation',
+        'Destination_Location',
+        'TransfertoCode',
+        'Transfer_to_Code',
+        'Destination',
+        'Location',
+      ]),
+    ) || '-',
+    dateOut: filterBcDate(text(row, ['DateOut', 'Date_Out'])) || '-',
+    timeOut: text(row, ['TimeOut', 'Time_Out'], '-'),
+    returnable: gatePassOptionLabel(
+      row.ToBeReturned ?? row.To_Be_Returned,
+      { 1: 'Yes', 2: 'No' },
+    ),
+    returned: returned === '-' && returnDate ? 'Yes' : returned,
+    returnDate: returnDate || '-',
+    employee: text(
+      row,
+      ['EmployeeName', 'Employee_Name', 'EmployeeNo', 'Employee_No', 'CreatedBy', 'Created_By'],
+      '-',
+    ),
+    status: text(row, ['Status'], '-'),
+  }
 }
 
 const frontendModules = [
@@ -754,9 +997,30 @@ function mapStoreLine(row: ODataRecord, index: number) {
   const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
   const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
   const quantityIssued = number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued'])
+  const quantityReceived = number(row, [
+    'quantityReceived',
+    'QuantityReceived',
+    'Quantity_Received',
+  ])
+  const quantityToIssue = number(row, [
+    'quantityToIssue',
+    'QuantityToIssue',
+    'Quantity_To_Issue',
+  ])
   const quantityOutstanding =
     number(row, ['quantityOutstanding', 'QuantityOutstanding', 'Quantity_Outstanding', 'OutstandingQuantity']) ||
     Math.max(0, quantityRequested - quantityIssued)
+  const quantityPendingReceipt = Math.max(0, quantityIssued - quantityReceived)
+  const fulfillmentStatus =
+    quantityIssued > 0 && quantityReceived < quantityIssued
+      ? 'Awaiting receipt confirmation'
+      : quantityRequested > 0 && quantityIssued >= quantityRequested && quantityReceived >= quantityIssued
+        ? 'Received'
+        : quantityIssued > 0
+          ? 'Partially issued'
+          : quantityToIssue > 0
+            ? 'Ready to issue'
+            : 'Awaiting store issue'
   return {
     id: lineNo,
     lineNo,
@@ -766,12 +1030,42 @@ function mapStoreLine(row: ODataRecord, index: number) {
     description: text(row, ['description', 'Description']),
     quantity: quantityRequested,
     quantityRequested,
+    availableStock: number(row, [
+      'availableStock',
+      'AvailableStock',
+      'Qtyinstore',
+      'QtyInStore',
+      'QuantityInStore',
+    ]),
+    quantityToIssue,
+    currentIssueQuantity: number(row, [
+      'currentIssueQuantity',
+      'IssueQuantity',
+      'Issue_Quantity',
+    ]),
     quantityIssued,
     quantityOutstanding,
     quantityToReceive: number(row, ['quantityToReceive', 'QuantityToReceive', 'Quantity_to_Receive', 'Qtytoreceive']),
-    quantityReceived: number(row, ['quantityReceived', 'QuantityReceived', 'Quantity_Received']),
+    quantityReceived,
+    quantityPendingReceipt,
+    lastQuantityIssued: number(row, [
+      'lastQuantityIssued',
+      'LastQuantityIssued',
+      'Last_Quantity_Issued',
+    ]),
+    lastIssueDate: text(row, ['lastIssueDate', 'LastDateofIssue', 'Last_Date_of_Issue']),
     reason: text(row, ['reason', 'Reason', 'ReasonforlessQtyReceived']),
+    reasonForLessIssued: text(row, [
+      'reasonForLessIssued',
+      'Reasonforissuinglesss',
+      'Reason_for_issuing_less',
+    ]),
+    remarks: text(row, ['remarks', 'Remarks']),
+    requestStatus: text(row, ['requestStatus', 'RequestStatus', 'Request_Status']),
+    fulfillmentStatus,
     unitOfMeasure: text(row, ['unitOfMeasure', 'UnitofMeasure', 'UnitOfMeasure', 'Unit_of_Measure']),
+    unitCost: number(row, ['unitCost', 'UnitCost', 'Unit_Cost']),
+    lineAmount: number(row, ['lineAmount', 'LineAmount', 'Line_Amount']),
   }
 }
 
@@ -904,6 +1198,21 @@ function purchaseLineTypeCode(value: string) {
 function mapPurchaseLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
   const rawType = text(row, ['Type', 'type'])
+  const quantity = number(row, ['Quantity', 'quantity'])
+  const directUnitCost = number(row, [
+    'DirectUnitCost',
+    'Direct_Unit_Cost',
+    'UnitCost',
+    'Unit_Cost',
+    'unitCost',
+  ])
+  const amountIncludingVat = number(row, [
+    'AmountIncludingVAT',
+    'Amount_Including_VAT',
+    'amountIncludingVat',
+  ])
+  const lineAmount = number(row, ['LineAmount', 'Line_Amount', 'Amount', 'amount'])
+  const amount = amountIncludingVat || lineAmount || directUnitCost * quantity
   return {
     id: lineNo,
     lineNo,
@@ -912,11 +1221,14 @@ function mapPurchaseLine(row: ODataRecord, index: number) {
     itemNo: text(row, ['No', 'No_', 'itemNo', 'ItemNo', 'Item_No', 'Item_No_']),
     description: text(row, ['Description', 'description']),
     location: text(row, ['Location_Code', 'LocationCode', 'Location', 'location']),
-    quantity: number(row, ['Quantity', 'quantity']),
+    quantity,
     reasonForRequest: text(row, ['RequestSummary', 'Reason_for_Request', 'ReasonForRequest', 'reasonForRequest']),
     procurementPlan: text(row, ['Procurement_Plan', 'ProcurementPlan', 'procurementPlan']),
     unitOfMeasure: text(row, ['Unit_of_Measure', 'UnitofMeasure', 'UnitOfMeasure', 'unitOfMeasure']),
-    amount: number(row, ['AmountIncludingVAT', 'Amount_Including_VAT', 'Amount', 'amount']),
+    directUnitCost,
+    lineAmount,
+    amountIncludingVat,
+    amount,
   }
 }
 
@@ -932,6 +1244,40 @@ export function transportRequestTypeLabel(value: unknown) {
     return 'Field Trip'
   }
   return String(value ?? '').trim()
+}
+
+/** Translate the portal/BC maintenance option value into a readable label. */
+export function maintenanceRequestTypeLabel(row: ODataRecord) {
+  const raw = text(row, [
+    'RequestType',
+    'Request_Type',
+    'MaintenanceType',
+    'DocumentType',
+    'Document_Type',
+  ])
+  const normalized = raw.trim().toLowerCase()
+  if (
+    normalized === '1' ||
+    normalized === 'fixed asset' ||
+    normalized === 'fixed asset maintenance'
+  ) {
+    return 'Fixed Asset Maintenance'
+  }
+  if (
+    normalized === '2' ||
+    normalized === 'vehicle' ||
+    normalized === 'vehicle service' ||
+    normalized === 'vehicle service maintenance'
+  ) {
+    return 'Vehicle Service Maintenance'
+  }
+  const maintenanceType = text(row, [
+    'TypeofMaintenance',
+    'Type_of_Maintenance',
+    'MaintenanceDescription',
+  ])
+  if (maintenanceType) return maintenanceType
+  return raw || 'Maintenance'
 }
 
 function mapTransportPassenger(row: ODataRecord, index: number) {
@@ -1001,6 +1347,124 @@ export function mapModuleLines(
     return rows.map((row) => mapSalaryAdvanceLine(row, header))
   }
   return rows
+}
+
+export interface FacilityListSummary {
+  amount?: number
+  totalQuantity?: number
+  passengerCount?: number
+}
+
+function firstNonZeroNumber(row: ODataRecord, keys: string[]) {
+  for (const key of keys) {
+    const parsed = Number(row[key])
+    if (Number.isFinite(parsed) && parsed !== 0) return parsed
+  }
+  return 0
+}
+
+/**
+ * Facility headers do not consistently calculate their FlowField totals for
+ * OData. Derive the list value from the saved lines when the header is zero,
+ * while keeping quantity/passenger workflows out of the currency column.
+ */
+export function facilityListSummary(
+  module: SupportedFrontendModule,
+  header: ODataRecord,
+  rawLines: ODataRecord[] = [],
+): FacilityListSummary {
+  if (module === 'storeRequisition') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    const amountFromHeader = firstNonZeroNumber(header, [
+      'TotalAmount',
+      'Total_Amount',
+      'Amount',
+      'ActualExpenditure',
+      'CommittedAmount',
+    ])
+    const amountFromLines = lines.reduce((total, line) => {
+      const value =
+        Number(line.lineAmount ?? 0) ||
+        Number(line.unitCost ?? 0) * Number(line.quantityRequested ?? line.quantity ?? 0)
+      return total + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return {
+      amount: amountFromHeader || amountFromLines,
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantityRequested ?? line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'purchaseRequisition') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    const amountFromHeader = firstNonZeroNumber(header, [
+      'AmountIncludingVAT',
+      'Amount_Including_VAT',
+      'TotalAmount',
+      'Total_Amount',
+      'Amount',
+      'CommittedAmount',
+      'ActualExpenditure',
+    ])
+    const amountFromLines = lines.reduce((total, line) => {
+      const value =
+        Number(line.amount ?? 0) ||
+        Number(line.directUnitCost ?? 0) * Number(line.quantity ?? 0)
+      return total + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return {
+      amount: amountFromHeader || amountFromLines,
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'fuelRequest') {
+    const quantity = firstNonZeroNumber(header, [
+      'QuantityofFuelLitres',
+      'Quantity_of_Fuel_Litres',
+      'Quantity',
+    ])
+    const price = firstNonZeroNumber(header, ['PriceLitre', 'Price_Litre', 'Price'])
+    return {
+      amount:
+        firstNonZeroNumber(header, [
+          'TotalPriceofFuel',
+          'Total_Price_of_Fuel',
+          'TotalCost',
+          'Total_Cost',
+          'Amount',
+        ]) ||
+        quantity * price,
+      totalQuantity: quantity,
+    }
+  }
+
+  if (module === 'transferOrder') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    return {
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'transport') {
+    return {
+      passengerCount: firstNonZeroNumber(header, [
+        'No_Of_Passangers',
+        'NoOfPassengers',
+        'No_of_Passengers',
+      ]),
+    }
+  }
+
+  return {}
 }
 
 const GATE_PASS_EMPLOYEE_NO_FIELDS = [
@@ -1157,14 +1621,62 @@ async function mappedModuleRows(
     const salaryBase =
       authUser.monthlySalaryBase && authUser.monthlySalaryBase > 0
         ? authUser.monthlySalaryBase
-        : await fetchEmployeeSalaryBaseFast(authUser.employeeNo)
-    const enrichedRows =
-      salaryBase > 0
-        ? rows.map((row) => injectSalaryAdvanceSalaryHint(row, salaryBase))
-        : rows
-    return enrichedRows
-      .map((row) => mapRequest(row, module as PortalModuleKey))
-      .filter((row) => true)
+        : await fetchEmployeeSalaryBaseFast(authUser.employeeNo, {
+            customerNo: authUser.imprestNo || authUser.accountNumber,
+          })
+    return mapInBatches(rows, 6, async (row) => {
+      const no = text(row, ['No', 'DocumentNo', 'Document_No', 'ApplicationNo'])
+      const rawLines = no
+        ? await listPortalModuleLines(spec, row, no).catch(() => [] as ODataRecord[])
+        : []
+      const customerNo =
+        text(row, ['CustomerNo', 'Customer_No']) ||
+        authUser.imprestNo ||
+        authUser.accountNumber ||
+        ''
+      const enriched = await enrichSalaryAdvanceLines(row, rawLines, {
+        employeeNo:
+          text(row, ['StaffNo', 'Staff_No', 'EmployeeNo', 'Employee_No']) ||
+          authUser.employeeNo,
+        customerNo,
+        docNo: no,
+        monthlySalaryBase: salaryBase,
+        fast: true,
+        skipSoap: true,
+      })
+      const mapped = mapRequest(enriched.header, module as PortalModuleKey)
+      const amount = salaryAdvanceLinesTotal(enriched.lines, enriched.header)
+      return {
+        ...mapped,
+        ...(amount > 0 ? { amount } : {}),
+        payload: {
+          ...enriched.header,
+          ...(enriched.salaryBase > 0
+            ? { monthlySalaryBase: enriched.salaryBase }
+            : {}),
+          lines: enriched.lines,
+        },
+      }
+    })
+  }
+  if (module === 'training') {
+    const enrichedRows = await mapInBatches(rows, 6, async (row) => {
+      const no = text(row, ['ApplicationNo', 'Application_No', 'No'])
+      const assessment = no
+        ? await fetchTrainingAssessment(no).catch(() => null)
+        : null
+      return enrichTrainingRow(row, assessment, authUser)
+    })
+    return enrichedRows.map((row) => {
+      const mapped = mapRequest(row, module as PortalModuleKey)
+      return {
+        ...mapped,
+        title:
+          text(row, ['trainingNeed', 'CourseTitle', 'Course_Title', 'Description']) ||
+          mapped.title,
+        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+      }
+    })
   }
   if (isFinanceDetailModule(module)) {
     const hints = financeSessionHints(authUser)
@@ -1181,6 +1693,33 @@ async function mappedModuleRows(
       })
       .filter((row) => true)
   }
+
+  if (
+    module === 'storeRequisition' ||
+    module === 'purchaseRequisition' ||
+    module === 'transferOrder'
+  ) {
+    return mapInBatches(rows, 6, async (row) => {
+      const mapped = mapRequest(row, module as PortalModuleKey)
+      const rawLines = mapped.requestNo
+        ? await listPortalModuleLines(spec, row, mapped.requestNo).catch(
+            () => [] as ODataRecord[],
+          )
+        : []
+      const summary = facilityListSummary(
+        module,
+        row,
+        Array.isArray(rawLines) ? rawLines : [],
+      )
+      return {
+        ...mapped,
+        ...(summary.amount !== undefined ? { amount: summary.amount } : {}),
+        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+        payload: { ...row, ...summary },
+      }
+    })
+  }
+
   const displayRows =
     module === 'gatePass'
       ? await enrichGatePassRowsWithEmployeeDimensions(rows, authUser)
@@ -1188,9 +1727,15 @@ async function mappedModuleRows(
   return displayRows
     .map((row) => {
       const mapped = mapRequest(row, module as PortalModuleKey)
+      const summary = facilityListSummary(module, row)
       return {
         ...mapped,
+        ...(summary.amount !== undefined ? { amount: summary.amount } : {}),
         status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+        payload:
+          Object.keys(summary).length > 0
+            ? { ...row, ...summary }
+            : mapped.payload,
       }
     })
     .filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
@@ -1309,13 +1854,51 @@ function leaveHintsFromApprovalEntry(entry?: ODataRecord): LeaveLookupHints {
   }
 }
 
-function leavePayloadFromRow(row: ODataRecord, no: string, entry?: ODataRecord) {
+export function leaveTypeDescriptionForDisplay(
+  row: ODataRecord,
+  resolvedDescription = '',
+) {
+  const explicit = text(row, [
+    'LeaveTypeDescription',
+    'Leave_Type_Description',
+    'LeaveDescription',
+  ])
+  if (explicit) return explicit
+  if (resolvedDescription.trim()) return resolvedDescription.trim()
+
+  const raw = text(row, ['LeaveType', 'Leave_Type'])
+  return raw && !/^\d+$/.test(raw) ? raw : ''
+}
+
+async function fetchLeaveTypeDescription(leaveTypeCode: string) {
+  const code = leaveTypeCode.trim()
+  if (!code) return ''
+  const rows = (await fetchOData('QyHRLeaveType', {
+    $filter: `Code eq '${odataString(code)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  const row = Array.isArray(rows) ? rows[0] : undefined
+  return row ? text(row, ['Description', 'Name']) : ''
+}
+
+function leavePayloadFromRow(
+  row: ODataRecord,
+  no: string,
+  entry?: ODataRecord,
+  resolvedLeaveTypeDescription = '',
+) {
+  const leaveTypeCode = text(row, ['LeaveTypeCode', 'Leave_Type_Code', 'LeaveType', 'Leave_Type'])
   return {
     ...row,
     sourceDocumentAvailable: true,
     ApplicationCode: text(row, ['ApplicationCode', 'Application_Code'], no),
     EmployeeNo: text(row, ['EmployeeNo', 'Employee_No']),
     LeaveType: text(row, ['LeaveType', 'Leave_Type']),
+    LeaveTypeCode: leaveTypeCode,
+    LeaveTypeDescription: leaveTypeDescriptionForDisplay(
+      row,
+      resolvedLeaveTypeDescription,
+    ),
     DaysApplied: text(row, ['DaysApplied', 'Days_Applied']),
     StartDate: text(row, ['StartDate', 'Start_Date']),
     EndDate: text(row, ['EndDate', 'End_Date']),
@@ -1343,6 +1926,7 @@ function buildLeaveRequestDetail(
   approvalSteps: unknown,
   attachments: unknown,
   entry?: ODataRecord,
+  resolvedLeaveTypeDescription = '',
 ) {
   const mapped = mapRequest(row, 'leave')
   const steps = mapApprovalSteps(approvalSteps)
@@ -1355,7 +1939,7 @@ function buildLeaveRequestDetail(
   return {
     ...mapped,
     status: resolvedStatus,
-    payload: leavePayloadFromRow(row, no, entry),
+    payload: leavePayloadFromRow(row, no, entry, resolvedLeaveTypeDescription),
     approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
@@ -1419,11 +2003,15 @@ async function resolveLeaveRequestDetail(
   const entry = approvalEntries[0]
   const hints = leaveHintsFromApprovalEntry(entry)
   const row = await fetchLeaveApplication(no, hints, entry)
-  const [approvers, attachments] = await Promise.all([
+  const leaveTypeCode = row
+    ? text(row, ['LeaveTypeCode', 'Leave_Type_Code', 'LeaveType', 'Leave_Type'])
+    : ''
+  const [approvers, attachments, leaveTypeDescription] = await Promise.all([
     approvalEntries.length
       ? enrichLeaveApprovalEntries(approvalEntries)
       : enrichLeaveApprovalEntries(await fetchLeaveApprovalEntries(no)),
     fetchDocumentAttachments(no, 50532).catch(() => [] as ODataRecord[]),
+    fetchLeaveTypeDescription(leaveTypeCode),
   ])
 
   if (row) {
@@ -1432,7 +2020,14 @@ async function resolveLeaveRequestDetail(
       : entry
         ? [entry]
         : []
-    const detail = buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const detail = buildLeaveRequestDetail(
+      row,
+      no,
+      approvers,
+      attachments,
+      entry,
+      leaveTypeDescription,
+    )
     const approvalStepsResolved = await resolveLeaveApprovalStepsAsync(row, approvalEntryRows, no, {
       employeeNo: text(row, ['EmployeeNo', 'Employee_No'], authUser.employeeNo),
       userID: authUser.userID,
@@ -1511,17 +2106,13 @@ async function requestDetail(
     }
   }
   if (module === 'training') {
-    const assessmentResult = await callSoapMethod(
-      'GetTrainingAssessment',
-      { applicationNo: no },
-      trainingSoapEndpoint,
-    ).catch(() => ({ returnValue: '{}' }))
     try {
-      const assessment = JSON.parse(String(assessmentResult.returnValue ?? '{}')) as ODataRecord
-      payloadRow = { ...payloadRow, ...assessment }
+      const assessment = await fetchTrainingAssessment(no)
+      payloadRow = enrichTrainingRow(payloadRow, assessment, authUser)
     } catch {
       // A legacy training header must remain readable even before the companion
       // assessment web service is installed.
+      payloadRow = enrichTrainingRow(payloadRow, null, authUser)
     }
   }
   if (
@@ -1530,6 +2121,12 @@ async function requestDetail(
     maintenanceExtras[0]
   ) {
     payloadRow = { ...payloadRow, ...maintenanceExtras[0] }
+  }
+  if (module === 'maintenance') {
+    payloadRow = {
+      ...payloadRow,
+      maintenanceRequestTypeLabel: maintenanceRequestTypeLabel(payloadRow),
+    }
   }
   if (isFinanceDetailModule(module)) {
     let financeRow = row
@@ -1603,8 +2200,17 @@ async function requestDetail(
     module === 'transport'
       ? text(payloadRow, ['RequestType', 'Request_Type', 'VehicleType', 'Vehicle_Type'])
       : ''
+  const storeRequestOwnedByCurrentUser =
+    module === 'storeRequisition' &&
+    (mapped.makerEmployeeNo.trim().toLowerCase() === authUser.employeeNo.trim().toLowerCase() ||
+      text(payloadRow, ['UserID', 'RequesterID']).trim().toLowerCase() ===
+        authUser.userID.trim().toLowerCase())
+  const storeRequesterName = storeRequestOwnedByCurrentUser
+    ? authUser.displayName || authUser.name || mapped.makerName
+    : ''
   return {
     ...mapped,
+    ...(storeRequesterName ? { makerName: storeRequesterName } : {}),
     status: resolvedStatus,
     ...(displayAmount > 0 ? { amount: displayAmount } : {}),
     payload: {
@@ -1624,6 +2230,14 @@ async function requestDetail(
         ? {
             transportRequestType: rawTransportRequestType,
             transportRequestTypeLabel: transportRequestTypeLabel(rawTransportRequestType),
+          }
+        : {}),
+      ...(storeRequesterName
+        ? {
+            RequesterName: storeRequesterName,
+            RequesterJobTitle: authUser.jobTitle,
+            RequesterBranch: authUser.branchName || authUser.branchCode,
+            RequesterPlaceOfDuty: authUser.placeOfDuty,
           }
         : {}),
       lines: mappedLines,
@@ -1912,6 +2526,9 @@ export function buildPortalApiRouter() {
         rows: (Array.isArray(rows) ? rows : [])
           .filter((row) => lookupMatches(row, spec))
           .map((row) => {
+            if (catalog === 'training-courses') {
+              return trainingCourseLookupOption(row)
+            }
             const value = text(row, spec.valueKeys)
             if (!value) return null
             const meta = Object.fromEntries(
@@ -2005,6 +2622,15 @@ export function buildPortalApiRouter() {
           )
         }
       }
+      const trainingCourseCode =
+        module === 'training'
+          ? await resolveTrainingCourseCodeForBc(
+              req.body?.trainingCourseCode ??
+                req.body?.trainingNeed ??
+                req.body?.trainingTitle ??
+                '',
+            )
+          : ''
       const no =
         module === 'training'
           ? String(
@@ -2015,11 +2641,7 @@ export function buildPortalApiRouter() {
                     requesterUserId: authUser.userID,
                     myAction: 'create',
                     docNo: '',
-                    trainingCourseCode:
-                      req.body?.trainingNeed ??
-                      req.body?.trainingCourseCode ??
-                      req.body?.trainingTitle ??
-                      '',
+                    trainingCourseCode,
                     purpose:
                       req.body?.purpose ??
                       req.body?.comments ??
@@ -2082,11 +2704,8 @@ export function buildPortalApiRouter() {
             employeeNo: authUser.employeeNo,
             requesterUserId: authUser.userID,
             detailsJson: JSON.stringify({
-              trainingNeed:
-                req.body?.trainingNeed ??
-                req.body?.trainingCourseCode ??
-                req.body?.trainingTitle ??
-                '',
+              trainingNeed: trainingCourseCode,
+              trainingCourseTitle: req.body?.trainingCourseTitle ?? req.body?.title ?? '',
               purpose: req.body?.purpose ?? req.body?.comments ?? req.body?.justification ?? '',
               otherTrainingName:
                 req.body?.otherTrainingName ?? req.body?.additionalTrainingNeeds ?? '',
@@ -2738,12 +3357,22 @@ export function buildPortalApiRouter() {
   router.post(
     '/imprest/fetch-line-amount',
     safe(async (req, res) => {
-      const result = await callSoapMethod('FetchImprestLineAmount', {
-        headerNo: String(req.body?.headerNo ?? ''),
-        noOfDays: Number(req.body?.noOfDays ?? 0),
-        advanceType: String(req.body?.advanceType ?? ''),
-        destinationCode: String(req.body?.destinationCode ?? req.body?.destination ?? ''),
-      })
+      let result
+      try {
+        result = await callSoapMethod('FetchImprestLineAmount', {
+          headerNo: String(req.body?.headerNo ?? ''),
+          noOfDays: Number(req.body?.noOfDays ?? 0),
+          advanceType: String(req.body?.advanceType ?? ''),
+          destinationCode: String(req.body?.destinationCode ?? req.body?.destination ?? ''),
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/please enter daily rate/i.test(message)) {
+          res.json({ amount: 0, dailyRate: 0, requiresManualRate: true })
+          return
+        }
+        throw error
+      }
       const noOfDays = Number(req.body?.noOfDays ?? 0)
       const amount = Number(result.returnValue ?? 0)
       if (!Number.isFinite(amount)) {
@@ -2797,7 +3426,7 @@ export function buildPortalApiRouter() {
       const today = new Date().toISOString().slice(0, 10)
       const rows = (await fetchOData('QyAttendanceLedger', {
         $filter: authUser.department
-          ? `DepartmentCode eq '${odataString(authUser.department)}' and Date eq ${today}`
+          ? `GlobalDimension1Code eq '${odataString(authUser.department)}' and Date eq ${today}`
           : `Date eq ${today}`,
       })) as ODataRecord[] | null
       res.json({ rows: (Array.isArray(rows) ? rows : []).map((row) => attendanceRow(row, authUser)) })
@@ -2932,7 +3561,14 @@ export function buildPortalApiRouter() {
         ),
         sector: text(employee, ['Sector', 'SectorName', 'Sector_Name']),
         division: text(employee, ['Division', 'DivisionName', 'Division_Name']),
-        district: text(employee, ['District', 'DistrictName', 'District_Name']),
+        district: text(employee, [
+          'District',
+          'DistrictName',
+          'District_Name',
+          'GlobalDimension2Code',
+          'GlobalDimension2Name',
+          'ShortcutDimension2Code',
+        ]),
         branchName: text(employee, ['BranchName', 'Branch_Name'], authUser.branchName),
         branchCode: text(
           employee,
@@ -3627,7 +4263,7 @@ export function buildPortalApiRouter() {
         $filter:
           `No eq '${odataString(employeeNo)}'` +
           ` and Status eq 'Active'` +
-          ` and DepartmentCode eq '${odataString(authUser.department)}'`,
+          ` and GlobalDimension1Code eq '${odataString(authUser.department)}'`,
         $top: 1,
       }).catch(() => [])) as ODataRecord[]
       const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
@@ -3728,15 +4364,59 @@ export function buildPortalApiRouter() {
   router.get(
     '/reports/gate-pass-log',
     safe(async (_req, res) => {
-      const rows = await fetchOData('QyGatePass').catch(() => [] as ODataRecord[])
-      res.json((Array.isArray(rows) ? rows : []).map((row) => ({
-        gatePassNo: text(row, ['GatePassNo']),
-        type: text(row, ['Linkto', 'LinkTo', 'Link_To'], 'Store Issue'),
-        assetTag: text(row, ['ItemNo', 'AssetTagNumber']),
-        destination: text(row, ['ToLocation']),
-        returnDate: text(row, ['ReturnDate'], '-'),
-        status: text(row, ['Status']),
-      })))
+      const [
+        rowsResult,
+        storeIssuesResult,
+        transferShipmentsResult,
+        assetTransfersResult,
+        maintenanceResult,
+        returnsResult,
+      ] = await Promise.all([
+        fetchOData('QyGatePass').catch(() => [] as ODataRecord[]),
+        fetchOData('QyStoreRequisitionHeader').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassTransferShipments').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassAssetTransfers').catch(() => [] as ODataRecord[]),
+        fetchOData('QyFuelMaintenanceRequests').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassReturns').catch(() => [] as ODataRecord[]),
+      ])
+      const rows = Array.isArray(rowsResult) ? rowsResult : []
+      const storeIssues = gatePassRecordIndex(
+        Array.isArray(storeIssuesResult) ? storeIssuesResult : [],
+        ['No', 'No_'],
+      )
+      const transferShipments = gatePassRecordIndex(
+        Array.isArray(transferShipmentsResult) ? transferShipmentsResult : [],
+        ['No', 'No_'],
+      )
+      const assetTransfers = gatePassRecordIndex(
+        Array.isArray(assetTransfersResult) ? assetTransfersResult : [],
+        ['No', 'No_'],
+      )
+      const maintenance = gatePassRecordIndex(
+        Array.isArray(maintenanceResult) ? maintenanceResult : [],
+        ['RequisitionNo', 'Requisition_No', 'No', 'No_'],
+      )
+      const returns = gatePassRecordIndex(
+        Array.isArray(returnsResult) ? returnsResult : [],
+        ['AssetRecordNo', 'Asset_Record_No', 'GatePassNo', 'Gate_Pass_No'],
+      )
+
+      res.json(rows.map((row) => {
+        const sourceDocumentNo = text(row, ['TransferNo', 'Transfer_No']).trim().toUpperCase()
+        const source = gatePassSourceFromRow(row)
+        const sourceRecord =
+          source === 'storeIssue'
+            ? storeIssues.get(sourceDocumentNo)
+            : source === 'transferOrder'
+              ? transferShipments.get(sourceDocumentNo)
+              : source === 'assetTransfer'
+                ? assetTransfers.get(sourceDocumentNo)
+                : maintenance.get(sourceDocumentNo)
+        const returnRecord =
+          returns.get(text(row, ['No']).trim().toUpperCase()) ??
+          returns.get(text(row, ['GatePassNo', 'Gate_Pass_No']).trim().toUpperCase())
+        return mapGatePassLogRow(row, sourceRecord ?? {}, returnRecord ?? {})
+      }))
     }),
   )
 
@@ -3801,6 +4481,28 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       res.json({ rows: await listHrServiceLetterRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.get(
+    '/hr/monthly-salary-base',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      let monthlySalaryBase = Number(authUser.monthlySalaryBase ?? 0)
+      if (!(monthlySalaryBase > 0)) {
+        monthlySalaryBase = await fetchEmployeeSalaryBaseFast(authUser.employeeNo, {
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+        })
+      }
+      if (!(monthlySalaryBase > 0)) {
+        monthlySalaryBase = await resolveEmployeeMonthlySalaryBase(authUser.employeeNo, {
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+        })
+      }
+      if (monthlySalaryBase > 0) {
+        req.session.authUser = { ...authUser, monthlySalaryBase }
+      }
+      res.json({ monthlySalaryBase })
     }),
   )
 

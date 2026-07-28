@@ -15,6 +15,7 @@ import {
   gatePassSourceFromRow,
   isMedicalClaimType,
   passengerTypeCode,
+  purchaseBudgetErrorMessage,
   transportRequestTypeCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
@@ -50,8 +51,12 @@ import {
 import {
   approvalModule,
   enrichGatePassRowDimensions,
+  facilityListSummary,
+  maintenanceRequestTypeLabel,
+  mapGatePassLogRow,
   mapApprovalSteps,
   mapModuleLines,
+  leaveTypeDescriptionForDisplay,
   transportRequestTypeLabel,
 } from './portalApi.js'
 import {
@@ -65,7 +70,12 @@ import {
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { inferEmployeeJobId, resolveEmployeeJobTitle, pickDimensionCodeFromRow } from './employeeProfile.js'
+import {
+  employeeFinanceSectorFromRecord,
+  inferEmployeeJobId,
+  resolveEmployeeJobTitle,
+  pickDimensionCodeFromRow,
+} from './employeeProfile.js'
 import {
   documentStatusFromBc,
   injectSalaryAdvanceSalaryHint,
@@ -79,6 +89,69 @@ import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+import { enrichFinanceHeaderRow } from './financeRequestEnrichment.js'
+import {
+  trainingCourseCodeForBc,
+  trainingCourseLookupOption,
+  trainingCourseOptionForBc,
+} from './trainingCourses.js'
+
+describe('training course Business Central relation', () => {
+  it('submits CourseCode while displaying CourseTittle', () => {
+    assert.deepEqual(
+      trainingCourseLookupOption({
+        CourseCode: 'CRS-0042',
+        CourseTittle: 'BSC',
+        Closed: false,
+        IndividualCourse: false,
+      }),
+      {
+        value: 'CRS-0042',
+        label: 'BSC',
+        meta: { courseTitle: 'BSC' },
+      },
+    )
+  })
+
+  it('excludes courses BC will reject and keeps Other out of the related field', () => {
+    assert.equal(
+      trainingCourseLookupOption({
+        CourseCode: 'CLOSED',
+        CourseTittle: 'Closed course',
+        Closed: true,
+      }),
+      null,
+    )
+    assert.equal(
+      trainingCourseLookupOption({
+        CourseCode: 'INDIVIDUAL',
+        CourseTittle: 'Individual course',
+        IndividualCourse: true,
+      }),
+      null,
+    )
+    assert.equal(trainingCourseCodeForBc('__OTHER__'), '')
+    assert.equal(trainingCourseCodeForBc(' CRS-0042 '), 'CRS-0042')
+  })
+
+  it('converts a displayed course title from an older portal build back to its BC code', () => {
+    assert.deepEqual(
+      trainingCourseOptionForBc('  EXCUSION   EXCELLENCE ', [
+        {
+          CourseCode: 'CRS-0017',
+          CourseTittle: 'EXCUSION EXCELLENCE',
+          Closed: false,
+          IndividualCourse: false,
+        },
+      ]),
+      {
+        value: 'CRS-0017',
+        label: 'EXCUSION EXCELLENCE',
+        meta: { courseTitle: 'EXCUSION EXCELLENCE' },
+      },
+    )
+  })
+})
 
 describe('jobTitleNeedsRefresh', () => {
   it('refreshes missing titles, the STAFF fallback, and raw BC job codes', () => {
@@ -232,6 +305,64 @@ describe('gate pass employee dimensions', () => {
 
     assert.equal(row.DistrictDepartmentName, 'Learning and Development')
     assert.equal(row.SectorName, 'Human Capital')
+  })
+})
+
+describe('gate pass log details', () => {
+  it('uses the real BC asset field and linked source locations', () => {
+    assert.deepEqual(
+      mapGatePassLogRow(
+        {
+          GatePassNo: 'IS000037',
+          TransferNo: 'AT0016',
+          Linkto: 'Asset Transfer',
+          AssetNo: 'FA-0016',
+          DateOut: '2026-07-28',
+          TimeOut: '14:45:00',
+          ToBeReturned: 1,
+          ReturnedStatus: false,
+          Status: 'Pending Approval',
+          EmployeeName: 'Beza Yoseff Abrehamm',
+        },
+        {
+          AssetDescription: 'Laptop',
+          FromLocation: 'Head Office',
+          ToLocation: 'Adama Branch',
+        },
+      ),
+      {
+        gatePassNo: 'IS000037',
+        sourceDocumentNo: 'AT0016',
+        type: 'Asset Transfer',
+        assetTag: 'FA-0016',
+        description: 'Laptop',
+        fromLocation: 'Head Office',
+        destination: 'Adama Branch',
+        dateOut: '2026-07-28',
+        timeOut: '14:45:00',
+        returnable: 'Yes',
+        returned: 'No',
+        returnDate: '-',
+        employee: 'Beza Yoseff Abrehamm',
+        status: 'Pending Approval',
+      },
+    )
+  })
+
+  it('uses the actual Gate Pass Return date and ignores the BC zero date', () => {
+    const row = mapGatePassLogRow(
+      {
+        GatePassNo: 'IS000036',
+        Linkto: 'Maintenance',
+        AssetNo: 'ET-1234',
+        ReturnDate: '0001-01-01',
+      },
+      {},
+      { DateIn: '2026-07-29', ReturnedStatus: true },
+    )
+    assert.equal(row.assetTag, 'ET-1234')
+    assert.equal(row.returnDate, '2026-07-29')
+    assert.equal(row.returned, 'Yes')
   })
 })
 
@@ -632,6 +763,24 @@ describe('isMedicalClaimType', () => {
 })
 
 describe('staffClaim saveLine params', () => {
+  it('uses the employee Sector for the Staff Claim Global Dimension 1 value', () => {
+    assert.equal(
+      employeeFinanceSectorFromRecord({
+        Sector: 'TREASURY',
+        GlobalDimension2Code: 'FINANCE',
+        DepartmentCode: 'FUND',
+      }),
+      'TREASURY',
+    )
+    assert.equal(
+      employeeFinanceSectorFromRecord({
+        GlobalDimension1Code: 'HC',
+        DepartmentCode: 'LND',
+      }),
+      'HC',
+    )
+  })
+
   it('maps long department names to dimension codes', () => {
     assert.equal(
       pickDimensionCodeFromRow(
@@ -904,7 +1053,81 @@ describe('ESS request mutation contracts', () => {
   })
 })
 
+describe('purchase requisition finalized budget handling', () => {
+  it('keeps the selected item number separate from the free-text specification', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveLine)
+    const params = await spec.params.saveLine({
+      req: {
+        body: {
+          type: '2',
+          itemNo: 'ITEM-0042',
+          specification: 'testj',
+          reasonForRequest: 'Office requirement',
+          quantity: 1,
+        },
+      } as Request,
+      user: { employeeNo: 'E001', userID: 'USER1' } as AuthUser,
+      no: '1507',
+    })
+    assert.equal(params.itemNo, 'ITEM-0042')
+    assert.equal(params.specification, 'testj')
+    assert.equal(params.type, 2)
+  })
+
+  it('identifies the real item and department in a Business Central budget error', () => {
+    assert.equal(
+      purchaseBudgetErrorMessage(
+        new Error(
+          'Business Central rejected the request: testj does not exist in the finalized budget. Please check item No. correctly',
+        ),
+        { RequestingDepartment: 'FACILTY' },
+        [{ No: 'ITEM-0042', Description: 'testj' }],
+      ),
+      'Item / service No. ITEM-0042 (testj) is not included in the current finalized budget for department FACILTY. ' +
+        'Edit or delete this line and select a budgeted item/service, or ask Finance to add it to the finalized budget.',
+    )
+  })
+})
+
 describe('mapModuleLines', () => {
+  it('maps the complete Store Requisition issue and receipt flow', () => {
+    const [line] = mapModuleLines('storeRequisition', {}, [{
+      LineNo: 10000,
+      Type: 1,
+      IssuingStore: '0010',
+      No: 'ITEM-01',
+      Description: 'Printing paper',
+      Qtyinstore: 12,
+      QuantityRequested: 5,
+      QuantityToIssue: 2,
+      IssueQuantity: 2,
+      QuantityIssued: 3,
+      QuantityReceived: 1,
+      Qtytoreceive: 2,
+      LastQuantityIssued: 2,
+      LastDateofIssue: '2026-07-29',
+      Reasonforissuinglesss: 'Partial stock issue',
+      ReasonforlessQtyReceived: 'One pack pending',
+      UnitCost: 100,
+      LineAmount: 500,
+    }])
+
+    assert.equal(line.availableStock, 12)
+    assert.equal(line.quantityRequested, 5)
+    assert.equal(line.quantityToIssue, 2)
+    assert.equal(line.currentIssueQuantity, 2)
+    assert.equal(line.quantityIssued, 3)
+    assert.equal(line.quantityOutstanding, 2)
+    assert.equal(line.quantityReceived, 1)
+    assert.equal(line.quantityPendingReceipt, 2)
+    assert.equal(line.lastIssueDate, '2026-07-29')
+    assert.equal(line.fulfillmentStatus, 'Awaiting receipt confirmation')
+    assert.equal(line.reasonForLessIssued, 'Partial stock issue')
+    assert.equal(line.reason, 'One pack pending')
+    assert.equal(line.lineAmount, 500)
+  })
+
   it('normalizes imprest fields and preserves the BC line number for actions', () => {
     const [line] = mapModuleLines('imprest', {}, [{
       Line_No: 10000,
@@ -959,7 +1182,117 @@ describe('mapModuleLines', () => {
   })
 })
 
+describe('facilityListSummary', () => {
+  it('derives Store Requisition value from lines when the BC header FlowField is zero', () => {
+    assert.deepEqual(
+      facilityListSummary(
+        'storeRequisition',
+        { TotalAmount: 0 },
+        [
+          { QuantityRequested: 5, UnitCost: 100, LineAmount: 0 },
+          { QuantityRequested: 2, UnitCost: 250, LineAmount: 500 },
+        ],
+      ),
+      { amount: 1000, totalQuantity: 7 },
+    )
+  })
+
+  it('derives Purchase Requisition value from line costs', () => {
+    assert.deepEqual(
+      facilityListSummary(
+        'purchaseRequisition',
+        {},
+        [
+          { Quantity: 3, DirectUnitCost: 200 },
+          { Quantity: 1, AmountIncludingVAT: 750 },
+        ],
+      ),
+      { amount: 1350, totalQuantity: 4 },
+    )
+  })
+
+  it('derives Fuel cost and keeps transfer quantity as a non-currency metric', () => {
+    assert.deepEqual(
+      facilityListSummary('fuelRequest', {
+        QuantityofFuelLitres: 20,
+        PriceLitre: 125,
+        TotalPriceofFuel: 0,
+      }),
+      { amount: 2500, totalQuantity: 20 },
+    )
+    assert.deepEqual(
+      facilityListSummary('transferOrder', {}, [{ Quantity: 4 }, { Quantity: 6 }]),
+      { totalQuantity: 10 },
+    )
+  })
+})
+
+describe('maintenanceRequestTypeLabel', () => {
+  it('shows readable maintenance types instead of raw BC option values', () => {
+    assert.equal(
+      maintenanceRequestTypeLabel({ RequestType: 1, Type: 'Maintenance' }),
+      'Fixed Asset Maintenance',
+    )
+    assert.equal(
+      maintenanceRequestTypeLabel({ Request_Type: 2, Type: 'Maintenance' }),
+      'Vehicle Service Maintenance',
+    )
+    assert.equal(
+      maintenanceRequestTypeLabel({
+        DocumentType: 'Maintenance',
+        TypeofMaintenance: 'Generator service',
+      }),
+      'Generator service',
+    )
+  })
+})
+
+describe('finance imprest surrender enrichment', () => {
+  it('uses real date and source-line destination/duty when header fields are unset', () => {
+    const enriched = enrichFinanceHeaderRow(
+      'imprestSurrender',
+      {
+        DateRequired: '0001-01-01T00:00:00Z',
+        Date: '2026-07-28',
+      },
+      {},
+      [{ DestinationCode: 'ADAMA', DutyArea: 'Central District' }],
+    )
+
+    assert.equal(enriched.DateRequired, '2026-07-28')
+    assert.equal(enriched.TravelDestination, 'ADAMA')
+    assert.equal(enriched.PlaceofDuty, 'Central District')
+  })
+})
+
 describe('mapRequest status', () => {
+  it('maps leave Days Applied as the approval quantity', () => {
+    const request = mapRequest(
+      {
+        ApplicationCode: 'LV00147',
+        LeaveType: '0006',
+        DaysApplied: 3,
+        Status: 'Pending Approval',
+      },
+      'leave',
+    )
+    assert.equal(request.amount, 3)
+  })
+
+  it('uses the resolved Business Central leave type description for approvers', () => {
+    assert.equal(
+      leaveTypeDescriptionForDisplay({ LeaveType: '0006' }, 'Sick Leave'),
+      'Sick Leave',
+    )
+    assert.equal(
+      leaveTypeDescriptionForDisplay({
+        LeaveType: '0001',
+        LeaveTypeDescription: 'Annual Leave',
+      }),
+      'Annual Leave',
+    )
+  })
+
   it('uses the real transport requisition number in list rows and routes', () => {
     const mapped = mapRequest(
       {
@@ -1173,6 +1506,18 @@ describe('requestWorkflow', () => {
       false,
     )
     assert.equal(
+      canRequestApprovalForSpec('asset-transfer', { Status: 'New' }),
+      true,
+    )
+    assert.equal(
+      canRequestApprovalForSpec('asset-transfer', { Status: 'Open' }),
+      true,
+    )
+    assert.equal(
+      canRequestApprovalForSpec('asset-transfer', { Status: 'Pending Approval' }),
+      false,
+    )
+    assert.equal(
       canRequestApprovalForSpec('transfer-order', { ApprovalStatus: 'Open' }),
       true,
     )
@@ -1180,6 +1525,10 @@ describe('requestWorkflow', () => {
     assert.match(
       requestApprovalBlockedMessage('inter-bank-transfer', { Status: 'Open' }),
       /Pending/,
+    )
+    assert.match(
+      requestApprovalBlockedMessage('asset-transfer', { Status: 'Approved' }),
+      /New or Open/,
     )
   })
 })

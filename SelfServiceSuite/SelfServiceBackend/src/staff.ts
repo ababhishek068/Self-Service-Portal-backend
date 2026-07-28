@@ -380,7 +380,6 @@ async function fetchScheduleEmployeeDirectory(user: ReturnType<typeof authUser>,
   const branch = odataString(user.branchCode)
   const filters = [
     department ? `GlobalDimension1Code eq '${department}' and Status eq 'Active'` : '',
-    department ? `DepartmentCode eq '${department}' and Status eq 'Active'` : '',
     department ? `GlobalDimension1Code eq '${department}'` : '',
     branch ? `GlobalDimension2Code eq '${branch}' and Status eq 'Active'` : '',
     `Status eq 'Active'`,
@@ -959,11 +958,27 @@ async function buildLeavePortalDetail(
 ) {
   const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
   const status = resolveLeaveStatus(row, approvalEntries)
-  const approvalSteps = await resolveLeaveApprovalStepsAsync(row, approvalEntries, applicationCode, {
-    employeeNo: fieldText(row, ['EmployeeNo', 'Employee_No'], user.employeeNo),
-    userID: user.userID,
-    department: user.department,
-  })
+  const leaveTypeCode = fieldText(
+    row,
+    ['LeaveTypeCode', 'Leave_Type_Code', 'LeaveType', 'Leave_Type'],
+  )
+  const [approvalSteps, leaveTypeRows] = await Promise.all([
+    resolveLeaveApprovalStepsAsync(row, approvalEntries, applicationCode, {
+      employeeNo: fieldText(row, ['EmployeeNo', 'Employee_No'], user.employeeNo),
+      userID: user.userID,
+      department: user.department,
+    }),
+    leaveTypeCode
+      ? fetchOData('QyHRLeaveType', {
+          $filter: `Code eq '${odataString(leaveTypeCode)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[])
+      : Promise.resolve([] as ODataRecord[]),
+  ])
+  const leaveTypeRow = Array.isArray(leaveTypeRows) ? leaveTypeRows[0] : undefined
+  const leaveTypeDescription = leaveTypeRow
+    ? fieldText(leaveTypeRow, ['Description', 'Name'])
+    : ''
   const primaryApprover = approvalSteps[0]
   return {
     id: `leave-${applicationCode}`,
@@ -986,6 +1001,8 @@ async function buildLeavePortalDetail(
       ...row,
       ApplicationCode: applicationCode,
       LeaveType: fieldText(row, ['LeaveType', 'Leave_Type']),
+      LeaveTypeCode: leaveTypeCode,
+      LeaveTypeDescription: leaveTypeDescription,
       DaysApplied: fieldText(row, ['DaysApplied', 'Days_Applied']),
       StartDate: fieldText(row, ['StartDate', 'Start_Date']),
       EndDate: fieldText(row, ['EndDate', 'End_Date']),
@@ -1041,9 +1058,13 @@ export function formatBcSoapDate(value: string) {
 export function isErpWorkingDate(value: string) {
   const formatted = formatBcSoapDate(value)
   if (!formatted) return false
-  const today = new Date()
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  return formatted === todayStr
+  const now = new Date()
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const utcToday = now.toISOString().slice(0, 10)
+  // Accept the local OR the UTC calendar day. A claim raised near midnight — or a date
+  // serialised as an ISO/UTC timestamp (formatBcSoapDate slices the UTC day) — must not be
+  // rejected just because the portal server and Business Central sit in different time zones.
+  return formatted === localToday || formatted === utcToday
 }
 
 export function normalizeLeaveStartDate(value: string) {

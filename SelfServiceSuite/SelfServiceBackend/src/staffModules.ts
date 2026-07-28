@@ -20,6 +20,7 @@ import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+import { trainingCourseCodeForBc } from './trainingCourses.js'
 
 /* -------------------------------------------------------------------------- */
 /* Module spec                                                                */
@@ -389,7 +390,16 @@ async function lookupClaimTypeGlAccount(claimType: string) {
     })) as ODataRecord[] | null
     const row = Array.isArray(rows) ? rows[0] : undefined
     if (!row) return ''
-    for (const key of ['GLAccount', 'GL_Account', 'GLAccountNo', 'GL_Account_No']) {
+    for (const key of [
+      'GLAccount',
+      'GL_Account',
+      'G_L_Account',
+      'GLAccountNo',
+      'GL_Account_No',
+      'G_L_Account_No',
+      'AccountNo',
+      'Account_No',
+    ]) {
       const value = String(row[key] ?? '').trim()
       if (value) return value
     }
@@ -466,6 +476,19 @@ const imprest: ModuleSpec = {
         )
       }
 
+      // Advance types whose BC "Rate Source" is Manual (e.g. PETTY CASH) have no
+      // per-diem rate in the ERP master. BC's "No of Days" validation then errors
+      // ("Please enter Daily Rate for Advance Type ...") unless the line's
+      // Daily Rate(Amount) is supplied. Forward the requester/ERP daily rate so BC
+      // can stamp it; when it is 0 we fall back to amount / days.
+      const dailyRateInput = Number(req.body?.dailyRate ?? 0)
+      const dailyRate =
+        dailyRateInput > 0
+          ? dailyRateInput
+          : noOfDays > 0 && amount > 0
+            ? Math.round((amount / noOfDays) * 100) / 100
+            : 0
+
       return {
         action: req.body?.action ?? 'create',
         docNo: no,
@@ -476,6 +499,7 @@ const imprest: ModuleSpec = {
         advanceType,
         dutyArea: req.body?.dutyArea ?? '',
         amount,
+        dailyRate,
       }
     },
     deleteLine: ({ req, no }) => ({
@@ -1283,8 +1307,9 @@ const training: ModuleSpec = {
       myAction: no ? 'edit' : 'create',
       docNo: no,
       purpose: req.body?.comments ?? req.body?.justification ?? '',
-      trainingCourseCode:
-        req.body?.trainingNeed ?? req.body?.trainingCourseCode ?? req.body?.trainingTitle ?? '',
+      trainingCourseCode: trainingCourseCodeForBc(
+        req.body?.trainingCourseCode ?? req.body?.trainingNeed ?? req.body?.trainingTitle ?? '',
+      ),
       myUserID: user.userID,
       employeeNo: user.employeeNo,
     }),
@@ -2224,6 +2249,50 @@ export async function cancelPortalModuleRequest(
   }
 }
 
+export function purchaseBudgetErrorMessage(
+  error: unknown,
+  header: ODataRecord,
+  lines: ODataRecord[],
+) {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (
+    !/does not exist in the finali[sz]ed budget|is not included in (?:the )?(?:current )?finali[sz]ed budget|there is no finali[sz]ed budget for the item|no approved finali[sz]ed budget was found/i.test(raw)
+  ) {
+    return ''
+  }
+
+  const matchingLine =
+    lines.find((line) => {
+      const description = fieldText(line, ['Description', 'description']).trim().toLowerCase()
+      return description.length > 0 && raw.toLowerCase().includes(description)
+    }) ??
+    lines[0] ??
+    {}
+  const itemNo = fieldText(matchingLine, [
+    'No',
+    'No_',
+    'ItemNo',
+    'Item_No',
+    'itemNo',
+  ])
+  const description = fieldText(matchingLine, ['Description', 'description'])
+  const department = fieldText(header, [
+    'RequestingDepartment',
+    'Requesting_Department',
+    'ShortcutDimension1Code',
+    'Shortcut_Dimension_1_Code',
+  ])
+  const itemLabel = itemNo
+    ? `Item / service No. ${itemNo}${description ? ` (${description})` : ''}`
+    : description || 'This purchase line'
+  const departmentLabel = department ? ` for department ${department}` : ''
+
+  return (
+    `${itemLabel} is not included in the current finalized budget${departmentLabel}. ` +
+    'Edit or delete this line and select a budgeted item/service, or ask Finance to add it to the finalized budget.'
+  )
+}
+
 export async function submitPortalModuleRequest(
   spec: ModuleSpec,
   user: AuthUser,
@@ -2243,6 +2312,10 @@ export async function submitPortalModuleRequest(
       status: 422,
     })
   }
+  const purchaseLines =
+    spec.module === 'purchase-requisition'
+      ? await listPortalModuleLines(spec, header, no)
+      : []
   if (spec.module === 'petty-cash') {
     const limit = await getPortalPettyCashDepartmentLimit(user)
     if (limit.configured && limit.limit > 0) {
@@ -2307,7 +2380,21 @@ export async function submitPortalModuleRequest(
     user,
     no,
   })
-  const result = await callModuleSoap(spec, spec.soap.submit, params)
+  let result: SoapResult
+  try {
+    result = await callModuleSoap(spec, spec.soap.submit, params)
+  } catch (error) {
+    if (spec.module === 'purchase-requisition') {
+      const message = purchaseBudgetErrorMessage(error, header, purchaseLines)
+      if (message) {
+        throw Object.assign(new Error(message), {
+          status: 422,
+          code: 'PURCHASE_ITEM_NOT_IN_FINALIZED_BUDGET',
+        })
+      }
+    }
+    throw error
+  }
   if (!soapActionOk(spec, result)) {
     if (spec.module === 'fuel' || spec.module === 'maintenance' || spec.module === 'gate-pass') {
       const docType = fieldText(header, ['DocumentType', 'Document_Type', 'Linkto', 'LinkTo', 'Link_To'])

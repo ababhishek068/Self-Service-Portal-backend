@@ -698,7 +698,9 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     ]),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
     amount:
-      requestType === 'salaryAdvance'
+      requestType === 'leave'
+        ? num(row, ['DaysApplied', 'Days_Applied', 'NoofDays', 'No_of_Days'], 0)
+        : requestType === 'salaryAdvance'
         ? resolveSalaryAdvanceAmount(
             {
               PercentageofSalary: num(row, SALARY_ADVANCE_PERCENTAGE_KEYS, 0),

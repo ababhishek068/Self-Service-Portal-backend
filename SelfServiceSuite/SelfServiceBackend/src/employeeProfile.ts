@@ -525,19 +525,38 @@ function firstEmployeeFieldText(
   return employeeFieldText(record, keys)
 }
 
-const EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS = [
+// Staff Claims stores the employee's Sector in Global Dimension 1.  Some
+// employee OData pages expose it as `Sector`, while others expose the same
+// value as `GlobalDimension1Code`, so both shapes must be checked before the
+// lower-level department/district fallbacks.
+const EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS = [
+  'Sector',
+  'SectorCode',
+  'Sector_Code',
   'GlobalDimension1Code',
   'Global_Dimension_1_Code',
+]
+
+const EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS = [
+  'SectorName',
+  'Sector_Name',
+  'GlobalDimension1Name',
+  'Global_Dimension_1_Name',
+]
+
+const EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS = [
+  ...EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS,
+  'DepartmentCode',
+  'Department_Code',
+  'Department',
   'ShortcutDimension2Code',
   'Shortcut_Dimension_2_Code',
   'GlobalDimension2Code',
   'Global_Dimension_2_Code',
-  'DepartmentCode',
-  'Department_Code',
-  'Department',
 ]
 
 const EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS = [
+  ...EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS,
   'DepartmentName',
   'Department_Name',
   'Division',
@@ -549,6 +568,14 @@ const EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS = [
   'BranchName',
   'Branch_Name',
 ]
+
+/** Return the preferred Staff Claim / finance Global Dimension 1 value. */
+export function employeeFinanceSectorFromRecord(record: Record<string, unknown>) {
+  return employeeFieldText(record, [
+    ...EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS,
+    ...EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS,
+  ])
+}
 
 async function resolveDimensionCodeCandidate(raw: string, maxLen = 20) {
   const trimmed = raw.trim()
@@ -566,8 +593,9 @@ async function resolveDimensionCodeCandidate(raw: string, maxLen = 20) {
 
 /**
  * Resolve the Code[20] department value required by finance SOAP methods
- * (ClaimRequisitionHeader, etc.). HIJRA stores department on GD1, GD2, or
- * named Division/District fields depending on the employee card layout.
+ * (ClaimRequisitionHeader, etc.). The Staff Claim table derives GD1 from the
+ * employee Sector; older employee pages may expose that value as GD1 or one
+ * of the department/district aliases.
  */
 export async function resolveFinanceDepartmentCodeForSoap(
   employeeNo: string,
@@ -1121,7 +1149,8 @@ export async function fetchMergedEmployeeRecord(employeeNo: string): Promise<ODa
   )
   const hasJobId = Boolean(discoverEmployeeJobId(merged))
   const hasAccountNumber = Boolean(employeeAccountNoFromRecord(merged))
-  if (!hasDirectTitle || !hasJobId || !hasAccountNumber) {
+  const hasFinanceSector = Boolean(employeeFinanceSectorFromRecord(merged))
+  if (!hasDirectTitle || !hasJobId || !hasAccountNumber || !hasFinanceSector) {
     merged = await enrichEmployeeRecordFromPageBases(employeeNo, merged)
   }
 
