@@ -37,6 +37,8 @@ import {
 } from './approvalTableIds.js'
 import {
   enrichLeaveApprovalEntries,
+  enrichApprovalStepsWithCommentLines,
+  enrichMappedApprovalSteps,
   fallbackApprovalStepsFromHeader,
   leaveDocumentNoCandidates,
   mapApprovalSteps,
@@ -48,6 +50,8 @@ import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvan
 import {
   enrichFinanceHeaderFromEmployee,
   enrichFinanceHeaderRow,
+  enrichImprestSurrenderFromSourceImprest,
+  buildImprestSurrenderPreview,
   financeSessionHints,
   isFinanceDetailModule,
 } from './financeRequestEnrichment.js'
@@ -114,6 +118,59 @@ function user(req: Request) {
     throw Object.assign(new Error('Unauthenticated'), { status: 401 })
   }
   return req.session.authUser
+}
+
+function filterBcDate(value: string) {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed || trimmed.startsWith('0001-')) return ''
+  return trimmed
+}
+
+function yearsOfServiceFromJoin(joinDate: string) {
+  if (!joinDate) return ''
+  const start = new Date(joinDate)
+  if (Number.isNaN(start.getTime())) return ''
+  const now = new Date()
+  let years = now.getFullYear() - start.getFullYear()
+  const monthDiff = now.getMonth() - start.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < start.getDate())) years -= 1
+  return years >= 0 ? String(years) : ''
+}
+
+/** BC query Option fields often arrive as numeric indices; map to readable text. */
+function employmentTypeLabel(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '0') return ''
+  if (/^\d+$/.test(raw)) {
+    const asNum = Number(raw)
+    const labels: Record<number, string> = {
+      1: 'Permanent',
+      2: 'Contract',
+      3: 'Casual',
+      4: 'Intern',
+      5: 'Temporary',
+      6: 'Probation',
+      7: 'Fixed Term',
+    }
+    if (labels[asNum]) return labels[asNum]
+    if (asNum === 0) return ''
+  }
+  const normalized = raw.toLowerCase().replace(/[_\s-]/g, '')
+  const textLabels: Record<string, string> = {
+    permanent: 'Permanent',
+    contract: 'Contract',
+    casual: 'Casual',
+    intern: 'Intern',
+    internship: 'Intern',
+    temporary: 'Temporary',
+    temp: 'Temporary',
+    probation: 'Probation',
+    fixedterm: 'Fixed Term',
+    fulltime: 'Permanent',
+    parttime: 'Part Time',
+  }
+  if (textLabels[normalized]) return textLabels[normalized]
+  return raw
 }
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -696,6 +753,10 @@ function optionCode(value: string, labels: Record<string, string>) {
 function mapStoreLine(row: ODataRecord, index: number) {
   const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
   const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
+  const quantityIssued = number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued'])
+  const quantityOutstanding =
+    number(row, ['quantityOutstanding', 'QuantityOutstanding', 'Quantity_Outstanding', 'OutstandingQuantity']) ||
+    Math.max(0, quantityRequested - quantityIssued)
   return {
     id: lineNo,
     lineNo,
@@ -705,7 +766,8 @@ function mapStoreLine(row: ODataRecord, index: number) {
     description: text(row, ['description', 'Description']),
     quantity: quantityRequested,
     quantityRequested,
-    quantityIssued: number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued']),
+    quantityIssued,
+    quantityOutstanding,
     quantityToReceive: number(row, ['quantityToReceive', 'QuantityToReceive', 'Quantity_to_Receive', 'Qtytoreceive']),
     quantityReceived: number(row, ['quantityReceived', 'QuantityReceived', 'Quantity_Received']),
     reason: text(row, ['reason', 'Reason', 'ReasonforlessQtyReceived']),
@@ -747,6 +809,8 @@ function mapImprestLine(row: ODataRecord, index: number) {
     'DailyRateAmount',
     'Daily_Rate_Amount',
     'Daily_Rate_Amount_',
+    'Daily_Rate',
+    'Daily Rate(Amount)',
   ])
   return {
     id: lineNo,
@@ -790,7 +854,19 @@ function mapClaimLine(row: ODataRecord, index: number) {
       { government: '1', private: '2', online: '3' },
     ),
     medicalAmount: number(row, ['medicalAmount', 'MedicalAmount', 'Medical_Amount']),
+    coveragePercent: number(row, [
+      'coveragePercent',
+      'CoveragePercent',
+      'Coverage_Percent',
+      'CoveragePercentValue',
+    ]),
     amount: number(row, ['amount', 'Amount']),
+    amountToRefund: number(row, [
+      'amountToRefund',
+      'AmountToRefund',
+      'Amount_to_refund',
+      'Amount to refund',
+    ]),
     claimReceiptNo: text(row, ['claimReceiptNo', 'ClaimReceiptNo', 'Claim_ReceiptNo']),
     expenditureDate: text(row, ['expenditureDate', 'ExpenditureDate', 'Expenditure_Date']),
     expenditureDescription: text(row, ['expenditureDescription', 'ExpenditureDescription', 'Purpose']),
@@ -1458,38 +1534,10 @@ async function requestDetail(
   if (isFinanceDetailModule(module)) {
     let financeRow = row
     if (module === 'imprestSurrender') {
-      const sourceNo = text(row, [
-        'ImprestIssueDocNo',
-        'Imprest_Issue_Doc_No',
-        'ImprestNo',
-        'Imprest_No',
-      ])
-      const imprestSpec = findFrontendModuleSpec('imprest')
-      const source =
-        sourceNo && imprestSpec
-          ? await getPortalModuleDocument(imprestSpec, authUser, sourceNo, false).catch(() => null)
-          : null
-      if (source) {
-        financeRow = {
-          ...row,
-          SourceImprestNo: sourceNo,
-          TravelDate:
-            text(row, ['TravelDate', 'Travel_Date']) ||
-            text(source, ['TravelDate', 'Travel_Date', 'TravelStartDate', 'Travel_Start_Date']),
-          ReturnDate:
-            text(row, ['ReturnDate', 'Return_Date']) ||
-            text(source, ['ReturnDate', 'Return_Date', 'TravelEndDate', 'Travel_End_Date']),
-          TravelDestination:
-            text(row, ['TravelDestination', 'Travel_Destination', 'Destination']) ||
-            text(source, ['TravelDestination', 'Travel_Destination', 'Destination']),
-          PlaceofDuty:
-            text(row, ['PlaceofDuty', 'PlaceOfDuty', 'DutyArea']) ||
-            text(source, ['PlaceofDuty', 'PlaceOfDuty', 'DutyArea']),
-          Purpose:
-            text(row, ['Purpose']) ||
-            text(source, ['Purpose', 'Description']),
-        }
-      }
+      financeRow = await enrichImprestSurrenderFromSourceImprest(
+        row,
+        Array.isArray(lines) ? (lines as Record<string, unknown>[]) : [],
+      )
     }
     headerForMapping = await enrichFinanceHeaderFromEmployee(
       module as PortalModuleKey,
@@ -1534,6 +1582,15 @@ async function requestDetail(
   }
   const mapped = mapRequest(headerForMapping, module as PortalModuleKey)
   const resolvedStatus = resolveModuleRequestStatus(headerForMapping, module as PortalModuleKey, approvers)
+  const approvalSteps = await resolveRequestApprovalSteps(
+    approvers,
+    row,
+    resolvedStatus,
+    no,
+    spec.headerTableId,
+  )
+  const rejectionReason =
+    approvalSteps.find((step) => /reject|declin/i.test(String(step.status ?? '')))?.note?.trim() ?? ''
   const salaryAdvanceAmount =
     module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
   const displayAmount =
@@ -1562,6 +1619,7 @@ async function requestDetail(
             gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
           }
         : {}),
+      ...(rejectionReason ? { RejectionReason: rejectionReason, rejectionReason } : {}),
       ...(module === 'transport' && rawTransportRequestType !== ''
         ? {
             transportRequestType: rawTransportRequestType,
@@ -1570,15 +1628,17 @@ async function requestDetail(
         : {}),
       lines: mappedLines,
     },
-    approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
+    approvalSteps,
     attachments: mapAttachments(attachments),
   }
 }
 
-function resolveRequestApprovalSteps(
+async function resolveRequestApprovalSteps(
   approvers: ODataRecord[],
   row: ODataRecord,
   mappedStatus: string,
+  documentNo = '',
+  tableId = 0,
 ) {
   if (
     mappedStatus !== 'Pending Approval' &&
@@ -1590,7 +1650,17 @@ function resolveRequestApprovalSteps(
   // Sequential clamp: a later step (e.g. ADMIN auto-approving its own future
   // step) must not show "Approved" while an earlier step is still pending.
   const steps = mapApprovalStepsWithSequence(approvers)
-  return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
+  const resolved =
+    steps.length > 0 ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
+  const docNo =
+    documentNo ||
+    text(row, ['No', 'ApplicationNo', 'Application_No', 'DocumentNo', 'Document_No'])
+  const withComments = await enrichApprovalStepsWithCommentLines(
+    resolved,
+    docNo,
+    tableId > 0 ? tableId : undefined,
+  )
+  return enrichMappedApprovalSteps(withComments)
 }
 
 export { mapApprovalSteps } from './leaveApprovalSteps.js'
@@ -2476,7 +2546,11 @@ export function buildPortalApiRouter() {
       if (!entry) throw portalError('Approval entry not found', 404)
 
       const queueItem = approvalQueueItem(entry)
-      const approvalSteps = mapApprovalStepsWithSequence(entryRows)
+      const approvalSteps = await enrichApprovalStepsWithCommentLines(
+        mapApprovalStepsWithSequence(entryRows),
+        no,
+        findFrontendModuleSpec(module)?.headerTableId,
+      )
       const source =
         module === 'leave'
           ? await resolveLeaveRequestDetail(requestId, authUser, {
@@ -2670,11 +2744,30 @@ export function buildPortalApiRouter() {
         advanceType: String(req.body?.advanceType ?? ''),
         destinationCode: String(req.body?.destinationCode ?? req.body?.destination ?? ''),
       })
+      const noOfDays = Number(req.body?.noOfDays ?? 0)
       const amount = Number(result.returnValue ?? 0)
       if (!Number.isFinite(amount)) {
         throw portalError('Business Central did not return an imprest line amount', 502)
       }
-      res.json({ amount })
+      if (amount <= 0) {
+        throw portalError(
+          'Business Central returned no amount for this advance type, destination and days. Check ERP daily-rate setup or enter amount manually.',
+          422,
+        )
+      }
+      const dailyRate =
+        amount > 0 && noOfDays > 0 ? Math.round((amount / noOfDays) * 100) / 100 : 0
+      res.json({ amount, dailyRate })
+    }),
+  )
+
+  router.get(
+    '/imprest/surrender-preview',
+    safe(async (req, res) => {
+      const imprestNo = String(req.query.imprestNo ?? '').trim()
+      if (!imprestNo) throw portalError('imprestNo is required', 400)
+      const enriched = await buildImprestSurrenderPreview(imprestNo, user(req))
+      res.json(enriched)
     }),
   )
 
@@ -2772,26 +2865,170 @@ export function buildPortalApiRouter() {
       ])
       const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
       const jobTitle =
-        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'], authUser.jobTitle) ||
+        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle', 'JobTitleDescription'], authUser.jobTitle) ||
         (await resolveEmployeeJobTitleByNo(authUser.employeeNo))
+      const dateOfJoin = filterBcDate(
+        text(employee, [
+          'EmploymentDate',
+          'Employment_Date',
+          'DateOfJoin',
+          'DateOfJoiningtheCompany',
+          'DateOfJoiningTheCompany',
+          'HireDate',
+          'DateEmployed',
+          'StartEmploymentDate',
+          'EmploymentStartDate',
+          'JoiningDate',
+          'Joining_Date',
+        ]),
+      )
+      const dateOfBirth = filterBcDate(
+        text(employee, ['BirthDate', 'Birth_Date', 'DateOfBirth', 'Date_Of_Birth', 'DOB']),
+      )
+      const yearsOfService = yearsOfServiceFromJoin(dateOfJoin)
+      const jobGrade = text(
+        employee,
+        [
+          'JobGrade',
+          'Job_Grade',
+          'JobGradeCode',
+          'Job_Grade_Code',
+          'Grade',
+          'GradeCode',
+          'Grade_Code',
+          'SalaryGrade',
+          'Salary_Grade',
+          'CurrentSalaryGrade',
+          'Current_Salary_Grade',
+          'PositionGrade',
+          'Position_Grade',
+          'JobGradeDescription',
+          'Job_Grade_Description',
+          'GradeDescription',
+          'Grade_Description',
+        ],
+        authUser.jobGrade,
+      )
+      const phoneNumber = text(
+        employee,
+        ['CellPhoneNumber', 'Cell_Phone_Number', 'PhoneNo', 'Phone_No', 'PhoneNumber', 'MobilePhoneNo'],
+        authUser.phoneNumber,
+      )
+      const gender = text(employee, ['Gender', 'Sex'], authUser.gender)
       res.json({
         jobTitle,
-        sector: text(employee, ['Sector', 'GlobalDimension1Code']),
-        division: text(employee, ['Division']),
-        district: text(employee, ['District', 'GlobalDimension2Code']),
+        jobGrade,
+        phoneNumber,
+        gender,
+        departmentName: text(
+          employee,
+          ['DepartmentName', 'Department_Name'],
+          authUser.departmentName,
+        ),
+        departmentCode: text(
+          employee,
+          ['GlobalDimension1Code', 'Global_Dimension_1_Code', 'DepartmentCode', 'Department_Code'],
+          authUser.department,
+        ),
+        sector: text(employee, ['Sector', 'SectorName', 'Sector_Name']),
+        division: text(employee, ['Division', 'DivisionName', 'Division_Name']),
+        district: text(employee, ['District', 'DistrictName', 'District_Name']),
+        branchName: text(employee, ['BranchName', 'Branch_Name'], authUser.branchName),
+        branchCode: text(
+          employee,
+          ['BranchCode', 'Branch_Code', 'GlobalDimension3Code', 'ShortcutDimension3Code'],
+          authUser.branchCode,
+        ),
         maritalStatus: text(employee, ['MaritalStatus', 'Marital_Status']),
-        employmentType: text(employee, ['EmploymentType', 'ContractType']),
-        gender: text(employee, ['Gender'], authUser.gender),
-        phoneNumber: text(employee, ['CellPhoneNumber', 'HomePhoneNumber'], authUser.phoneNumber),
-        dateOfJoin: text(employee, ['EmploymentDate', 'DateOfJoin']),
-        contractStartDate: text(employee, ['ContractStartDate']),
-        contractEndDate: text(employee, ['ContractEndDate']),
-        probationEndDate: text(employee, ['ProbationEndDate']),
+        employmentType:
+          employmentTypeLabel(
+            text(employee, [
+              'EmployeeContractType',
+              'Employee_Contract_Type',
+              'EmploymentType',
+              'Employment_Type',
+              'ContractType',
+              'Contract_Type',
+              'EmployeeType',
+              'Employee_Type',
+              'StaffType',
+              'Staff_Type',
+              'EmploymentStatus',
+              'Employment_Status',
+              'EmploymentCategory',
+              'Employment_Category',
+              'EmployeesType',
+              'Employee_Type_Code',
+              'ContractStatus',
+            ]),
+          ) || '—',
+        employmentDate: dateOfJoin,
+        dateOfJoin,
+        yearsOfService,
+        contractStartDate: filterBcDate(
+          text(employee, [
+            'ContractStartDate',
+            'Contract_Start_Date',
+            'ContractStart',
+            'StartDate',
+            'EmploymentDate',
+            'Employment_Date',
+          ]),
+        ),
+        contractEndDate: filterBcDate(
+          text(employee, [
+            'ContractEndDate',
+            'Contract_End_Date',
+            'ContractExpiryDate',
+            'Contract_Expiry_Date',
+            'ContractEnd',
+            'EndDate',
+            'ContractExpirationDate',
+          ]),
+        ),
+        probationEndDate: filterBcDate(
+          text(employee, [
+            'ProbationEndDate',
+            'Probation_End_Date',
+            'ProbationEnd',
+            'ConfirmationDate',
+            'Confirmation_Date',
+            'DateConfirmed',
+            'Probation_Date',
+          ]),
+        ),
+        confirmationDate: filterBcDate(
+          text(employee, [
+            'ConfirmationDate',
+            'Confirmation_Date',
+            'DateConfirmed',
+            'Date_Confirmed',
+            'ProbationEndDate',
+            'Probation_End_Date',
+          ]),
+        ),
+        birthDate: dateOfBirth,
+        dateOfBirth,
+        lastPromotionDate: filterBcDate(
+          text(employee, [
+            'LastPromotionDate',
+            'Last_Promotion_Date',
+            'PromotionDate',
+            'Promotion_Date',
+            'DateOfLastPromotion',
+          ]),
+        ),
+        retirementDate: filterBcDate(
+          text(employee, ['RetirementDate', 'Retirement_Date', 'ExpectedRetirementDate']),
+        ),
+        lastDateWorked: filterBcDate(
+          text(employee, ['LastDateWorked', 'Last_Date_Worked', 'TerminationDate', 'DateLeft']),
+        ),
         nextOfKin: (Array.isArray(kin) ? kin : []).map((row) => ({
-          name: text(row, ['Name', 'FullName']),
-          relationship: text(row, ['Relationship']),
-          phone: text(row, ['PhoneNo', 'PhoneNumber']),
-          address: text(row, ['Address']),
+          name: text(row, ['Name', 'FullName', 'KinName', 'Kin_Name', 'NextOfKinName']),
+          relationship: text(row, ['Relationship', 'KinRelationship', 'Kin_Relationship']),
+          phone: text(row, ['PhoneNo', 'PhoneNumber', 'Phone_No', 'KinPhoneNo', 'Kin_Phone_No']),
+          address: text(row, ['Address', 'KinAddress', 'Kin_Address']),
         })),
         employmentHistory: (Array.isArray(history) ? history : []).map((row) => ({
           organisation: text(row, ['Employer', 'Organisation', 'CompanyName']),
@@ -2813,6 +3050,55 @@ export function buildPortalApiRouter() {
           status: text(row, ['Status'], 'Active'),
         })),
       })
+    }),
+  )
+
+  router.get(
+    '/profile/trainings',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const rows = await fetchOData('QyTrainingApplicationHeader', {
+        $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
+      }).catch(() => [] as ODataRecord[])
+      const enriched = await Promise.all(
+        (Array.isArray(rows) ? rows : []).map(async (row) => {
+          const applicationNo = text(row, ['ApplicationNo', 'Application_No', 'No'])
+          const courseTitle = text(row, ['CourseTitle', 'Course_Title', 'TrainingNeed'])
+          let assessment: ODataRecord | null = null
+          if (applicationNo) {
+            try {
+              const assessmentResult = await callSoapMethod(
+                'GetTrainingAssessment',
+                { applicationNo },
+                trainingSoapEndpoint,
+              )
+              assessment = JSON.parse(String(assessmentResult.returnValue ?? '{}')) as ODataRecord
+            } catch {
+              assessment = null
+            }
+          }
+          const periodStart = String(assessment?.periodStart ?? '')
+          const periodEnd = String(assessment?.periodEnd ?? '')
+          return {
+            applicationNo,
+            course:
+              String(assessment?.otherTrainingName ?? '').trim() ||
+              String(assessment?.trainingNeed ?? '') ||
+              courseTitle,
+            fromDate: periodStart,
+            toDate: periodEnd,
+            trainer: String(assessment?.vendor ?? ''),
+            location: String(assessment?.department ?? authUser.departmentName ?? ''),
+            status: text(row, ['Status', 'ApprovalStatus']),
+            result: String(assessment?.remark ?? ''),
+            purpose: String(assessment?.purpose ?? text(row, ['PurposeofTraining', 'Purpose_of_Training'])),
+            year: periodStart
+              ? periodStart.slice(0, 4)
+              : text(row, ['ApplicationDate', 'Application_Date']).slice(0, 4),
+          }
+        }),
+      )
+      res.json({ rows: enriched })
     }),
   )
 
@@ -2900,38 +3186,14 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const spec = findModuleSpec('work-tickets')
       if (!spec) throw portalError('Work tickets are not configured', 501)
-      const authUser = user(req)
-      const ticketNo = await createPortalModuleRequest(spec, authUser, req.body ?? {})
-      const flightResult = await callSoapMethod(
-        'SaveWorkTicketFlightDetails',
-        {
-          ticketNo,
-          travelerEmployeeNo: req.body?.travelerEmployeeNo ?? authUser.employeeNo,
-          flightFrom: req.body?.flightFrom ?? '',
-          flightTo: req.body?.flightTo ?? '',
-          departureDate: req.body?.departureDate ?? '',
-          returnDate: req.body?.returnDate ?? '',
-          ticketClass: Number(req.body?.ticketClass ?? 1),
-          airlinePreference: req.body?.airlinePreference ?? '',
-          justification: req.body?.justification ?? '',
-        },
-        facilitySoapEndpoint,
-      )
-      if (String(flightResult.returnValue).toLowerCase() !== 'true') {
-        throw portalError('Business Central did not save the flight-booking details', 502)
-      }
-      const [tickets, flights] = await Promise.all([
+      const ticketNo = await createPortalModuleRequest(spec, user(req), req.body ?? {})
+      const [tickets] = await Promise.all([
         fetchOData('QyWorkTickets', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
           $top: 1,
         }) as Promise<ODataRecord[] | null>,
-        fetchOData('QyWorkTicketFlight', {
-          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
-          $top: 1,
-        }).catch(() => [] as ODataRecord[]) as Promise<ODataRecord[] | null>,
       ])
       const row = Array.isArray(tickets) ? tickets[0] : undefined
-      const flight = Array.isArray(flights) ? flights[0] : undefined
       res.status(201).json({
         id: ticketNo,
         ticketNo,
@@ -2940,9 +3202,37 @@ export function buildPortalApiRouter() {
         type: text(row ?? {}, ['Type']),
         department: text(row ?? {}, ['DepartmentName', 'Department']),
         status: text(row ?? {}, ['Status'], 'Open'),
-        ...workTicketFlight(flight),
         lines: [],
       })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/flight',
+    safe(async (req, res) => {
+      const ticketNo = String(req.params.ticketNo)
+      const ticketClassRaw = String(req.body?.ticketClass ?? '1')
+      const ticketClass =
+        ticketClassRaw.toLowerCase() === 'business' || ticketClassRaw === '2' ? 2 : 1
+      const result = await callSoapMethod(
+        'SaveWorkTicketFlightDetails',
+        {
+          ticketNo,
+          travelerEmployeeNo: req.body?.travelerEmployeeNo ?? user(req).employeeNo,
+          flightFrom: req.body?.flightFrom ?? '',
+          flightTo: req.body?.flightTo ?? '',
+          departureDate: req.body?.departureDate ?? '',
+          returnDate: req.body?.returnDate ?? '',
+          ticketClass,
+          airlinePreference: req.body?.airlinePreference ?? '',
+          justification: req.body?.justification ?? '',
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not save the flight-booking details', 502)
+      }
+      res.json({ ok: true })
     }),
   )
 

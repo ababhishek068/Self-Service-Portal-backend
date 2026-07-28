@@ -78,6 +78,15 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().optional(),
   ),
+  /** Employee figures (card leave balance) codeunit — CuPortalEmployeeData.GetLeaveBalance. */
+  BC_SOAP_EMPLOYEE_DATA_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_EMPLOYEE_DATA_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
   BC_SOAP_ATTACHMENTS_CODEUNIT_URL: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().url().optional(),

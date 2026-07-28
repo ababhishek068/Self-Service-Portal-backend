@@ -1,6 +1,11 @@
 import type { ODataRecord } from './bcClient.js'
 import { fetchOData, odataString } from './bcClient.js'
-import { resolveLeaveStatus } from './erpMappings.js'
+import {
+  currentLeaveApplicationApprovalEntries,
+  latestLeaveApprovalCycleEntries,
+  leaveDraftNotYetSubmitted,
+  resolveLeaveStatus,
+} from './erpMappings.js'
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
   for (const key of keys) {
@@ -164,8 +169,13 @@ export function resolveLeaveApprovalSteps(
   approvalEntries: ODataRecord[],
   _documentNo = '',
 ) {
+  if (leaveDraftNotYetSubmitted(row)) return []
+
+  const scopedEntries = latestLeaveApprovalCycleEntries(
+    currentLeaveApplicationApprovalEntries(row, approvalEntries),
+  )
   const resolvedStatus = resolveLeaveStatus(row, approvalEntries)
-  const steps = mapApprovalStepsWithSequence(approvalEntries)
+  const steps = mapApprovalStepsWithSequence(scopedEntries)
   if (steps.length > 0) return steps
 
   if (['Pending Approval', 'Approved', 'Rejected'].includes(resolvedStatus)) {
@@ -181,23 +191,47 @@ export interface LeaveApproverContext {
   department?: string
 }
 
-async function enrichMappedApprovalSteps(steps: ReturnType<typeof mapApprovalSteps>) {
+async function resolveApproverRoleLabel(approverId: string): Promise<string> {
+  const trimmed = approverId.trim()
+  if (!trimmed) return 'Approver'
+
+  const employeeFilters = [
+    `No eq '${odataString(trimmed)}'`,
+    `EmployeeNo eq '${odataString(trimmed)}'`,
+    `UserID eq '${odataString(trimmed)}'`,
+  ]
+  for (const filter of employeeFilters) {
+    const rows = (await fetchOData('QyHREmployee', { $filter: filter, $top: 1 }).catch(
+      () => [],
+    )) as ODataRecord[] | null
+    if (!Array.isArray(rows) || rows.length === 0) continue
+    const role = text(rows[0]!, ['JobTitle', 'Job_Title', 'Designation', 'Position'])
+    if (role) return role
+  }
+
+  return 'Approver'
+}
+
+export async function enrichMappedApprovalSteps(steps: ReturnType<typeof mapApprovalSteps>) {
   const enriched: ReturnType<typeof mapApprovalSteps> = []
   for (const step of steps) {
-    if (
-      step.actorEmployeeNo &&
+    const actorId = step.actorEmployeeNo.trim()
+    const needsName =
+      Boolean(actorId) &&
       (!step.actorName ||
+        step.actorName === actorId ||
         step.actorName === step.actorEmployeeNo ||
         step.actorName === 'Awaiting approver assignment')
-    ) {
-      const resolved = await resolveApproverDisplayName(step.actorEmployeeNo)
-      enriched.push({
-        ...step,
-        actorName: resolved || step.actorName,
-      })
-      continue
+    const needsRole = step.role === 'Approver' || step.role === actorId
+    let actorName = step.actorName
+    let role = step.role
+    if (needsName) {
+      actorName = (await resolveApproverDisplayName(actorId)) || actorName
     }
-    enriched.push(step)
+    if (needsRole && actorId) {
+      role = (await resolveApproverRoleLabel(actorId)) || role
+    }
+    enriched.push({ ...step, actorName, role })
   }
   return normalizeSequentialApprovalStatuses(enriched)
 }
@@ -380,21 +414,29 @@ export async function resolveLeaveApprovalStepsAsync(
   documentNo = '',
   context: LeaveApproverContext = {},
 ) {
-  if (approvalEntries.length > 0) {
-    const enriched = await enrichMappedApprovalSteps(mapApprovalSteps(approvalEntries))
+  if (leaveDraftNotYetSubmitted(row)) return []
+
+  const scopedEntries = latestLeaveApprovalCycleEntries(
+    currentLeaveApplicationApprovalEntries(row, approvalEntries),
+  )
+
+  if (scopedEntries.length > 0) {
+    const enriched = await enrichMappedApprovalSteps(mapApprovalSteps(scopedEntries))
     const needsBetterName = enriched.every(
       (step) =>
         !step.actorName ||
         step.actorName === 'Awaiting approver assignment' ||
         (step.actorEmployeeNo && step.actorName === step.actorEmployeeNo),
     )
-    if (!needsBetterName) return enriched
+    if (!needsBetterName && enriched.length > 1) {
+      return enrichApprovalStepsWithCommentLines(enriched, documentNo, 50532)
+    }
   }
 
-  const fallbackSteps = resolveLeaveApprovalSteps(row, approvalEntries, documentNo)
+  const fallbackSteps = resolveLeaveApprovalSteps(row, scopedEntries, documentNo)
   const entriesForRoute =
-    approvalEntries.length > 0
-      ? approvalEntries
+    scopedEntries.length > 0
+      ? scopedEntries
       : fallbackSteps.map((step, index) => ({
           ApproverID: step.actorEmployeeNo,
           ApproverName: step.actorName,
@@ -402,10 +444,14 @@ export async function resolveLeaveApprovalStepsAsync(
           SequenceNo: step.sequenceNo ?? index + 1,
         }))
 
-  return resolveLeaveApprovalRouteAsync(entriesForRoute, {
-    ...context,
-    leaveRow: row,
-  })
+  return enrichApprovalStepsWithCommentLines(
+    await resolveLeaveApprovalRouteAsync(entriesForRoute, {
+      ...context,
+      leaveRow: row,
+    }),
+    documentNo,
+    50532,
+  )
 }
 
 async function resolveApproverDisplayName(approverId: string): Promise<string> {
@@ -475,4 +521,83 @@ export function leaveDocumentNoCandidates(no: string) {
     values.push(trimmed.replace(/^lv/i, ''))
   }
   return [...new Set(values.filter(Boolean))]
+}
+
+const APPROVAL_COMMENT_LINE_SERVICES = [
+  'QyApprovalCommentLine',
+  'QyApprovalCommentLines',
+  'QyApprovalComments',
+]
+
+function approvalCommentDocumentNo(row: ODataRecord) {
+  return text(row, [
+    'DocumentNo',
+    'Document_No',
+    'RecordIDToApprove',
+    'Record_ID_to_Approve',
+  ])
+}
+
+function approvalCommentEntryNo(row: ODataRecord) {
+  return text(row, ['ApprovalEntryNo', 'Approval_Entry_No', 'EntryNo', 'Entry_No'])
+}
+
+function approvalCommentText(row: ODataRecord) {
+  return text(row, ['Comment', 'Comments', 'Description', 'Note'])
+}
+
+/** Load rejection / approval notes from BC Approval Comment Line when QyApprovalEntry.Comment is blank. */
+export async function fetchApprovalCommentNotes(documentNo: string, tableId?: number) {
+  const notesByEntry = new Map<string, string>()
+  const trimmed = documentNo.trim()
+  if (!trimmed) return notesByEntry
+
+  const docFilter = `(Document_No eq '${odataString(trimmed)}' or DocumentNo eq '${odataString(trimmed)}')`
+  const tableFilter =
+    tableId && Number.isFinite(tableId) ? ` and Table_ID eq ${tableId}` : ''
+
+  for (const service of APPROVAL_COMMENT_LINE_SERVICES) {
+    try {
+      const rows = (await fetchOData(service, {
+        $filter: `${docFilter}${tableFilter}`,
+        $top: 100,
+      })) as ODataRecord[] | null
+      if (!Array.isArray(rows) || rows.length === 0) continue
+      for (const row of rows) {
+        const note = approvalCommentText(row)
+        if (!note) continue
+        const entryNo = approvalCommentEntryNo(row)
+        if (entryNo) notesByEntry.set(entryNo, note)
+        const fallbackKey = text(row, ['SequenceNo', 'Sequence_No'], entryNo || '0')
+        if (!notesByEntry.has(fallbackKey)) notesByEntry.set(fallbackKey, note)
+      }
+      if (notesByEntry.size > 0) break
+    } catch {
+      // try the next published BC service
+    }
+  }
+
+  return notesByEntry
+}
+
+export async function enrichApprovalStepsWithCommentLines(
+  steps: ReturnType<typeof mapApprovalSteps>,
+  documentNo: string,
+  tableId?: number,
+) {
+  if (!steps.length || !documentNo.trim()) return steps
+  const notesByEntry = await fetchApprovalCommentNotes(documentNo, tableId)
+  if (!notesByEntry.size) return steps
+
+  return steps.map((step) => {
+    if (step.note?.trim()) return step
+    const byId = notesByEntry.get(String(step.id))
+    if (byId) return { ...step, note: byId }
+    const bySequence = notesByEntry.get(String(step.sequenceNo))
+    if (bySequence) return { ...step, note: bySequence }
+    if (notesByEntry.size === 1 && /reject|declin/i.test(step.status)) {
+      return { ...step, note: [...notesByEntry.values()][0]! }
+    }
+    return step
+  })
 }

@@ -517,6 +517,82 @@ async function scanDimensionListForLabel(label: string, maxLen = 20) {
   return ''
 }
 
+function firstEmployeeFieldText(
+  record: ODataRecord | null | undefined,
+  keys: string[],
+) {
+  if (!record) return ''
+  return employeeFieldText(record, keys)
+}
+
+const EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS = [
+  'GlobalDimension1Code',
+  'Global_Dimension_1_Code',
+  'ShortcutDimension2Code',
+  'Shortcut_Dimension_2_Code',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+  'DepartmentCode',
+  'Department_Code',
+  'Department',
+]
+
+const EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS = [
+  'DepartmentName',
+  'Department_Name',
+  'Division',
+  'DivisionName',
+  'Division_Name',
+  'District',
+  'DistrictName',
+  'District_Name',
+  'BranchName',
+  'Branch_Name',
+]
+
+async function resolveDimensionCodeCandidate(raw: string, maxLen = 20) {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= maxLen) {
+    const byCode = await fetchDimensionRows(`Code eq '${odataString(trimmed)}'`, 1)
+    if (byCode.length > 0) {
+      const code = dimensionRowText(byCode[0]!, ['Code', 'Code_'])
+      if (code && code.length <= maxLen) return code
+    }
+    return trimmed
+  }
+  return resolveDimensionCodeByName(trimmed, maxLen)
+}
+
+/**
+ * Resolve the Code[20] department value required by finance SOAP methods
+ * (ClaimRequisitionHeader, etc.). HIJRA stores department on GD1, GD2, or
+ * named Division/District fields depending on the employee card layout.
+ */
+export async function resolveFinanceDepartmentCodeForSoap(
+  employeeNo: string,
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
+) {
+  const emp = (await fetchMergedEmployeeRecord(employeeNo)) ?? (await fetchEmployeeRecordFast(employeeNo))
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const hint of [hints.department, hints.departmentName, hints.branchCode]) {
+    const resolved = await resolveDimensionCodeCandidate(String(hint ?? ''))
+    if (resolved) return resolved
+  }
+
+  return ''
+}
+
 function dimensionNameFilters(label: string) {
   const escaped = odataString(label)
   const scoped = [
@@ -596,20 +672,24 @@ async function syncEmployeeGlobalDimension1Code(employeeNo: string, departmentCo
 /** Resolve department/branch codes that fit BC Code[20] fields on finance documents. */
 export async function resolveEmployeeDimensionCodesForSoap(
   employeeNo: string,
-  hints: { department?: string; branchCode?: string } = {},
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
 ) {
   const emp = await fetchEmployeeRecordFast(employeeNo)
-  const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
-  ).trim()
+  const departmentRaw = firstEmployeeFieldText(emp, EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) ||
+    String(hints.department ?? '').trim()
   const branchRaw = String(
-    emp?.GlobalDimension2Code ?? emp?.Branch ?? hints.branchCode ?? '',
+    emp?.GlobalDimension2Code ?? emp?.ShortcutDimension3Code ?? emp?.Branch ?? hints.branchCode ?? '',
   ).trim()
 
-  const [departmentCode, branchCode] = await Promise.all([
-    resolveDimensionCodeByName(departmentRaw),
+  const [departmentCodeFromRaw, branchCode] = await Promise.all([
+    resolveDimensionCodeCandidate(departmentRaw),
     resolveDimensionCodeByName(branchRaw),
   ])
+
+  let departmentCode = departmentCodeFromRaw
+  if (!departmentCode) {
+    departmentCode = await resolveFinanceDepartmentCodeForSoap(employeeNo, hints)
+  }
 
   return { departmentCode, branchCode }
 }
@@ -620,13 +700,12 @@ export async function resolveEmployeeDimensionCodesForSoap(
  */
 export async function ensureEmployeeDepartmentCodeForFinance(
   employeeNo: string,
-  hints: { department?: string; branchCode?: string } = {},
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
 ) {
   const dims = await resolveEmployeeDimensionCodesForSoap(employeeNo, hints)
   const emp = await fetchEmployeeRecordFast(employeeNo)
-  const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
-  ).trim()
+  const departmentRaw = firstEmployeeFieldText(emp, EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) ||
+    String(hints.department ?? '').trim()
 
   if (departmentRaw.length > 20 && !dims.departmentCode) {
     throw Object.assign(

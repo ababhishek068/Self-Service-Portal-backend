@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
 import { callSoapMethod, fetchOData, odataString, type ODataRecord } from './bcClient.js'
+import { employeeAnnualLeaveBalance } from './leaveBalance.js'
 import { config } from './config.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
@@ -282,33 +283,7 @@ function employeeIsActive(employee: BcEmployee) {
 }
 
 function employeeLeaveBalanceFromRecord(record: Record<string, unknown>) {
-  const preferredKeys = [
-    'EarnedLeaveDays',
-    'Earned_Leave_Days',
-    'AnnualLeaveBalance',
-    'Annual_Leave_Balance',
-    'Annual_Leave_balance',
-    'AnnualLeavebalance',
-    'LeaveBalance',
-    'Leave_Balance',
-  ]
-  for (const key of preferredKeys) {
-    const value = record[key]
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      const parsed = Number(value)
-      if (Number.isFinite(parsed)) return parsed
-    }
-  }
-  for (const [key, value] of Object.entries(record)) {
-    if (value === undefined || value === null || String(value).trim() === '') continue
-    const normalized = key.toLowerCase().replace(/[_\s]/g, '')
-    if (!['annualleavebalance', 'leavebalance', 'earnedleavedays', 'earnedleave'].includes(normalized)) {
-      continue
-    }
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return 0
+  return employeeAnnualLeaveBalance(record as ODataRecord) ?? 0
 }
 
 function firstEmployeeField(employee: BcEmployee, names: string[]) {
@@ -472,7 +447,15 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
-  const department = employee.GlobalDimension1Code ?? ''
+  const department = employeeFieldText(employee as Record<string, unknown>, [
+    'GlobalDimension1Code',
+    'Global_Dimension_1_Code',
+    'ShortcutDimension2Code',
+    'Shortcut_Dimension_2_Code',
+    'GlobalDimension2Code',
+    'DepartmentCode',
+    'Department',
+  ])
   const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
@@ -509,7 +492,10 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     isChangedPassword: Boolean(employee.ChangedPassword),
     mustChangePassword: !Boolean(employee.ChangedPassword),
     department,
-    departmentName: employee.DepartmentName ?? department,
+    departmentName:
+      employee.DepartmentName ??
+      employeeFieldText(employee as Record<string, unknown>, ['Division', 'District']) ??
+      department,
     branchCode: employee.GlobalDimension2Code ?? '',
     branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
     jobTitle,

@@ -298,10 +298,174 @@ export function leaveSentForApproval(row: ODataRecord) {
   return Boolean(sentAt && !sentAt.startsWith('0001-01-01'))
 }
 
+/** True once the employee (or BC) has sent this leave into the approval workflow. */
+export function leaveHasEnteredApprovalWorkflow(row: ODataRecord) {
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') return true
+  if (leaveSentForApproval(row)) return true
+  if (leaveSentForApprovalFlag(row)) return true
+  return false
+}
+
+/** Open/Draft leave that has not been sent for approval must stay a draft in the portal. */
+export function leaveDraftNotYetSubmitted(row: ODataRecord) {
+  const headerStatus = text(row, ['Status', 'DocumentStatus']).trim().toLowerCase()
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+
+  if (
+    headerStatus.includes('approved') ||
+    headerStatus.includes('cancel') ||
+    headerStatus.includes('reject')
+  ) {
+    return false
+  }
+
+  // BC keeps Status=Open until the employee clicks Request Approval, then sets ApprovalStatus.
+  if (headerStatus === 'open' || headerStatus === 'draft' || headerStatus === '') {
+    return approvalStatus !== 'pending approval' && approvalStatus !== 'pending'
+  }
+
+  return false
+}
+
 function leaveApprovalEntryIsActive(entry: ODataRecord) {
   const rawStatus = text(entry, ['Status']).trim().toLowerCase()
   if (rawStatus === 'open' || rawStatus === 'pending' || rawStatus === 'created') return true
   return rawStatus.includes('pending')
+}
+
+function leaveApprovalEntryTimestamp(entry: ODataRecord) {
+  const raw = text(entry, [
+    'DateTimeSentforApproval',
+    'Date_Time_Sent_for_Approval',
+    'DateTimeSentForApproval',
+    'CreatedDateTime',
+    'Created_Date_Time',
+  ])
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function leaveApprovalEntryNumber(entry: ODataRecord) {
+  const parsed = Number(text(entry, ['EntryNo', 'Entry_No']))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizedLeaveDocumentKey(value: unknown) {
+  const normalized = String(value ?? '').trim().toUpperCase()
+  if (!normalized) return ''
+  const withoutPrefix = normalized.replace(/^LV/, '')
+  return withoutPrefix.replace(/^0+/, '') || withoutPrefix
+}
+
+function validDateTimestamp(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.startsWith('0001-01-01')) return null
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * A reused/reset BC number series can leave historical Approval Entry rows with
+ * the same document number as a newly-created leave. Keep only leave-table entries
+ * for the exact document whose sent/created timestamp is on or after this application date.
+ */
+export function currentLeaveApplicationApprovalEntries(
+  row: ODataRecord,
+  entries: ODataRecord[],
+) {
+  const applicationCode = text(row, ['ApplicationCode', 'Application_Code', 'No'])
+  const applicationKey = normalizedLeaveDocumentKey(applicationCode)
+  const applicationTimestamp = validDateTimestamp(
+    text(row, [
+      'ApplicationDate',
+      'Application_Date',
+      'CreatedDateTime',
+      'Created_Date_Time',
+      'SystemCreatedAt',
+    ]),
+  )
+
+  return entries.filter((entry) => {
+    const tableIdRaw = entry.TableID ?? entry.TableId
+    if (tableIdRaw !== undefined && tableIdRaw !== null && String(tableIdRaw).trim() !== '') {
+      const tableId = Number(tableIdRaw)
+      if (Number.isFinite(tableId) && tableId !== 50532) return false
+    }
+
+    const entryDocumentKey = normalizedLeaveDocumentKey(
+      text(entry, ['DocumentNo', 'Document_No', 'No']),
+    )
+    if (applicationKey && entryDocumentKey && applicationKey !== entryDocumentKey) return false
+
+    if (applicationTimestamp !== null) {
+      const entryTimestamp = validDateTimestamp(
+        text(entry, [
+          'DateTimeSentforApproval',
+          'Date_Time_Sent_for_Approval',
+          'DateTimeSentForApproval',
+          'CreatedDateTime',
+          'Created_Date_Time',
+          'SystemCreatedAt',
+          'Date',
+        ]),
+      )
+      if (entryTimestamp !== null && entryTimestamp < applicationTimestamp) return false
+    }
+
+    return true
+  })
+}
+
+/**
+ * Approval Entry retains every submission/cancellation cycle for a document.
+ * Use only the newest cycle when resolving the current leave state.
+ */
+export function latestLeaveApprovalCycleEntries(entries: ODataRecord[]) {
+  if (entries.length <= 1) return [...entries]
+
+  const timed = entries
+    .map((entry) => ({ entry, timestamp: leaveApprovalEntryTimestamp(entry) }))
+    .filter((item): item is { entry: ODataRecord; timestamp: number } => item.timestamp !== null)
+  if (timed.length > 0) {
+    const latestTimestamp = Math.max(...timed.map((item) => item.timestamp))
+    return timed
+      .filter((item) => item.timestamp === latestTimestamp)
+      .map((item) => item.entry)
+  }
+
+  const numbered = entries
+    .map((entry) => ({ entry, entryNo: leaveApprovalEntryNumber(entry) }))
+    .filter((item): item is { entry: ODataRecord; entryNo: number } => item.entryNo !== null)
+  if (numbered.length > 0) {
+    const latestEntryNo = Math.max(...numbered.map((item) => item.entryNo))
+    return numbered.filter((item) => item.entryNo === latestEntryNo).map((item) => item.entry)
+  }
+
+  return [...entries]
+}
+
+function leaveApprovalCycleStatus(entries: ODataRecord[]) {
+  const current = latestLeaveApprovalCycleEntries(entries)
+  if (current.length === 0) return ''
+  const statuses = current.map((entry) => statusFromBc(text(entry, ['Status'], 'Open')))
+  if (statuses.some((status) => status === 'Pending Approval' || status === 'Submitted')) {
+    return 'Pending Approval'
+  }
+  if (statuses.some((status) => status === 'Rejected')) return 'Rejected'
+  if (statuses.some((status) => status === 'Cancelled')) return 'Cancelled'
+  if (statuses.every((status) => status === 'Approved')) return 'Approved'
+  return ''
+}
+
+function leaveHeaderTerminalStatus(row: ODataRecord) {
+  for (const key of ['Status', 'DocumentStatus', 'ApprovalStatus', 'Approval_Status']) {
+    const raw = row[key]
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue
+    const mapped = statusFromBc(String(raw))
+    if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') return mapped
+  }
+  return ''
 }
 
 function leaveSentForApprovalFlag(row: ODataRecord) {
@@ -342,6 +506,23 @@ function leaveHeaderSignalsPending(row: ODataRecord) {
  * approval entries). BC is the single source of truth — nothing is stored locally.
  */
 export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  const headerTerminal = leaveHeaderTerminalStatus(row)
+  if (headerTerminal) return headerTerminal
+
+  if (leaveDraftNotYetSubmitted(row)) {
+    return statusFromBc(documentStatusFromBc(row, 'leave'))
+  }
+
+  const applicationApprovalEntries = currentLeaveApplicationApprovalEntries(row, approvalEntries)
+  const cycleStatus = leaveApprovalCycleStatus(applicationApprovalEntries)
+  if (
+    cycleStatus === 'Approved' ||
+    cycleStatus === 'Rejected' ||
+    cycleStatus === 'Cancelled'
+  ) {
+    return cycleStatus
+  }
+
   const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
   if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
     return 'Pending Approval'
@@ -351,23 +532,20 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
 
   if (leaveSentForApprovalFlag(row)) return 'Pending Approval'
 
-  if (approvalEntries.some(leaveApprovalEntryIsActive)) {
+  const currentApprovalEntries = latestLeaveApprovalCycleEntries(applicationApprovalEntries)
+  if (cycleStatus === 'Pending Approval' || currentApprovalEntries.some(leaveApprovalEntryIsActive)) {
     return 'Pending Approval'
   }
 
   const mapped = statusFromBc(documentStatusFromBc(row, 'leave'))
-  if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') {
-    return mapped
-  }
   if (mapped !== 'Open' && mapped !== 'Draft') return mapped
 
-  // Only promote Open/Draft → Pending below; terminal states already returned.
   if (leaveHeaderSignalsPending(row)) return 'Pending Approval'
 
   if (
-    approvalEntries.some((entry) => {
+    currentApprovalEntries.some((entry) => {
       const stepStatus = statusFromBc(text(entry, ['Status'], 'Open'))
-      return ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(stepStatus)
+      return ['Pending Approval', 'Submitted'].includes(stepStatus)
     })
   ) {
     return 'Pending Approval'
@@ -387,7 +565,17 @@ export function mapEmployee(row: ODataRecord) {
   const middleName = text(row, ['MiddleName', 'Middle_Name'])
   const lastName = text(row, ['LastName', 'Last_Name'])
   const displayName = text(row, ['FullName', 'Name', 'EmployeeName'], [firstName, middleName, lastName].filter(Boolean).join(' '))
-  const departmentCode = text(row, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code'])
+  const departmentCode = text(
+    row,
+    [
+      'GlobalDimension1Code',
+      'ShortcutDimension2Code',
+      'DepartmentCode',
+      'Department_Code',
+      'Department',
+    ],
+    text(row, ['GlobalDimension2Code']),
+  )
 
   return {
     id: employeeNo || crypto.randomUUID(),
@@ -395,8 +583,12 @@ export function mapEmployee(row: ODataRecord) {
     displayName,
     email: text(row, ['Email', 'CompanyEMail', 'CompanyEmail', 'E_Mail']),
     departmentCode,
-    departmentName: text(row, ['DepartmentName', 'Department_Name'], departmentCode),
-    branchCode: text(row, ['GlobalDimension2Code', 'BranchCode', 'Branch_Code'], 'HO'),
+    departmentName: text(
+      row,
+      ['DepartmentName', 'Department_Name'],
+      departmentCode,
+    ),
+    branchCode: text(row, ['BranchCode', 'Branch_Code', 'GlobalDimension3Code', 'ShortcutDimension3Code'], 'HO'),
     branchName: text(row, ['BranchName', 'Branch_Name'], 'Head Office'),
     jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),

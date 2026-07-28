@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
+import { callSoapMethod, fetchOData, fetchODataCount, odataString, deriveCodeunitSoapUrl, codeunitSoapNamespace, type ODataRecord } from './bcClient.js'
 import { requireAuth } from './auth.js'
 import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, approvalTableIdsFor, type ApprovalTableKey } from './approvalTableIds.js'
 import {
@@ -25,6 +25,35 @@ import {
 } from './leaveApprovalSteps.js'
 import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
+import {
+  employeeAnnualLeaveBalance,
+  employeeLeaveMetrics,
+  employeeCardLeaveBalances,
+  leaveCardBalancesFromRecord,
+  mergeLeaveCardBalances,
+  parseBcLeaveSummary,
+  parseEmployeeLeaveBalancesReturn,
+  resolveAnnualLeaveEntitlement,
+  resolveBcLeaveBalance,
+} from './leaveBalance.js'
+
+export {
+  employeeLeaveMetrics,
+  resolveAnnualLeaveBalance,
+  resolveAnnualLeaveEntitlement,
+  employeeAnnualLeaveBalance,
+  parseBcLeaveSummary,
+  resolveBcLeaveBalance,
+} from './leaveBalance.js'
+
+/** BC employee-card leave figures — PortalEmployeeDataMgt.Codeunit.al / CuPortalEmployeeData. */
+const employeeDataSoapEndpoint = {
+  url:
+    config.BC_SOAP_EMPLOYEE_DATA_CODEUNIT_URL ??
+    deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, 'CuPortalEmployeeData'),
+  namespace:
+    config.BC_SOAP_EMPLOYEE_DATA_NAMESPACE ?? codeunitSoapNamespace('CuPortalEmployeeData'),
+}
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -153,6 +182,40 @@ function fieldNumber(row: ODataRecord | null | undefined, keys: string[]) {
   return null
 }
 
+function fieldBoolean(row: ODataRecord | null | undefined, keys: string[]) {
+  if (!row) return null
+  for (const key of keys) {
+    const value = row[key]
+    if (value === undefined || value === null || String(value).trim() === '') continue
+    if (typeof value === 'boolean') return value
+    const normalized = String(value).trim().toLowerCase()
+    if (['true', 'yes', '1'].includes(normalized)) return true
+    if (['false', 'no', '0'].includes(normalized)) return false
+  }
+  return null
+}
+
+const LEAVE_FAMILY_MEMBER_OPTIONS = [
+  'Aunt',
+  'Brother',
+  'Child',
+  'Father',
+  'Father-in-law',
+  'Grand-Parents',
+  'Mother',
+  'Mother-in-Law',
+  'Sister',
+  'Step-Dad',
+  'Step-Mom',
+  'Inlaw',
+  'Uncle',
+] as const
+
+function normalizeLeaveFamilyMember(value: unknown): string {
+  const trimmed = String(value ?? '').trim()
+  return (LEAVE_FAMILY_MEMBER_OPTIONS as readonly string[]).includes(trimmed) ? trimmed : ''
+}
+
 function normalizeLeaveFieldKey(key: string) {
   return key.toLowerCase().replace(/[_\s]/g, '')
 }
@@ -176,60 +239,24 @@ function roundLeaveValue(value: number) {
   return Math.round(value * 100) / 100
 }
 
-export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
-  if (!row) {
-    const sessionBalance = Number(user.leaveBalance)
-    return {
-      leaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
-      earnedLeaveDays: null,
-    }
-  }
-
-  const leaveBalance =
-    fieldNumber(row, [
-      'LeaveBalance',
-      'Leave_Balance',
-      'AnnualLeaveBalance',
-      'Annual_Leave_Balance',
-      'Annual_Leave_balance',
-      'AnnualLeavebalance',
-    ]) ??
-    discoverLeaveFieldNumber(row, [
-      (key) => key === 'annualleavebalance',
-      (key) => key === 'leavebalance',
-    ])
-
-  const earnedLeaveDays =
-    fieldNumber(row, ['EarnedLeaveDays', 'Earned_Leave_Days', 'EarnedLeave', 'Earned_Leave']) ??
-    discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
-
-  return { leaveBalance, earnedLeaveDays }
-}
-
-export function resolveAnnualLeaveBalance(
-  metrics: ReturnType<typeof employeeLeaveMetrics>,
-  ledgerNet: number,
-) {
-  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
-  if (metrics.leaveBalance !== null) return metrics.leaveBalance
-  return ledgerNet
-}
-
-export function resolveAnnualLeaveEntitlement(
-  metrics: ReturnType<typeof employeeLeaveMetrics>,
-  leaveTypeDays: number,
-) {
-  if (metrics.earnedLeaveDays !== null) return metrics.earnedLeaveDays
-  if (metrics.leaveBalance !== null) return metrics.leaveBalance
-  return leaveTypeDays
-}
-
 async function fetchCurrentEmployeeRow(employeeNo: string) {
   const rows = (await fetchOData('QyHREmployee', {
     $filter: `No eq '${odataString(employeeNo)}'`,
     $top: 1,
   }).catch(() => [])) as ODataRecord[] | null
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+}
+
+async function fetchLeaveApplicationBalanceRows(employeeNo: string, leaveTypeCode: string) {
+  const filter =
+    `EmployeeNo eq '${odataString(employeeNo)}'` +
+    ` and LeaveType eq '${odataString(leaveTypeCode)}'`
+  const rows = (await fetchOData('QyHRLeaveApplications', {
+    $filter: filter,
+    $orderby: 'ApplicationDate desc',
+    $top: 10,
+  }).catch(() => [])) as ODataRecord[] | null
+  return Array.isArray(rows) ? rows : []
 }
 
 function likelyActiveEmployee(row: ODataRecord) {
@@ -1010,6 +1037,15 @@ export function formatBcSoapDate(value: string) {
   return normalized
 }
 
+/** ERP working date rule — claim/expenditure dates must match the server calendar day. */
+export function isErpWorkingDate(value: string) {
+  const formatted = formatBcSoapDate(value)
+  if (!formatted) return false
+  const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  return formatted === todayStr
+}
+
 export function normalizeLeaveStartDate(value: string) {
   return formatBcSoapDate(value)
 }
@@ -1502,14 +1538,31 @@ export function buildStaffRouter() {
         }),
         fetchCurrentEmployeeRow(user.employeeNo),
       ])
-      const metrics = employeeLeaveMetrics(employeeRow, user)
+      const metrics = employeeLeaveMetrics(employeeRow, user.leaveBalance)
       res.json({
         rows: (Array.isArray(rows) ? rows : []).map((row) => {
           const annual = leaveTypeIsAnnual(row)
           const genericDays = Number(row.Days ?? row.NoofDays ?? 0)
+          const description = String(row.Description ?? row.description ?? '')
+          const code = String(row.Code ?? row.code ?? '')
+          const requiresFamilyMember =
+            fieldBoolean(row, ['RequiresFamilyMember', 'Requires_Family_Member']) ??
+            /mourn|bereav|funeral|compassionate/i.test(`${description} ${code}`)
+          const requiresMedicalAttachment =
+            fieldBoolean(row, ['RequiresMedicalAttachment', 'Requires_Medical_Attachment']) ??
+            /sick|medical|illness|hospital/i.test(`${description} ${code}`)
           return {
             ...row,
             Hourly: Boolean(row.Hourly ?? row.Allow_Hourly ?? false),
+            UnlimitedDays: fieldBoolean(row, ['UnlimitedDays', 'Unlimited_Days']) ?? false,
+            MaximumApplicationDays: fieldNumber(row, [
+              'MaximumApplicationDays',
+              'Maximum_Application_Days',
+              'MaxApplicationDays',
+              'Max_Application_Days',
+            ]),
+            RequiresMedicalAttachment: requiresMedicalAttachment,
+            RequiresFamilyMember: requiresFamilyMember,
             Days: roundLeaveValue(
               annual ? resolveAnnualLeaveEntitlement(metrics, genericDays) : genericDays,
             ),
@@ -1546,58 +1599,136 @@ export function buildStaffRouter() {
     '/leave/balance/:type',
     safe(async (req, res) => {
       const user = authUser(req)
-      const leaveTypeCode = req.params.type
+      const leaveTypeCode = String(req.params.type ?? '')
       const today = new Date().toISOString().slice(0, 10)
+      const currentPeriod = new Date().getFullYear()
 
-      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
-        fetchOData('QyHRLeaveType', {
-          $filter: `Code eq '${odataString(leaveTypeCode)}'`,
-          $top: 1,
-        }) as Promise<ODataRecord[] | null>,
-        fetchODataCount('QyHRLeaveApplications', {
-          $filter:
-            `Status eq 'Pending Approval'` +
-            ` and EmployeeNo eq '${odataString(user.employeeNo)}'` +
-            ` and LeaveType eq '${odataString(leaveTypeCode)}'` +
-            ` and EndDate gt ${today}`,
-        }),
-        fetchOData('QyHRLeaveLedger', {
-          $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
-        }) as Promise<ODataRecord[] | null>,
-        fetchCurrentEmployeeRow(user.employeeNo),
-      ])
+      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows, soapBalances, summarySoap] =
+        await Promise.all([
+          fetchOData('QyHRLeaveType', {
+            $filter: `Code eq '${odataString(leaveTypeCode)}'`,
+            $top: 1,
+          }) as Promise<ODataRecord[] | null>,
+          fetchODataCount('QyHRLeaveApplications', {
+            $filter:
+              `Status eq 'Pending Approval'` +
+              ` and EmployeeNo eq '${odataString(user.employeeNo)}'` +
+              ` and LeaveType eq '${odataString(leaveTypeCode)}'` +
+              ` and EndDate gt ${today}`,
+          }),
+          fetchOData('QyHRLeaveLedger', {
+            $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
+          }) as Promise<ODataRecord[] | null>,
+          fetchCurrentEmployeeRow(user.employeeNo),
+          fetchLeaveApplicationBalanceRows(user.employeeNo, leaveTypeCode),
+          callSoapMethod('FnGetEmployeeLeaveBalances', {
+            employeeNo: user.employeeNo,
+          }).catch(() => null),
+          callSoapMethod(
+            'GetLeaveBalance',
+            { employeeNo: user.employeeNo, leaveType: leaveTypeCode },
+            employeeDataSoapEndpoint,
+          ).catch(() => null),
+        ])
 
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
-      const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
+      if (!leaveTypeRow) {
+        res.status(404).json({ message: 'The selected leave type was not found in Business Central.' })
+        return
+      }
+      const leaveTypeDays = Number(leaveTypeRow?.Days ?? leaveTypeRow?.NoofDays ?? 0)
+      const leaveTypeUnlimitedDays =
+        fieldBoolean(leaveTypeRow, ['UnlimitedDays', 'Unlimited_Days']) ?? false
+      const maximumApplicationDays = fieldNumber(leaveTypeRow, [
+        'MaximumApplicationDays',
+        'Maximum_Application_Days',
+        'MaxApplicationDays',
+        'Max_Application_Days',
+      ])
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
       const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
-      const metrics = employeeLeaveMetrics(employeeRow, user)
+      const metrics = employeeLeaveMetrics(employeeRow, user.leaveBalance)
 
       let additions = 0
       let deductions = 0
+      let openNet = 0
+      let currentPeriodNet = 0
+      let hasOpenEntries = false
+      let hasCurrentPeriodEntries = false
       if (Array.isArray(ledgerRows)) {
         for (const entry of ledgerRows) {
           const noOfDays = Number(entry?.NoofDays ?? entry?.['No_of_Days'] ?? 0)
-          if (Number.isFinite(noOfDays)) {
-            if (noOfDays < 0) deductions += -noOfDays
-            else additions += noOfDays
+          if (!Number.isFinite(noOfDays)) continue
+          if (noOfDays < 0) deductions += -noOfDays
+          else additions += noOfDays
+          const closed =
+            entry?.Closed === true || String(entry?.Closed ?? '').toLowerCase() === 'true'
+          if (closed) continue
+          hasOpenEntries = true
+          openNet += noOfDays
+          if (Number(entry?.LeavePeriod ?? entry?.Leave_Period) === currentPeriod) {
+            hasCurrentPeriodEntries = true
+            currentPeriodNet += noOfDays
           }
         }
       }
 
-      const ledgerNet = additions - deductions
-      let leaveBalance = 0
-      if (isAnnual) {
-        leaveBalance = resolveAnnualLeaveBalance(metrics, ledgerNet)
-      } else {
-        leaveBalance = leaveTypeDays - (deductions - additions)
-      }
-      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
+      const directBalances = mergeLeaveCardBalances(
+        employeeCardLeaveBalances(employeeRow),
+        parseEmployeeLeaveBalancesReturn(soapBalances?.returnValue),
+        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
+      )
+      const summary = parseBcLeaveSummary(summarySoap?.returnValue)
+      const cardAnnualBalance = employeeAnnualLeaveBalance(employeeRow)
+      const ledgerNetDays = additions - deductions
+      const earnedLeaveDays =
+        summary?.earnedLeaveDays ??
+        metrics.earnedLeaveDays ??
+        directBalances.employeeEarnedLeaveDays ??
+        directBalances.earnedLeaveDays
+      const balance = roundLeaveValue(
+        resolveBcLeaveBalance({
+          isAnnual,
+          leaveTypeDays,
+          leaveTypeUnlimitedDays,
+          maximumApplicationDays,
+          summary,
+          cardAnnualBalance,
+          earnedLeaveDays,
+          hasCurrentPeriodEntries,
+          currentPeriodNet,
+          hasOpenEntries,
+          openNet,
+          ledgerNetDays,
+        }),
+      )
       const entitlement = roundLeaveValue(
         isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
       )
+      const unlimitedDays = summary?.unlimitedDays ?? leaveTypeUnlimitedDays
+      const maximumDays = summary?.maximumApplicationDays ?? maximumApplicationDays
 
-      res.json({ balance, entitlement, pendingCount, isHourly })
+      if (config.LOG_LEAVE_STATUS) {
+        logDiagnostic(
+          `[leave-balance] emp=${user.employeeNo} type=${leaveTypeCode} annual=${isAnnual} ` +
+            `summary=${JSON.stringify(summary)} cardAnnual=${cardAnnualBalance} ` +
+            `periodNet(${currentPeriod})=${hasCurrentPeriodEntries ? currentPeriodNet : 'n/a'} ` +
+            `openNet=${hasOpenEntries ? openNet : 'n/a'} allNet=${ledgerNetDays} ` +
+            `=> balance=${balance} earned=${earnedLeaveDays}`,
+        )
+      }
+
+      res.json({
+        balance,
+        entitlement,
+        allocatedDays: entitlement,
+        currentLeaveBalance: balance,
+        earnedLeaveDays,
+        unlimitedDays,
+        maximumApplicationDays: maximumDays,
+        pendingCount,
+        isHourly,
+      })
     }),
   )
 
@@ -1819,7 +1950,10 @@ export function buildStaffRouter() {
           reliever: z.string().optional().default(''),
           reason: z.string().min(1),
           requisitionNo: z.string().optional().default(''),
-          requestApproval: z.boolean().optional().default(true),
+          requestApproval: z.boolean().optional().default(false),
+          endDate: z.string().optional().default(''),
+          returnDate: z.string().optional().default(''),
+          familyMember: z.string().optional().default(''),
         })
         .parse(req.body)
 
@@ -1842,12 +1976,16 @@ export function buildStaffRouter() {
       }
 
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
-      const { endDate } = await resolveLeaveDatesFromBc(
+      const calculatedDates = await resolveLeaveDatesFromBc(
         user,
         body.leaveType,
         body.appliedDays,
         body.startDate,
         body.isHalfDayLeave,
+      )
+      const endDate = formatBcSoapDate(body.endDate || calculatedDates.endDate)
+      const returnDate = formatBcSoapDate(
+        body.returnDate || calculatedDates.returnDate || nextWorkingDayIso(endDate),
       )
       if (!endDate) {
         res.status(422).json({
@@ -1871,6 +2009,7 @@ export function buildStaffRouter() {
         isRequestLeaveAllowance: false,
         // LeaveApplication declares this as Boolean; GetLeaveDates uses 0/1/2 separately.
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
+        familyMember: normalizeLeaveFamilyMember(body.familyMember),
       })
 
       const soapOk = soapLeaveActionOk(result.returnValue)

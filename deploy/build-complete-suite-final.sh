@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.3.79"
-AL_PATCH_VERSION="1.0.5.73"
+VERSION="1.0.3.98"
+AL_PATCH_VERSION="1.0.5.75"
 BUNDLE="HIJRA-${VERSION}-COMPLETE-SUITE-FINAL"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUITE="$REPO_ROOT/SelfServiceSuite"
@@ -16,7 +16,7 @@ cd "$SUITE/SelfServiceBackend"
 rm -rf "$SUITE/SelfServiceBackend/dist"
 npm run build
 npm run build:portal
-echo "hijra-portal-${VERSION}-FINAL-2026-07-28-all-existing-modules-preserved-search-facility-workflow-fixes" > dist/BUILD_ID.txt
+echo "hijra-portal-${VERSION}-FINAL-2026-07-28-uat-spreadsheet-audit-fixes" > dist/BUILD_ID.txt
 
 echo "==> Staging $BUNDLE..."
 rm -rf "$STAGE"
@@ -53,6 +53,11 @@ for query in ApprovalCommentLine PettyCashLimitDepartment TrainingApplicationHea
   cp "$AL_PROJECT/src/staffPortal/query/${query}.Query.al" "$ROOT/BC-AL/FILES/staffPortal/query/"
 done
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
+# Imprest daily-rate fix — must win over the local AL project copy when present.
+PATCH_CU="$REPO_ROOT/deploy/HIJRA-FELIX-SAFE-PATCH-1.0.5.71/FILES/HR-DEEP/StaffPortalCodeunit.Codeunit.al"
+if [[ -f "$PATCH_CU" ]]; then
+  cp "$PATCH_CU" "$ROOT/BC-AL/FILES/HR-DEEP/StaffPortalCodeunit.Codeunit.al"
+fi
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplication.Table.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/Fleet/GatePass.Table.al" "$ROOT/BC-AL/FILES/BASE-DEEP/"
 cp "$AL_PROJECT/src/Query/GatePassAssetTransfers.Query.al" "$AL_PROJECT/src/Query/GatePassTransferShipments.Query.al" "$ROOT/BC-AL/FILES/Query/"
@@ -102,6 +107,13 @@ findstr /M /C:"cannot apply a new leave while another" dist\staff.js >nul 2>&1 &
 findstr /M /C:"countResolvedPendingLeaveApplications" dist\staff.js >nul 2>&1 && echo [OK] HR leave pending fix || echo [WARN] HR leave pending fix
 findstr /M /C:"resolvePettyCashDefaultsFromEmployee" dist\portalApi.js >nul 2>&1 && echo [OK] Finance petty cash profile dims || echo [WARN] petty cash dims
 findstr /M /C:"dailyRate" dist\portalApi.js >nul 2>&1 && echo [OK] Finance imprest daily rate || echo [WARN] imprest daily rate
+findstr /M /C:"surrender-preview" dist\portalApi.js >nul 2>&1 && echo [OK] Finance imprest surrender preview || echo [WARN] surrender preview
+findstr /M /C:"enrichImprestSurrenderFromSourceImprest" dist\portalApi.js >nul 2>&1 && echo [OK] Finance surrender enrichment || echo [WARN] surrender enrichment
+findstr /M /C:"enrichApprovalStepsWithCommentLines" dist\leaveApprovalSteps.js >nul 2>&1 && echo [OK] Approval rejection notes || echo [WARN] rejection notes
+findstr /M /C:"profile/trainings" dist\portalApi.js >nul 2>&1 && echo [OK] HR profile trainings tab || echo [WARN] profile trainings
+findstr /M /C:"yearsOfService" dist\portalApi.js >nul 2>&1 && echo [OK] HR profile important dates || echo [WARN] profile dates
+findstr /M /C:"listStatusFilter" public\assets\*.js >nul 2>&1 && echo [OK] Finance list status filter || echo [WARN] list status filter
+findstr /M /C:"Requisition_Type" public\assets\*.js >nul 2>&1 && echo [OK] Facility fuel BC field aliases || echo [WARN] fuel field aliases
 findstr /M /C:"travel-destinations" dist\portalApi.js >nul 2>&1 && echo [OK] Finance travel destinations lookup || echo [WARN] travel destinations
 findstr /M /C:"Search table records" public\assets\*.js >nul 2>&1 && echo [OK] shared list search || echo [WARN] shared list search
 if exist "public\index.html" (echo [OK] public) else (echo [FAIL] public)
@@ -115,8 +127,9 @@ cat > "$ROOT/README-FIRST.txt" << EOF
 HIJRA COMPLETE SUITE FINAL v${VERSION} — 28 July 2026
 *** DEPLOY THIS ZIP ONCE — ALL MODULES INCLUDED ***
 
-Do NOT use older zips (including 1.0.3.70 through 1.0.3.78).
-This build stacks HR (Jul 27) + Finance (Jul 28) + Facility (Jul 21) in ONE package.
+Do NOT use older zips (including 1.0.3.70 through 1.0.3.79).
+This build restores all UAT regression fixes from v1.0.3.54 portal + v1.0.3.44 backend.
+HR + Finance + Facility row-by-row spreadsheet fixes included.
 
 TWO-PART DEPLOY (order matters):
   1. Felix runs BC-AL/APPLY-HIJRA-PATCH.ps1, then packages/publishes the AL app
@@ -126,10 +139,10 @@ Read ALL-FIXES-MANIFEST.txt for the full list mapped to UAT spreadsheets.
 EOF
 
 cat > "$ROOT/ALL-FIXES-MANIFEST.txt" << 'EOF'
-HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v1.0.3.79)
+HIJRA SSP — FULL ALL-MODULES FIX MANIFEST (v1.0.3.80)
 =====================================================
 Deploy ONCE. Felix publishes BC-AL ONCE. Then portal zip ONCE.
-No partial labels — HR Jul 27 + Finance Jul 27 + Facility Jul 21 checked off below.
+Regression restore: portal baseline v1.0.3.54 + backend baseline v1.0.3.44 merged with current ahead-of-staging fixes.
 
 ALL MODULES — PORTAL LIST SEARCH
 ---------------------------------
@@ -282,7 +295,7 @@ HR: HOD → staff on leave shows own department only; Training list shows applic
 Finance: Imprest daily rate + travel destination dropdown; Petty cash profile dims
 Finance: Staff claim medical refund; Facility: Purchase spec attach, Asset Transfer post
 
-BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-28-all-existing-modules-preserved-search-facility-workflow-fixes
+BUILD_ID=hijra-portal-${VERSION}-FINAL-2026-07-28-finance-department-imprest-erp-fixes
 EOF
 
 cat > "$ROOT/FIX-NETWORK-ERROR.txt" << 'EOF'

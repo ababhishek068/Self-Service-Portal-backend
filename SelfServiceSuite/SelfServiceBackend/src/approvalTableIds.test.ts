@@ -32,15 +32,21 @@ import {
   isHalfDaySelection,
   halfDayOptionValue,
   formatBcSoapDate,
+  isErpWorkingDate,
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
   computeLeaveDatesFallback,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
   employeeLeaveMetrics,
+} from './staff.js'
+import {
+  employeeAnnualLeaveBalance,
+  parseBcLeaveSummary,
   resolveAnnualLeaveBalance,
   resolveAnnualLeaveEntitlement,
-} from './staff.js'
+  resolveBcLeaveBalance,
+} from './leaveBalance.js'
 import {
   approvalModule,
   enrichGatePassRowDimensions,
@@ -172,6 +178,22 @@ describe('gatePassFilters', () => {
   })
 })
 
+describe('gatePassSubmitParams', () => {
+  it('passes the linked transfer number from the loaded BC header', async () => {
+    const spec = findModuleSpec('gate-pass')
+    assert.ok(spec?.params?.submit)
+    const payload = (await spec!.params!.submit!({
+      req: { body: { transferNo: '108117' } },
+      user: { employeeNo: 'E0083' } as never,
+      no: 'IS000036',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.gatePassNo, 'IS000036')
+    assert.equal(payload.transferNo, '108117')
+    assert.equal(payload.tableID, 50296)
+    assert.equal(payload.employeeNo, 'E0083')
+  })
+})
+
 describe('gate pass employee dimensions', () => {
   it('uses each gate-pass owner employee card for department and sector', () => {
     const row = enrichGatePassRowDimensions(
@@ -294,36 +316,220 @@ describe('halfDayRequiresAnnualLeave', () => {
 })
 
 describe('employeeLeaveMetrics', () => {
-  const user = { leaveBalance: 0 } as Parameters<typeof employeeLeaveMetrics>[1]
-
-  it('reads earned leave and annual balance fields from BC employee OData', () => {
+  it('reads annual leave balance separately from earned leave days', () => {
     const metrics = employeeLeaveMetrics(
       {
-        EarnedLeaveDays: 16,
-        Annual_Leave_balance: 16,
+        EarnedLeaveDays: 5.64,
+        Annual_Leave_balance: 73.5,
+        LeaveBalance: 73.5,
       },
-      user,
+      0,
     )
-    assert.equal(metrics.earnedLeaveDays, 16)
-    assert.equal(metrics.leaveBalance, 16)
+    assert.equal(metrics.earnedLeaveDays, 5.64)
+    assert.equal(metrics.annualLeaveBalance, 73.5)
+    assert.equal(metrics.leaveBalance, 73.5)
   })
 
   it('does not treat missing leave fields as zero', () => {
-    const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
+    const metrics = employeeLeaveMetrics({ No: 'E0083', FirstName: 'Beza' }, 0)
     assert.equal(metrics.earnedLeaveDays, null)
+    assert.equal(metrics.annualLeaveBalance, null)
     assert.equal(metrics.leaveBalance, null)
   })
 })
 
 describe('resolveAnnualLeaveBalance', () => {
-  it('prefers earned leave over ledger when BC exposes it', () => {
-    const metrics = { earnedLeaveDays: 16, leaveBalance: 16 }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 0), 16)
+  it('prefers annual leave balance over earned leave days (BC employee card)', () => {
+    const metrics = { earnedLeaveDays: 5.64, annualLeaveBalance: 73.5, leaveBalance: 73.5 }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0, 0), 73.5)
   })
 
   it('falls back to ledger when employee card fields are absent', () => {
-    const metrics = { earnedLeaveDays: null, leaveBalance: null }
-    assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
+    const metrics = { earnedLeaveDays: null, annualLeaveBalance: null, leaveBalance: null }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 12, 0), 12)
+  })
+
+  it('uses earned leave only when no annual balance or ledger exists', () => {
+    const metrics = { earnedLeaveDays: 5.64, annualLeaveBalance: null, leaveBalance: null }
+    assert.equal(resolveAnnualLeaveBalance(metrics, 0, 0), 5.64)
+  })
+})
+
+describe('leave balance follows BC: annual = card, other types = Days or application cap', () => {
+  const noLedger = {
+    hasCurrentPeriodEntries: false,
+    currentPeriodNet: 0,
+    hasOpenEntries: false,
+    openNet: 0,
+    ledgerNetDays: 0,
+  }
+
+  const bezaSummary = parseBcLeaveSummary(
+    JSON.stringify({
+      employeeNo: 'E0083',
+      leaveType: '0001',
+      annualLeaveCode: '0001',
+      cardAnnualLeaveBalance: 14.5,
+      earnedLeaveDays: 0.6,
+      hasOpenEntries: true,
+      openNet: 14.5,
+      hasCurrentPeriodEntries: true,
+      currentPeriodNet: 14.5,
+    }),
+  )
+
+  it('annual leave shows the employee card Annual Leave balance FlowField verbatim', () => {
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: true,
+        leaveTypeDays: 16,
+        summary: bezaSummary,
+        cardAnnualBalance: null,
+        ...noLedger,
+        ledgerNetDays: 91.37,
+      }),
+      14.5,
+    )
+  })
+
+  it('prefers the current leave period over an unfiltered all-period OData card value', () => {
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: true,
+        leaveTypeDays: 16,
+        summary: null,
+        cardAnnualBalance: 75.37,
+        hasCurrentPeriodEntries: true,
+        currentPeriodNet: 14.5,
+        hasOpenEntries: true,
+        openNet: 75.37,
+        ledgerNetDays: 75.37,
+      }),
+      14.5,
+    )
+  })
+
+  it('non-annual types show the HR Leave Types Days, never the leave-ledger net', () => {
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: false,
+        leaveTypeDays: 90,
+        summary: null,
+        cardAnnualBalance: null,
+        hasCurrentPeriodEntries: true,
+        currentPeriodNet: 540,
+        hasOpenEntries: true,
+        openNet: 540,
+        ledgerNetDays: 540,
+      }),
+      90,
+    )
+    const sick = parseBcLeaveSummary(
+      JSON.stringify({
+        cardAnnualLeaveBalance: 14.5,
+        hasOpenEntries: true,
+        openNet: 350,
+        hasCurrentPeriodEntries: true,
+        currentPeriodNet: 177,
+      }),
+    )
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: false,
+        leaveTypeDays: 180,
+        summary: sick,
+        cardAnnualBalance: null,
+        ...noLedger,
+        ledgerNetDays: 670,
+      }),
+      180,
+    )
+  })
+
+  it('uses Maximum Application Days for unlimited types and Days for normal types', () => {
+    const cases = [
+      { description: 'Postnatal Leave/Maternity', days: 90, unlimited: false, maximum: 0, expected: 90 },
+      { description: 'Paternity Leave', days: 0, unlimited: true, maximum: 5, expected: 5 },
+      { description: 'Wedding leave', days: 0, unlimited: true, maximum: 3, expected: 3 },
+      { description: 'Mourning Leave', days: 0, unlimited: true, maximum: 3, expected: 3 },
+      { description: 'Sick leave', days: 180, unlimited: false, maximum: 0, expected: 180 },
+      { description: 'Leave Without Pay', days: 0, unlimited: true, maximum: 30, expected: 30 },
+      { description: 'Special Leave', days: 0, unlimited: true, maximum: 5, expected: 5 },
+      { description: 'Prenatal Leave/Maternity', days: 30, unlimited: false, maximum: 0, expected: 30 },
+    ]
+
+    for (const setup of cases) {
+      const summary = parseBcLeaveSummary(
+        JSON.stringify({
+          setupDays: setup.days,
+          unlimitedDays: setup.unlimited,
+          maximumApplicationDays: setup.maximum,
+          hasCurrentPeriodEntries: true,
+          currentPeriodNet: 330,
+          hasOpenEntries: true,
+          openNet: 330,
+        }),
+      )
+      assert.equal(
+        resolveBcLeaveBalance({
+          isAnnual: false,
+          leaveTypeDays: setup.days,
+          leaveTypeUnlimitedDays: setup.unlimited,
+          maximumApplicationDays: setup.maximum,
+          summary,
+          cardAnnualBalance: null,
+          hasCurrentPeriodEntries: true,
+          currentPeriodNet: 330,
+          hasOpenEntries: true,
+          openNet: 330,
+          ledgerNetDays: 330,
+        }),
+        setup.expected,
+        setup.description,
+      )
+    }
+  })
+
+  it('never substitutes a ledger total when an older codeunit omits the application cap', () => {
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: false,
+        leaveTypeDays: 0,
+        leaveTypeUnlimitedDays: true,
+        maximumApplicationDays: null,
+        summary: null,
+        cardAnnualBalance: null,
+        hasCurrentPeriodEntries: true,
+        currentPeriodNet: 330,
+        hasOpenEntries: true,
+        openNet: 330,
+        ledgerNetDays: 330,
+      }),
+      0,
+    )
+  })
+
+  it('a card that genuinely says 0 shows 0 — the employee cannot apply', () => {
+    const zeroCard = parseBcLeaveSummary(
+      JSON.stringify({ cardAnnualLeaveBalance: 0, hasOpenEntries: true, openNet: 32 }),
+    )
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: true,
+        leaveTypeDays: 16,
+        summary: zeroCard,
+        cardAnnualBalance: null,
+        ...noLedger,
+        ledgerNetDays: 32,
+      }),
+      0,
+    )
+  })
+
+  it('rejects malformed codeunit payloads instead of guessing', () => {
+    assert.equal(parseBcLeaveSummary(''), null)
+    assert.equal(parseBcLeaveSummary('<html>500</html>'), null)
+    assert.equal(parseBcLeaveSummary('[]'), null)
   })
 })
 
@@ -337,9 +543,13 @@ describe('resolveLeaveApprovalSteps', () => {
     assert.equal(steps[0]?.actorName, 'Awaiting approver assignment')
   })
 
-  it('maps BC approval entries to approver names', () => {
+  it('maps BC approval entries to approver names after the leave is sent for approval', () => {
     const steps = resolveLeaveApprovalSteps(
-      { ApplicationCode: 'LV00116', Status: 'Open' },
+      {
+        ApplicationCode: 'LV00116',
+        Status: 'Open',
+        ApprovalStatus: 'Pending Approval',
+      },
       [{ EntryNo: 10, ApproverID: 'HOD01', ApproverName: 'Jane Manager', Status: 'Open', SequenceNo: 1 }],
       'LV00116',
     )
@@ -369,6 +579,14 @@ describe('normalizeLeaveStartDate', () => {
     assert.equal(normalizeLeaveStartDate('2026_06_22'), '2026-06-22')
     assert.equal(formatBcSoapDate('6/23/2026'), '2026-06-23')
     assert.equal(formatBcSoapDate('6/22/26'), '2026-06-22')
+  })
+})
+
+describe('isErpWorkingDate', () => {
+  it('accepts only the current calendar day', () => {
+    const today = formatBcSoapDate(new Date().toISOString())
+    assert.equal(isErpWorkingDate(today), true)
+    assert.equal(isErpWorkingDate('2020-01-01'), false)
   })
 })
 
@@ -427,9 +645,10 @@ describe('staffClaim saveLine params', () => {
   it('builds claim header SOAP params with formatted date and department', async () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveHeader)
+    const today = formatBcSoapDate(new Date().toISOString())
     const payload = (await spec!.params!.saveHeader!({
       req: {
-        body: { purpose: 'Travel refund', claimDate: '2026-07-04' },
+        body: { purpose: 'Travel refund', claimDate: today },
       },
       user: {
         employeeNo: 'E001',
@@ -440,15 +659,69 @@ describe('staffClaim saveLine params', () => {
       no: '',
     } as never)) as Record<string, unknown>
     assert.equal(payload.claimDescription, 'Travel refund')
-    assert.equal(payload.claimDate, '2026-07-04')
+    assert.equal(payload.claimDate, today)
     assert.equal(payload.staffNo, 'E001')
     assert.equal(payload.myUserID, 'BEZA')
+    assert.equal(payload.department, 'TRR')
   })
 
-  it('sends hospital category 0 for non-medical claim types', () => {
+  it('rejects claim headers when department cannot be resolved', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveHeader)
+    const today = formatBcSoapDate(new Date().toISOString())
+    await assert.rejects(
+      () =>
+        spec!.params!.saveHeader!({
+          req: {
+            body: { purpose: 'Travel refund', claimDate: today },
+          },
+          user: {
+            employeeNo: 'E001',
+            userID: 'BEZA',
+            department: '',
+            departmentName: '',
+            branchCode: '',
+          },
+          no: '',
+        } as never),
+      (error: Error & { status?: number; code?: string }) => {
+        assert.match(error.message, /department dimension/i)
+        assert.equal(error.status, 422)
+        assert.equal(error.code, 'EMPLOYEE_DEPARTMENT_MISSING')
+        return true
+      },
+    )
+  })
+
+  it('rejects claim headers when claim date is not the working date', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveHeader)
+    await assert.rejects(
+      () =>
+        spec!.params!.saveHeader!({
+          req: {
+            body: { purpose: 'Travel refund', claimDate: '2026-07-04' },
+          },
+          user: {
+            employeeNo: 'E001',
+            userID: 'BEZA',
+            department: 'TRR',
+            branchCode: 'ADDIS',
+          },
+          no: '',
+        } as never),
+      (error: Error & { status?: number }) => {
+        assert.match(error.message, /working date/i)
+        assert.equal(error.status, 400)
+        return true
+      },
+    )
+  })
+
+  it('sends hospital category 0 for non-medical claim types', async () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
-    const payload = spec!.params!.saveLine!({
+    const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           claimType: 'ACC',
@@ -460,16 +733,16 @@ describe('staffClaim saveLine params', () => {
         },
       },
       no: '1237',
-    } as never) as Record<string, unknown>
+    } as never)) as Record<string, unknown>
     assert.equal('hospitalCategory' in payload, true)
     assert.equal(payload.hospitalCategory, 0)
     assert.equal(payload.medicalAmount, 0)
   })
 
-  it('includes hospital category for medical claim types', () => {
+  it('includes hospital category for medical claim types', async () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
-    const payload = spec!.params!.saveLine!({
+    const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           claimType: 'MEDICAL',
@@ -482,7 +755,7 @@ describe('staffClaim saveLine params', () => {
         },
       },
       no: '1237',
-    } as never) as Record<string, unknown>
+    } as never)) as Record<string, unknown>
     assert.equal(payload.hospitalCategory, 2)
     assert.equal(payload.medicalAmount, 100)
   })
@@ -743,11 +1016,11 @@ describe('mapRequest status', () => {
         { Status: 'Open', ApprovalStatus: '' },
         [{ Status: 'Open', DocumentNo: 'LV00018' }],
       ),
-      'Pending Approval',
+      'Open',
     )
     assert.equal(
       resolveLeaveStatus({ Status: 'Open', ApprovalStatus: '', Sent_for_Approval: true }),
-      'Pending Approval',
+      'Open',
     )
   })
 
@@ -823,7 +1096,52 @@ describe('leave status is driven only by Business Central', () => {
     )
     assert.equal(
       leaveIsPendingInBc({ Status: 'Open' }, [{ Status: 'Open', DocumentNo: 'LV00303' }]),
+      false,
+    )
+    assert.equal(
+      leaveIsPendingInBc(
+        { Status: 'Open', ApprovalStatus: 'Pending Approval' },
+        [{ Status: 'Open', DocumentNo: 'LV00303' }],
+      ),
       true,
+    )
+  })
+
+  it('does not show Pending when BC header is Approved despite historical approval rows', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV00012', Status: 'Approved', ApprovalStatus: 'Open' },
+        [{ Status: 'Approved', DocumentNo: 'LV00012', EntryNo: 1 }],
+      ),
+      'Approved',
+    )
+  })
+
+  it('shows Cancelled and Rejected from BC header in the leave list', () => {
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00020', Status: 'Cancelled' }, []),
+      'Cancelled',
+    )
+    assert.equal(
+      resolveLeaveStatus({ ApplicationCode: 'LV00021', Status: 'Rejected' }, []),
+      'Rejected',
+    )
+  })
+
+  it('keeps Open drafts Open until the employee sends for approval', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV00032', Status: 'Open', ApprovalStatus: '' },
+        [{ Status: 'Open', DocumentNo: 'LV00032', EntryNo: 99 }],
+      ),
+      'Open',
+    )
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV00032', Status: 'Open', ApprovalStatus: 'Pending Approval' },
+        [],
+      ),
+      'Pending Approval',
     )
   })
 })

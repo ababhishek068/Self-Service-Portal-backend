@@ -13,8 +13,8 @@ import { config } from './config.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
-import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance } from './employeeProfile.js'
-import { formatBcSoapDate } from './staff.js'
+import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap } from './employeeProfile.js'
+import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
 import { uploadViaPortalAttachments } from './portalAttachments.js'
 import {
   canRequestApprovalForSpec,
@@ -293,19 +293,51 @@ function normalizeBcTime(value: unknown) {
  * request id, never the source document number. Look it up from BC instead of
  * relying on a request body field that is never populated.
  */
-async function gatePassTransferNo(no: string): Promise<string> {
-  try {
-    const rows = (await fetchOData('QyGatePass', {
-      $filter: `GatePassNo eq '${odataString(no)}'`,
-      $top: 1,
-    })) as ODataRecord[] | null
-    if (Array.isArray(rows) && rows[0]) {
-      return fieldText(rows[0], ['TransferNo', 'Transfer_No'])
+async function gatePassTransferNo(no: string, hint = ''): Promise<string> {
+  const hinted = String(hint ?? '').trim()
+  if (hinted) return hinted
+
+  for (const key of ['GatePassNo', 'Gate_Pass_No']) {
+    try {
+      const rows = (await fetchOData('QyGatePass', {
+        $filter: `${key} eq '${odataString(no)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows[0]) {
+        const transfer = fieldText(rows[0], ['TransferNo', 'Transfer_No'])
+        if (transfer) return transfer
+      }
+    } catch {
+      // try the next published key name
     }
-  } catch {
-    // fall through to blank — the SOAP call will surface a clear BC error
   }
   return ''
+}
+
+async function gatePassSubmitParams(
+  req: Pick<Request, 'body'>,
+  user: AuthUser,
+  no: string,
+) {
+  const transferNo = await gatePassTransferNo(
+    no,
+    fieldText(req.body ?? {}, ['transferNo', 'TransferNo', 'Transfer_No']),
+  )
+  if (!transferNo) {
+    throw Object.assign(
+      new Error(
+        `Gate pass ${no} has no linked source document number in Business Central. ` +
+          'Verify the maintenance/store/transfer document is linked on the gate pass in BC, then retry.',
+      ),
+      { status: 422 },
+    )
+  }
+  return {
+    gatePassNo: no,
+    transferNo,
+    tableID: 50296,
+    employeeNo: user.employeeNo,
+  }
 }
 
 function storeLineTypeCode(value: unknown) {
@@ -334,11 +366,37 @@ export function passengerTypeCode(value: unknown) {
 
 function claimTypeCode(value: unknown) {
   const raw = String(value ?? '').trim()
-  return raw.toLowerCase().includes('medical') ? 'MEDICAL' : raw
+  const base = raw.split(' - ')[0]?.trim() ?? raw
+  if (base.toUpperCase().includes('MEDICAL') || base.toUpperCase().startsWith('MED')) return 'MEDICAL'
+  return base || raw
 }
 
 export function isMedicalClaimType(value: unknown) {
   return claimTypeCode(value) === 'MEDICAL'
+}
+
+export function isOtherClaimType(value: unknown) {
+  return claimTypeCode(value).toUpperCase() === 'OTHER'
+}
+
+async function lookupClaimTypeGlAccount(claimType: string) {
+  const code = claimTypeCode(claimType)
+  if (!code) return ''
+  try {
+    const rows = (await fetchOData('QyReceiptsPayments', {
+      $filter: `Code eq '${odataString(code)}' and Type eq 'Claim'`,
+      $top: 1,
+    })) as ODataRecord[] | null
+    const row = Array.isArray(rows) ? rows[0] : undefined
+    if (!row) return ''
+    for (const key of ['GLAccount', 'GL_Account', 'GLAccountNo', 'GL_Account_No']) {
+      const value = String(row[key] ?? '').trim()
+      if (value) return value
+    }
+  } catch {
+    // BC lookup unavailable — frontend should have sent accountNo
+  }
+  return ''
 }
 
 /* -------------------------------------------------------------------------- */
@@ -372,24 +430,54 @@ const imprest: ModuleSpec = {
       action: no ? 'edit' : 'create',
       docNo: no,
       employeeNo: user.employeeNo,
-      dateRequired: req.body?.dateRequired ?? req.body?.startDate ?? '',
+      dateRequired: formatBcSoapDate(String(req.body?.dateRequired ?? req.body?.startDate ?? '')),
       purpose: req.body?.purpose ?? '',
       myUserId: user.userID,
       travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
-      travelDate: req.body?.travelDate ?? req.body?.startDate ?? '',
-      returnDate: req.body?.returnDate ?? '',
+      travelDate: formatBcSoapDate(String(req.body?.travelDate ?? req.body?.startDate ?? '')),
+      returnDate: formatBcSoapDate(String(req.body?.returnDate ?? '')),
     }),
-    saveLine: ({ req, user, no }) => ({
-      action: req.body?.action ?? 'create',
-      docNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      destination: req.body?.destination ?? req.body?.description ?? '',
-      noOfDays: Number(req.body?.noOfDays ?? 0),
-      employeeNo: user.employeeNo,
-      advanceType: req.body?.advanceType ?? req.body?.expenseType ?? '',
-      dutyArea: req.body?.dutyArea ?? '',
-      amount: Number(req.body?.amount ?? 0),
-    }),
+    saveLine: async ({ req, user, no }) => {
+      const advanceType = String(req.body?.advanceType ?? req.body?.expenseType ?? '').trim()
+      const destination = String(req.body?.destination ?? req.body?.description ?? '').trim()
+      const noOfDays = Number(req.body?.noOfDays ?? 0)
+      let amount = Number(req.body?.amount ?? 0)
+
+      if (amount <= 0 && advanceType && destination && noOfDays > 0) {
+        try {
+          const result = await callSoapMethod('FetchImprestLineAmount', {
+            headerNo: no,
+            noOfDays,
+            advanceType,
+            destinationCode: destination,
+          })
+          amount = Number(result.returnValue ?? 0)
+        } catch {
+          // Fall through — BC will reject with a clearer message if still zero.
+        }
+      }
+
+      if (amount <= 0) {
+        throw Object.assign(
+          new Error(
+            'Amount is required. Select advance type, travel destination and days so ERP can calculate the daily rate — or enter amount manually.',
+          ),
+          { status: 422 },
+        )
+      }
+
+      return {
+        action: req.body?.action ?? 'create',
+        docNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        destination,
+        noOfDays,
+        employeeNo: user.employeeNo,
+        advanceType,
+        dutyArea: req.body?.dutyArea ?? '',
+        amount,
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -479,33 +567,65 @@ const staffClaim: ModuleSpec = {
   },
   params: {
     saveHeader: async ({ req, user, no }) => {
-      const dims = await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
+      await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
         department: user.department,
+        departmentName: user.departmentName,
         branchCode: user.branchCode,
       })
       const claimDescription = String(
         req.body?.purpose ?? req.body?.claimDescription ?? req.body?.description ?? '',
       ).trim()
+      const claimDateRaw = String(req.body?.claimDate ?? '')
+      if (!isErpWorkingDate(claimDateRaw)) {
+        throw Object.assign(new Error('Claim date must be the current working date'), { status: 400 })
+      }
+      const departmentCode = await resolveFinanceDepartmentCodeForSoap(user.employeeNo, {
+        department: user.department,
+        departmentName: user.departmentName,
+        branchCode: user.branchCode,
+      })
+      if (!departmentCode) {
+        throw Object.assign(
+          new Error(
+            'Your Business Central employee record has no department dimension. Ask HR to set Global Dimension 1 (department) on your employee card, then log out and sign in again.',
+          ),
+          { status: 422, code: 'EMPLOYEE_DEPARTMENT_MISSING' },
+        )
+      }
       const payload: Record<string, unknown> = {
         action: no ? 'edit' : 'create',
         reqNo: no,
         staffNo: user.employeeNo,
         claimDescription,
-        claimDate: formatBcSoapDate(String(req.body?.claimDate ?? '')),
+        claimDate: formatBcSoapDate(claimDateRaw),
         myUserID: user.userID,
+        department: departmentCode,
       }
-      if (dims.departmentCode) payload.department = dims.departmentCode
       return payload
     },
-    saveLine: ({ req, no }) => {
+    saveLine: async ({ req, no }) => {
       const claimType = claimTypeCode(req.body?.claimType)
       const medical = isMedicalClaimType(claimType)
+      const other = isOtherClaimType(claimType)
+      let accountNo = String(req.body?.accountNo ?? '').trim()
+      if (!accountNo) accountNo = await lookupClaimTypeGlAccount(claimType)
+      if (!accountNo) {
+        throw Object.assign(
+          new Error(
+            `No G/L account is mapped to claim type "${claimType}" in Business Central. Ask finance to set the G/L account on Receipts & Payment Types.`,
+          ),
+          { status: 422 },
+        )
+      }
+      const amount = other
+        ? Number(req.body?.amount ?? req.body?.amountToRefund ?? req.body?.grossAmount ?? 0)
+        : Number(req.body?.amount ?? req.body?.grossAmount ?? 0)
       const payload: Record<string, unknown> = {
         action: req.body?.action ?? 'create',
-        amount: Number(req.body?.amount ?? req.body?.grossAmount ?? 0),
+        amount,
         reqNo: no,
         claimType,
-        accountNo: req.body?.accountNo ?? '',
+        accountNo,
         medicalAmount: medical ? Number(req.body?.medicalAmount ?? 0) : 0,
         claimReceiptNo: req.body?.claimReceiptNo ?? '',
         expenditureDescription:
@@ -1103,15 +1223,24 @@ const workTickets: ModuleSpec = {
     deleteLine: 'DeleteWorkTicketLine',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      ticketNo: no,
-      employeeNo: user.employeeNo,
-      previousWTNo: req.body?.previousTicketNo ?? req.body?.previousWTNo ?? '',
-      gkNo: req.body?.gkNo ?? '',
-      type: req.body?.type ?? '',
-      department: req.body?.department ?? user.department ?? '',
-    }),
+    saveHeader: async ({ req, user, no }) => {
+      const departmentCode = await resolveFinanceDepartmentCodeForSoap(user.employeeNo, {
+        department: user.department,
+        departmentName: user.departmentName,
+        branchCode: user.branchCode,
+      })
+      const rawType = String(req.body?.type ?? '').trim()
+      const type = rawType.length > 10 ? rawType.slice(0, 10) : rawType
+      return {
+        action: no ? 'edit' : 'create',
+        ticketNo: no,
+        employeeNo: user.employeeNo,
+        previousWTNo: req.body?.previousTicketNo ?? req.body?.previousWTNo ?? '',
+        gkNo: req.body?.gkNo ?? '',
+        type,
+        department: departmentCode || String(user.department ?? '').trim(),
+      }
+    },
     saveLine: ({ req, user, no }) => ({
       action: req.body?.action ?? 'create',
       ticketNo: no,
@@ -1286,18 +1415,8 @@ const gatePass: ModuleSpec = {
         gpComment: req.body?.comment ?? '',
       }
     },
-    submit: async ({ user, no }) => ({
-      gatePassNo: no,
-      transferNo: await gatePassTransferNo(no),
-      tableID: 50296,
-      employeeNo: user.employeeNo,
-    }),
-    cancel: async ({ user, no }) => ({
-      gatePassNo: no,
-      transferNo: await gatePassTransferNo(no),
-      tableID: 50296,
-      employeeNo: user.employeeNo,
-    }),
+    submit: ({ req, user, no }) => gatePassSubmitParams(req, user, no),
+    cancel: ({ req, user, no }) => gatePassSubmitParams(req, user, no),
   },
 }
 
@@ -2190,10 +2309,10 @@ export async function submitPortalModuleRequest(
   })
   const result = await callModuleSoap(spec, spec.soap.submit, params)
   if (!soapActionOk(spec, result)) {
-    if (spec.module === 'fuel' || spec.module === 'maintenance') {
-      const docType = fieldText(header, ['DocumentType', 'Document_Type'])
+    if (spec.module === 'fuel' || spec.module === 'maintenance' || spec.module === 'gate-pass') {
+      const docType = fieldText(header, ['DocumentType', 'Document_Type', 'Linkto', 'LinkTo', 'Link_To'])
       const hint = docType
-        ? ` Enable the Business Central approval workflow for "${docType}" (table ${spec.headerTableId}).`
+        ? ` Enable the Business Central approval workflow for "${docType}" on table ${spec.headerTableId}.`
         : ` Enable the Business Central approval workflow for this document type (table ${spec.headerTableId}).`
       throw Object.assign(new Error(`Business Central did not submit ${no}.${hint}`), { status: 502 })
     }
