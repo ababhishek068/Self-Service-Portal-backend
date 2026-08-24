@@ -2,8 +2,8 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
 import { callSoapMethod, fetchOData, odataString, type ODataRecord } from './bcClient.js'
-import { config } from './config.js'
 import { employeeAnnualLeaveBalance } from './leaveBalance.js'
+import { config } from './config.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
 /**
@@ -142,8 +142,12 @@ interface BcEmployee {
   Gender?: string
   GlobalDimension1Code?: string
   GlobalDimension2Code?: string
+  GlobalDimension2Name?: string
+  GlobalDimension3Code?: string
+  GlobalDimension3Name?: string
   DepartmentName?: string
   BranchName?: string
+  'Branch- Name'?: string
   CustomerNo?: string
   JobID?: string
   JobTitle?: string
@@ -176,13 +180,16 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
 import {
   configuredJobTitleByEmployeeNo,
   employeeAccountNoFromRecord,
+  employeeSalaryBaseFromRecord,
   fetchEmployeeCustomerAccountNo,
   fetchEmployeeRecordFast,
   fetchEmployeeSalaryBase,
+  fetchEmployeeSalaryBaseFast,
   fetchMergedEmployeeRecord,
   resolveAuthUserJobTitle,
   resolveEmployeeJobTitle,
   resolveEmployeeJobTitleByNo,
+  resolveEmployeeOrgDisplayFields,
 } from './employeeProfile.js'
 
 export { resolveEmployeeJobTitle } from './employeeProfile.js'
@@ -283,9 +290,7 @@ function employeeIsActive(employee: BcEmployee) {
 }
 
 function employeeLeaveBalanceFromRecord(record: Record<string, unknown>) {
-  // Never substitute the generic Leave Balance or Earned Leave Days for the
-  // employee card's authoritative Annual Leave balance.
-  return employeeAnnualLeaveBalance(record) ?? 0
+  return employeeAnnualLeaveBalance(record as ODataRecord) ?? 0
 }
 
 function firstEmployeeField(employee: BcEmployee, names: string[]) {
@@ -449,8 +454,17 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const roles = ['staff']
   if (isHOD) roles.push('hod')
   if (isCEO) roles.push('ceo')
-  const department = employee.GlobalDimension1Code ?? ''
+  const department = employeeFieldText(employee as Record<string, unknown>, [
+    'GlobalDimension1Code',
+    'Global_Dimension_1_Code',
+    'ShortcutDimension2Code',
+    'Shortcut_Dimension_2_Code',
+    'GlobalDimension2Code',
+    'DepartmentCode',
+    'Department',
+  ])
   const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
+  const monthlySalaryBase = employeeSalaryBaseFromRecord(employee as Record<string, unknown>)
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
   const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
@@ -471,6 +485,17 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const jobTitle =
     resolvedJobTitle || configuredJobTitleByEmployeeNo(employeeNo) || ''
 
+  const org = await resolveEmployeeOrgDisplayFields(employee as Record<string, unknown>, {
+    departmentName:
+      employee.DepartmentName ??
+      employeeFieldText(employee as Record<string, unknown>, ['Division', 'District']) ??
+      department,
+    branchCode: employee.GlobalDimension3Code ?? employee.GlobalDimension2Code ?? '',
+    branchName: employee.BranchName ?? '',
+    placeOfDuty: employee.PlaceOfDuty ?? '',
+    responsibleCenter: employee.ResponsibilityCenter ?? '',
+  })
+
   return {
     employeeNo,
     name: employee.FirstName ?? employeeNo,
@@ -486,19 +511,24 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     isChangedPassword: Boolean(employee.ChangedPassword),
     mustChangePassword: !Boolean(employee.ChangedPassword),
     department,
-    departmentName: employee.DepartmentName ?? department,
-    branchCode: employee.GlobalDimension2Code ?? '',
-    branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
+    departmentName:
+      org.departmentName ||
+      (employee.DepartmentName ??
+      employeeFieldText(employee as Record<string, unknown>, ['Division', 'District']) ??
+      department),
+    branchCode:
+      org.branchCode ||
+      (employee.GlobalDimension3Code ?? employee.GlobalDimension2Code ?? ''),
+    branchName:
+      org.branchName ||
+      (employee['Branch- Name'] ??
+      employee.BranchName ??
+      employee.GlobalDimension3Name ??
+      employee.GlobalDimension2Name ??
+      employee.GlobalDimension2Code ??
+      ''),
     jobTitle,
-    jobGrade:
-      employeeFieldText(employee as Record<string, unknown>, [
-        'JobGrade',
-        'Job_Grade',
-        'JobGradeCode',
-        'Grade',
-        'GradeCode',
-        'SalaryGrade',
-      ]) || '',
+    jobGrade: employee.JobGrade ?? '',
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
@@ -506,6 +536,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     responsibleCenter: employee.ResponsibilityCenter ?? '',
     permissionDepartments: department ? [department] : [],
     imprestNo: accountNumber,
+    ...(monthlySalaryBase > 0 ? { monthlySalaryBase } : {}),
     HOD: isHOD,
     CEO: isCEO,
     canApprove,
@@ -761,9 +792,18 @@ export function buildAuthRouter() {
   const currentUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const existing = req.session.authUser!
-      const refreshed = jobTitleNeedsRefresh(existing.jobTitle)
+      let refreshed = jobTitleNeedsRefresh(existing.jobTitle)
         ? await refreshAuthUserProfile(existing, 'full')
         : existing
+      // Tokens/sessions issued before salary was included in AuthUser do not contain
+      // monthlySalaryBase. Refresh it from QyHREmployee.Basic_Pay so users do not need
+      // to log out and back in after deploying the portal fix.
+      if (!(Number(refreshed.monthlySalaryBase) > 0)) {
+        const monthlySalaryBase = await fetchEmployeeSalaryBaseFast(refreshed.employeeNo, {
+          customerNo: refreshed.imprestNo || refreshed.accountNumber,
+        })
+        if (monthlySalaryBase > 0) refreshed = { ...refreshed, monthlySalaryBase }
+      }
       req.session.authUser = refreshed
       res.json({ user: refreshed, token: signAuthToken(refreshed) })
     } catch (error) {

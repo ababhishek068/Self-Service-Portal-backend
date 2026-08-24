@@ -1,6 +1,0 @@
-export * from './departments'
-export * from './items'
-export * from './hospitalCoverage'
-export * from './payroll'
-export * from './leaveTypes'
-export * from './moduleLabels'

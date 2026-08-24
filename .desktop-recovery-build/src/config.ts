@@ -62,10 +62,6 @@ const envSchema = z.object({
     z.string().url().optional(),
   ),
   BC_SOAP_NAMESPACE: z.string().default('urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal'),
-  /**
-   * Employee Exit lives in its own published codeunit. Leave both blank to derive them
-   * from BC_SOAP_CODEUNIT_URL by swapping the service name for CuPortalEmployeeExit.
-   */
   BC_SOAP_EXIT_CODEUNIT_URL: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().url().optional(),
@@ -74,25 +70,6 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().optional(),
   ),
-  /** Employee figures (card leave balance) codeunit (CuPortalEmployeeData). */
-  BC_SOAP_EMPLOYEE_DATA_CODEUNIT_URL: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
-    z.string().url().optional(),
-  ),
-  BC_SOAP_EMPLOYEE_DATA_NAMESPACE: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
-    z.string().optional(),
-  ),
-  /** Portal document attachments codeunit (CuPortalAttachments) — purchase spec uploads. */
-  BC_SOAP_ATTACHMENTS_CODEUNIT_URL: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
-    z.string().url().optional(),
-  ),
-  BC_SOAP_ATTACHMENTS_NAMESPACE: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
-    z.string().optional(),
-  ),
-  /** HR service letters live in their own published codeunit (CuPortalHrLetters). */
   BC_SOAP_LETTERS_CODEUNIT_URL: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().url().optional(),
@@ -101,12 +78,31 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
     z.string().optional(),
   ),
-  /**
-   * Which CuStaffPortal LeaveApplication signature the server exposes. 'auto' probes the
-   * latest (no returnDate) and falls back to the legacy one, so the portal keeps working
-   * either side of an AL deployment.
-   */
-  BC_LEAVE_SOAP_SIGNATURE: z.enum(['auto', 'latest', 'legacy']).default('auto'),
+  /** Employee figures (card leave balance) codeunit — CuPortalEmployeeData.GetLeaveBalance. */
+  BC_SOAP_EMPLOYEE_DATA_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_EMPLOYEE_DATA_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_ATTACHMENTS_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_ATTACHMENTS_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_ASSET_TRANSFER_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_ASSET_TRANSFER_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
   BC_AUTH_MODE: z.enum(['none', 'basic', 'ntlm']).default('ntlm'),
   BC_DOMAIN: z.string().optional().default(''),
   BC_NAV_USER: z.string().optional().default(''),

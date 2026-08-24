@@ -41,14 +41,17 @@ const OPEN_STATUS_MODULES = new Set([
 /**
  * ESS only exposes Request Approval when the BC header is in the module's
  * pre-submission status (`Pending` for finance replenishment/imprest/etc,
- * `Open` for store/purchase/transport/training/fuel, `New`/`Open` for asset
- * transfers, `ApprovalStatus=Open` for transfer orders).
+ * `Open` for store/purchase/transport/fuel, `New`/`Open` for asset transfers
+ * and training (HRTrainingApplications.Table.al Status OptionMembers =
+ * New,"Pending Approval",Approved — a freshly created record's real BC
+ * status is literally "New", never "Open"), `ApprovalStatus=Open` for
+ * transfer orders).
  */
 export function canRequestApprovalForSpec(specModule: string, row: ODataRecord) {
   const status = bcDocumentStatus(specModule, row)
   if (!status) return false
   if (specModule === 'transfer-order') return status === 'Open'
-  if (specModule === 'asset-transfer') return status === 'New' || status === 'Open'
+  if (specModule === 'asset-transfer' || specModule === 'training') return status === 'New' || status === 'Open'
   if (PENDING_STATUS_MODULES.has(specModule)) return status === 'Pending'
   if (OPEN_STATUS_MODULES.has(specModule)) return status === 'Open'
   return false
@@ -59,8 +62,8 @@ export function requestApprovalBlockedMessage(specModule: string, row: ODataReco
   if (specModule === 'transfer-order') {
     return `Transfer orders can only be sent for approval while Approval Status is Open (current: ${status}).`
   }
-  if (specModule === 'asset-transfer') {
-    return `Asset transfers can only be sent for approval while Business Central status is New or Open (current: ${status}).`
+  if (specModule === 'asset-transfer' || specModule === 'training') {
+    return `This request can only be sent for approval while Business Central status is New or Open (current: ${status}).`
   }
   if (PENDING_STATUS_MODULES.has(specModule)) {
     return `This request can only be sent for approval while Business Central status is Pending (current: ${status}).`

@@ -451,6 +451,19 @@ export async function fetchEmployeeSalaryBaseForAdvance(
   return 0
 }
 
+/**
+ * Resolve a trustworthy monthly salary value for HR service-letter requests.
+ * Prefer the authenticated/session value, then use the same BC lookup chain as salary advances.
+ */
+export async function resolveEmployeeMonthlySalaryBase(
+  employeeNo: string,
+  hints: { customerNo?: string; existing?: number } = {},
+) {
+  const existing = Number(hints.existing ?? 0)
+  if (Number.isFinite(existing) && existing > 0) return existing
+  return fetchEmployeeSalaryBaseForAdvance(employeeNo, { customerNo: hints.customerNo })
+}
+
 const DIMENSION_SERVICES = ['QyDimensionValues', 'DimensionValue', 'Dimension_Values']
 const DIMENSION_LIST_FILTERS = [
   "Dimension_Code eq 'DEPARTMENTS'",
@@ -504,6 +517,110 @@ async function scanDimensionListForLabel(label: string, maxLen = 20) {
   return ''
 }
 
+function firstEmployeeFieldText(
+  record: ODataRecord | null | undefined,
+  keys: string[],
+) {
+  if (!record) return ''
+  return employeeFieldText(record, keys)
+}
+
+// Staff Claims stores the employee's Sector in Global Dimension 1.  Some
+// employee OData pages expose it as `Sector`, while others expose the same
+// value as `GlobalDimension1Code`, so both shapes must be checked before the
+// lower-level department/district fallbacks.
+const EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS = [
+  'Sector',
+  'SectorCode',
+  'Sector_Code',
+  'GlobalDimension1Code',
+  'Global_Dimension_1_Code',
+]
+
+const EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS = [
+  'SectorName',
+  'Sector_Name',
+  'GlobalDimension1Name',
+  'Global_Dimension_1_Name',
+]
+
+const EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS = [
+  ...EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS,
+  'DepartmentCode',
+  'Department_Code',
+  'Department',
+  'ShortcutDimension2Code',
+  'Shortcut_Dimension_2_Code',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+]
+
+const EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS = [
+  ...EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS,
+  'DepartmentName',
+  'Department_Name',
+  'Division',
+  'DivisionName',
+  'Division_Name',
+  'District',
+  'DistrictName',
+  'District_Name',
+  'BranchName',
+  'Branch_Name',
+]
+
+/** Return the preferred Staff Claim / finance Global Dimension 1 value. */
+export function employeeFinanceSectorFromRecord(record: Record<string, unknown>) {
+  return employeeFieldText(record, [
+    ...EMPLOYEE_FINANCE_SECTOR_CODE_FIELDS,
+    ...EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS,
+  ])
+}
+
+async function resolveDimensionCodeCandidate(raw: string, maxLen = 20) {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= maxLen) {
+    const byCode = await fetchDimensionRows(`Code eq '${odataString(trimmed)}'`, 1)
+    if (byCode.length > 0) {
+      const code = dimensionRowText(byCode[0]!, ['Code', 'Code_'])
+      if (code && code.length <= maxLen) return code
+    }
+    return trimmed
+  }
+  return resolveDimensionCodeByName(trimmed, maxLen)
+}
+
+/**
+ * Resolve the Code[20] department value required by finance SOAP methods
+ * (ClaimRequisitionHeader, etc.). The Staff Claim table derives GD1 from the
+ * employee Sector; older employee pages may expose that value as GD1 or one
+ * of the department/district aliases.
+ */
+export async function resolveFinanceDepartmentCodeForSoap(
+  employeeNo: string,
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
+) {
+  const emp = (await fetchMergedEmployeeRecord(employeeNo)) ?? (await fetchEmployeeRecordFast(employeeNo))
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const hint of [hints.department, hints.departmentName, hints.branchCode]) {
+    const resolved = await resolveDimensionCodeCandidate(String(hint ?? ''))
+    if (resolved) return resolved
+  }
+
+  return ''
+}
+
 function dimensionNameFilters(label: string) {
   const escaped = odataString(label)
   const scoped = [
@@ -549,6 +666,147 @@ async function resolveDimensionCodeByName(name: string, maxLen = 20) {
   return ''
 }
 
+async function resolveDimensionDisplayName(code: string) {
+  const trimmed = code.trim()
+  if (!trimmed) return ''
+  if (trimmed.length > 20) return trimmed
+  const rows = await fetchDimensionRows(`Code eq '${odataString(trimmed)}'`, 1)
+  if (rows.length > 0) {
+    const name = dimensionRowText(rows[0]!, ['Name', 'Description', 'Dimension_Value_Name'])
+    if (name) return name
+  }
+  return trimmed
+}
+
+async function resolveDepartmentListName(code: string, level?: 'Department' | 'District') {
+  const trimmed = code.trim()
+  if (!trimmed) return ''
+  const levelFilter = level ? ` and level eq '${level}'` : ''
+  for (const key of ['Department_Code', 'DepartmentCode', 'Code']) {
+    try {
+      const rows = (await fetchOData('PgDepartmentsList', {
+        $filter: `${key} eq '${odataString(trimmed)}'${levelFilter}`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      const row = Array.isArray(rows) ? rows[0] : undefined
+      if (row) {
+        return (
+          dimensionRowText(row, ['Department_Name', 'DepartmentName', 'Name']) || trimmed
+        )
+      }
+    } catch {
+      // PgDepartmentsList may be unpublished in this tenant.
+    }
+  }
+  return ''
+}
+
+const EMPLOYEE_BRANCH_NAME_FIELDS = [
+  'Branch- Name',
+  'Branch_Name',
+  'BranchName',
+  'Branch_Name',
+  'GlobalDimension3Name',
+  'Global_Dimension_3_Name',
+]
+
+const EMPLOYEE_BRANCH_FALLBACK_FIELDS = [
+  'ResponsibilityCenter',
+  'Responsibility_Center',
+  'PlaceOfDuty',
+  'Place_of_Duty',
+  'PlaceofDuty',
+]
+
+/** Human-readable Division / Department / District / Branch for finance headers and profile. */
+export async function resolveEmployeeOrgDisplayFields(
+  employee: ODataRecord,
+  authUser?: {
+    departmentName?: string
+    branchName?: string
+    branchCode?: string
+    placeOfDuty?: string
+    responsibleCenter?: string
+  },
+) {
+  const divisionCode = firstEmployeeFieldText(employee, ['Division'])
+  const divisionName = firstEmployeeFieldText(employee, ['DivisionName', 'Division_Name'])
+  let division = divisionName || divisionCode
+  if (divisionCode && (!divisionName || division === divisionCode)) {
+    const resolvedDivision =
+      (await resolveDimensionDisplayName(divisionCode)) ||
+      (await resolveDepartmentListName(divisionCode, 'Department'))
+    if (resolvedDivision && resolvedDivision !== divisionCode) {
+      division = resolvedDivision
+    }
+  }
+
+  const departmentName =
+    firstEmployeeFieldText(employee, ['DepartmentName', 'Department_Name']) ||
+    authUser?.departmentName ||
+    ''
+
+  const departmentCode = firstEmployeeFieldText(employee, [
+    'GlobalDimension2Code',
+    'Global_Dimension_2_Code',
+    'DepartmentCode',
+    'Department_Code',
+  ])
+
+  const districtCode = firstEmployeeFieldText(employee, ['District'])
+  let district =
+    firstEmployeeFieldText(employee, ['DistrictName', 'District_Name']) ||
+    (districtCode ? await resolveDepartmentListName(districtCode, 'District') : '') ||
+    (districtCode ? await resolveDimensionDisplayName(districtCode) : '')
+
+  const gd3Code = firstEmployeeFieldText(employee, [
+    'GlobalDimension3Code',
+    'Global_Dimension_3_Code',
+    'ShortcutDimension3Code',
+  ])
+  const gd3Name = firstEmployeeFieldText(employee, ['GlobalDimension3Name', 'Global_Dimension_3_Name'])
+
+  let branchName =
+    firstEmployeeFieldText(employee, EMPLOYEE_BRANCH_NAME_FIELDS) ||
+    gd3Name ||
+    authUser?.branchName ||
+    ''
+  let branchCode =
+    firstEmployeeFieldText(employee, ['BranchCode', 'Branch_Code']) ||
+    gd3Code ||
+    authUser?.branchCode ||
+    ''
+
+  if (!branchName && branchCode) {
+    branchName = (await resolveDimensionDisplayName(branchCode)) || branchCode
+  }
+  if (!branchName) {
+    branchName =
+      firstEmployeeFieldText(employee, EMPLOYEE_BRANCH_FALLBACK_FIELDS) ||
+      authUser?.placeOfDuty ||
+      authUser?.responsibleCenter ||
+      ''
+  }
+
+  if (!district && departmentCode) {
+    const departmentLabel = await resolveDepartmentListName(departmentCode, 'Department')
+    if (departmentLabel && departmentLabel !== departmentName) {
+      // Some tenants store the district label on the department row caption.
+      district = departmentLabel
+    }
+  }
+
+  return {
+    division,
+    divisionCode,
+    departmentName,
+    departmentCode,
+    district,
+    branchName,
+    branchCode,
+  }
+}
+
 const EMPLOYEE_PATCH_SERVICES = ['QyHREmployee', 'Employee_Card', 'EmployeeCard', 'QyHREmployeeCard']
 
 async function patchEmployeeGlobalDimension1Code(employeeNo: string, departmentCode: string) {
@@ -583,20 +841,24 @@ async function syncEmployeeGlobalDimension1Code(employeeNo: string, departmentCo
 /** Resolve department/branch codes that fit BC Code[20] fields on finance documents. */
 export async function resolveEmployeeDimensionCodesForSoap(
   employeeNo: string,
-  hints: { department?: string; branchCode?: string } = {},
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
 ) {
   const emp = await fetchEmployeeRecordFast(employeeNo)
-  const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
-  ).trim()
+  const departmentRaw = firstEmployeeFieldText(emp, EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) ||
+    String(hints.department ?? '').trim()
   const branchRaw = String(
-    emp?.GlobalDimension2Code ?? emp?.Branch ?? hints.branchCode ?? '',
+    emp?.GlobalDimension2Code ?? emp?.ShortcutDimension3Code ?? emp?.Branch ?? hints.branchCode ?? '',
   ).trim()
 
-  const [departmentCode, branchCode] = await Promise.all([
-    resolveDimensionCodeByName(departmentRaw),
+  const [departmentCodeFromRaw, branchCode] = await Promise.all([
+    resolveDimensionCodeCandidate(departmentRaw),
     resolveDimensionCodeByName(branchRaw),
   ])
+
+  let departmentCode = departmentCodeFromRaw
+  if (!departmentCode) {
+    departmentCode = await resolveFinanceDepartmentCodeForSoap(employeeNo, hints)
+  }
 
   return { departmentCode, branchCode }
 }
@@ -607,13 +869,12 @@ export async function resolveEmployeeDimensionCodesForSoap(
  */
 export async function ensureEmployeeDepartmentCodeForFinance(
   employeeNo: string,
-  hints: { department?: string; branchCode?: string } = {},
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
 ) {
   const dims = await resolveEmployeeDimensionCodesForSoap(employeeNo, hints)
   const emp = await fetchEmployeeRecordFast(employeeNo)
-  const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
-  ).trim()
+  const departmentRaw = firstEmployeeFieldText(emp, EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) ||
+    String(hints.department ?? '').trim()
 
   if (departmentRaw.length > 20 && !dims.departmentCode) {
     throw Object.assign(
@@ -1029,15 +1290,8 @@ export async function fetchMergedEmployeeRecord(employeeNo: string): Promise<ODa
   )
   const hasJobId = Boolean(discoverEmployeeJobId(merged))
   const hasAccountNumber = Boolean(employeeAccountNoFromRecord(merged))
-  const hasImportantProfileDates = Boolean(
-    employeeFieldText(merged, ['DateOfBirth', 'Date_Of_Birth', 'BirthDate']) &&
-      employeeFieldText(merged, [
-        'DateOfJoiningtheCompany',
-        'EmploymentDate',
-        'DateOfJoin',
-      ]),
-  )
-  if (!hasDirectTitle || !hasJobId || !hasAccountNumber || !hasImportantProfileDates) {
+  const hasFinanceSector = Boolean(employeeFinanceSectorFromRecord(merged))
+  if (!hasDirectTitle || !hasJobId || !hasAccountNumber || !hasFinanceSector) {
     merged = await enrichEmployeeRecordFromPageBases(employeeNo, merged)
   }
 

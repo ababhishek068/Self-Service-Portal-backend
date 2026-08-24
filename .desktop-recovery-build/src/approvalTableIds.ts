@@ -16,9 +16,10 @@ export const APPROVAL_TABLE_IDS = {
   purchaseOrder: 38,
   fuel: 50865,
   transferOrder: 5740,
-  assetTransfer: 50278,
   gatePass: 50296,
-  transport: 61801,
+  assetTransfer: 50278,
+  transport: 50863,
+  workTicket: 50866,
   salaryAdvance: 50880,
   paymentVoucher: 50000,
 } as const
@@ -38,10 +39,11 @@ export const SUPPORTED_FRONTEND_MODULES = [
   'transport',
   'maintenance',
   'transferOrder',
-  'assetTransfer',
+  'workTickets',
   'training',
   'salaryAdvance',
   'gatePass',
+  'assetTransfer',
   'leave',
 ] as const
 
@@ -63,12 +65,125 @@ export function approvalModuleFromEntry(row: ODataRecord): SupportedFrontendModu
   return 'purchaseRequisition'
 }
 
+/**
+ * Fuel and maintenance use the same BC table (50865).  Approval Entry often
+ * exposes only that table ID, so the source header is the authoritative module
+ * discriminator.
+ */
+/** Portal maintenance requests stamp Description / IssueDescription with Item + Priority. */
+export function portalMaintenancePurposeStamp(value: unknown) {
+  const text = String(value ?? '')
+  return (
+    /\|\s*Item:/i.test(text) &&
+    /\|\s*Priority:/i.test(text) &&
+    /\|\s*Location:/i.test(text)
+  )
+}
+
+export function fuelMaintenanceModuleFromSourceRow(
+  row: ODataRecord,
+): 'fuelRequest' | 'maintenance' | null {
+  const sourceType = entryText(row, [
+    'Type',
+    'Type_Field',
+    'DocumentType',
+    'Document_Type',
+  ]).toLowerCase()
+  // BC table 50865 exposes Type as "Maintenance" or as the option ordinal 1.
+  if (sourceType === 'maintenance' || sourceType === '1') return 'maintenance'
+  if (/maintenance|service/.test(sourceType)) return 'maintenance'
+
+  const requestType = entryText(row, ['RequestType', 'Request_Type', 'MaintenanceType'])
+  const numericRequestType = Number(requestType)
+  if (requestType !== '' && Number.isFinite(numericRequestType)) {
+    if (numericRequestType === 1 || numericRequestType === 2) return 'maintenance'
+    if (numericRequestType === 0 || numericRequestType === 3) return 'fuelRequest'
+  }
+
+  const purposeText = entryText(row, [
+    'IssueDescription',
+    'MaintenanceDescription',
+    'Description',
+    'Purpose',
+  ])
+  if (portalMaintenancePurposeStamp(purposeText)) return 'maintenance'
+
+  if (
+    entryText(row, ['FixedAssetNo', 'Fixed_Asset_No']) ||
+    (entryText(row, ['Item']) && entryText(row, ['Priority']))
+  ) {
+    return 'maintenance'
+  }
+
+  if (sourceType === 'fuel' || sourceType === '16') return 'fuelRequest'
+  const requisitionType = entryText(row, ['RequisitionType', 'Requisition_Type']).toLowerCase()
+  if (/fuel|card/.test(requisitionType)) return 'fuelRequest'
+  return null
+}
+
+function normalizedDocumentNo(value: unknown) {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+function fuelMaintenanceDocumentNo(row: ODataRecord) {
+  return entryText(row, ['RequisitionNo', 'Requisition_No', 'DocumentNo', 'Document_No', 'No'])
+}
+
+async function fetchFuelMaintenanceSourceRows(service: string, documentNos: string[]) {
+  const wanted = new Set(documentNos.map(normalizedDocumentNo).filter(Boolean))
+  if (!wanted.size) return [] as ODataRecord[]
+
+  const numbers = [...wanted]
+  const collected: ODataRecord[] = []
+  let filteredLookupFailed = false
+  for (let offset = 0; offset < numbers.length; offset += 10) {
+    const chunk = numbers.slice(offset, offset + 10)
+    const filter = chunk
+      .map((no) => `RequisitionNo eq '${odataString(no)}'`)
+      .join(' or ')
+    try {
+      const rows = (await fetchOData(service, { $filter: `(${filter})`, $top: 1000 })) as
+        | ODataRecord[]
+        | null
+      if (Array.isArray(rows)) collected.push(...rows)
+    } catch {
+      // Older HIJRA query publications reject filters on this shared service.
+      filteredLookupFailed = true
+      break
+    }
+  }
+
+  const rows = filteredLookupFailed
+    ? (((await fetchOData(service, { $top: 5000 }).catch(() => [])) as ODataRecord[] | null) ?? [])
+    : collected
+  return rows.filter((row) => wanted.has(normalizedDocumentNo(fuelMaintenanceDocumentNo(row))))
+}
+
+/** Resolve shared table-50865 documents in one BC read per source service. */
+export async function resolveFuelMaintenanceModules(documentNos: string[]) {
+  const unique = [...new Set(documentNos.map(normalizedDocumentNo).filter(Boolean))]
+  const [headers, extras] = await Promise.all([
+    fetchFuelMaintenanceSourceRows('QyFuelMaintenanceRequests', unique),
+    fetchFuelMaintenanceSourceRows('QyPortalFuelMaintExtra', unique),
+  ])
+  const headerByNo = new Map(headers.map((row) => [normalizedDocumentNo(fuelMaintenanceDocumentNo(row)), row]))
+  const extraByNo = new Map(extras.map((row) => [normalizedDocumentNo(fuelMaintenanceDocumentNo(row)), row]))
+  const resolved = new Map<string, 'fuelRequest' | 'maintenance'>()
+  for (const no of unique) {
+    const source = { ...(headerByNo.get(no) ?? {}), ...(extraByNo.get(no) ?? {}) }
+    const module = fuelMaintenanceModuleFromSourceRow(source)
+    if (module) resolved.set(no, module)
+  }
+  return resolved
+}
+
 /** Legacy IDs observed on `QyApprovalEntry` in older ESS builds. */
 export const LEGACY_APPROVAL_TABLE_IDS: Partial<Record<ApprovalTableKey, number>> = {
   imprest: 52202786,
   imprestSurrender: 52202707,
   storeRequisition: 52202966,
   staffClaim: 52202717,
+  transport: 61801,
 }
 
 export function approvalTableIdsFor(key: ApprovalTableKey): number[] {
@@ -104,9 +219,10 @@ export function resolveApprovalModuleFromTableId(
   if (tableId === APPROVAL_TABLE_IDS.pettyCashReplenishment) return 'pettyCashReplenishment'
   if (tableId === APPROVAL_TABLE_IDS.salaryAdvance) return 'salaryAdvance'
   if (tableId === APPROVAL_TABLE_IDS.gatePass) return 'gatePass'
-  if (tableId === APPROVAL_TABLE_IDS.transport) return 'transport'
-  if (tableId === APPROVAL_TABLE_IDS.transferOrder) return 'transferOrder'
   if (tableId === APPROVAL_TABLE_IDS.assetTransfer) return 'assetTransfer'
+  if (approvalTableIdsFor('transport').includes(tableId)) return 'transport'
+  if (tableId === APPROVAL_TABLE_IDS.transferOrder) return 'transferOrder'
+  if (tableId === APPROVAL_TABLE_IDS.workTicket) return 'workTickets'
   if (tableId === APPROVAL_TABLE_IDS.fuel) return 'fuelRequest'
   if (doc.includes('imprest surrender')) return 'imprestSurrender'
   if (doc.includes('imprest')) return 'imprest'
@@ -116,10 +232,12 @@ export function resolveApprovalModuleFromTableId(
   if (doc.includes('gate pass')) return 'gatePass'
   if (doc.includes('asset transfer')) return 'assetTransfer'
   if (doc.includes('transfer order')) return 'transferOrder'
+  if (doc.includes('work ticket') || doc.includes('flight booking')) return 'workTickets'
   if (doc.includes('fuel')) return 'fuelRequest'
   if (doc.includes('training')) return 'training'
   if (doc.includes('transport')) return 'transport'
   if (doc.includes('store requisition')) return 'storeRequisition'
+  if (doc.includes('petty') || doc.includes('payment voucher') || doc === 'payment') return 'pettyCash'
   if (doc.includes('purchase') || doc === 'order') return 'purchaseRequisition'
   return null
 }
@@ -132,120 +250,173 @@ function entryText(row: ODataRecord, keys: string[]) {
   return ''
 }
 
-/** ESS `ApprovalsController::viewDocument` store-vs-purchase check on table 38 headers. */
-function isEssStoreRequisitionHeader(row: ODataRecord) {
-  return (
-    entryText(row, ['DocApprovalType', 'Doc_Approval_Type']) === 'Requisition' &&
-    entryText(row, ['DocumentType', 'Document_Type']) === 'Quote' &&
-    entryText(row, ['DocumentType2', 'Document_Type2']) === 'Requisition'
-  )
+function purchaseHeaderLooksLikeRequisition(row: ODataRecord) {
+  const approvalType = entryText(row, ['DocApprovalType', 'Doc_Approval_Type']).toLowerCase()
+  if (approvalType.includes('requisition')) return true
+  const documentType = entryText(row, ['DocumentType', 'Document_Type']).toLowerCase()
+  return documentType === 'quote' || documentType.includes('requisition')
 }
 
 /**
- * Fuel and maintenance share BC table 50865 (FLT-Fuel & Maintenance Req.), and
- * the approval entry carries no usable document type (the AL populates it as
- * blank). Classify from the source row instead:
- * - `Type` / `Type_Field` = Maintenance → maintenance
- * - portal Description markers (`Priority:` / `Odometer:`) → maintenance
- *   (FnFuelRequisitionHeader still stamps RequisitionType as Vehicle Fuel)
- * - otherwise fuel / card requisition types → fuel
+ * Table 38 approval entries can belong to either a Purchase Requisition or a
+ * legacy store document. Never prefer store just because a same-numbered store
+ * header exists — that made live PRs open with Issuing Store / store fields.
  */
-export function fuelMaintenanceModuleFromRow(
-  row: ODataRecord,
-): 'fuelRequest' | 'maintenance' {
-  const docType = String(row.Type ?? row.Type_Field ?? row.DocumentType ?? row.Document_Type ?? '')
-    .trim()
-    .toLowerCase()
-  if (docType === 'maintenance') return 'maintenance'
-  const purpose = String(row.Description ?? row.MaintenanceDescription ?? '').toLowerCase()
-  if (purpose.includes('priority:') || purpose.includes('odometer:')) return 'maintenance'
-  const requisitionType = String(row.RequisitionType ?? row.Requisition_Type ?? '').toLowerCase()
-  if (requisitionType.includes('fuel') || requisitionType.includes('card')) return 'fuelRequest'
-  const maintenanceDate = String(row.DateTakenforMaintenance ?? '').trim()
-  if (maintenanceDate && !maintenanceDate.startsWith('0001-01-01')) return 'maintenance'
-  return 'fuelRequest'
-}
-
-const FUEL_DOC_NO_KEYS = ['RequisitionNo', 'Requisition_No', 'No'] as const
-
-/** HIJRA's QyFuelMaintenanceRequests often rejects `$filter`; fetch and match locally. */
-async function fetchFuelMaintenanceRowsForDocs(docNos: Set<string>) {
-  const rows = (await fetchOData('QyFuelMaintenanceRequests', {}).catch(() => null)) as
-    | ODataRecord[]
-    | null
-  if (!Array.isArray(rows)) return []
-  return rows.filter((row) =>
-    FUEL_DOC_NO_KEYS.some((key) => docNos.has(String(row[key] ?? '').trim().toUpperCase())),
-  )
-}
-
-/**
- * Batch classification for approval queues: map each fuel-table document number
- * to `fuelRequest` or `maintenance` so a fuel requisition never renders as a
- * maintenance request on the approver side (UAT fail C).
- */
-export async function classifyFuelMaintenanceModules(docNos: string[]) {
-  const map = new Map<string, 'fuelRequest' | 'maintenance'>()
-  const wanted = new Set(docNos.map((no) => no.trim().toUpperCase()).filter(Boolean))
-  if (!wanted.size) return map
-  for (const row of await fetchFuelMaintenanceRowsForDocs(wanted)) {
-    const module = fuelMaintenanceModuleFromRow(row)
-    for (const key of FUEL_DOC_NO_KEYS) {
-      const value = String(row[key] ?? '').trim().toUpperCase()
-      if (value && wanted.has(value)) map.set(value, module)
-    }
-  }
-  return map
-}
-
-async function resolveFuelMaintenanceTableModule(
-  docNo: string,
-): Promise<'fuelRequest' | 'maintenance' | null> {
-  const resolved = await classifyFuelMaintenanceModules([docNo])
-  return resolved.get(docNo.trim().toUpperCase()) ?? null
-}
-
 async function resolvePurchaseOrderTableModule(
   docNo: string,
+  preferred?: 'storeRequisition' | 'purchaseRequisition',
 ): Promise<'storeRequisition' | 'purchaseRequisition' | null> {
-  const purchaseRows = (await fetchOData('QyPurchaseHeader', {
-    $filter: `No eq '${odataString(docNo)}'`,
-    $top: 1,
-  })) as ODataRecord[] | null
-  if (Array.isArray(purchaseRows) && purchaseRows[0]) {
-    return isEssStoreRequisitionHeader(purchaseRows[0]) ? 'storeRequisition' : 'purchaseRequisition'
+  const [storeRows, purchaseRows] = (await Promise.all([
+    fetchOData('QyStoreRequisitionHeader', {
+      $filter: `No eq '${odataString(docNo)}'`,
+      $top: 1,
+    }).catch(() => [] as ODataRecord[]),
+    fetchOData('QyPurchaseHeader', {
+      $filter: `No eq '${odataString(docNo)}'`,
+      $top: 1,
+    }).catch(() => [] as ODataRecord[]),
+  ])) as [ODataRecord[] | null, ODataRecord[] | null]
+
+  const store = Array.isArray(storeRows) && storeRows[0] ? storeRows[0] : null
+  const purchase = Array.isArray(purchaseRows) && purchaseRows[0] ? purchaseRows[0] : null
+  const purchaseReq = purchase && purchaseHeaderLooksLikeRequisition(purchase) ? purchase : null
+
+  if (preferred === 'purchaseRequisition' && (purchaseReq || purchase)) {
+    return 'purchaseRequisition'
   }
-  const storeRows = (await fetchOData('QyStoreRequisitionHeader', {
-    $filter: `No eq '${odataString(docNo)}'`,
-    $top: 1,
-  })) as ODataRecord[] | null
-  if (Array.isArray(storeRows) && storeRows[0]) return 'storeRequisition'
+  if (preferred === 'storeRequisition' && store) return 'storeRequisition'
+
+  // Portal PRs are Purchase Header quotes with DocApprovalType = Requisition.
+  if (purchaseReq) return 'purchaseRequisition'
+  if (store) return 'storeRequisition'
+  if (purchase) return 'purchaseRequisition'
+  return null
+}
+
+/**
+ * Payments Header (50887) and Inter-Bank (50883) numbers collide with other series.
+ * Probe the source document so Petty Cash is not labelled Purchase Requisition.
+ *
+ * BC Option "Payment Type" = Normal, "Petty Cash", Cash, ... (0/1/2). OData may
+ * return the caption or the ordinal — treat any Payments Header hit as petty cash
+ * settlement unless it is clearly a Normal payment voucher.
+ */
+export async function resolvePettyCashModuleFromSource(
+  docNo: string,
+): Promise<'pettyCash' | 'pettyCashReplenishment' | null> {
+  const no = String(docNo ?? '').trim()
+  if (!no) return null
+
+  const [paymentRows, interBankRows] = (await Promise.all([
+    fetchOData('QyPaymentsHeader', {
+      $filter: `No eq '${odataString(no)}'`,
+      $top: 1,
+    }).catch(() => [] as ODataRecord[]),
+    fetchOData('PgInterBankTransfers', {
+      $filter: `No eq '${odataString(no)}'`,
+      $top: 1,
+    }).catch(() => [] as ODataRecord[]),
+  ])) as [ODataRecord[] | null, ODataRecord[] | null]
+
+  const payment = Array.isArray(paymentRows) && paymentRows[0] ? paymentRows[0] : null
+  if (payment) {
+    const paymentType = entryText(payment, ['PaymentType', 'Payment_Type']).toLowerCase()
+    const documentType = entryText(payment, ['DocumentType', 'Document_Type']).toLowerCase()
+    const isNormalVoucher = paymentType === '0' || paymentType === 'normal'
+    const isPetty =
+      !paymentType ||
+      paymentType === '1' ||
+      paymentType.includes('petty') ||
+      documentType.includes('petty') ||
+      paymentType === 'cash' ||
+      paymentType === '2'
+    if (isPetty || !isNormalVoucher) return 'pettyCash'
+  }
+
+  if (Array.isArray(interBankRows) && interBankRows[0]) return 'pettyCashReplenishment'
   return null
 }
 
 /**
  * Resolve the portal module from an approval entry the same way ESS
  * `ApprovalsController::viewDocument` picks OData services.
+ *
+ * `preferredModule` comes from the request id (e.g. purchaseRequisition-1540)
+ * so a PR link is not flipped onto store fields when numbers collide.
  */
 export async function resolveApprovalModuleFromEntry(
   entry: ODataRecord,
   docNo: string,
   fallback: (row: ODataRecord) => string,
+  preferredModule?: string,
 ): Promise<string> {
+  const tableId = Number(entry.TableID ?? entry.TableId ?? 0)
+  // The source table is authoritative. Some older Approval Entry publications
+  // expose TransportRequest as the generic document type Order, which must not
+  // route a live TR document through the Purchase Requisition source service.
+  if (approvalTableIdsFor('transport').includes(tableId)) return 'transport'
+  if (approvalTableIdsFor('storeRequisition').includes(tableId)) return 'storeRequisition'
+
+  // Honour the request-id module when the approval table is not the other kind.
+  // Stops purchaseRequisition-#### links flipping onto Issuing Store / store fields
+  // just because a same-numbered store header also exists (or the probe hangs).
+  // Exception: queue may have mislabelled petty cash as purchaseRequisition-####.
+  // Always probe Payments Header first — BC often stamps TableID 38 / Document Type
+  // "Purchase Requisition" on Payments Header (50887) approvals.
+  if (preferredModule === 'purchaseRequisition') {
+    const petty = await resolvePettyCashModuleFromSource(docNo)
+    if (petty) return petty
+    return 'purchaseRequisition'
+  }
+  if (preferredModule === 'storeRequisition') return 'storeRequisition'
+  if (preferredModule === 'pettyCash' || preferredModule === 'pettyCashReplenishment') {
+    return preferredModule
+  }
+
   const documentType = entryText(entry, ['DocumentType', 'Document_Type'])
   if (documentType === 'TransportRequest') return 'transport'
-  if (documentType === 'Petty Cash') return 'pettyCash'
-  if (documentType === 'Order') return 'purchaseRequisition'
+  if (documentType === 'Petty Cash' || /petty\s*cash/i.test(documentType)) return 'pettyCash'
+  if (/inter\s*bank|replenishment/i.test(documentType)) return 'pettyCashReplenishment'
+  if (/store\s*requisition/i.test(documentType)) return 'storeRequisition'
 
-  const tableId = Number(entry.TableID ?? entry.TableId ?? 0)
-  if (tableId === APPROVAL_TABLE_IDS.purchaseOrder) {
+  const looksLikeMislabelledPurchase =
+    tableId === APPROVAL_TABLE_IDS.purchaseRequisition ||
+    tableId === APPROVAL_TABLE_IDS.purchaseOrder ||
+    tableId === APPROVAL_TABLE_IDS.pettyCash ||
+    tableId === APPROVAL_TABLE_IDS.pettyCashReplenishment ||
+    tableId === 0 ||
+    /payment|petty|voucher/i.test(documentType) ||
+    /purchase\s*requisition/i.test(documentType) ||
+    documentType === 'Order' ||
+    documentType === 'Quote'
+
+  if (looksLikeMislabelledPurchase) {
+    const petty = await resolvePettyCashModuleFromSource(docNo)
+    if (petty) return petty
+  }
+
+  if (tableId === APPROVAL_TABLE_IDS.purchaseRequisition) return 'purchaseRequisition'
+  if (/purchase\s*requisition/i.test(documentType)) return 'purchaseRequisition'
+
+  if (tableId === APPROVAL_TABLE_IDS.fuel) {
+    const resolved = await resolveFuelMaintenanceModules([docNo])
+    const sourceModule = resolved.get(normalizedDocumentNo(docNo))
+    if (sourceModule) return sourceModule
+  }
+
+  const needsPurchaseStoreProbe =
+    tableId === APPROVAL_TABLE_IDS.purchaseOrder ||
+    documentType === 'Order' ||
+    documentType === 'Quote'
+
+  if (needsPurchaseStoreProbe) {
     const resolved = await resolvePurchaseOrderTableModule(docNo)
     if (resolved) return resolved
+    if (documentType === 'Order' || documentType === 'Quote') return 'purchaseRequisition'
   }
-  if (tableId === APPROVAL_TABLE_IDS.fuel) {
-    const resolved = await resolveFuelMaintenanceTableModule(docNo)
-    if (resolved) return resolved
-  }
+
+  if (tableId === APPROVAL_TABLE_IDS.pettyCash) return 'pettyCash'
+  if (tableId === APPROVAL_TABLE_IDS.pettyCashReplenishment) return 'pettyCashReplenishment'
 
   return fallback(entry)
 }

@@ -1,4 +1,0 @@
-HIJRA SSP v1.0.3.44 - 25 July 2026 — UAT SYNC BUILD
-
-Portal API: v1.0.3.44 — UAT sync (profile, training, HR routes, staff-claim approvals)
-BUILD_ID: hijra-portal-1.0.3.44-uat-sync-2026-07-25

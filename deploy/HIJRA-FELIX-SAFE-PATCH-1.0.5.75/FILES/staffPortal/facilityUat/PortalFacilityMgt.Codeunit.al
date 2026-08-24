@@ -243,6 +243,8 @@ codeunit 52161 "Portal Facility Mgt."
     begin
         if (budgetName = '') or (planPeriod = '') then
             exit(false);
+        if globalDim2 = '' then
+            Error('Department or District is required to open a procurement budget template.');
         if Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
             exit(true); // already exists — idempotent
         Header.Init();
@@ -264,6 +266,8 @@ codeunit 52161 "Portal Facility Mgt."
     begin
         if (budgetName = '') or (typeNo = '') or (planPeriod = '') then
             exit(false);
+        if department = '' then
+            Error('Department or District is required on each procurement budget line.');
         if PlanIsSubmitted(budgetName, globalDim1, department, planPeriod) then
             Error('Procurement plan %1 / %2 has already been submitted and can no longer be changed.', budgetName, planPeriod);
         if not Line.Get(budgetName, department, lineType, typeNo, globalDim1, planPeriod) then begin
@@ -308,6 +312,8 @@ codeunit 52161 "Portal Facility Mgt."
         if not Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
             exit(false);
         Line.SetRange("Budget Name", budgetName);
+        Line.SetRange("Global Dimension 1", globalDim1);
+        Line.SetRange(Department, globalDim2);
         Line.SetRange("Plan Period", planPeriod);
         if Line.IsEmpty() then
             Error('Add at least one plan line before submitting procurement plan %1 / %2.', budgetName, planPeriod);
@@ -322,6 +328,8 @@ codeunit 52161 "Portal Facility Mgt."
         Header: Record "Portal Procurement Plan Hdr.";
     begin
         Header.SetRange("Budget Name", budgetName);
+        Header.SetRange("Global Dimension 1", globalDim1);
+        Header.SetRange("Global Dimension 2", globalDim2);
         Header.SetRange("Plan Period", planPeriod);
         Header.SetRange(Status, 'Submitted');
         exit(not Header.IsEmpty());

@@ -1,0 +1,69 @@
+HIJRA SSP — ALL UNDEPLOYED FIXES (16–19 August 2026)
+===================================================
+You have not deployed these yet. Deploy THIS zip once (v1.0.3.292).
+Do not use 1.0.3.288–1.0.3.291 (291 still baked API ports 4000/4001).
+
+PORTAL / BACKEND (already compiled into dist + public; source also in this zip)
+------------------------------------------------------------------------------
+Salary advance (v1.0.3.284)
+  Approver amount = percentage × payroll salary (not BC Basic 40k).
+  Files: src/salaryAdvanceAmount.ts, src/erpMappings.ts, src/employeeProfile.ts,
+         src/portalApi.ts
+
+Imprest surrender travel days (v1.0.3.285)
+  Multi-day travel no longer stamps 1 day. Portal syncs travel start from source imprest.
+  Files: src/staffModules.ts, src/financeRequestEnrichment.ts, src/imprestSurrenderLines.ts
+         portal: components/finance/ImprestSurrenderLinesEditor.tsx
+  AL: StaffPortalCodeunit — EnsureImprestSurrenderTravelStartDate,
+      DeduplicateImprestSurrenderLines
+
+Petty cash limit warning (v1.0.3.286)
+  Branch users no longer get a false “no positive petty-cash limit” amber warning.
+  Files: src/staffModules.ts (getPortalPettyCashDepartmentLimit), src/employeeProfile.ts
+         portal: pages/finance/PettyCashReplenishment.tsx
+
+Petty cash Limit Source / Responsibility Center (v1.0.3.287)
+  Branch staff: Limit Source = branch name; Responsibility Center = branch (not CENTRAL).
+  Files: src/portalApi.ts, src/financeRequestEnrichment.ts
+         portal: pages/finance/PettyCashReplenishment.tsx
+
+Finance org display — all finance modules (v1.0.3.288)
+  Branch (district-line): District + Branch; hide Department/Division.
+  HQ (department-line): Department + Division; hide District/Branch.
+  Responsibility Center: branch name for branch staff; division/department for HQ.
+  Modules: Petty Cash Settlement, Petty Cash Request, Imprest, Imprest Surrender, Staff Claim.
+  Files: src/financeRequestEnrichment.ts, src/employeeProfile.ts, src/portalApi.ts
+         portal: data/financeOrgDetailFields.ts, utils/financeOrgDisplay.ts,
+                 data/approvalDetailFields.ts, components/finance/FinanceEmployeeOrgBanner.tsx,
+                 pages/finance/PettyCash.tsx, pages/finance/PettyCashReplenishment.tsx,
+                 components/shared/RequestFormPage.tsx, MultiStepRequestPage.tsx,
+                 pages/approvals/ApprovalDetail.tsx
+
+Procurement Individual Budget (v1.0.3.289–290) — UAT R59–R61
+  Department OR district opens their own template (org from employee card).
+  Itemise lines against that unit. Submit itemised plan.
+  Files: src/portalApi.ts, src/employeeProfile.ts
+         portal: pages/facility/ProcurementPlan.tsx, api/endpoints/procurementPlan.ts
+  AL: PortalFacilityMgt.Codeunit.al (52161) Save/SubmitProcurementPlan*
+      PortalProcurementPlanHeader.Table.al, PortalProcurementPlanLine.Table.al
+
+AL FELIX MUST PUBLISH (from BC-AL/FILES — live object IDs)
+----------------------------------------------------------
+  FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+    imprest surrender travel start, surrender line dedupe, petty cash Insert-before-Validate
+  FILES/staffPortal/facilityUat/PortalFacilityMgt.Codeunit.al   (codeunit 52161)
+    procurement budget template enter / itemise / submit
+  FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
+    vehicle tools on asset transfer
+  FILES/staffPortal/facilityUat/PortalProcurementPlanHeader.Table.al
+  FILES/staffPortal/facilityUat/PortalProcurementPlanLine.Table.al
+
+Extra reviewed AL copies (do not overwrite live IDs blindly):
+  BC-AL/REVIEWED-AL-FIXES-16-19-AUG/
+
+DEPLOY ORDER
+------------
+1. Felix: APPLY-HIJRA-PATCH.ps1 → AL: Package → publish (keep AL 1.0.5.173)
+2. TA: extract this zip to C:\TA\SelfServiceSuite, restore .env, START-HIJRA-PORTAL.bat
+3. Verify: http://10.30.4.23:4000/api/health → v1.0.3.292 then Ctrl+F5
+   (UI + /api share one PORT from .env — clear browser site data once after upgrade)

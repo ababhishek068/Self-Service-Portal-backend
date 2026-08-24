@@ -2,19 +2,60 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import {
   callSoapMethod,
+  codeunitSoapNamespace,
+  deriveCodeunitSoapUrl,
   fetchOData,
   odataString,
   type ODataRecord,
+  type SoapEndpoint,
 } from './bcClient.js'
-import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
+import { config } from './config.js'
+import {
+  APPROVAL_TABLE_IDS,
+  approvalTableFilter,
+  type ApprovalTableKey,
+} from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
-import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance } from './employeeProfile.js'
-import { formatBcSoapDate } from './staff.js'
+import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap } from './employeeProfile.js'
+import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
+import { uploadViaPortalAttachments } from './portalAttachments.js'
 import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+import { trainingCourseCodeForBc } from './trainingCourses.js'
+import { resolveModuleRequestStatus } from './erpMappings.js'
+import {
+  prepareImprestSurrenderLinesForSave,
+  imprestSurrenderLinesToPersist,
+  imprestSurrenderAccountNo,
+  imprestSurrenderLineActualSpent,
+  imprestSurrenderLineOutstanding,
+  isImprestSurrenderModule,
+  normalizeImprestSurrenderCashReceiptNo,
+  mergeImprestSurrenderODataRow,
+  imprestSurrenderLinesHaveSpendReadback,
+  imprestSurrenderLinePersistedMatches,
+  imprestSurrenderLineNo,
+} from './imprestSurrenderLines.js'
+
+const DUPLICATE_REQUISITION_WINDOW_MS = 24 * 60 * 60 * 1000
+
+async function recalculateImprestSurrenderSettlement(spec: ModuleSpec, no: string) {
+  if (!isImprestSurrenderModule(spec.module)) return
+  try {
+    const recalc = await callModuleSoap(spec, 'RecalculateImprestSurrenderSettlement', { docNo: no })
+    if (!ok(recalc)) {
+      console.warn(`[imprest-surrender] settlement recalc returned false for ${no}`)
+    }
+  } catch (err) {
+    console.warn(
+      `[imprest-surrender] settlement recalc failed for ${no} (publish AL 1.0.5.166+)`,
+      err,
+    )
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /* Module spec                                                                */
@@ -54,6 +95,7 @@ export interface ModuleSpec {
     | 'RequesterID'
     | 'Employee_No'
     | 'CustomerNo'
+    | 'RaisedBy'
   /** Which session field feeds `ownerField` — defaults match Laravel. */
   ownerSource: 'employeeNo' | 'userID' | 'imprestNo'
   /** ESS intentionally lists these rows without an employee filter. */
@@ -66,17 +108,23 @@ export interface ModuleSpec {
   postListFilter?: (row: ODataRecord) => boolean
   /** OData service holding line rows (omit if module has no lines). */
   lineService?: string
+  /** Older published service names tried when the primary line query is unavailable. */
+  lineFallbackServices?: string[]
   /** OData field linking lines to the header (e.g. `No`, `RequistionNo`, …). */
   lineHeaderField?: string
 
   /** SOAP methods used to mutate the document. */
   soap: {
     saveHeader?: string
+    /** Optional separate SOAP method used when editing an existing header. */
+    editHeader?: string
     saveLine?: string
     deleteLine?: string
     submit?: string
     cancel?: string
   }
+  /** Dedicated published codeunit endpoint; defaults to CuStaffPortal. */
+  soapEndpoint?: SoapEndpoint
 
   /** Per-module SOAP parameter builders. */
   params?: {
@@ -95,6 +143,14 @@ export interface ModuleSpec {
   headerReturnsBoolean?: boolean
   /** ESS exposes UploadDocumentAttachment only for a subset of modules (imprest, claim, petty cash, …). */
   supportsAttachments?: boolean
+}
+
+function callModuleSoap(
+  spec: ModuleSpec,
+  methodName: string,
+  params: Record<string, unknown>,
+) {
+  return callSoapMethod(methodName, params, spec.soapEndpoint)
 }
 
 const SCHEMAS = {
@@ -172,6 +228,17 @@ function numericCode(
   return labels[raw.toLowerCase()] ?? fallback
 }
 
+export function assetConditionDescriptionValue(description: unknown, condition: unknown) {
+  const entered = String(description ?? '').trim()
+  if (entered) return entered
+  const conditionCode = numericCode(condition, {
+    good: 1,
+    fair: 2,
+    damaged: 3,
+  })
+  return ({ 1: 'Good', 2: 'Fair', 3: 'Damaged' } as Record<number, string>)[conditionCode] ?? ''
+}
+
 function fieldText(row: ODataRecord, keys: string[], fallback = '') {
   for (const key of keys) {
     const value = row[key]
@@ -180,7 +247,14 @@ function fieldText(row: ODataRecord, keys: string[], fallback = '') {
   return fallback
 }
 
-export type GatePassSourceKey = 'storeIssue' | 'transferOrder' | 'assetTransfer'
+function fieldNumber(row: ODataRecord, keys: string[], fallback = 0) {
+  const raw = fieldText(row, keys, '')
+  if (!raw) return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+export type GatePassSourceKey = 'storeIssue' | 'transferOrder' | 'assetTransfer' | 'maintenance'
 
 export const GATE_PASS_SOURCE_SPECS: Record<
   GatePassSourceKey,
@@ -213,6 +287,13 @@ export const GATE_PASS_SOURCE_SPECS: Record<
     lineHeaderField: 'DocumentNo',
     scopeToEmployee: false,
   },
+  maintenance: {
+    label: 'Maintained Asset / Vehicle Requisitions',
+    linkTo: 'Maintenance',
+    lineService: 'QyFuelMaintenanceRequests',
+    lineHeaderField: 'RequisitionNo',
+    scopeToEmployee: true,
+  },
 }
 
 function normalizedGatePassSource(value: unknown): GatePassSourceKey {
@@ -220,6 +301,9 @@ function normalizedGatePassSource(value: unknown): GatePassSourceKey {
   const compact = raw.replace(/[^a-z]/g, '')
   if (compact === 'transferorder' || compact === 'transferorders') return 'transferOrder'
   if (compact === 'assettransfer' || compact === 'assettransfers') return 'assetTransfer'
+  if (compact === 'maintenance' || compact === 'maintainedasset' || compact === 'maintainedgoods') {
+    return 'maintenance'
+  }
   return 'storeIssue'
 }
 
@@ -265,19 +349,120 @@ function normalizeBcTime(value: unknown) {
  * request id, never the source document number. Look it up from BC instead of
  * relying on a request body field that is never populated.
  */
-async function gatePassTransferNo(no: string): Promise<string> {
-  try {
-    const rows = (await fetchOData('QyGatePass', {
-      $filter: `GatePassNo eq '${odataString(no)}'`,
-      $top: 1,
-    })) as ODataRecord[] | null
-    if (Array.isArray(rows) && rows[0]) {
-      return fieldText(rows[0], ['TransferNo', 'Transfer_No'])
-    }
-  } catch {
-    // fall through to blank — the SOAP call will surface a clear BC error
+/**
+ * Pick the canonical gate pass for a posted store requisition. The stamped
+ * `GatePassNo` on the store header (created when BC posts the requisition) wins
+ * over any duplicate gate pass the portal may have created later.
+ */
+export function storeIssueGatePassFromRows(
+  storeRequisitionNo: string,
+  storeHeader: ODataRecord | undefined,
+  gatePassRows: ODataRecord[],
+): string {
+  const wanted = storeRequisitionNo.trim()
+  if (!wanted) return ''
+
+  const fromHeader = storeHeader
+    ? fieldText(storeHeader, ['GatePassNo', 'Gate_Pass_No'])
+    : ''
+  if (fromHeader) return fromHeader
+
+  for (const row of gatePassRows) {
+    if (gatePassSourceFromRow(row) !== 'storeIssue') continue
+    if (fieldText(row, ['TransferNo', 'Transfer_No']).trim() !== wanted) continue
+    const gatePassNo = fieldText(row, ['GatePassNo', 'Gate_Pass_No'])
+    if (gatePassNo) return gatePassNo
   }
   return ''
+}
+
+/** Resolve the BC gate pass already linked to a posted store requisition. */
+export async function resolveStoreIssueGatePassNo(storeRequisitionNo: string): Promise<string> {
+  const wanted = storeRequisitionNo.trim()
+  if (!wanted) return ''
+
+  let storeHeader: ODataRecord | undefined
+  for (const key of ['No', 'No_']) {
+    try {
+      const rows = (await fetchOData('QyStoreRequisitionHeader', {
+        $filter: `${key} eq '${odataString(wanted)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      storeHeader = Array.isArray(rows) ? rows[0] : undefined
+      if (storeHeader) break
+    } catch {
+      // try the next published key name
+    }
+  }
+
+  for (const transferKey of ['TransferNo', 'Transfer_No']) {
+    for (const linkKey of ['Linkto', 'LinkTo', 'Link_To']) {
+      try {
+        const rows = (await fetchOData('QyGatePass', {
+          $filter: `${linkKey} eq 'Store Issue' and ${transferKey} eq '${odataString(wanted)}'`,
+          $top: 10,
+        })) as ODataRecord[] | null
+        const resolved = storeIssueGatePassFromRows(
+          wanted,
+          storeHeader,
+          Array.isArray(rows) ? rows : [],
+        )
+        if (resolved) return resolved
+      } catch {
+        // try the next published key name
+      }
+    }
+  }
+
+  const fetched = (await fetchOData('QyGatePass', { $top: 5000 }).catch(() => [])) as ODataRecord[]
+  return storeIssueGatePassFromRows(wanted, storeHeader, Array.isArray(fetched) ? fetched : [])
+}
+
+async function gatePassTransferNo(no: string, hint = ''): Promise<string> {
+  const hinted = String(hint ?? '').trim()
+  if (hinted) return hinted
+
+  for (const key of ['GatePassNo', 'Gate_Pass_No']) {
+    try {
+      const rows = (await fetchOData('QyGatePass', {
+        $filter: `${key} eq '${odataString(no)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows[0]) {
+        const transfer = fieldText(rows[0], ['TransferNo', 'Transfer_No'])
+        if (transfer) return transfer
+      }
+    } catch {
+      // try the next published key name
+    }
+  }
+  return ''
+}
+
+async function gatePassSubmitParams(
+  req: Pick<Request, 'body'>,
+  user: AuthUser,
+  no: string,
+) {
+  const transferNo = await gatePassTransferNo(
+    no,
+    fieldText(req.body ?? {}, ['transferNo', 'TransferNo', 'Transfer_No']),
+  )
+  if (!transferNo) {
+    throw Object.assign(
+      new Error(
+        `Gate pass ${no} has no linked source document number in Business Central. ` +
+          'Verify the maintenance/store/transfer document is linked on the gate pass in BC, then retry.',
+      ),
+      { status: 422 },
+    )
+  }
+  return {
+    gatePassNo: no,
+    transferNo,
+    tableID: 50296,
+    employeeNo: user.employeeNo,
+  }
 }
 
 function storeLineTypeCode(value: unknown) {
@@ -288,7 +473,7 @@ function purchaseLineTypeCode(value: unknown) {
   return numericCode(value, { service: 1, item: 2, asset: 4 })
 }
 
-function transportRequestTypeCode(value: unknown) {
+export function transportRequestTypeCode(value: unknown) {
   return numericCode(value, { city: 0, 'field trip': 1, field: 1 })
 }
 
@@ -306,11 +491,46 @@ export function passengerTypeCode(value: unknown) {
 
 function claimTypeCode(value: unknown) {
   const raw = String(value ?? '').trim()
-  return raw.toLowerCase().includes('medical') ? 'MEDICAL' : raw
+  const base = raw.split(' - ')[0]?.trim() ?? raw
+  if (base.toUpperCase().includes('MEDICAL') || base.toUpperCase().startsWith('MED')) return 'MEDICAL'
+  return base || raw
 }
 
 export function isMedicalClaimType(value: unknown) {
   return claimTypeCode(value) === 'MEDICAL'
+}
+
+export function isOtherClaimType(value: unknown) {
+  return claimTypeCode(value).toUpperCase() === 'OTHER'
+}
+
+async function lookupClaimTypeGlAccount(claimType: string) {
+  const code = claimTypeCode(claimType)
+  if (!code) return ''
+  try {
+    const rows = (await fetchOData('QyReceiptsPayments', {
+      $filter: `Code eq '${odataString(code)}' and Type eq 'Claim'`,
+      $top: 1,
+    })) as ODataRecord[] | null
+    const row = Array.isArray(rows) ? rows[0] : undefined
+    if (!row) return ''
+    for (const key of [
+      'GLAccount',
+      'GL_Account',
+      'G_L_Account',
+      'GLAccountNo',
+      'GL_Account_No',
+      'G_L_Account_No',
+      'AccountNo',
+      'Account_No',
+    ]) {
+      const value = String(row[key] ?? '').trim()
+      if (value) return value
+    }
+  } catch {
+    // BC lookup unavailable — frontend should have sent accountNo
+  }
+  return ''
 }
 
 /* -------------------------------------------------------------------------- */
@@ -340,28 +560,123 @@ const imprest: ModuleSpec = {
     cancel: 'CancelImprestRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      docNo: no,
-      employeeNo: user.employeeNo,
-      dateRequired: req.body?.dateRequired ?? req.body?.startDate ?? '',
-      purpose: req.body?.purpose ?? '',
-      myUserId: user.userID,
-      travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
-      travelDate: req.body?.travelDate ?? req.body?.startDate ?? '',
-      returnDate: req.body?.returnDate ?? '',
-    }),
-    saveLine: ({ req, user, no }) => ({
-      action: req.body?.action ?? 'create',
-      docNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      destination: req.body?.destination ?? req.body?.description ?? '',
-      noOfDays: Number(req.body?.noOfDays ?? 0),
-      employeeNo: user.employeeNo,
-      advanceType: req.body?.advanceType ?? req.body?.expenseType ?? '',
-      dutyArea: req.body?.dutyArea ?? '',
-      amount: Number(req.body?.amount ?? 0),
-    }),
+    saveHeader: ({ req, user, no }) => {
+      const travelDate = formatBcSoapDate(
+        String(req.body?.travelDate ?? req.body?.startDate ?? ''),
+      )
+      let returnDate = formatBcSoapDate(String(req.body?.returnDate ?? ''))
+      const todayIso = (() => {
+        const now = new Date()
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      })()
+      // Excel R5 / Word Aug 7: block back-dated travel start and return.
+      if (travelDate && travelDate < todayIso) {
+        throw Object.assign(
+          new Error('Travel start date cannot be earlier than today.'),
+          { status: 422, code: 'IMPREST_TRAVEL_BACKDATE' },
+        )
+      }
+      if (returnDate && returnDate < todayIso) {
+        throw Object.assign(
+          new Error('Return date cannot be earlier than today.'),
+          { status: 422, code: 'IMPREST_RETURN_BACKDATE' },
+        )
+      }
+      // HB: start and return must not be the same calendar day.
+      if (travelDate && (!returnDate || returnDate <= travelDate)) {
+        const next = new Date(`${travelDate}T12:00:00`)
+        next.setDate(next.getDate() + 1)
+        returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+      }
+      return {
+        action: no ? 'edit' : 'create',
+        docNo: no,
+        employeeNo: user.employeeNo,
+        dateRequired: formatBcSoapDate(String(req.body?.dateRequired ?? req.body?.startDate ?? '')),
+        purpose: req.body?.purpose ?? '',
+        myUserId: user.userID,
+        travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
+        travelDate,
+        returnDate,
+      }
+    },
+    saveLine: async ({ req, user, no }) => {
+      const advanceType = String(req.body?.advanceType ?? req.body?.expenseType ?? '').trim()
+      let destination = String(req.body?.destination ?? req.body?.description ?? '').trim()
+      // Word Aug 7: destination is captured on the header — reuse it for ERP rate lookup.
+      if (!destination) {
+        destination = String(
+          req.body?.travelDestination ?? req.body?.headerTravelDestination ?? '',
+        ).trim()
+        if (!destination) {
+          try {
+            const headerRows = (await fetchOData('QyImprestHeader', {
+              $filter: `No eq '${odataString(no)}'`,
+              $top: 1,
+            }).catch(() => [])) as ODataRecord[] | null
+            const header = Array.isArray(headerRows) ? headerRows[0] : undefined
+            destination = fieldText(header ?? {}, [
+              'TravelDestination',
+              'Travel_Destination',
+              'Destination',
+            ])
+          } catch {
+            // keep empty — BC/amount validation below will explain
+          }
+        }
+      }
+      const noOfDays = Number(req.body?.noOfDays ?? 0)
+      let amount = Number(req.body?.amount ?? 0)
+
+      if (amount <= 0 && advanceType && destination && noOfDays > 0) {
+        try {
+          const result = await callSoapMethod('FetchImprestLineAmount', {
+            headerNo: no,
+            noOfDays,
+            advanceType,
+            destinationCode: destination,
+          })
+          amount = Number(result.returnValue ?? 0)
+        } catch {
+          // Fall through — BC will reject with a clearer message if still zero.
+        }
+      }
+
+      if (amount <= 0) {
+        throw Object.assign(
+          new Error(
+            'Amount is required. Select advance type and days so ERP can calculate the daily rate from the header travel destination — or enter amount manually.',
+          ),
+          { status: 422 },
+        )
+      }
+
+      // Advance types whose BC "Rate Source" is Manual (e.g. PETTY CASH) have no
+      // per-diem rate in the ERP master. BC's "No of Days" validation then errors
+      // ("Please enter Daily Rate for Advance Type ...") unless the line's
+      // Daily Rate(Amount) is supplied. Forward the requester/ERP daily rate so BC
+      // can stamp it; when it is 0 we fall back to amount / days.
+      const dailyRateInput = Number(req.body?.dailyRate ?? 0)
+      const dailyRate =
+        dailyRateInput > 0
+          ? dailyRateInput
+          : noOfDays > 0 && amount > 0
+            ? Math.round((amount / noOfDays) * 100) / 100
+            : 0
+
+      return {
+        action: req.body?.action ?? 'create',
+        docNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        destination,
+        noOfDays,
+        employeeNo: user.employeeNo,
+        advanceType,
+        dutyArea: req.body?.dutyArea ?? '',
+        amount,
+        dailyRate,
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -401,22 +716,36 @@ const imprestSurrender: ModuleSpec = {
     cancel: 'CancelImprestSurrender',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      docNo: no,
-      imprestIssueDocNo: req.body?.imprestIssueDocNo ?? req.body?.imprest ?? '',
-      myUserID: user.userID,
-      employeeNo: user.employeeNo,
-      imprestNo: user.imprestNo ?? '',
-      myAction: no ? 'update' : 'create',
-      receivedFrom: user.userID,
-      pVNo: '',
-    }),
+    saveHeader: ({ req, user, no }) => {
+      const actualReturnDate = formatBcSoapDate(
+        String(req.body?.actualReturnDate ?? req.body?.ActualReturnDate ?? ''),
+      )
+      if (!actualReturnDate || actualReturnDate.startsWith('0001-01-01')) {
+        throw Object.assign(
+          new Error(
+            'Actual Return Date is required. Business Central uses it to calculate Actual Travel Days before you can enter Actual Spent.',
+          ),
+          { status: 422 },
+        )
+      }
+      return {
+        docNo: no,
+        imprestIssueDocNo: req.body?.imprestIssueDocNo ?? req.body?.imprest ?? '',
+        myUserID: user.userID,
+        employeeNo: user.employeeNo,
+        imprestNo: user.imprestNo ?? '',
+        myAction: no ? 'update' : 'create',
+        receivedFrom: user.userID,
+        pVNo: '',
+        actualReturnDate,
+      }
+    },
     saveLine: ({ req, no }) => ({
       lineNo: Number(req.body?.lineNo ?? 0),
       accountNo: req.body?.accountNo ?? '',
       docNo: no,
       actualSpent: Number(req.body?.actualSpent ?? 0),
-      cashReceiptNo: req.body?.cashReceiptNo ?? '',
+      cashReceiptNo: normalizeImprestSurrenderCashReceiptNo(req.body?.cashReceiptNo),
       cashReceiptAmount: Number(req.body?.cashReceiptAmount ?? 0),
     }),
     submit: ({ no }) => ({ docNo: no }),
@@ -451,33 +780,72 @@ const staffClaim: ModuleSpec = {
   },
   params: {
     saveHeader: async ({ req, user, no }) => {
-      const dims = await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
+      await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
         department: user.department,
+        departmentName: user.departmentName,
         branchCode: user.branchCode,
       })
       const claimDescription = String(
         req.body?.purpose ?? req.body?.claimDescription ?? req.body?.description ?? '',
       ).trim()
+      const claimDateRaw = String(req.body?.claimDate ?? '')
+      if (!isErpWorkingDate(claimDateRaw)) {
+        throw Object.assign(new Error('Claim date must be the current working date'), { status: 400 })
+      }
+      const departmentCode = await resolveFinanceDepartmentCodeForSoap(user.employeeNo, {
+        department: user.department,
+        departmentName: user.departmentName,
+        branchCode: user.branchCode,
+      })
+      if (!departmentCode) {
+        throw Object.assign(
+          new Error(
+            'Your Business Central employee record has no department dimension. Ask HR to set Global Dimension 1 (department) on your employee card, then log out and sign in again.',
+          ),
+          { status: 422, code: 'EMPLOYEE_DEPARTMENT_MISSING' },
+        )
+      }
       const payload: Record<string, unknown> = {
         action: no ? 'edit' : 'create',
         reqNo: no,
         staffNo: user.employeeNo,
         claimDescription,
-        claimDate: formatBcSoapDate(String(req.body?.claimDate ?? '')),
+        claimDate: formatBcSoapDate(claimDateRaw),
         myUserID: user.userID,
+        department: departmentCode,
       }
-      if (dims.departmentCode) payload.department = dims.departmentCode
       return payload
     },
-    saveLine: ({ req, no }) => {
+    saveLine: async ({ req, no }) => {
       const claimType = claimTypeCode(req.body?.claimType)
       const medical = isMedicalClaimType(claimType)
+      const other = isOtherClaimType(claimType)
+      let accountNo = String(req.body?.accountNo ?? '').trim()
+      if (!accountNo) accountNo = await lookupClaimTypeGlAccount(claimType)
+      if (!accountNo) {
+        throw Object.assign(
+          new Error(
+            `No G/L account is mapped to claim type "${claimType}" in Business Central. Ask finance to set the G/L account on Receipts & Payment Types.`,
+          ),
+          { status: 422 },
+        )
+      }
+      const amount = other
+        ? Number(req.body?.amount ?? req.body?.amountToRefund ?? req.body?.grossAmount ?? 0)
+        : medical
+          ? Number(
+              req.body?.amountToRefund ??
+                req.body?.amount ??
+                req.body?.grossAmount ??
+                0,
+            )
+          : Number(req.body?.amount ?? req.body?.grossAmount ?? 0)
       const payload: Record<string, unknown> = {
         action: req.body?.action ?? 'create',
-        amount: Number(req.body?.amount ?? req.body?.grossAmount ?? 0),
+        amount,
         reqNo: no,
         claimType,
-        accountNo: req.body?.accountNo ?? '',
+        accountNo,
         medicalAmount: medical ? Number(req.body?.medicalAmount ?? 0) : 0,
         claimReceiptNo: req.body?.claimReceiptNo ?? '',
         expenditureDescription:
@@ -520,6 +888,7 @@ const pettyCash: ModuleSpec = {
   ownerSource: 'employeeNo',
   extraListFilter: `PaymentType eq 'Petty Cash'`,
   lineService: 'QyPaymentLine',
+  lineFallbackServices: ['QyPaymentLines', 'PaymentLines'],
   lineHeaderField: 'No',
   soap: {
     saveHeader: 'FnPettyCashHeader',
@@ -531,8 +900,9 @@ const pettyCash: ModuleSpec = {
   params: {
     saveHeader: ({ req, user, no }) => ({
       myAction: no ? 'edit' : 'create',
-      requiredDate:
-        req.body?.dateNeeded ?? req.body?.requiredDate ?? req.body?.requestDate ?? '',
+      requiredDate: formatBcSoapDate(
+        String(req.body?.dateNeeded ?? req.body?.requiredDate ?? req.body?.requestDate ?? ''),
+      ),
       staffNo: user.employeeNo,
       myUserId: user.userID,
       narration:
@@ -588,14 +958,16 @@ const interBankTransfer: ModuleSpec = {
       myUserId: user.userID,
       staffNo: user.employeeNo,
       myAction: no ? 'edit' : 'create',
-      sector: req.body?.sector ?? '',
+      // Leave org blank — AL stamps Sector/Department/Branch from Employee No only.
+      // Sending portal org codes made BC reject: Branch when Department already selected.
+      sector: '',
       remarks: req.body?.remarks ?? '',
-      division: req.body?.division ?? '',
-      department: req.body?.department ?? '',
+      division: '',
+      department: '',
       dateCreated: req.body?.dateCreated ?? '',
       sourceAmount: Number(req.body?.sourceAmount ?? 0),
-      payingAccount: req.body?.payingAccount ?? '',
-      receivingAmount: Number(req.body?.receivingAmount ?? 0),
+      payingAccount: '',
+      receivingAmount: Number(req.body?.receivingAmount ?? req.body?.sourceAmount ?? 0),
       receivingAccount: req.body?.receivingAccount ?? '',
       interBankTransferNo: no,
     }),
@@ -614,6 +986,7 @@ const storeRequisition: ModuleSpec = {
   module: 'store-requisition',
   headerService: 'QyStoreRequisitionHeader',
   headerTableId: 50575,
+  supportsAttachments: true,
   ownerField: 'UserID',
   ownerSource: 'userID',
   lineService: 'QyStoreRequisitionLines',
@@ -644,7 +1017,19 @@ const storeRequisition: ModuleSpec = {
         req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '',
       ).trim(),
     }),
-    saveLine: async ({ req, no }) => {
+    saveLine: async ({ req, user, no }) => {
+      const itemNo = String(req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '')
+      const quantity =
+        storeLineTypeCode(req.body?.type) === 1
+          ? Number(req.body?.quantity ?? 0)
+          : 0
+      await assertNoDuplicateStoreLine(
+        user,
+        no,
+        itemNo,
+        quantity,
+        String(req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '').trim(),
+      )
       // ERP parity: BC's Store Requisition lines subform links lines to the
       // HEADER's Issuing Store — a line saved with a different store becomes
       // invisible on the BC page. Prefer the header's store for every line;
@@ -703,11 +1088,20 @@ const purchaseRequisition: ModuleSpec = {
   module: 'purchase-requisition',
   headerService: 'QyPurchaseHeader',
   headerTableId: 52121800,
+  supportsAttachments: true,
   ownerField: 'AssignedUserID',
   ownerSource: 'userID',
   extraListFilter: `DocApprovalType eq 'Requisition'`,
-  lineService: 'QyPurchaseLine',
-  lineHeaderField: 'Document_No_',
+  // Dedicated query is installed and published by the Felix AL package. The
+  // legacy QyPurchaseLine service was manually configured and can be absent or
+  // point at a different Purchase Line query, which made approvers see only the
+  // PR header with ETB 0 and no requested items.
+  lineService: 'QyPortalPurchaseLines',
+  // Existing HIJRA tenants can still have the original web-service name. The
+  // dedicated query is authoritative, but falling back keeps approval details
+  // populated during the AL upgrade/publish transition.
+  lineFallbackServices: ['QyPurchaseLine'],
+  lineHeaderField: 'DocumentNo',
   soap: {
     saveHeader: 'PurchaseRequisitionHeader',
     saveLine: 'PurchaseRequisitionLine',
@@ -737,29 +1131,38 @@ const purchaseRequisition: ModuleSpec = {
         req.body?.requestingDepartment ?? req.body?.departmentCode ?? '',
       ).trim(),
     }),
-    saveLine: ({ req, no }) => ({
-      action: req.body?.action ?? 'create',
-      reqNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      itemNo: req.body?.itemNo ?? req.body?.itemCode ?? '',
-      quantity: Number(req.body?.quantity ?? 0),
-      location: req.body?.whereNeeded ?? req.body?.location ?? '',
-      type: purchaseLineTypeCode(req.body?.type),
-      procurementPlan: req.body?.procurementPlan ?? '',
-      reasonForRequest:
-        req.body?.reason ??
-        req.body?.reasonForRequest ??
-        req.body?.description ??
-        req.body?.specification ??
-        '',
-      // R4: free-text specification the requestor types for FA/Service/Item
-      // lines; AL writes it to Purchase Line "Description" (overriding the
-      // value auto-filled from Validate("No.")) when non-blank. AL 1.0.2.361+
-      // declares the parameter, so it must always be present.
-      specification: String(
-        req.body?.specification ?? req.body?.itemDescription ?? '',
-      ).trim(),
-    }),
+    saveLine: async ({ req, user, no }) => {
+      const itemNo = String(req.body?.itemNo ?? req.body?.itemCode ?? '')
+      const quantity = Number(req.body?.quantity ?? 0)
+      await assertNoDuplicatePurchaseLine(user, no, itemNo, quantity)
+      return {
+        action: req.body?.action ?? 'create',
+        reqNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        itemNo,
+        quantity,
+        location: req.body?.whereNeeded ?? req.body?.location ?? '',
+        type: purchaseLineTypeCode(req.body?.type),
+        procurementPlan: req.body?.procurementPlan ?? '',
+        reasonForRequest:
+          req.body?.reason ??
+          req.body?.reasonForRequest ??
+          req.body?.description ??
+          req.body?.specification ??
+          '',
+        // R4: free-text specification the requestor types for FA/Service/Item
+        // lines; AL writes it to Purchase Line "Description" (overriding the
+        // value auto-filled from Validate("No.")) when non-blank. AL 1.0.2.361+
+        // declares the parameter, so it must always be present.
+        specification: String(
+          req.body?.specification ??
+            req.body?.itemDescription ??
+            req.body?.reasonForRequest ??
+            req.body?.reason ??
+            '',
+        ).trim(),
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -787,7 +1190,8 @@ const purchaseRequisition: ModuleSpec = {
 const transport: ModuleSpec = {
   module: 'transport',
   headerService: 'QyTransportRequisition',
-  headerTableId: 61801,
+  headerTableId: 50863,
+  supportsAttachments: true,
   ownerField: 'Requested_By',
   ownerSource: 'userID',
   headerKey: 'Transport_Requisition_No',
@@ -848,12 +1252,12 @@ const transport: ModuleSpec = {
     submit: ({ user, no }) => ({
       reqNo: no,
       employeeNo: user.employeeNo,
-      tableID: 61801,
+      tableID: 50863,
     }),
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
-      tableID: 61801,
+      tableID: 50863,
     }),
   },
 }
@@ -882,12 +1286,22 @@ function fuelMaintenanceRequestTypeCode(row: ODataRecord) {
 
 /** HIJRA OData uses `Type` = Maintenance; other sites may use numeric RequestType. */
 function isMaintenanceRequestRow(row: ODataRecord) {
-  const docType = String(row.Type ?? row.DocumentType ?? row.Document_Type ?? '')
+  const docType = String(
+    row.Type ?? row.Type_Field ?? row.DocumentType ?? row.Document_Type ?? '',
+  )
     .trim()
     .toLowerCase()
-  if (docType === 'maintenance') return true
+  if (docType === 'maintenance' || docType === '1') return true
   const type = fuelMaintenanceRequestTypeCode(row)
-  return type === 1 || type === 2
+  if (type === 1 || type === 2) return true
+  const description = String(
+    row.IssueDescription ?? row.MaintenanceDescription ?? row.Description ?? '',
+  )
+  return (
+    /\|\s*Item:/i.test(description) &&
+    /\|\s*Priority:/i.test(description) &&
+    /\|\s*Location:/i.test(description)
+  )
 }
 
 function isFuelRequestRow(row: ODataRecord) {
@@ -902,7 +1316,19 @@ function isFuelRequestRow(row: ODataRecord) {
 const FUEL_MAINTENANCE_MODULES = new Set(['fuel', 'maintenance'])
 
 function portalOwnerFieldKeys(spec: ModuleSpec) {
-  return [...new Set([spec.ownerField, 'Requester_ID', 'EmployeeNo', 'Employee_No', 'PreparedBy'])]
+  return [
+    ...new Set([
+      spec.ownerField,
+      'RequestedBy',
+      'Requested_By',
+      'Requester_ID',
+      'EmployeeNo',
+      'Employee_No',
+      'EmpoyeeNo',
+      'Empoyee_No',
+      'PreparedBy',
+    ]),
+  ]
 }
 
 function rowOwnedByUser(row: ODataRecord, spec: ModuleSpec, user: AuthUser) {
@@ -919,9 +1345,70 @@ function rowOwnedByUser(row: ODataRecord, spec: ModuleSpec, user: AuthUser) {
   return false
 }
 
+function transportRowTimestamp(row: ODataRecord) {
+  const date = fieldText(row, ['Date_of_Request', 'DateOfRequest', 'Date'])
+    .slice(0, 10)
+  const time = fieldText(row, ['Time_Requested', 'TimeRequested', 'Time_Requisition_Received'])
+  const parsed = Date.parse(`${date || '0001-01-01'}T${time.slice(0, 8) || '00:00:00'}`)
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+
+const TRANSPORT_HEADER_FILTER_KEYS = [
+  'Transport_Requisition_No',
+  'TransportRequisitionNo',
+  'RequisitionNo',
+  'Requisition_No',
+] as const
+
+/** Resolve the transport document number from any known QyTransportRequisition column alias. */
+export function transportDocumentNoFromRow(row: ODataRecord) {
+  return fieldText(row, [...TRANSPORT_HEADER_FILTER_KEYS, 'No'])
+}
+
+export function transportRowsForUser(rows: ODataRecord[], user: AuthUser) {
+  return rows
+    .filter((row) => rowOwnedByUser(row, transport, user))
+    .sort((left, right) => {
+      const leftTimestamp = transportRowTimestamp(left)
+      const rightTimestamp = transportRowTimestamp(right)
+      if (leftTimestamp !== rightTimestamp) return rightTimestamp > leftTimestamp ? 1 : -1
+      return transportDocumentNoFromRow(right).localeCompare(transportDocumentNoFromRow(left), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    })
+}
+
+export function mergeFuelMaintenanceExtras(
+  rows: ODataRecord[],
+  extras: ODataRecord[],
+) {
+  const extrasByRequisition = new Map(
+    extras
+      .map((row) => [
+        fieldText(row, ['RequisitionNo', 'Requisition_No']),
+        row,
+      ] as const)
+      .filter(([no]) => Boolean(no)),
+  )
+  return rows.map((row) => {
+    const no = fieldText(row, ['RequisitionNo', 'Requisition_No'])
+    return {
+      ...row,
+      ...(extrasByRequisition.get(no) ?? {}),
+    }
+  })
+}
+
 async function fetchFuelMaintenanceRows(spec: ModuleSpec, user: AuthUser) {
-  const fetched = await fetchOData(spec.headerService, {})
-  let rows = Array.isArray(fetched) ? fetched : []
+  const [fetched, fetchedExtras] = await Promise.all([
+    fetchOData(spec.headerService, {}),
+    fetchOData('QyPortalFuelMaintExtra', {}).catch(() => []),
+  ])
+  let rows = mergeFuelMaintenanceExtras(
+    Array.isArray(fetched) ? fetched : [],
+    Array.isArray(fetchedExtras) ? fetchedExtras : [],
+  )
   if (!spec.unscopedList) {
     rows = rows.filter((row) => rowOwnedByUser(row, spec, user))
   }
@@ -945,18 +1432,27 @@ function fuelMaintenanceSaveHeader(
     no: string
   },
 ) {
+  const requestType =
+    module === 'maintenance'
+      ? maintenanceTypeCode(req.body?.requestType)
+      : fuelTypeCode(req.body?.requestType)
+  const vehicleNo = String(req.body?.vehicleNo ?? '').trim()
+  const faTagNumber = String(req.body?.faTagNumber ?? '').trim()
   return {
     myAction: no ? 'edit' : 'create',
     recId: no ? String(req.body?.recId ?? '') : '',
     staffNo: user.employeeNo,
     purpose: req.body?.purpose ?? req.body?.issueDescription ?? '',
     quantity: Number(req.body?.quantity ?? req.body?.liters ?? 0),
-    requestType:
-      module === 'maintenance'
-        ? maintenanceTypeCode(req.body?.requestType)
-        : fuelTypeCode(req.body?.requestType),
+    requestType,
     cardNo: req.body?.cardNo ?? '',
-    vehicleNo: req.body?.vehicleNo ?? req.body?.faTagNumber ?? '',
+    // BC's legacy SOAP method calls this shared parameter vehicleNo. For
+    // fixed-asset maintenance it must carry the real FA tag, while vehicle
+    // service must carry only the registration number.
+    vehicleNo:
+      module === 'maintenance' && requestType === 1
+        ? faTagNumber
+        : vehicleNo,
     fuelDealer: req.body?.fuelDealer ?? '',
     price: Number(req.body?.price ?? 0),
   }
@@ -972,6 +1468,7 @@ const fuelRequest: ModuleSpec = {
   module: 'fuel',
   headerService: 'QyFuelMaintenanceRequests',
   headerTableId: 50865,
+  supportsAttachments: true,
   ownerField: 'RequesterID',
   ownerSource: 'employeeNo',
   headerKey: 'RequisitionNo',
@@ -988,6 +1485,7 @@ const maintenance: ModuleSpec = {
   module: 'maintenance',
   headerService: 'QyFuelMaintenanceRequests',
   headerTableId: 50865,
+  supportsAttachments: true,
   ownerField: 'RequesterID',
   ownerSource: 'employeeNo',
   headerKey: 'RequisitionNo',
@@ -1010,6 +1508,7 @@ const transferOrder: ModuleSpec = {
   module: 'transfer-order',
   headerService: 'QyTransferOrderHeader',
   headerTableId: 5740,
+  supportsAttachments: true,
   ownerField: 'EmployeeNo',
   ownerSource: 'employeeNo',
   lineService: 'QyTransferLines',
@@ -1069,15 +1568,24 @@ const workTickets: ModuleSpec = {
     deleteLine: 'DeleteWorkTicketLine',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      ticketNo: no,
-      employeeNo: user.employeeNo,
-      previousWTNo: req.body?.previousTicketNo ?? req.body?.previousWTNo ?? '',
-      gkNo: req.body?.gkNo ?? '',
-      type: req.body?.type ?? '',
-      department: req.body?.department ?? user.department ?? '',
-    }),
+    saveHeader: async ({ req, user, no }) => {
+      const departmentCode = await resolveFinanceDepartmentCodeForSoap(user.employeeNo, {
+        department: user.department,
+        departmentName: user.departmentName,
+        branchCode: user.branchCode,
+      })
+      const rawType = String(req.body?.type ?? '').trim()
+      const type = rawType.length > 10 ? rawType.slice(0, 10) : rawType
+      return {
+        action: no ? 'edit' : 'create',
+        ticketNo: no,
+        employeeNo: user.employeeNo,
+        previousWTNo: req.body?.previousTicketNo ?? req.body?.previousWTNo ?? '',
+        gkNo: req.body?.gkNo ?? '',
+        type,
+        department: departmentCode || String(user.department ?? '').trim(),
+      }
+    },
     saveLine: ({ req, user, no }) => ({
       action: req.body?.action ?? 'create',
       ticketNo: no,
@@ -1120,8 +1628,9 @@ const training: ModuleSpec = {
       myAction: no ? 'edit' : 'create',
       docNo: no,
       purpose: req.body?.comments ?? req.body?.justification ?? '',
-      trainingCourseCode:
-        req.body?.trainingNeed ?? req.body?.trainingCourseCode ?? req.body?.trainingTitle ?? '',
+      trainingCourseCode: trainingCourseCodeForBc(
+        req.body?.trainingCourseCode ?? req.body?.trainingNeed ?? req.body?.trainingTitle ?? '',
+      ),
       myUserID: user.userID,
       employeeNo: user.employeeNo,
     }),
@@ -1210,6 +1719,7 @@ const gatePass: ModuleSpec = {
   module: 'gate-pass',
   headerService: 'QyGatePass',
   headerTableId: 50296,
+  supportsAttachments: true,
   ownerField: 'EmployeeNo',
   ownerSource: 'employeeNo',
   unscopedList: true,
@@ -1251,18 +1761,92 @@ const gatePass: ModuleSpec = {
         gpComment: req.body?.comment ?? '',
       }
     },
-    submit: async ({ user, no }) => ({
-      gatePassNo: no,
-      transferNo: await gatePassTransferNo(no),
-      tableID: 50296,
-      employeeNo: user.employeeNo,
+    submit: ({ req, user, no }) => gatePassSubmitParams(req, user, no),
+    cancel: ({ req, user, no }) => gatePassSubmitParams(req, user, no),
+  },
+}
+
+const ASSET_TRANSFER_SERVICE_NAME = 'CuPortalAssetTransfer'
+const assetTransferSoapEndpoint: SoapEndpoint = {
+  url:
+    config.BC_SOAP_ASSET_TRANSFER_CODEUNIT_URL ??
+    deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, ASSET_TRANSFER_SERVICE_NAME),
+  namespace:
+    config.BC_SOAP_ASSET_TRANSFER_NAMESPACE ??
+    codeunitSoapNamespace(ASSET_TRANSFER_SERVICE_NAME),
+}
+
+/** Facility UAT R49-R54: a real Asset Transfer, separate from inventory Transfer Orders. */
+const assetTransfer: ModuleSpec = {
+  module: 'asset-transfer',
+  headerService: 'QyAssetTransfer',
+  headerTableId: 50278,
+  ownerField: 'RaisedBy',
+  ownerSource: 'userID',
+  headerKey: 'No',
+  lineService: 'QyAssetTransferTools',
+  lineHeaderField: 'TransferNo',
+  soapEndpoint: assetTransferSoapEndpoint,
+  soap: {
+    saveHeader: 'CreateAssetTransfer',
+    editHeader: 'UpdateAssetTransfer',
+    saveLine: 'AddAssetTransferTool',
+    deleteLine: 'DeleteAssetTransferTool',
+    submit: 'AssetTransferApprovalAction',
+    cancel: 'AssetTransferApprovalAction',
+  },
+  decideMode: 'submitCancelOnSameMethod',
+  params: {
+    saveHeader: ({ req, user, no }) => ({
+      myUserID: user.userID,
+      ...(no ? { docNo: no } : {}),
+      transferType: numericCode(req.body?.transferType, { internal: 1, external: 2 }),
+      typeOfTransfer: numericCode(req.body?.typeOfTransfer, { permanent: 1, temporary: 2 }),
+      assetType: numericCode(req.body?.assetType, { item: 1, 'fixed asset': 2 }),
+      assetNo: req.body?.assetNo ?? '',
+      toEmployeeNo: req.body?.toEmployeeNo ?? '',
+      toLocation: req.body?.toLocation ?? '',
+      destinationLocation: req.body?.destinationLocation ?? '',
+      partnerName: req.body?.partnerName ?? '',
+      reasonForTransfer: numericCode(req.body?.reasonForTransfer, {
+        lost: 1,
+        damaged: 2,
+        resignation: 3,
+        other: 4,
+      }),
+      reasonText: req.body?.reason ?? '',
+      assetCondition: numericCode(req.body?.assetCondition, {
+        good: 1,
+        fair: 2,
+        damaged: 3,
+      }),
+      // BC requires this separate field before Status can become Pending Approval.
+      // Older portal builds allowed it to be blank, so retain the entered detail
+      // and use the selected condition as a safe minimum for legacy/API clients.
+      assetConditionDescription: assetConditionDescriptionValue(
+        req.body?.assetConditionDescription,
+        req.body?.assetCondition,
+      ),
+      temporaryExpiryDate: req.body?.temporaryExpiryDate ?? '',
+      fromLocation: req.body?.fromLocation ?? '',
+      fromEmployeeNo: req.body?.fromEmployeeNo ?? '',
     }),
-    cancel: async ({ user, no }) => ({
-      gatePassNo: no,
-      transferNo: await gatePassTransferNo(no),
-      tableID: 50296,
-      employeeNo: user.employeeNo,
+    saveLine: async ({ req, user, no }) => {
+      const accessoryEntryNo = await resolveAssetTransferAccessoryEntryNo(req.body ?? {}, no, user)
+      await assertAssetTransferToolNotAlreadyAssigned(no, accessoryEntryNo, user)
+      return {
+        docNo: no,
+        accessoryEntryNo,
+        quantity: Number(req.body?.quantity ?? 0),
+        remarks: String(req.body?.remarks ?? ''),
+      }
+    },
+    deleteLine: ({ req, no }) => ({
+      docNo: no,
+      lineNo: Number(req.params.lineNo ?? 0),
     }),
+    submit: ({ no }) => ({ docNo: no, myAction: 'requestApproval' }),
+    cancel: ({ no }) => ({ docNo: no, myAction: 'cancelApproval' }),
   },
 }
 
@@ -1360,13 +1944,15 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       // Inter-Bank Transfer routes edits through a separate SOAP method.
       if (spec.module === 'inter-bank-transfer' && no) {
         methodName = 'FnUpdateInterBankTransfer'
+      } else if (no && spec.soap.editHeader) {
+        methodName = spec.soap.editHeader
       }
       const editBody = no
         ? await resolveRecIdHeaderEditBody(spec, user, no, body as Record<string, unknown>)
         : (body as Record<string, unknown>)
       ;(req as Request).body = editBody
       const params = await spec.params!.saveHeader!({ req, user, no })
-      const result = await callSoapMethod(methodName, params)
+      const result = await callModuleSoap(spec, methodName, params)
       res.json({
         ok: ok(result),
         no: result.returnValue ?? null,
@@ -1384,7 +1970,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
         const params = await spec.params!.saveLine!({ req, user, no })
-        const result = await callSoapMethod(spec.soap.saveLine!, params)
+        const result = await callModuleSoap(spec, spec.soap.saveLine!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
       }),
     )
@@ -1397,7 +1983,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
         const params = await spec.params!.deleteLine!({ req, user, no })
-        const result = await callSoapMethod(spec.soap.deleteLine!, params)
+        const result = await callModuleSoap(spec, spec.soap.deleteLine!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
       }),
     )
@@ -1410,7 +1996,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
         const params = await spec.params!.submit!({ req, user, no })
-        const result = await callSoapMethod(spec.soap.submit!, params)
+        const result = await callModuleSoap(spec, spec.soap.submit!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
       }),
     )
@@ -1423,7 +2009,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
         const params = await spec.params!.cancel!({ req, user, no })
-        const result = await callSoapMethod(spec.soap.cancel!, params)
+        const result = await callModuleSoap(spec, spec.soap.cancel!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
       }),
     )
@@ -1464,6 +2050,7 @@ export const MODULE_SPECS: ModuleSpec[] = [
   training,
   salaryAdvance,
   gatePass,
+  assetTransfer,
 ]
 
 export function findModuleSpec(module: string) {
@@ -1482,9 +2069,11 @@ const FRONTEND_MODULE_ALIASES: Record<string, string> = {
   transport: 'transport',
   maintenance: 'maintenance',
   transferOrder: 'transfer-order',
+  workTickets: 'work-tickets',
   training: 'training',
   salaryAdvance: 'salary-advance',
   gatePass: 'gate-pass',
+  assetTransfer: 'asset-transfer',
 }
 
 export function findFrontendModuleSpec(module: string) {
@@ -1501,8 +2090,10 @@ const MODULE_APPROVAL_KEYS: Partial<Record<string, ApprovalTableKey>> = {
   'store-requisition': 'storeRequisition',
   fuel: 'fuel',
   'transfer-order': 'transferOrder',
+  'work-tickets': 'workTicket',
   'salary-advance': 'salaryAdvance',
   'gate-pass': 'gatePass',
+  'asset-transfer': 'assetTransfer',
   transport: 'transport',
 }
 
@@ -1592,6 +2183,55 @@ function sortApprovalEntries(rows: ODataRecord[]) {
   })
 }
 
+function validBcDateTime(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.startsWith('0001-01-01')) return null
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+/**
+ * Purchase quote numbers can be reused after a BC number-series reset while
+ * Approval Entry retains the old document's completed workflow. Keep only
+ * entries that belong to the Purchase Requisition/Purchase Header tables and
+ * were submitted after this exact Purchase Header was created.
+ */
+export function filterCurrentPortalApprovalEntries(
+  spec: ModuleSpec,
+  document: ODataRecord | undefined,
+  rows: ODataRecord[],
+) {
+  if (spec.module !== 'purchase-requisition' || !document) return rows
+
+  const allowedTableIds = new Set<number>([
+    APPROVAL_TABLE_IDS.purchaseRequisition,
+    APPROVAL_TABLE_IDS.purchaseOrder,
+  ])
+  const tableScoped = rows.filter((row) => {
+    const tableId = Number(row.TableID ?? row.TableId)
+    return Number.isFinite(tableId) && allowedTableIds.has(tableId)
+  })
+
+  const headerCreatedAt = validBcDateTime(
+    fieldText(document, ['SystemCreatedAt', 'CreatedDateTime', 'Created_Date_Time']),
+  )
+  if (headerCreatedAt === null) return tableScoped
+
+  return tableScoped.filter((row) => {
+    const approvalSentAt = validBcDateTime(
+      fieldText(row, [
+        'DateTimeSentforApproval',
+        'Date_Time_Sent_for_Approval',
+        'DateTimeSentForApproval',
+      ]),
+    )
+    // Current BC Approval Entry rows always carry the sent timestamp. If BC
+    // cannot prove when an entry was submitted, it must not be allowed to
+    // promote a newly-created header that happens to reuse the same number.
+    return approvalSentAt !== null && approvalSentAt >= headerCreatedAt
+  })
+}
+
 async function collectApprovalEntriesForCandidate(spec: ModuleSpec, candidate: string) {
   const rows: ODataRecord[] = []
   rows.push(...(await queryApprovalEntries(portalApprovalEntryFilter(spec, candidate))))
@@ -1646,7 +2286,11 @@ export async function fetchPortalApprovalEntries(
     collected.push(...(await collectApprovalEntriesForCandidate(spec, candidate)))
   }
 
-  collected = sortApprovalEntries(dedupeApprovalEntries(collected))
+  collected = filterCurrentPortalApprovalEntries(
+    spec,
+    document,
+    sortApprovalEntries(dedupeApprovalEntries(collected)),
+  )
   if (collected.length) return collected
 
   if (document) {
@@ -1688,6 +2332,14 @@ export async function listPortalModuleRows(
 
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
     return fetchFuelMaintenanceRows(spec, user)
+  }
+  if (spec.module === 'transport') {
+    // Fetch then scope locally using both BC ownership fields. Some HIJRA rows
+    // contain Requested_By while newer/legacy routines populate Empoyee_No.
+    // Sorting here makes the just-created document visible at the top instead
+    // of below years of ascending OData results.
+    const fetched = await fetchOData(spec.headerService, {})
+    return transportRowsForUser(Array.isArray(fetched) ? fetched : [], user)
   }
   const filterParts =
     spec.module === 'gate-pass'
@@ -1740,6 +2392,46 @@ export async function getPortalModuleDocument(
     return null
   }
 
+  if (spec.module === 'purchase-requisition') {
+    for (const key of [headerKey, 'No', 'No_', 'DocumentNo']) {
+      const rows = (await fetchOData(spec.headerService, {
+        $filter: `${key} eq '${odataString(no)}'${ownerFilter}`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+    }
+    return null
+  }
+
+  if (spec.module === 'transport') {
+    const wanted = no.trim().toUpperCase()
+    for (const key of TRANSPORT_HEADER_FILTER_KEYS) {
+      try {
+        const rows = (await fetchOData(spec.headerService, {
+          $filter: `${key} eq '${odataString(no)}'${ownerFilter}`,
+          $top: 1,
+        })) as ODataRecord[] | null
+        const row = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+        if (!row) continue
+        if (enforceOwner && !spec.unscopedList && !rowOwnedByUser(row, spec, user)) return null
+        return row
+      } catch {
+        // Some HIJRA query publications reject OData filters on QyTransportRequisition.
+        break
+      }
+    }
+    // Mirror the transport list: unscoped read then match by document number.
+    const fetched = (await fetchOData(spec.headerService, { $top: 5000 }).catch(
+      () => [] as ODataRecord[],
+    )) as ODataRecord[]
+    const match = fetched.find(
+      (row) => transportDocumentNoFromRow(row).trim().toUpperCase() === wanted,
+    )
+    if (!match) return null
+    if (enforceOwner && !spec.unscopedList && !rowOwnedByUser(match, spec, user)) return null
+    return match
+  }
+
   if (spec.module === 'salary-advance') {
     const customerNo = await resolveSalaryAdvanceCustomerNo(user, {})
     if (!customerNo) return null
@@ -1757,20 +2449,115 @@ export async function getPortalModuleDocument(
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
 }
 
+async function fetchImprestSurrenderLineRows(docNo: string): Promise<ODataRecord[]> {
+  const services = [
+    'ImprestSurrenderDetails',
+    'QyImprestSurrenderDetails',
+    'QyImprestSurrenderLines',
+  ]
+  const filterKeys = [
+    'SurrenderDocNo',
+    'Surrender_Doc_No',
+    'Surrender_Doc_No_',
+    'DocNo',
+    'Doc_No',
+  ]
+  const mergedByAccount = new Map<string, ODataRecord>()
+
+  for (const service of services) {
+    for (const filterKey of filterKeys) {
+      try {
+        const rows = await fetchOData(service, {
+          $filter: `${filterKey} eq '${odataString(docNo)}'`,
+        })
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        for (const row of rows) {
+          const account = imprestSurrenderAccountNo(row as Record<string, unknown>)
+          const key = account || `entry-${imprestSurrenderLineNo(row as Record<string, unknown>)}`
+          const existing = mergedByAccount.get(key)
+          mergedByAccount.set(
+            key,
+            mergeImprestSurrenderODataRow(
+              existing as Record<string, unknown> | undefined,
+              row as Record<string, unknown>,
+            ),
+          )
+        }
+      } catch {
+        // try the next published BC alias
+      }
+    }
+  }
+
+  return Array.from(mergedByAccount.values())
+}
+
+async function fetchImprestSurrenderSpendLineRows(docNo: string): Promise<ODataRecord[]> {
+  const services = ['ImprestSurrenderDetails', 'QyImprestSurrenderDetails']
+  const filterKeys = [
+    'SurrenderDocNo',
+    'Surrender_Doc_No',
+    'Surrender_Doc_No_',
+    'DocNo',
+    'Doc_No',
+  ]
+  const mergedByAccount = new Map<string, ODataRecord>()
+
+  for (const service of services) {
+    for (const filterKey of filterKeys) {
+      try {
+        const rows = await fetchOData(service, {
+          $filter: `${filterKey} eq '${odataString(docNo)}'`,
+        })
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        for (const row of rows) {
+          const account = imprestSurrenderAccountNo(row as Record<string, unknown>)
+          const key = account || `entry-${imprestSurrenderLineNo(row as Record<string, unknown>)}`
+          const existing = mergedByAccount.get(key)
+          mergedByAccount.set(
+            key,
+            mergeImprestSurrenderODataRow(
+              existing as Record<string, unknown> | undefined,
+              row as Record<string, unknown>,
+            ),
+          )
+        }
+      } catch {
+        // try the next published BC alias
+      }
+    }
+  }
+
+  return Array.from(mergedByAccount.values())
+}
+
 /** Read the document lines exactly as the ESS controllers do, including transport's two passenger pages. */
 export async function listPortalModuleLines(
   spec: ModuleSpec,
   header: ODataRecord,
   no: string,
 ) {
+  if (isImprestSurrenderModule(spec.module)) {
+    return await fetchImprestSurrenderLineRows(no)
+  }
+
   if (spec.module === 'transport') {
+    const passengerFilter = async (service: string, keys: string[], value: string) => {
+      for (const key of keys) {
+        try {
+          const rows = await fetchOData(service, {
+            $filter: `${key} eq '${odataString(value)}'`,
+          })
+          if (Array.isArray(rows) && rows.length > 0) return rows
+        } catch {
+          // fall through to next alias
+        }
+      }
+      return [] as ODataRecord[]
+    }
     const [staffRows, externalRows] = await Promise.all([
-      fetchOData('PgTransportStaffPassengers', {
-        $filter: `Req_No eq '${odataString(no)}'`,
-      }).catch(() => [] as ODataRecord[]),
-      fetchOData('PgTransportExternalPassengers', {
-        $filter: `Transport_No eq '${odataString(no)}'`,
-      }).catch(() => [] as ODataRecord[]),
+      passengerFilter('PgTransportStaffPassengers', ['Req_No', 'ReqNo'], no),
+      passengerFilter('PgTransportExternalPassengers', ['Transport_No', 'TransportNo'], no),
     ])
     const staff = (Array.isArray(staffRows) ? staffRows : []).map((row) => ({
       ...row,
@@ -1790,15 +2577,59 @@ export async function listPortalModuleLines(
     return [...staff, ...external]
   }
 
+  if (spec.module === 'asset-transfer' && spec.lineService) {
+    const filterKeys = ['TransferNo', 'Transfer_No', 'Transfer_No_']
+    for (const key of filterKeys) {
+      try {
+        const rows = await fetchOData(spec.lineService, {
+          $filter: `${key} eq '${odataString(no)}'`,
+        })
+        if (Array.isArray(rows) && rows.length > 0) return rows
+      } catch {
+        // fall through to next alias
+      }
+    }
+    const fetched = (await fetchOData(spec.lineService, { $top: 5000 }).catch(
+      () => [] as ODataRecord[],
+    )) as ODataRecord[]
+    const wanted = no.trim().toUpperCase()
+    return fetched.filter((row) =>
+      filterKeys.some(
+        (key) => fieldText(row, [key]).trim().toUpperCase() === wanted,
+      ),
+    )
+  }
+
   const gatePassBinding = spec.module === 'gate-pass' ? gatePassLineBinding(header, no) : null
   const lineService = gatePassBinding?.lineService ?? spec.lineService
   const lineHeaderField = gatePassBinding?.lineHeaderField ?? spec.lineHeaderField
   const lineDocumentNo = gatePassBinding?.documentNo ?? no
   if (!lineService || !lineHeaderField) return []
-  const rows = await fetchOData(lineService, {
-    $filter: `${lineHeaderField} eq '${odataString(lineDocumentNo)}'`,
-  }).catch(() => [] as ODataRecord[])
-  return Array.isArray(rows) ? rows : []
+  const services = [lineService, ...(spec.lineFallbackServices ?? [])]
+  const lineFilterKeys =
+    spec.module === 'purchase-requisition'
+      ? ['DocumentNo', 'Document_No_', 'Document_No']
+      : [lineHeaderField]
+  let firstError: unknown = null
+  for (const service of services) {
+    for (const filterKey of lineFilterKeys) {
+      try {
+        const rows = await fetchOData(service, {
+          $filter: `${filterKey} eq '${odataString(lineDocumentNo)}'`,
+        })
+        if (Array.isArray(rows) && rows.length > 0) return rows
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+  }
+
+  if (firstError) {
+    console.warn(
+      `[portal-lines] ${spec.module} ${lineDocumentNo}: no published line service returned rows (${services.join(', ')})`,
+    )
+  }
+  return []
 }
 
 function lineHasContent(line: Record<string, unknown>) {
@@ -1874,18 +2705,39 @@ export async function createPortalModuleRequest(
   const existingNumbers = spec.headerReturnsBoolean
     ? new Set((await readbackRows()).map((row) => fieldText(row, numberAliases)))
     : null
-  const headerParams = await spec.params.saveHeader({
-    req: headerRequest,
-    user,
-    no: '',
-  })
-  const headerResult = await callSoapMethod(spec.soap.saveHeader, headerParams)
-  if (!ok(headerResult)) {
-    throw Object.assign(new Error(`Business Central did not create the ${spec.module} request`), {
-      status: 502,
-    })
+  let no = ''
+  if (spec.module === 'gate-pass') {
+    const source = gatePassSourceFromQuery(
+      headerBody.gatePassSource ??
+        headerBody.source ??
+        headerBody.linkTo ??
+        headerBody.Linkto,
+    )
+    const sourceDocumentNo = fieldText(headerBody, [
+      'sourceDocumentNo',
+      'transferNo',
+      'TransferNo',
+      'Transfer_No',
+    ])
+    if (source === 'storeIssue' && sourceDocumentNo) {
+      no = await resolveStoreIssueGatePassNo(sourceDocumentNo)
+    }
   }
-  let no = String(headerResult.returnValue ?? '').trim()
+
+  if (!no) {
+    const headerParams = await spec.params.saveHeader({
+      req: headerRequest,
+      user,
+      no: '',
+    })
+    const headerResult = await callModuleSoap(spec, spec.soap.saveHeader, headerParams)
+    if (!ok(headerResult)) {
+      throw Object.assign(new Error(`Business Central did not create the ${spec.module} request`), {
+        status: 502,
+      })
+    }
+    no = String(headerResult.returnValue ?? '').trim()
+  }
   if (spec.headerReturnsBoolean) {
     no = ''
     for (let attempt = 0; attempt < 6 && !no; attempt += 1) {
@@ -1904,6 +2756,8 @@ export async function createPortalModuleRequest(
     )
   }
 
+  await recalculateImprestSurrenderSettlement(spec, no)
+
   if (spec.soap.saveLine && spec.params?.saveLine) {
     const lines = portalLineBodies(spec, body)
     for (let index = 0; index < lines.length; index += 1) {
@@ -1918,7 +2772,7 @@ export async function createPortalModuleRequest(
         user,
         no,
       })
-      const lineResult = await callSoapMethod(spec.soap.saveLine, lineParams)
+      const lineResult = await callModuleSoap(spec, spec.soap.saveLine, lineParams)
       if (!ok(lineResult)) {
         throw Object.assign(
           new Error(`Business Central created ${no}, but line ${index + 1} failed`),
@@ -1926,6 +2780,7 @@ export async function createPortalModuleRequest(
         )
       }
     }
+    await recalculateImprestSurrenderSettlement(spec, no)
   }
 
   for (const attachment of attachmentBodies(body)) {
@@ -1965,7 +2820,7 @@ export async function createPortalModuleRequest(
       user,
       no,
     })
-    const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
+    const submitResult = await callModuleSoap(spec, spec.soap.submit, submitParams)
     if (!ok(submitResult)) {
       throw Object.assign(
         new Error(`Business Central created ${no}, but approval submission failed`),
@@ -1997,9 +2852,456 @@ export async function cancelPortalModuleRequest(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.cancel, params)
+  const result = await callModuleSoap(spec, spec.soap.cancel, params)
   if (!soapActionOk(spec, result)) {
     throw Object.assign(new Error(`Business Central did not cancel ${no}`), { status: 502 })
+  }
+}
+
+export function purchaseBudgetErrorMessage(
+  error: unknown,
+  header: ODataRecord,
+  lines: ODataRecord[],
+  departmentKeys: string[] = [
+    'RequestingDepartment',
+    'Requesting_Department',
+    'Department',
+    'ShortcutDimension1Code',
+    'Shortcut_Dimension_1_Code',
+  ],
+) {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (
+    !/does not exist in the finali[sz]ed budget|is not included in (?:the )?(?:current )?finali[sz]ed budget|there is no finali[sz]ed budget for the item|no approved finali[sz]ed budget was found|budget exceeded|budget balance/i.test(
+      raw,
+    )
+  ) {
+    return ''
+  }
+
+  const matchingLine =
+    lines.find((line) => {
+      const description = fieldText(line, ['Description', 'description']).trim().toLowerCase()
+      return description.length > 0 && raw.toLowerCase().includes(description)
+    }) ??
+    lines[0] ??
+    {}
+  const itemNo = fieldText(matchingLine, [
+    'No',
+    'No_',
+    'ItemNo',
+    'Item_No',
+    'itemNo',
+  ])
+  const description = fieldText(matchingLine, ['Description', 'description'])
+  const department = fieldText(header, departmentKeys)
+  const itemLabel = itemNo
+    ? `${itemNo}${description ? ` (${description})` : ''}`
+    : description || 'This item'
+  const departmentLabel = department ? ` (${department})` : ''
+
+  // Keep short — Excel rule still enforced; message is for the end user.
+  return `Budget exceeded for ${itemLabel}${departmentLabel}. Choose a budgeted item or ask Finance to update the budget.`
+}
+
+function storeLineEstimatedAmount(line: ODataRecord) {
+  const lineAmount = fieldNumber(line, ['LineAmount', 'Line_Amount', 'lineAmount'])
+  if (lineAmount > 0) return lineAmount
+  const unitCost = fieldNumber(line, ['UnitCost', 'Unit_Cost', 'unitCost'])
+  const qty = fieldNumber(line, [
+    'Quantity',
+    'QuantityRequested',
+    'Quantity_Requested',
+    'quantity',
+    'quantityRequested',
+  ])
+  return unitCost > 0 && qty > 0 ? unitCost * qty : 0
+}
+
+export function assertStoreRequisitionBudgetLines(lines: ODataRecord[]) {
+  for (const line of lines) {
+    const balance = fieldNumber(line, ['BudgetBalance', 'Budget_Balance', 'budgetBalance'], NaN)
+    const itemNo = fieldText(line, ['No', 'No_', 'ItemNo', 'Item_No', 'itemNo'])
+    const description = fieldText(line, ['Description', 'description'])
+    const itemLabel = itemNo
+      ? `${itemNo}${description ? ` (${description})` : ''}`
+      : description || 'this item'
+    const estimated = storeLineEstimatedAmount(line)
+    if (Number.isFinite(balance) && balance < 0) {
+      throw Object.assign(
+        new Error(`Budget exceeded for requested item ${itemLabel}. Available balance: ${balance.toFixed(2)}.`),
+        { status: 422, code: 'STORE_BUDGET_EXCEEDED' },
+      )
+    }
+    if (Number.isFinite(balance) && estimated > 0 && estimated > balance + 0.01) {
+      throw Object.assign(
+        new Error(
+          `Budget exceeded for requested item ${itemLabel}. Available balance: ${balance.toFixed(2)}.`,
+        ),
+        { status: 422, code: 'STORE_BUDGET_EXCEEDED' },
+      )
+    }
+  }
+}
+
+function duplicateBlockingStatus(status: string) {
+  const normalized = status.trim().toLowerCase()
+  return !['cancelled', 'rejected', 'closed'].includes(normalized)
+}
+
+/**
+ * Excel SR_03 / PR_07: block duplicate items while another request is Open,
+ * Draft, Pending Approval, Submitted, or Approved. Only Rejected / Cancelled /
+ * Closed allow the same item again.
+ */
+export function storeDuplicateBlockingStatus(status: string) {
+  return duplicateBlockingStatus(status)
+}
+
+/** Excel PR_07 — same status gate as store requisition. */
+export function purchaseDuplicateBlockingStatus(status: string) {
+  return duplicateBlockingStatus(status)
+}
+
+function headerIssuingStore(row: ODataRecord) {
+  return fieldText(row, ['IssuingStore', 'Issuing_Store']).trim().toUpperCase()
+}
+
+function headerActivityTimestamp(row: ODataRecord) {
+  const raw = fieldText(row, [
+    'SystemCreatedAt',
+    'SystemCreatedAt',
+    'OrderDate',
+    'Order_Date',
+    'Needed_By_Date',
+    'Requestdate',
+    'RequestDate',
+    'Date',
+  ])
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+function lineItemNo(row: ODataRecord) {
+  return fieldText(row, ['No', 'No_', 'ItemNo', 'Item_No', 'itemNo', 'item']).trim().toUpperCase()
+}
+
+export async function assertNoDuplicatePurchaseLine(
+  user: AuthUser,
+  currentDocNo: string,
+  itemNo: string,
+  quantity: number,
+) {
+  const normalizedItem = itemNo.trim().toUpperCase()
+  if (!normalizedItem || quantity <= 0) return
+  const spec = findModuleSpec('purchase-requisition')
+  if (!spec) return
+  let headers: ODataRecord[] = []
+  try {
+    headers = await listPortalModuleRows(spec, user)
+  } catch {
+    return
+  }
+  // Excel PR_07 joint remark: 24 hours.
+  const cutoff = Date.now() - DUPLICATE_REQUISITION_WINDOW_MS
+  const currentKey = currentDocNo.trim().toUpperCase()
+  for (const header of headers) {
+    const docNo = fieldText(header, ['No', 'No_', 'DocumentNo'])
+    if (docNo.trim().toUpperCase() === currentKey) continue
+    const status = resolveModuleRequestStatus(header, 'purchaseRequisition')
+    if (!purchaseDuplicateBlockingStatus(status)) continue
+    if (headerActivityTimestamp(header) < cutoff) continue
+    const lines = await listPortalModuleLines(spec, header, docNo)
+    const duplicateLine = lines.find((line) => {
+      const lineQty = fieldNumber(line, ['Quantity'])
+      return lineItemNo(line) === normalizedItem && Math.abs(lineQty - quantity) < 0.01
+    })
+    if (duplicateLine) {
+      throw Object.assign(
+        new Error(
+          `Duplicate request: item ${itemNo} (qty ${quantity}) is already on ${docNo} (${status}). Cancel that request or wait 24 hours.`,
+        ),
+        { status: 409, code: 'DUPLICATE_PURCHASE_REQUISITION' },
+      )
+    }
+  }
+}
+
+export async function assertNoDuplicateStoreLine(
+  user: AuthUser,
+  currentDocNo: string,
+  itemNo: string,
+  quantity: number,
+  issuingStore = '',
+) {
+  const normalizedItem = itemNo.trim().toUpperCase()
+  if (!normalizedItem) return
+  const spec = findModuleSpec('store-requisition')
+  if (!spec) return
+  let headers: ODataRecord[] = []
+  try {
+    headers = await listPortalModuleRows(spec, user)
+  } catch {
+    return
+  }
+  const currentKey = currentDocNo.trim().toUpperCase()
+  if (!issuingStore.trim() && currentKey) {
+    try {
+      const rows = (await fetchOData('QyStoreRequisitionHeader', {
+        $filter: `No eq '${odataString(currentDocNo)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows[0]) {
+        issuingStore = headerIssuingStore(rows[0])
+      }
+    } catch {
+      // keep blank — match any store
+    }
+  }
+  const storeFilter = issuingStore.trim().toUpperCase()
+  for (const header of headers) {
+    const docNo = fieldText(header, ['No', 'No_'])
+    if (docNo.trim().toUpperCase() === currentKey) continue
+    const status = resolveModuleRequestStatus(header, 'storeRequisition')
+    if (!storeDuplicateBlockingStatus(status)) continue
+    if (storeFilter && headerIssuingStore(header) && headerIssuingStore(header) !== storeFilter) {
+      continue
+    }
+    const lines = await listPortalModuleLines(spec, header, docNo)
+    const duplicateLine = lines.find((line) => {
+      const lineQty = fieldNumber(line, ['Quantity', 'QuantityRequested', 'Quantity_Requested'])
+      const sameItem = lineItemNo(line) === normalizedItem
+      const sameQty = quantity <= 0 || Math.abs(lineQty - quantity) < 0.01
+      return sameItem && sameQty
+    })
+    if (duplicateLine) {
+      throw Object.assign(
+        new Error(
+          `Duplicate request: item ${itemNo}${quantity > 0 ? ` (qty ${quantity})` : ''} is already on ${docNo} (${status}). Only rejected or cancelled requests allow the same item again.`,
+        ),
+        { status: 409, code: 'DUPLICATE_STORE_REQUISITION' },
+      )
+    }
+  }
+}
+
+export async function assertNoDuplicateFuelRequest(
+  user: AuthUser,
+  currentDocNo: string,
+  vehicleNo: string,
+  litres: number,
+  cardNo = '',
+) {
+  const normalizedVehicle = vehicleNo.trim().toUpperCase()
+  const normalizedCard = cardNo.trim().toUpperCase()
+  if ((!normalizedVehicle && !normalizedCard) || litres <= 0) return
+  const spec = findModuleSpec('fuel')
+  if (!spec) return
+  let headers: ODataRecord[] = []
+  try {
+    headers = await listPortalModuleRows(spec, user)
+  } catch {
+    return
+  }
+  const cutoff = Date.now() - DUPLICATE_REQUISITION_WINDOW_MS
+  const currentKey = currentDocNo.trim().toUpperCase()
+  for (const header of headers) {
+    const docNo = fieldText(header, ['RequisitionNo', 'Requisition_No', 'No'])
+    if (docNo.trim().toUpperCase() === currentKey) continue
+    const status = resolveModuleRequestStatus(header, 'fuelRequest')
+    if (!duplicateBlockingStatus(status)) continue
+    if (headerActivityTimestamp(header) < cutoff) continue
+    const headerVehicle = fieldText(header, [
+      'VehicleRegNo',
+      'Vehicle_Reg_No',
+      'VehicleNo',
+      'Vehicle_No',
+    ]).trim().toUpperCase()
+    const headerCard = fieldText(header, ['FuelCardNo', 'Fuel_Card_No', 'CardNo']).trim().toUpperCase()
+    const headerLitres = fieldNumber(header, [
+      'QuantityofFuelLitres',
+      'Quantity_of_Fuel_Litres',
+      'Quantity',
+    ])
+    const sameVehicle = normalizedVehicle && headerVehicle === normalizedVehicle
+    const sameCard = normalizedCard && headerCard === normalizedCard
+    if ((sameVehicle || sameCard) && Math.abs(headerLitres - litres) < 0.01) {
+      throw Object.assign(
+        new Error(
+          `Duplicate fuel entry detected for ${normalizedVehicle || `card ${normalizedCard}`} (${litres} L). See request ${docNo}.`,
+        ),
+        { status: 409, code: 'DUPLICATE_FUEL_REQUEST' },
+      )
+    }
+  }
+}
+
+/** Active Asset Transfer statuses for Excel VTH_08 duplicate checks. */
+export function assetTransferHandoverActive(status: string) {
+  return !['Cancelled', 'Rejected', 'Closed', 'Posted'].includes(status)
+}
+
+export function assetTransferAssetNo(row: ODataRecord | Record<string, unknown>) {
+  return fieldText(row, [
+    'AssetToTransfer',
+    'Asset_to_Transfer',
+    'AssetNo',
+    'Asset_No',
+    'FixedAssetNo',
+    'FANo',
+  ])
+    .trim()
+    .toUpperCase()
+}
+
+export function assetTransferToEmployee(row: ODataRecord | Record<string, unknown>) {
+  return fieldText(row, [
+    'ToResponsibleEmployee',
+    'To_Responsible_Employee',
+    'ToEmployeeNo',
+    'To_Employee_No',
+    'NewResponsibleEmployee',
+    'ResponsibleEmployee',
+  ])
+    .trim()
+    .toUpperCase()
+}
+
+/** Excel VTH_08 — same asset already handed to the same person on an active transfer. */
+export async function assertNoDuplicateAssetHandover(
+  assetNo: string,
+  toEmployee: string,
+  excludeDocNo = '',
+) {
+  const normalizedAsset = assetNo.trim().toUpperCase()
+  const normalizedEmployee = toEmployee.trim().toUpperCase()
+  if (!normalizedAsset || !normalizedEmployee) return
+  const fetched = await fetchOData('QyAssetTransfer', {}).catch(() => [])
+  const rows = Array.isArray(fetched) ? fetched : []
+  const exclude = excludeDocNo.trim().toUpperCase()
+  const duplicate = rows.find((row) => {
+    const docNo = fieldText(row, ['No', 'No_']).trim().toUpperCase()
+    if (exclude && docNo === exclude) return false
+    const status = resolveModuleRequestStatus(row, 'assetTransfer')
+    if (!assetTransferHandoverActive(status)) return false
+    if (fieldText(row, ['Posted']).toLowerCase() === 'true') return false
+    return (
+      assetTransferAssetNo(row) === normalizedAsset &&
+      assetTransferToEmployee(row) === normalizedEmployee
+    )
+  })
+  if (duplicate) {
+    throw Object.assign(
+      new Error('Item already assigned. Please return before re-assigning.'),
+      { status: 409, code: 'DUPLICATE_ASSET_HANDOVER' },
+    )
+  }
+}
+
+/** Excel VTH_02 — tool/spare checklist required before approval. */
+export async function assertAssetTransferToolsChecklist(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  header?: ODataRecord,
+) {
+  const tools = await listPortalModuleLines(spec, header ?? {}, no)
+  if (tools.length === 0) {
+    throw Object.assign(new Error('Tools and spare checklist must be completed.'), {
+      status: 422,
+      code: 'ASSET_TRANSFER_TOOLS_REQUIRED',
+    })
+  }
+}
+
+async function resolveAssetTransferAccessoryEntryNo(
+  body: Record<string, unknown>,
+  docNo: string,
+  user: AuthUser,
+) {
+  let accessoryEntryNo = Number(body.accessoryEntryNo ?? body.entryNo ?? 0)
+  if (Number.isFinite(accessoryEntryNo) && accessoryEntryNo > 0) {
+    return accessoryEntryNo
+  }
+
+  const toolCode = String(body.toolCode ?? body.accessoryCode ?? '').trim()
+  const toolName = String(body.toolName ?? body.toolDescription ?? body.accessoryName ?? '').trim()
+  if (!toolCode && !toolName) {
+    throw Object.assign(new Error('Select or register a vehicle tool or accessory.'), {
+      status: 422,
+      code: 'ASSET_TRANSFER_TOOL_REQUIRED',
+    })
+  }
+
+  const header = await getPortalModuleDocument(findFrontendModuleSpec('assetTransfer')!, user, docNo, false)
+  const assetNo = header ? assetTransferAssetNo(header) : ''
+  if (!assetNo) {
+    throw Object.assign(new Error('Save the asset transfer with an asset/vehicle selected first.'), {
+      status: 422,
+    })
+  }
+  const tagNo = header
+    ? fieldText(header, ['TagNo', 'Tag_No', 'AssetTag', 'Asset_Tag'])
+    : ''
+  const quantity = Number(body.quantity ?? 1) || 1
+  const serialNo = String(body.serialNo ?? '').trim()
+  const result = await callModuleSoap(findFrontendModuleSpec('assetTransfer')!, 'RegisterAssetAccessory', {
+    assetNo,
+    accessoryCode: toolCode || toolName.replace(/\s+/g, '').slice(0, 20).toUpperCase(),
+    accessoryName: toolName || toolCode,
+    quantity,
+    serialNo,
+    tagNo,
+  })
+  accessoryEntryNo = Number(result.returnValue ?? 0)
+  if (!Number.isFinite(accessoryEntryNo) || accessoryEntryNo <= 0) {
+    throw Object.assign(
+      new Error(
+        'Could not register the tool in Business Central. Ask Felix to publish CuPortalAssetTransfer.RegisterAssetAccessory.',
+      ),
+      { status: 502, code: 'ASSET_ACCESSORY_REGISTER_FAILED' },
+    )
+  }
+  return accessoryEntryNo
+}
+
+/** Excel VTH_08 — same tool line already on an active handover to the same person. */
+export async function assertAssetTransferToolNotAlreadyAssigned(
+  docNo: string,
+  accessoryEntryNo: number,
+  user: AuthUser,
+) {
+  if (!accessoryEntryNo) return
+  const spec = findFrontendModuleSpec('assetTransfer')
+  if (!spec) return
+  const header = await getPortalModuleDocument(spec, user, docNo, false)
+  if (!header) return
+  const toEmployee = assetTransferToEmployee(header)
+  const assetNo = assetTransferAssetNo(header)
+  if (!toEmployee) return
+
+  const fetched = await fetchOData('QyAssetTransfer', {}).catch(() => [])
+  const rows = Array.isArray(fetched) ? (fetched as ODataRecord[]) : []
+  const current = docNo.trim().toUpperCase()
+  for (const row of rows) {
+    const otherNo = fieldText(row, ['No', 'No_']).trim()
+    if (!otherNo || otherNo.toUpperCase() === current) continue
+    const status = resolveModuleRequestStatus(row, 'assetTransfer')
+    if (!assetTransferHandoverActive(status)) continue
+    if (fieldText(row, ['Posted']).toLowerCase() === 'true') continue
+    if (assetTransferToEmployee(row) !== toEmployee) continue
+    if (assetNo && assetTransferAssetNo(row) && assetTransferAssetNo(row) !== assetNo) continue
+    const tools = await listPortalModuleLines(spec, row, otherNo).catch(() => [])
+    const hit = tools.some((line) => {
+      const entry = Number(line.AccessoryEntryNo ?? line.accessoryEntryNo ?? line.EntryNo ?? 0)
+      return entry > 0 && entry === accessoryEntryNo
+    })
+    if (hit) {
+      throw Object.assign(
+        new Error('Item already assigned. Please return before re-assigning.'),
+        { status: 409, code: 'DUPLICATE_ASSET_HANDOVER' },
+      )
+    }
   }
 }
 
@@ -2022,17 +3324,175 @@ export async function submitPortalModuleRequest(
       status: 422,
     })
   }
+  const purchaseLines =
+    spec.module === 'purchase-requisition'
+      ? await listPortalModuleLines(spec, header, no)
+      : []
+  const storeLines =
+    spec.module === 'store-requisition'
+      ? await listPortalModuleLines(spec, header, no)
+      : []
+  // Excel SR_02 — budget availability must block approval when balance is exceeded.
+  if (spec.module === 'store-requisition' && storeLines.length > 0) {
+    assertStoreRequisitionBudgetLines(storeLines)
+  }
+  if (spec.module === 'asset-transfer') {
+    await assertAssetTransferToolsChecklist(spec, user, no, header)
+  }
   if (spec.module === 'inter-bank-transfer') {
     const sourceAmount = Number(header.Source_Amount ?? header.SourceAmount ?? 0)
-    const payingAccount = fieldText(header, ['Paying_Account', 'PayingAccount'])
     const receivingAccount = fieldText(header, ['Receiving_Account', 'ReceivingAccount'])
-    if (sourceAmount <= 0 || !payingAccount || !receivingAccount) {
+    // HB 05/08/2026: paying bank account is not collected from the requester.
+    if (sourceAmount <= 0 || !receivingAccount) {
       throw Object.assign(
         new Error(
-          'Complete the paying account, receiving account, and source amount before requesting approval.',
+          'Complete the receiving account and requested amount before requesting approval.',
         ),
         { status: 422 },
       )
+    }
+    const limit = await getPortalPettyCashDepartmentLimit(user)
+    if (limit.configured && limit.limit > 0 && sourceAmount > limit.limit) {
+      throw Object.assign(
+        new Error(
+          `Petty cash request ${sourceAmount.toFixed(2)} exceeds the Business Central department limit ` +
+            `${limit.limit.toFixed(2)} for ${limit.departmentName || limit.departmentCode}.`,
+        ),
+        { status: 422 },
+      )
+    }
+  }
+  // Word Aug 7 / Excel R42–R43: settlement needs at least one line with amount before approval.
+  if (spec.module === 'petty-cash') {
+    const lines = await listPortalModuleLines(spec, header, no)
+    const total = lines.reduce((sum, line) => sum + Number(line.amount ?? line.Amount ?? 0), 0)
+    if (!lines.length || total <= 0) {
+      throw Object.assign(
+        new Error('Add at least one petty cash settlement line with an amount before requesting approval.'),
+        { status: 422, code: 'PETTY_CASH_LINES_REQUIRED' },
+      )
+    }
+  }
+  // Settlement (petty-cash) no longer enforces department float limit — that is for replenishment/request.
+  if (spec.module === 'fuel') {
+    let fuelHeader = header
+    try {
+      const extras = (await fetchOData('QyPortalFuelMaintExtra', {
+        $filter: `RequisitionNo eq '${odataString(no)}'`,
+        $top: 1,
+      }).catch(() => [])) as ODataRecord[] | null
+      if (Array.isArray(extras) && extras[0]) {
+        fuelHeader = { ...header, ...extras[0] }
+      }
+    } catch {
+      // keep header-only validation when extras OData is unpublished
+    }
+    const litres = fieldNumber(fuelHeader, [
+      'QuantityofFuelLitres',
+      'Quantity_of_Fuel_Litres',
+      'Quantity',
+      'RequestedFuelLitres',
+      'Requested_Fuel_Litres',
+    ])
+    const cardNo = fieldText(fuelHeader, ['FuelCardNo', 'Fuel_Card_No', 'CardNo', 'Card_No'])
+    const vehicleNo = fieldText(fuelHeader, [
+      'VehicleRegNo',
+      'Vehicle_Reg_No',
+      'VehicleNo',
+      'Vehicle_No',
+    ])
+    await assertNoDuplicateFuelRequest(user, no, vehicleNo, litres, cardNo)
+    if (cardNo && litres > 0) {
+      const cards = (await fetchOData('QyFuelCardSetups', {
+        $filter: `CardNo eq '${odataString(cardNo)}'`,
+        $top: 1,
+      }).catch(() => [])) as ODataRecord[] | null
+      const card = Array.isArray(cards) ? cards[0] : undefined
+      const monthlyLimit = fieldNumber(card ?? {}, [
+        'MonthlyLimit',
+        'Monthly_Limit',
+        'MonthlyFuelLimit',
+        'Monthly_Fuel_Limit',
+      ])
+      if (monthlyLimit > 0 && litres > monthlyLimit) {
+        throw Object.assign(
+          new Error(
+            `Fuel limit exceeded for card ${cardNo}. Requested ${litres.toFixed(2)} L, monthly limit ${monthlyLimit.toFixed(2)} L.`,
+          ),
+          { status: 422, code: 'FUEL_MONTHLY_LIMIT_EXCEEDED' },
+        )
+      }
+    }
+    const odometer = fieldNumber(fuelHeader, [
+      'CurrentOdometer',
+      'Initial_Odometer_Reading',
+      'InitialOdometerReading',
+    ])
+    if (odometer <= 0) {
+      throw Object.assign(new Error('Odometer reading required'), {
+        status: 422,
+        code: 'FUEL_ODOMETER_REQUIRED',
+      })
+    }
+    // R21/R22: previous km vs current km must meet vehicle fuel rating (km/L).
+    let previousReading = fieldNumber(fuelHeader, [
+      'VehicleCurrentReading',
+      'Vehicle_Current_Reading',
+      'PreviousReading',
+      'Previous_Reading',
+    ])
+    let fuelRating = fieldNumber(fuelHeader, [
+      'VehicleFuelRating',
+      'Vehicle_Fuel_Rating',
+      'FuelRating',
+      'Fuel_Rating',
+    ])
+    if ((previousReading <= 0 || fuelRating <= 0) && vehicleNo) {
+      try {
+        const vehicles = (await fetchOData('QyVehicleHeader', {
+          $filter: `RegistrationNo eq '${odataString(vehicleNo)}' or No eq '${odataString(vehicleNo)}'`,
+          $top: 1,
+        }).catch(() => [])) as ODataRecord[] | null
+        const vehicle = Array.isArray(vehicles) ? vehicles[0] : undefined
+        if (vehicle) {
+          if (fuelRating <= 0) {
+            fuelRating = fieldNumber(vehicle, ['FuelRating', 'Fuel_Rating'])
+          }
+          if (previousReading <= 0) {
+            previousReading = fieldNumber(vehicle, [
+              'CurrentReading',
+              'Current_Reading',
+              'CurrentMiliege',
+              'CurrentOdometer',
+            ])
+          }
+        }
+      } catch {
+        // vehicle lookup optional
+      }
+    }
+    if (previousReading > 0 && odometer > 0 && litres > 0 && fuelRating > 0) {
+      if (odometer < previousReading) {
+        throw Object.assign(
+          new Error(
+            `Current odometer ${odometer} km cannot be less than the previous vehicle reading ${previousReading} km.`,
+          ),
+          { status: 422, code: 'FUEL_ODOMETER_BACKWARDS' },
+        )
+      }
+      const kmDriven = odometer - previousReading
+      if (kmDriven > 0) {
+        const actualKmPerLitre = kmDriven / litres
+        if (actualKmPerLitre < fuelRating) {
+          throw Object.assign(
+            new Error(
+              `Fuel request ${actualKmPerLitre.toFixed(2)} km/L is below the vehicle standard ${fuelRating} km/L ` +
+                `(${kmDriven} km / ${litres} L). Adjust litres or odometer to match the FLT vehicle fuel rating.`,
+            ),
+            { status: 422, code: 'FUEL_BELOW_VEHICLE_STANDARD' },
+          )
+        }
+      }
     }
   }
   if (spec.module === 'salary-advance') {
@@ -2067,16 +3527,107 @@ export async function submitPortalModuleRequest(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.submit, params)
+  let result: SoapResult
+  try {
+    result = await callModuleSoap(spec, spec.soap.submit, params)
+  } catch (error) {
+    if (spec.module === 'purchase-requisition') {
+      const message = purchaseBudgetErrorMessage(error, header, purchaseLines)
+      if (message) {
+        throw Object.assign(new Error(message), {
+          status: 422,
+          code: 'PURCHASE_ITEM_NOT_IN_FINALIZED_BUDGET',
+        })
+      }
+    }
+    if (spec.module === 'store-requisition') {
+      const message = purchaseBudgetErrorMessage(error, header, storeLines, [
+        'ShortcutDimension2Code',
+        'Shortcut_Dimension_2_Code',
+        'GlobalDimension2Code',
+        'Global_Dimension_2_Code',
+        'BudgetCenterName',
+        'Budget_Center_Name',
+      ])
+      if (message) {
+        throw Object.assign(new Error(message), {
+          status: 422,
+          code: 'STORE_ITEM_NOT_IN_FINALIZED_BUDGET',
+        })
+      }
+    }
+    throw error
+  }
   if (!soapActionOk(spec, result)) {
-    if (spec.module === 'fuel' || spec.module === 'maintenance') {
-      const docType = fieldText(header, ['DocumentType', 'Document_Type'])
+    if (spec.module === 'fuel' || spec.module === 'maintenance' || spec.module === 'gate-pass') {
+      const docType = fieldText(header, ['DocumentType', 'Document_Type', 'Linkto', 'LinkTo', 'Link_To'])
       const hint = docType
-        ? ` Enable the Business Central approval workflow for "${docType}" (table ${spec.headerTableId}).`
+        ? ` Enable the Business Central approval workflow for "${docType}" on table ${spec.headerTableId}.`
         : ` Enable the Business Central approval workflow for this document type (table ${spec.headerTableId}).`
       throw Object.assign(new Error(`Business Central did not submit ${no}.${hint}`), { status: 502 })
     }
     throw Object.assign(new Error(`Business Central did not submit ${no}`), { status: 502 })
+  }
+}
+
+export async function getPortalPettyCashDepartmentLimit(
+  user: AuthUser,
+  departmentCode = user.department,
+) {
+  const code = departmentCode.trim()
+  if (!code) {
+    return {
+      departmentCode: '',
+      departmentName: user.departmentName,
+      limit: 0,
+      configured: false,
+    }
+  }
+
+  const rows = (await fetchOData('QyPettyCashLimitDepartment', {
+    $filter: `DepartmentCode eq '${odataString(code)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  const row = Array.isArray(rows) ? rows[0] : undefined
+  const limit = Number(row?.Limit ?? row?.limit ?? 0)
+  return {
+    departmentCode: fieldText(row ?? {}, ['DepartmentCode', 'Department_Code']) || code,
+    departmentName:
+      fieldText(row ?? {}, ['DepartmentName', 'Department_Name']) || user.departmentName || code,
+    limit: Number.isFinite(limit) ? limit : 0,
+    configured: Boolean(row) && Number.isFinite(limit) && limit > 0,
+  }
+}
+
+export async function postPortalAssetTransfer(user: AuthUser, no: string) {
+  const spec = findFrontendModuleSpec('assetTransfer')
+  if (!spec) {
+    throw Object.assign(new Error('Asset Transfer is not configured'), { status: 501 })
+  }
+  const header = await getPortalModuleDocument(spec, user, no, false)
+  if (!header) {
+    throw Object.assign(new Error(`Asset Transfer ${no} was not found`), { status: 404 })
+  }
+  const status = fieldText(header, ['Status'])
+  const posted = ['true', 'yes', '1'].includes(fieldText(header, ['Posted']).toLowerCase())
+  if (status !== 'Approved' || posted) {
+    throw Object.assign(
+      new Error(
+        posted
+          ? `Asset Transfer ${no} is already posted`
+          : `Asset Transfer ${no} must be approved before posting (current: ${status || 'unknown'})`,
+      ),
+      { status: 422 },
+    )
+  }
+  const result = await callModuleSoap(spec, 'PostAssetTransfer', {
+    docNo: no,
+    myUserID: user.userID,
+  })
+  if (!approvalOk(result)) {
+    throw Object.assign(new Error(`Business Central did not post Asset Transfer ${no}`), {
+      status: 502,
+    })
   }
 }
 
@@ -2099,6 +3650,8 @@ export async function updatePortalModuleHeader(
   let methodName = spec.soap.saveHeader
   if (spec.module === 'inter-bank-transfer') {
     methodName = 'FnUpdateInterBankTransfer'
+  } else if (spec.soap.editHeader) {
+    methodName = spec.soap.editHeader
   }
   const editBody = await resolveRecIdHeaderEditBody(spec, user, no, body)
   const params = await spec.params.saveHeader({
@@ -2106,10 +3659,11 @@ export async function updatePortalModuleHeader(
     user,
     no,
   })
-  const result = await callSoapMethod(methodName, params)
+  const result = await callModuleSoap(spec, methodName, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not update ${no}`), { status: 502 })
   }
+  await recalculateImprestSurrenderSettlement(spec, no)
 }
 
 /**
@@ -2128,7 +3682,7 @@ export async function savePortalModuleLine(
     })
   }
   const params = await spec.params.saveLine({ req: requestWithBody(body), user, no })
-  const result = await callSoapMethod(spec.soap.saveLine, params)
+  const result = await callModuleSoap(spec, spec.soap.saveLine, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not save the ${spec.module} line`), {
       status: 502,
@@ -2143,15 +3697,84 @@ export async function setPortalModuleLines(
   user: AuthUser,
   no: string,
   lines: Record<string, unknown>[],
-) {
-  for (let index = 0; index < lines.length; index += 1) {
-    const incoming = lines[index] ?? {}
+): Promise<Record<string, unknown>[]> {
+  let linesToSave = lines
+  if (isImprestSurrenderModule(spec.module)) {
+    const header = await getPortalModuleDocument(spec, user, no)
+    if (!header) {
+      throw Object.assign(new Error(`Imprest surrender ${no} was not found`), { status: 404 })
+    }
+    const approvers = await fetchPortalApprovalEntries(spec, no, header)
+    const surrenderStatus = resolveModuleRequestStatus(header, 'imprestSurrender', approvers)
+    if (surrenderStatus !== 'Draft' && surrenderStatus !== 'Open') {
+      throw Object.assign(
+        new Error(
+          `Imprest surrender lines cannot be edited when status is ${surrenderStatus}. Cancel approval or use a draft surrender.`,
+        ),
+        { status: 422 },
+      )
+    }
+    const existingLines = await listPortalModuleLines(spec, header, no)
+    linesToSave = imprestSurrenderLinesToPersist(
+      prepareImprestSurrenderLinesForSave(existingLines, lines),
+    )
+  }
+  for (let index = 0; index < linesToSave.length; index += 1) {
+    const incoming = linesToSave[index] ?? {}
     await savePortalModuleLine(spec, user, no, {
       ...incoming,
       action: incoming.action ?? (incoming.lineNo ? 'edit' : 'create'),
       lineNo: Number(incoming.lineNo ?? (index + 1) * 10000),
     })
   }
+
+  if (isImprestSurrenderModule(spec.module) && linesToSave.length > 0) {
+    await recalculateImprestSurrenderSettlement(spec, no)
+
+    const spendLines = await fetchImprestSurrenderSpendLineRows(no)
+    const allLines = await fetchImprestSurrenderLineRows(no)
+    const verifyLines =
+      imprestSurrenderLinesHaveSpendReadback(spendLines as Record<string, unknown>[])
+        ? (spendLines as Record<string, unknown>[])
+        : (allLines as Record<string, unknown>[])
+    if (!imprestSurrenderLinesHaveSpendReadback(verifyLines)) {
+      throw Object.assign(
+        new Error(
+          'Business Central did not return surrender spend fields. Felix must publish OData web service ImprestSurrenderDetails (query 50079) with ActualSpent and OutstandingAmount, then retry.',
+        ),
+        { status: 502 },
+      )
+    }
+    for (const saved of linesToSave) {
+      const expectedSpent = Number(saved.actualSpent ?? 0)
+      if (expectedSpent <= 0) continue
+      const accountNo = String(saved.accountNo ?? '')
+      const expectedReceipt = Number(saved.cashReceiptAmount ?? 0)
+      const match = verifyLines.find((row) => imprestSurrenderAccountNo(row) === accountNo)
+      if (!match) {
+        throw Object.assign(
+          new Error(`Business Central surrender line ${accountNo} was not found after save`),
+          { status: 502 },
+        )
+      }
+      if (!imprestSurrenderLinePersistedMatches(match, expectedSpent, expectedReceipt)) {
+        const readSpent = imprestSurrenderLineActualSpent(match)
+        const readOutstanding = imprestSurrenderLineOutstanding(match)
+        const odataHint =
+          spendLines.length === 0
+            ? 'ImprestSurrenderDetails OData is not published — Felix must publish query 50079.'
+            : 'Open the surrender in Business Central. If Actual Spent is correct there, republish ImprestSurrenderDetails OData.'
+        throw Object.assign(
+          new Error(
+            `Business Central did not persist surrender expenditure on account ${accountNo} (saved spent ${expectedSpent}, receipt ${expectedReceipt}; OData read spent ${readSpent}, outstanding ${readOutstanding ?? 'n/a'}). Publish AL 1.0.5.166+ (partial settlement tax). ${odataHint}`,
+          ),
+          { status: 502 },
+        )
+      }
+    }
+  }
+
+  return linesToSave
 }
 
 export async function deletePortalModuleLine(
@@ -2185,7 +3808,7 @@ export async function deletePortalModuleLine(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.deleteLine, params)
+  const result = await callModuleSoap(spec, spec.soap.deleteLine, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not delete line ${lineNo}`), {
       status: 502,
@@ -2267,6 +3890,50 @@ export async function uploadPortalModuleAttachment(
     throw Object.assign(new Error(`Business Central record ${no} was not found`), { status: 404 })
   }
   const docNo = resolveAttachmentDocNo(spec, document, no)
+  const facilityAttachmentModules = new Set([
+    'purchase-requisition',
+    'store-requisition',
+    'fuel',
+    'maintenance',
+    'transport',
+    'gate-pass',
+    'transfer-order',
+  ])
+  if (facilityAttachmentModules.has(spec.module)) {
+    const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
+    const description = String(attachment.description ?? '').trim()
+    const fileName = attachmentFileName(attachment)
+    const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
+    if (!contentBase64) {
+      throw Object.assign(new Error('Attachment content is required'), { status: 422 })
+    }
+    if (!description) {
+      throw Object.assign(new Error('Attachment description is required'), { status: 422 })
+    }
+    if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+      throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
+        status: 422,
+      })
+    }
+    if (Buffer.from(contentBase64, 'base64').byteLength > MAX_ATTACHMENT_BYTES) {
+      throw Object.assign(new Error(`${fileName || 'Attachment'} exceeds the 10 MB limit`), {
+        status: 422,
+      })
+    }
+    const result = await uploadViaPortalAttachments({
+      docNo,
+      description,
+      tableID: spec.headerTableId,
+      fileName,
+      fileBase64: contentBase64,
+    })
+    if (!attachmentOk(result)) {
+      throw Object.assign(new Error('Business Central did not store the attachment'), {
+        status: 502,
+      })
+    }
+    return
+  }
   return uploadPortalAttachment(spec.headerTableId, docNo, attachment)
 }
 

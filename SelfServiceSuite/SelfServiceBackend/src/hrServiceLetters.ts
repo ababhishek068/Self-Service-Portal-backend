@@ -58,8 +58,8 @@ export type HrServiceLetterRequest = {
   hrRemarks?: string
   hrDecisionAt?: string
   hrDecisionBy?: string
-  /** This request uses the dedicated HR decision queue rather than the generic BC approval entry. */
-  approvalRequired: true
+  /** Letter requests go straight to HR for processing — no staff approval workflow. */
+  approvalRequired: boolean
 }
 
 const LABELS: Record<HrServiceLetterType, string> = {
@@ -316,7 +316,7 @@ export function parseHrServiceLetterRows(value: unknown): HrServiceLetterRequest
           ? LABELS[row.letterType]
           : row.letterTypeLabel || LABELS[row.letterType],
       details: row.details ?? {},
-      approvalRequired: true as const,
+      approvalRequired: false,
     }))
 }
 
@@ -385,14 +385,14 @@ export async function createHrServiceLetterRequest(input: {
     requestNo,
     letterType: input.letterType,
     letterTypeLabel: LABELS[input.letterType],
-    status: 'Submitted',
+    status: 'In Progress',
     submittedAt: now,
     updatedAt: now,
     employeeNo: input.employeeNo,
     employeeName: input.employeeName,
     departmentName: input.departmentName,
     details,
-    approvalRequired: true,
+    approvalRequired: false,
   } satisfies HrServiceLetterRequest
 }
 

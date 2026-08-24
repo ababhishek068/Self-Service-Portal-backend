@@ -1,0 +1,19 @@
+HIJRA Felix AL bundle v1.0.3.290 — keep AL 1.0.5.173 installed
+=============================================================================
+ONE publish for every undeployed 16–19 Aug fix. Portal zip is 1.0.3.290.
+
+Publish these live files (FILES/):
+  FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+    Imprest surrender travel start + line dedupe
+    Petty cash create: Insert Payments Header BEFORE dimension Validate
+  FILES/staffPortal/facilityUat/PortalFacilityMgt.Codeunit.al
+    Procurement Individual Budget (department OR district template, itemise, submit)
+  FILES/staffPortal/facilityUat/PortalProcurementPlanHeader.Table.al
+  FILES/staffPortal/facilityUat/PortalProcurementPlanLine.Table.al
+  FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
+    Vehicle-only tools on asset transfer
+
+Also in this zip for reference (do not blindly replace object IDs):
+  REVIEWED-AL-FIXES-16-19-AUG\  (every reviewed .al from the last 3 days)
+
+Run APPLY-HIJRA-PATCH.ps1, then AL: Package, then publish BEFORE the portal zip.

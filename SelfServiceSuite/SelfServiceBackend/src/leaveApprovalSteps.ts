@@ -38,9 +38,13 @@ export function mapApprovalSteps(value: unknown) {
         id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
         actorEmployeeNo: approverId || senderId,
         actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
+        // An explicit 'Role' wins (used by placeholder/fallback steps that
+        // represent an unassigned APPROVER but carry no ApproverID yet — e.g.
+        // "Awaiting approver assignment" — so they never mislabel as
+        // "Requester" just because approverId is blank).
         role: text(
           row,
-          ['ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation'],
+          ['Role', 'ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation'],
           approverId ? 'Approver' : 'Requester',
         ),
         status,
@@ -107,6 +111,7 @@ export function fallbackApprovalStepsFromHeader(row: ODataRecord, mappedStatus: 
       {
         Status: 'Pending Approval',
         SequenceNo: 1,
+        Role: 'Approver',
         ApproverName: 'Awaiting approver assignment',
         Comment: 'Submitted for approval in Business Central',
       },
@@ -538,8 +543,13 @@ function approvalCommentDocumentNo(row: ODataRecord) {
   ])
 }
 
-function approvalCommentEntryNo(row: ODataRecord) {
-  return text(row, ['ApprovalEntryNo', 'Approval_Entry_No', 'EntryNo', 'Entry_No'])
+function approvalCommentApprovalEntryNo(row: ODataRecord) {
+  return text(row, ['ApprovalEntryNo', 'Approval_Entry_No'])
+}
+
+function approvalCommentLineEntryNo(row: ODataRecord) {
+  const value = Number(text(row, ['EntryNo', 'Entry_No']))
+  return Number.isFinite(value) ? value : 0
 }
 
 function approvalCommentText(row: ODataRecord) {
@@ -549,34 +559,57 @@ function approvalCommentText(row: ODataRecord) {
 /** Load rejection / approval notes from BC Approval Comment Line when QyApprovalEntry.Comment is blank. */
 export async function fetchApprovalCommentNotes(documentNo: string, tableId?: number) {
   const notesByEntry = new Map<string, string>()
+  let latestNote = ''
+  let latestNoteEntryNo = -1
   const trimmed = documentNo.trim()
   if (!trimmed) return notesByEntry
 
-  const docFilter = `(Document_No eq '${odataString(trimmed)}' or DocumentNo eq '${odataString(trimmed)}')`
-  const tableFilter =
-    tableId && Number.isFinite(tableId) ? ` and Table_ID eq ${tableId}` : ''
+  const escaped = odataString(trimmed)
+  // OData rejects the entire expression when one alias is not published. Try
+  // the exact property names independently, preferring this project's
+  // QyApprovalCommentLine names (DocumentNo/TableID).
+  const filters =
+    tableId && Number.isFinite(tableId)
+      ? [
+          `DocumentNo eq '${escaped}' and TableID eq ${tableId}`,
+          `Document_No eq '${escaped}' and Table_ID eq ${tableId}`,
+          `DocumentNo eq '${escaped}'`,
+          `Document_No eq '${escaped}'`,
+        ]
+      : [`DocumentNo eq '${escaped}'`, `Document_No eq '${escaped}'`]
 
   for (const service of APPROVAL_COMMENT_LINE_SERVICES) {
-    try {
-      const rows = (await fetchOData(service, {
-        $filter: `${docFilter}${tableFilter}`,
-        $top: 100,
-      })) as ODataRecord[] | null
-      if (!Array.isArray(rows) || rows.length === 0) continue
-      for (const row of rows) {
-        const note = approvalCommentText(row)
-        if (!note) continue
-        const entryNo = approvalCommentEntryNo(row)
-        if (entryNo) notesByEntry.set(entryNo, note)
-        const fallbackKey = text(row, ['SequenceNo', 'Sequence_No'], entryNo || '0')
-        if (!notesByEntry.has(fallbackKey)) notesByEntry.set(fallbackKey, note)
+    for (const filter of filters) {
+      try {
+        const rows = (await fetchOData(service, {
+          $filter: filter,
+          $top: 100,
+        })) as ODataRecord[] | null
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        for (const row of rows) {
+          const note = approvalCommentText(row)
+          if (!note) continue
+          const approvalEntryNo = approvalCommentApprovalEntryNo(row)
+          if (approvalEntryNo) notesByEntry.set(approvalEntryNo, note)
+          const sequenceNo = text(row, ['SequenceNo', 'Sequence_No'])
+          if (sequenceNo && sequenceNo !== '0' && !notesByEntry.has(sequenceNo)) {
+            notesByEntry.set(sequenceNo, note)
+          }
+          const commentEntryNo = approvalCommentLineEntryNo(row)
+          if (commentEntryNo >= latestNoteEntryNo) {
+            latestNoteEntryNo = commentEntryNo
+            latestNote = note
+          }
+        }
+        if (notesByEntry.size > 0 || latestNote) break
+      } catch {
+        // Try the next property-name variant or published service.
       }
-      if (notesByEntry.size > 0) break
-    } catch {
-      // try the next published BC service
     }
+    if (notesByEntry.size > 0 || latestNote) break
   }
 
+  if (latestNote) notesByEntry.set('__latest__', latestNote)
   return notesByEntry
 }
 
@@ -595,8 +628,9 @@ export async function enrichApprovalStepsWithCommentLines(
     if (byId) return { ...step, note: byId }
     const bySequence = notesByEntry.get(String(step.sequenceNo))
     if (bySequence) return { ...step, note: bySequence }
-    if (notesByEntry.size === 1 && /reject|declin/i.test(step.status)) {
-      return { ...step, note: [...notesByEntry.values()][0]! }
+    const latest = notesByEntry.get('__latest__')
+    if (latest && /reject|declin/i.test(step.status)) {
+      return { ...step, note: latest }
     }
     return step
   })

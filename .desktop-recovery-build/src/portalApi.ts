@@ -9,23 +9,40 @@ import {
   resolveAttendanceIdentifier,
   resolveAttendanceMacAddress,
 } from './attendanceClient.js'
-import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
-import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
 import {
+  callSoapMethod,
+  codeunitSoapNamespace,
+  deriveCodeunitSoapUrl,
+  fetchOData,
+  fetchODataCount,
+  odataString,
+  type ODataRecord,
+} from './bcClient.js'
+import { requireAuth, resolveEmployeeJobTitle, type AuthUser } from './auth.js'
+import { config } from './config.js'
+import {
+  fetchEmployeeRecordFast,
   fetchEmployeeSalaryBaseFast,
+  fetchMergedEmployeeRecord,
   probeEmployeeSalarySources,
   resolveEmployeeJobTitleByNo,
+  resolveEmployeeMonthlySalaryBase,
+  resolveEmployeeOrgDisplayFields,
 } from './employeeProfile.js'
 import {
+  APPROVAL_TABLE_IDS,
   approvalModuleFromEntry,
   approvalTableFilter,
   approvalTableIdsFor,
   isSupportedFrontendModule,
   resolveApprovalModuleFromEntry,
+  resolveFuelMaintenanceModules,
   type SupportedFrontendModule,
 } from './approvalTableIds.js'
 import {
   enrichLeaveApprovalEntries,
+  enrichApprovalStepsWithCommentLines,
+  enrichMappedApprovalSteps,
   fallbackApprovalStepsFromHeader,
   leaveDocumentNoCandidates,
   mapApprovalSteps,
@@ -37,12 +54,34 @@ import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvan
 import {
   enrichFinanceHeaderFromEmployee,
   enrichFinanceHeaderRow,
+  enrichImprestRemainingSettlement,
   enrichImprestSurrenderFromSourceImprest,
+  buildImprestSurrenderPreview,
   financeSessionHints,
   isFinanceDetailModule,
 } from './financeRequestEnrichment.js'
-import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import {
+  documentStatusFromBc,
+  injectSalaryAdvanceSalaryHint,
+  mapItem,
+  mapRequest,
+  mapSalaryAdvanceLine,
+  resolveLeaveStatus,
+  resolveModuleRequestStatus,
+  resolveSalaryAdvanceAmount,
+  statusFromBc,
+  type PortalModuleKey,
+} from './erpMappings.js'
+import {
+  imprestSurrenderLineNo,
+  imprestSurrenderAccountNo,
+  imprestSurrenderLineActualSpent,
+  imprestSurrenderLineCashReceiptAmount,
+  imprestSurrenderLineOutstanding,
+} from './imprestSurrenderLines.js'
+import { employeeAnnualLeaveBalance } from './leaveBalance.js'
+import {
+  assertNoDuplicateAssetHandover,
   cancelPortalModuleRequest,
   createPortalModuleRequest,
   deletePortalModuleLine,
@@ -52,10 +91,13 @@ import {
   gatePassSourceFromQuery,
   gatePassSourceFromRow,
   GATE_PASS_SOURCE_SPECS,
+  storeIssueGatePassFromRows,
   getPortalModuleDocument,
   listPortalModuleRows,
   listPortalModuleLines,
   portalApprovalEntryFilter,
+  postPortalAssetTransfer,
+  getPortalPettyCashDepartmentLimit,
   fetchPortalApprovalEntries,
   savePortalModuleLine,
   setPortalModuleLines,
@@ -66,7 +108,6 @@ import {
   moduleSpecSupportsAttachments,
   hospitalCategoryCode,
   resolveAttachmentDocNo,
-  fetchPortalTrainingAssessment,
 } from './staffModules.js'
 import {
   createEmployeeExitRequest,
@@ -83,6 +124,11 @@ import {
   REQUESTABLE_HR_SERVICE_LETTER_TYPES,
   type RequestableHrServiceLetterType,
 } from './hrServiceLetters.js'
+import {
+  trainingCourseCodeForBc,
+  trainingCourseLookupOption,
+  trainingCourseOptionForBc,
+} from './trainingCourses.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
   return async (
@@ -96,6 +142,13 @@ function safe(handler: (req: Request, res: import('express').Response) => Promis
       next(error)
     }
   }
+}
+
+function user(req: Request) {
+  if (!req.session.authUser) {
+    throw Object.assign(new Error('Unauthenticated'), { status: 401 })
+  }
+  return req.session.authUser
 }
 
 function filterBcDate(value: string) {
@@ -115,11 +168,40 @@ function yearsOfServiceFromJoin(joinDate: string) {
   return years >= 0 ? String(years) : ''
 }
 
-function user(req: Request) {
-  if (!req.session.authUser) {
-    throw Object.assign(new Error('Unauthenticated'), { status: 401 })
+/** BC query Option fields often arrive as numeric indices; map to readable text. */
+function employmentTypeLabel(value: unknown) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw === '0') return ''
+  if (/^\d+$/.test(raw)) {
+    const asNum = Number(raw)
+    const labels: Record<number, string> = {
+      1: 'Permanent',
+      2: 'Contract',
+      3: 'Casual',
+      4: 'Intern',
+      5: 'Temporary',
+      6: 'Probation',
+      7: 'Fixed Term',
+    }
+    if (labels[asNum]) return labels[asNum]
+    if (asNum === 0) return ''
   }
-  return req.session.authUser
+  const normalized = raw.toLowerCase().replace(/[_\s-]/g, '')
+  const textLabels: Record<string, string> = {
+    permanent: 'Permanent',
+    contract: 'Contract',
+    casual: 'Casual',
+    intern: 'Intern',
+    internship: 'Intern',
+    temporary: 'Temporary',
+    temp: 'Temporary',
+    probation: 'Probation',
+    fixedterm: 'Fixed Term',
+    fulltime: 'Permanent',
+    parttime: 'Part Time',
+  }
+  if (textLabels[normalized]) return textLabels[normalized]
+  return raw
 }
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -135,28 +217,136 @@ function number(row: ODataRecord, keys: string[], fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-/** BC query Option fields often arrive as numeric indices; map to readable text. */
-function employmentTypeLabel(value: unknown) {
-  const raw = String(value ?? '').trim()
-  if (!raw || raw === '0') return ''
-  if (/^\d+$/.test(raw)) {
-    const asNum = Number(raw)
-    const labels: Record<number, string> = {
-      1: 'Permanent',
-      2: 'Contract',
-      3: 'Casual',
-      4: 'Intern',
-      5: 'Temporary',
-      6: 'Probation',
-    }
-    if (labels[asNum]) return labels[asNum]
-    if (asNum === 0) return ''
-  }
-  return raw
+/** Human-readable label for Asset Accessories rows (QyVehicleAccessories). */
+export function vehicleToolLookupLabel(row: ODataRecord, entryNo = '') {
+  const name = text(row, [
+    'AccessoryName',
+    'Accessory_Name',
+    'Accessory Name',
+  ])
+  const code = text(row, [
+    'AccessoryCode',
+    'Accessory_Code',
+    'Accessory Code',
+  ])
+  const serial = text(row, ['SerialNo', 'Serial_No', 'Serial No'])
+  const qty = text(row, ['Quantity'])
+  const condition = text(row, ['Condition'])
+  const primary = name || code || (entryNo ? `Accessory #${entryNo}` : 'Vehicle accessory')
+  return [
+    primary,
+    name && code ? code : '',
+    serial ? `Serial ${serial}` : '',
+    qty ? `Qty ${qty}` : '',
+    condition || '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
+}
+
+const FACILITY_SERVICE_NAME = 'CuPortalFacility'
+const facilitySoapEndpoint = {
+  url: deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, FACILITY_SERVICE_NAME),
+  namespace: codeunitSoapNamespace(FACILITY_SERVICE_NAME),
+}
+
+const TRAINING_SERVICE_NAME = 'CuPortalTraining'
+const trainingSoapEndpoint = {
+  url: deriveCodeunitSoapUrl(config.BC_SOAP_CODEUNIT_URL, TRAINING_SERVICE_NAME),
+  namespace: codeunitSoapNamespace(TRAINING_SERVICE_NAME),
+}
+
+async function mapInBatches<T, R>(
+  rows: T[],
+  batchSize: number,
+  mapper: (row: T) => Promise<R>,
+) {
+  const mapped: R[] = []
+  for (let index = 0; index < rows.length; index += batchSize) {
+    mapped.push(...(await Promise.all(rows.slice(index, index + batchSize).map(mapper))))
+  }
+  return mapped
+}
+
+async function fetchTrainingAssessment(applicationNo: string) {
+  if (!applicationNo.trim()) return null
+  const result = await callSoapMethod(
+    'GetTrainingAssessment',
+    { applicationNo },
+    trainingSoapEndpoint,
+  )
+  const raw = String(result.returnValue ?? '').trim()
+  if (!raw) return null
+  const assessment = JSON.parse(raw) as ODataRecord
+  return assessment && typeof assessment === 'object' && Object.keys(assessment).length > 0
+    ? assessment
+    : null
+}
+
+function enrichTrainingRow(
+  row: ODataRecord,
+  assessment: ODataRecord | null,
+  authUser: AuthUser,
+) {
+  const saved = assessment ?? {}
+  const trainingNeed =
+    text(saved, ['otherTrainingName']) ||
+    text(saved, ['trainingNeed']) ||
+    text(row, ['CourseTitle', 'Course_Title', 'IndividualCourseDescription', 'Description'])
+  const department =
+    text(saved, ['department']) ||
+    text(row, [
+      'DepartmentName',
+      'Department_Name',
+      'Department',
+      'DepartmentCode',
+      'GlobalDimension1',
+      'GlobalDimension1Code',
+      'Dim1Name',
+    ]) ||
+    authUser.departmentName ||
+    authUser.department
+
+  return {
+    ...row,
+    ...saved,
+    trainingNeed,
+    department,
+    periodStart:
+      text(saved, ['periodStart']) || text(row, ['FromDate', 'From_Date', 'StartDate']),
+    periodEnd:
+      text(saved, ['periodEnd']) || text(row, ['ToDate', 'To_Date', 'EndDate']),
+    vendor:
+      text(saved, ['vendor']) ||
+      text(row, ['TrainingInstitution', 'Training_Institution', 'Trainer', 'Provider']),
+    estimatedBudget:
+      text(saved, ['estimatedBudget']) ||
+      text(row, ['CostOfTraining', 'Cost_Of_Training', 'EstimatedBudget', 'EstimatedCost']),
+  }
+}
+
+function workTicketFlight(row: ODataRecord | undefined) {
+  return {
+    bookingType: text(row ?? {}, ['BookingType'], 'Flight'),
+    travelerEmployeeNo: text(row ?? {}, ['TravelerEmployeeNo']),
+    travelerName: text(row ?? {}, ['TravelerName']),
+    flightFrom: text(row ?? {}, ['FlightFrom']),
+    flightTo: text(row ?? {}, ['FlightTo']),
+    departureDate: text(row ?? {}, ['DepartureDate']),
+    returnDate: text(row ?? {}, ['ReturnDate']),
+    ticketClass: text(row ?? {}, ['TicketClass']),
+    airlinePreference: text(row ?? {}, ['AirlinePreference']),
+    justification: text(row ?? {}, ['BookingJustification']),
+    bookingConfirmationNo: text(row ?? {}, ['BookingConfirmationNo']),
+    bookingConfirmed: ['true', 'yes', '1'].includes(
+      text(row ?? {}, ['BookingConfirmed']).trim().toLowerCase(),
+    ),
+    bookingConfirmedDate: text(row ?? {}, ['BookingConfirmedDate']),
+  }
 }
 
 /**
@@ -166,7 +356,7 @@ function portalError(message: string, status = 400, code?: string) {
  * dist/portalApi.js is stale.
  */
 export const PORTAL_API_BUILD =
-  'v1.0.3.44 — 2026-07-25 (UAT sync: profile, training, HR routes, staff-claim approvals)'
+  'v1.0.3.211 — 2026-08-09 (Finance HB: imprest travel back-date block; header destination only; duration/district/daily rate; surrender Actual Spent UX; petty cash create/approve/details; AL 1.0.5.173)'
 
 interface LookupSpec {
   service: string
@@ -186,6 +376,10 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
     filter: `Description ne '' and Type eq 'Imprest'`,
+    meta: {
+      rateSource: ['RateSource', 'Rate_Source'],
+      manualAmount: ['ManualAmount', 'Manual_Amount'],
+    },
   },
   'travel-destinations': {
     service: 'QyTravelDestinations',
@@ -197,13 +391,40 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
     filter: `Description ne '' and Type eq 'Claim'`,
-    meta: { accountNo: ['GLAccount', 'GL_Account'] },
+    meta: {
+      accountNo: [
+        'GLAccount',
+        'GL_Account',
+        'G_L_Account',
+        'GLAccountNo',
+        'GL_Account_No',
+        'G_L_Account_No',
+        'AccountNo',
+        'Account_No',
+      ],
+      accountName: ['GLAccountName', 'GL_Account_Name', 'G_L_Account_Name'],
+    },
   },
   'petty-cash-types': {
     service: 'QyReceiptsPayments',
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
+    // Settlement lines Validate(Type) → G/L Account from Receipts & Payment Types.
+    // Exclude types whose linked account is missing/blocked (e.g. LOCAL CHARGE → 101006).
     filter: `AccountType eq 'G/L Account' and Type eq 'Payment'`,
+    meta: {
+      accountNo: [
+        'GLAccount',
+        'GL_Account',
+        'G_L_Account',
+        'GLAccountNo',
+        'GL_Account_No',
+        'G_L_Account_No',
+        'AccountNo',
+        'Account_No',
+      ],
+      accountName: ['GLAccountName', 'GL_Account_Name', 'G_L_Account_Name'],
+    },
   },
   'gl-accounts': {
     service: 'QyGlAccounts',
@@ -235,8 +456,28 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
   },
   assets: {
     service: 'QyFixedAssets',
-    valueKeys: ['No', 'No_', 'Code'],
+    // Submit the stable Fixed Asset No. so assets that do not have a physical
+    // tag yet remain selectable. Business Central resolves legacy tag values
+    // too, and assigns the next configured Asset Tag when the selected asset
+    // is still untagged.
+    valueKeys: ['No', 'No_'],
     labelKeys: ['Description', 'Name', 'No', 'No_'],
+    meta: {
+      assetNo: ['No', 'No_'],
+      assetTag: ['AssetTag', 'Asset_Tag'],
+      oldTagNo: ['OldTagNo', 'Old_Tag_No'],
+    },
+  },
+  'purchase-assets': {
+    service: 'QyFixedAssets',
+    // Purchase Line.Type = Fixed Asset relates to the internal Fixed Asset
+    // "No.", not to its physical Asset Tag. The maintenance lookup now also
+    // submits this stable No. so Business Central can generate a missing tag.
+    valueKeys: ['No', 'No_'],
+    labelKeys: ['Description', 'Name', 'No', 'No_'],
+    meta: {
+      assetTag: ['AssetTag', 'Asset_Tag'],
+    },
   },
   services: {
     service: 'QyGlAccounts',
@@ -262,13 +503,54 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
   },
   vehicles: {
     service: 'QyVehicleHeader',
+    // Registration stays the dropdown value (fuel TableRelation uses Registration No.).
+    // meta.assetNo is FLT-Vehicle Header."No." (Fixed Asset No.) — transport assign needs that.
     valueKeys: ['RegistrationNo', 'Registration_No'],
     labelKeys: ['Description', 'RegistrationNo', 'Registration_No'],
+    meta: {
+      assetNo: ['No', 'No_'],
+      currentReading: ['CurrentReading', 'Current_Reading', 'CurrentMiliege'],
+      fuelRating: ['FuelRating', 'Fuel_Rating'],
+      nextServiceKm: ['NextServiceKilometers', 'Next_Service_Kilometers'],
+    },
+    fallback: {
+      service: 'QyFleetVehicles',
+      valueKeys: ['RegistrationNo', 'Registration_No'],
+      labelKeys: ['Description', 'RegistrationNo', 'Registration_No'],
+      meta: {
+        assetNo: ['No', 'No_'],
+        currentReading: ['CurrentReading', 'Current_Reading'],
+        fuelRating: ['FuelRating', 'Fuel_Rating'],
+        nextServiceKm: ['NextServiceKilometers', 'Next_Service_Kilometers'],
+      },
+    },
+  },
+  'vehicle-tools': {
+    service: 'QyVehicleAccessories',
+    valueKeys: ['EntryNo'],
+    labelKeys: ['AccessoryName', 'AccessoryCode'],
+    plainLabel: true,
+    meta: {
+      assetNo: ['AssetNo', 'Asset_No', 'Asset No'],
+      tagNo: ['TagNo', 'Tag_No', 'Tag No'],
+      accessoryCode: ['AccessoryCode', 'Accessory_Code'],
+      quantity: ['Quantity'],
+      condition: ['Condition'],
+      serialNo: ['SerialNo', 'Serial_No', 'Serial No'],
+    },
   },
   'fuel-cards': {
     service: 'QyFuelCardSetups',
     valueKeys: ['CardNo', 'Card_No'],
     labelKeys: ['CardNo', 'Card_No'],
+    meta: {
+      vehicleNo: ['VehicleAssigned', 'Vehicle_Assigned'],
+      vendorNo: ['Vendor', 'VendorNo', 'Vendor_No'],
+      vendorName: ['VendorName', 'Vendor_Name'],
+      monthlyLimit: ['MonthlyLimit', 'Monthly_Limit', 'MonthlyFuelLimit', 'Monthly_Fuel_Limit'],
+      fuelRating: ['FuelRating', 'Fuel_Rating'],
+      currentReading: ['CurrentReading', 'Current_Reading', 'OdometerReading', 'Odometer_Reading'],
+    },
   },
   vendors: {
     service: 'QyVendorsList',
@@ -277,10 +559,11 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
   },
   'training-courses': {
     service: 'QyTrainingCourses',
-    // The target field is Course Title and is table-related by title in this
-    // BC tenant. Sending the display code (for example IND) is rejected.
-    valueKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'Description', 'CourseCode', 'Course_Code', 'Code'],
-    labelKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'Description', 'CourseName', 'CourseCode'],
+    // Despite its name, HR Training Applications."Course Title" relates to
+    // HR Training Courses."Course Code". CourseTittle is display text only.
+    valueKeys: ['CourseCode', 'Course_Code'],
+    labelKeys: ['CourseTittle', 'CourseTitle', 'Course_Title', 'CourseName'],
+    filter: 'Closed eq false and IndividualCourse eq false',
     plainLabel: true,
   },
   'payroll-posting-groups': {
@@ -355,6 +638,12 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     labelKeys: ['AssetDescription'],
     filter: `Status eq 'Approved'`,
   },
+  'gate-pass-maintenance': {
+    service: 'QyFuelMaintenanceRequests',
+    valueKeys: ['RequisitionNo', 'Requisition_No'],
+    labelKeys: ['Description', 'VehicleRegNo', 'Vehicle_Reg_No'],
+    filter: `Status eq 'Approved' and Type eq 'Maintenance'`,
+  },
 }
 
 function lookupLabel(row: ODataRecord, spec: LookupSpec, value: string) {
@@ -363,9 +652,417 @@ function lookupLabel(row: ODataRecord, spec: LookupSpec, value: string) {
   return description === value ? value : `${value} - ${description}`
 }
 
+/** Fixed Asset list labels include the physical tag when BC has assigned one. */
+export function fixedAssetLookupOption(row: ODataRecord, value: string) {
+  const tag = text(row, ['AssetTag', 'Asset_Tag'])
+  const description = text(row, ['Description', 'Name'], value)
+  const label = tag
+    ? `${tag} · ${value} · ${description}`
+    : description && description !== value
+      ? `${value} · ${description} · (tag pending)`
+      : `${value} · (tag pending)`
+  return {
+    value,
+    label,
+    meta: {
+      assetNo: text(row, ['No', 'No_'], value),
+      assetTag: tag,
+      oldTagNo: text(row, ['OldTagNo', 'Old_Tag_No']),
+    },
+  }
+}
+
+async function fixedAssetTagIndex() {
+  const rows = (await fetchOData('QyFixedAssets', {}).catch(() => [])) as ODataRecord[] | null
+  const index = new Map<string, string>()
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const no = text(row, ['No', 'No_']).trim().toUpperCase()
+    const tag = text(row, ['AssetTag', 'Asset_Tag'])
+    if (no) index.set(no, tag)
+  }
+  return index
+}
+
+const VEHICLE_HEADER_SERVICES = ['QyVehicleHeader', 'QyFleetVehicles'] as const
+
+function vehicleRowMatches(row: ODataRecord, wantUpper: string) {
+  const no = text(row, ['No', 'No_']).trim().toUpperCase()
+  const reg = text(row, ['RegistrationNo', 'Registration_No']).trim().toUpperCase()
+  return Boolean(wantUpper) && (no === wantUpper || reg === wantUpper)
+}
+
+function vehiclePrimaryNoFromRow(row: ODataRecord) {
+  return text(row, ['No', 'No_']).trim()
+}
+
+async function lookupVehicleHeaderRow(vehicleNo: string) {
+  const trimmed = vehicleNo.trim()
+  if (!trimmed) return undefined
+  const wantUpper = trimmed.toUpperCase()
+  const filter =
+    `(No eq '${odataString(trimmed)}' or No_ eq '${odataString(trimmed)}'` +
+    ` or RegistrationNo eq '${odataString(trimmed)}' or Registration_No eq '${odataString(trimmed)}')`
+
+  for (const service of VEHICLE_HEADER_SERVICES) {
+    const rows = (await fetchOData(service, {
+      $filter: filter,
+      $top: 10,
+    }).catch(() => [])) as ODataRecord[] | null
+    const match = (Array.isArray(rows) ? rows : []).find((row) => vehicleRowMatches(row, wantUpper))
+    if (match) return match
+  }
+
+  // Filter-by-field can fail on older query publications — scan the list instead.
+  for (const service of VEHICLE_HEADER_SERVICES) {
+    const rows = (await fetchOData(service, { $top: 5000 }).catch(() => [])) as ODataRecord[] | null
+    const match = (Array.isArray(rows) ? rows : []).find((row) => vehicleRowMatches(row, wantUpper))
+    if (match) return match
+  }
+  return undefined
+}
+
+/** Vehicle service can omit the tag in the portal — BC resolves it from registration. */
+async function lookupVehicleRegistrationNo(vehicleNo: string) {
+  const vehicle = await lookupVehicleHeaderRow(vehicleNo)
+  return vehicle ? text(vehicle, ['RegistrationNo', 'Registration_No']) : ''
+}
+
+/**
+ * Transport "Vehicle Allocated" TableRelation is FLT-Vehicle Header."No." —
+ * the portal dropdown value is Registration No. Resolve before SOAP assign.
+ */
+async function lookupVehiclePrimaryNo(vehicleNo: string) {
+  const vehicle = await lookupVehicleHeaderRow(vehicleNo)
+  if (!vehicle) return ''
+  const primary = vehiclePrimaryNoFromRow(vehicle)
+  if (primary) return primary
+  return ''
+}
+
+/** Approvers need the vehicle registration and tool snapshot even when OData is sparse. */
+export async function enrichAssetTransferDetail(
+  payloadRow: ODataRecord,
+  lines: Array<Record<string, unknown>>,
+) {
+  let resolvedAssetNo = text(payloadRow, [
+    'AssetToTransfer',
+    'Asset_to_Transfer',
+    'AssetNo',
+    'Asset_No',
+  ])
+  let vehicleRegistrationNo = text(payloadRow, [
+    'VehicleRegistrationNo',
+    'Vehicle_Registration_No',
+    'RegistrationNo',
+    'Registration_No',
+  ])
+  let tagNo = text(payloadRow, ['TagNo', 'Tag_No', 'AssetTag', 'Asset_Tag'])
+
+  if (resolvedAssetNo) {
+    if (!vehicleRegistrationNo) {
+      vehicleRegistrationNo = await lookupVehicleRegistrationNo(resolvedAssetNo)
+    }
+    if (!tagNo) {
+      const assets = (await fetchOData('QyFixedAssets', {
+        $filter: `(No eq '${odataString(resolvedAssetNo)}' or No_ eq '${odataString(resolvedAssetNo)}')`,
+        $top: 1,
+      }).catch(() => [])) as ODataRecord[] | null
+      const asset = Array.isArray(assets) ? assets[0] : undefined
+      tagNo = asset ? text(asset, ['AssetTag', 'Asset_Tag']) : ''
+    }
+  } else if (tagNo) {
+    const assets = (await fetchOData('QyFixedAssets', {
+      $filter: `(AssetTag eq '${odataString(tagNo)}' or Asset_Tag eq '${odataString(tagNo)}')`,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    const asset = Array.isArray(assets) ? assets[0] : undefined
+    resolvedAssetNo = asset ? text(asset, ['No', 'No_']) : resolvedAssetNo
+  }
+
+  const normalizedAssetNo = resolvedAssetNo
+
+  const enrichedLines: Array<Record<string, unknown>> = []
+  for (const line of lines) {
+    const vehicleNo = String(line.vehicleNo ?? normalizedAssetNo ?? '').trim()
+    let registration = String(line.vehicleRegistrationNo ?? '').trim()
+    if (!registration && vehicleNo) {
+      registration = await lookupVehicleRegistrationNo(vehicleNo)
+    }
+    enrichedLines.push({
+      ...line,
+      vehicleNo: vehicleNo || line.vehicleNo,
+      vehicleRegistrationNo: registration || line.vehicleRegistrationNo,
+    })
+  }
+
+  if (!vehicleRegistrationNo) {
+    vehicleRegistrationNo = String(
+      enrichedLines.find((line) => String(line.vehicleRegistrationNo ?? '').trim())
+        ?.vehicleRegistrationNo ?? '',
+    ).trim()
+  }
+
+  return {
+    payloadRow: {
+      ...payloadRow,
+      ...(normalizedAssetNo ? { AssetToTransfer: normalizedAssetNo } : {}),
+      ...(vehicleRegistrationNo ? { VehicleRegistrationNo: vehicleRegistrationNo } : {}),
+      ...(tagNo ? { TagNo: tagNo } : {}),
+    },
+    lines: enrichedLines,
+  }
+}
+
+export function normalizeLookupCode(value: unknown) {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+/** Read the asset/vehicle code from an Asset Transfer header row or portal payload. */
+export function resolveAssetTransferAssetNo(source: ODataRecord | Record<string, unknown>) {
+  return text(source, [
+    'AssetToTransfer',
+    'Asset_to_Transfer',
+    'AssetNo',
+    'Asset_No',
+    'assetNo',
+  ])
+}
+
+export type VehicleToolLookupOption = {
+  value: string
+  label: string
+  meta?: Record<string, unknown>
+}
+
+/** Match BC vehicle accessories to the selected transfer asset (UAT asset-transfer tools). */
+export function filterVehicleToolsForAsset(
+  options: VehicleToolLookupOption[],
+  source: ODataRecord | Record<string, unknown>,
+) {
+  const assetNo = normalizeLookupCode(resolveAssetTransferAssetNo(source))
+  const tagNo = normalizeLookupCode(
+    text(source, ['TagNo', 'Tag_No', 'AssetTag', 'Asset_Tag']),
+  )
+  const vehicleReg = normalizeLookupCode(
+    text(source, [
+      'VehicleRegistrationNo',
+      'Vehicle_Registration_No',
+      'RegistrationNo',
+      'Registration_No',
+    ]),
+  )
+  const matchKeys = new Set([assetNo, tagNo, vehicleReg].filter(Boolean))
+  if (matchKeys.size === 0) {
+    return { options: [] as VehicleToolLookupOption[], reason: 'missing-asset' as const }
+  }
+  const filtered = options.filter((option) => {
+    const keys = [option.meta?.assetNo, option.meta?.tagNo]
+      .map(normalizeLookupCode)
+      .filter(Boolean)
+    return keys.some((key) => matchKeys.has(key))
+  })
+  return {
+    options: filtered,
+    reason: filtered.length ? ('ok' as const) : ('no-tools' as const),
+  }
+}
+
+/** Store-issue gate passes for fixed assets must show each line's physical tag. */
+export async function enrichGatePassStoreIssueLines(
+  lines: Array<Record<string, unknown>>,
+): Promise<Array<Record<string, unknown>>> {
+  const needsTag = lines.some(
+    (line) =>
+      !String(line.tagNo ?? line.TagNo ?? '').trim() &&
+      (String(line.type ?? '') === '2' ||
+        String(line.type ?? '').toLowerCase() === 'asset'),
+  )
+  if (!needsTag) return lines
+
+  const tagIndex = await fixedAssetTagIndex()
+  return lines.map((line) => {
+    const type = String(line.type ?? '')
+    const isAsset = type === '2' || type.toLowerCase() === 'asset'
+    const itemNo = String(line.itemNo ?? '').trim().toUpperCase()
+    let tagNo = String(line.tagNo ?? line.TagNo ?? '').trim()
+    if (!tagNo && isAsset && itemNo) {
+      tagNo = tagIndex.get(itemNo) ?? ''
+    }
+    if (!tagNo) return line
+    return { ...line, tagNo, TagNo: tagNo }
+  })
+}
+
+/** Vehicle service can omit the tag in the portal — BC resolves it from registration. */
+async function resolveMaintenanceFaReference(
+  requestType: number,
+  faTagNumber: string,
+  vehicleNo: string,
+) {
+  const trimmed = faTagNumber.trim()
+  if (trimmed || requestType !== 2 || !vehicleNo.trim()) return trimmed
+  const rows = (await fetchOData('QyVehicleHeader', {
+    $filter: `(RegistrationNo eq '${odataString(vehicleNo)}' or Registration_No eq '${odataString(vehicleNo)}')`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  const vehicle = Array.isArray(rows) ? rows[0] : undefined
+  return vehicle ? text(vehicle, ['No', 'No_']) : ''
+}
+
 function lookupMatches(row: ODataRecord, spec: LookupSpec) {
   if (!spec.match) return true
   return text(row, spec.match.keys).trim().toUpperCase() === spec.match.value.toUpperCase()
+}
+
+async function resolveTrainingCourseCodeForBc(candidate: unknown) {
+  const submittedValue = trainingCourseCodeForBc(candidate)
+  if (!submittedValue) return ''
+
+  const rows = await fetchOData('QyTrainingCourses')
+  const option = trainingCourseOptionForBc(
+    submittedValue,
+    Array.isArray(rows) ? rows : [],
+  )
+  if (!option) {
+    throw portalError(
+      'The selected training course is not available in Business Central. Refresh the page and select an active course from the ERP list.',
+      422,
+      'TRAINING_COURSE_NOT_FOUND',
+    )
+  }
+  return option.value
+}
+
+function gatePassRecordIndex(rows: ODataRecord[], keys: string[]) {
+  const records = new Map<string, ODataRecord>()
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = text(row, [key]).trim().toUpperCase()
+      if (value && !records.has(value)) records.set(value, row)
+    }
+  }
+  return records
+}
+
+function gatePassOptionLabel(value: unknown, labels: Record<number, string>, fallback = '-') {
+  if (typeof value === 'boolean') return value ? labels[1] ?? 'Yes' : labels[0] ?? 'No'
+  const raw = String(value ?? '').trim()
+  if (!raw) return fallback
+  if (/^\d+$/.test(raw)) return labels[Number(raw)] ?? fallback
+  if (['true', 'yes'].includes(raw.toLowerCase())) return 'Yes'
+  if (['false', 'no'].includes(raw.toLowerCase())) return 'No'
+  return raw
+}
+
+export function mapGatePassLogRow(
+  row: ODataRecord,
+  sourceRecord: ODataRecord = {},
+  returnRecord: ODataRecord = {},
+) {
+  const sourceDocumentNo = text(row, [
+    'TransferNo',
+    'Transfer_No',
+    'SourceDocumentNo',
+    'Source_Document_No',
+    'ExternalDocumentNo',
+    'External_Document_No',
+  ])
+  const assetTag = text(
+    row,
+    [
+      'AssetNo',
+      'Asset_No',
+      'AssetTag',
+      'Asset_Tag',
+      'AssetTagNumber',
+      'Asset_Tag_Number',
+      'TagNo',
+      'Tag_No',
+      'SerialNo',
+      'Serial_No',
+      'ItemNo',
+      'Item_No',
+    ],
+    text(sourceRecord, [
+      'TagNo',
+      'Tag_No',
+      'AssetNo',
+      'Asset_No',
+      'AssetToTransfer',
+      'Asset_To_Transfer',
+      'VehicleRegNo',
+      'Vehicle_Reg_No',
+      'ItemNo',
+      'Item_No',
+    ]),
+  )
+  const returnDate =
+    filterBcDate(text(returnRecord, ['DateIn', 'Date_In', 'ReturnDate', 'Return_Date'])) ||
+    filterBcDate(text(row, ['ReturnDate', 'Return_Date', 'DateIn', 'Date_In']))
+  const returned = gatePassOptionLabel(
+    returnRecord.ReturnedStatus ??
+      returnRecord.Returned_Status ??
+      row.ReturnedStatus ??
+      row.Returned_Status,
+    { 0: 'No', 1: 'Yes' },
+  )
+
+  return {
+    gatePassNo: text(row, ['GatePassNo', 'Gate_Pass_No', 'No']),
+    sourceDocumentNo,
+    type: text(row, ['Linkto', 'LinkTo', 'Link_To'], 'Store Issue'),
+    assetTag: assetTag || '-',
+    description: text(
+      row,
+      ['Description', 'AssetDescription', 'Asset_Description'],
+      text(sourceRecord, [
+        'AssetDescription',
+        'Asset_Description',
+        'RequestDescription',
+        'Request_Description',
+        'Description',
+      ]),
+    ) || '-',
+    fromLocation: text(
+      row,
+      ['FromLocation', 'From_Location', 'AssetFromLocation', 'Asset_From_Location'],
+      text(sourceRecord, [
+        'FromLocation',
+        'From_Location',
+        'TransferfromCode',
+        'Transfer_from_Code',
+        'Location',
+      ]),
+    ) || '-',
+    destination: text(
+      row,
+      ['ToLocation', 'To_Location', 'AssetToLocation', 'Asset_To_Location'],
+      text(sourceRecord, [
+        'ToLocation',
+        'To_Location',
+        'DestinationLocation',
+        'Destination_Location',
+        'TransfertoCode',
+        'Transfer_to_Code',
+        'Destination',
+        'Location',
+      ]),
+    ) || '-',
+    dateOut: filterBcDate(text(row, ['DateOut', 'Date_Out'])) || '-',
+    timeOut: text(row, ['TimeOut', 'Time_Out'], '-'),
+    returnable: gatePassOptionLabel(
+      row.ToBeReturned ?? row.To_Be_Returned,
+      { 1: 'Yes', 2: 'No' },
+    ),
+    returned: returned === '-' && returnDate ? 'Yes' : returned,
+    returnDate: returnDate || '-',
+    employee: text(
+      row,
+      ['EmployeeName', 'Employee_Name', 'EmployeeNo', 'Employee_No', 'CreatedBy', 'Created_By'],
+      '-',
+    ),
+    status: text(row, ['Status'], '-'),
+  }
 }
 
 const frontendModules = [
@@ -380,9 +1077,11 @@ const frontendModules = [
   'transport',
   'maintenance',
   'transferOrder',
+  'workTickets',
   'training',
   'salaryAdvance',
   'gatePass',
+  'assetTransfer',
   'leave',
 ] as const satisfies readonly SupportedFrontendModule[]
 
@@ -481,6 +1180,7 @@ async function resolveApprovalReference(
             entryRows[0]!,
             parsed.no,
             approvalModuleFromEntry,
+            parsed.module,
           )) as SupportedFrontendModule)
         : parsed.module
     if (!isSupportedModule(module)) {
@@ -506,15 +1206,27 @@ async function resolveApprovalReference(
 const approvalModule = approvalModuleFromEntry
 export { approvalModule }
 
-function approvalQueueItem(row: ODataRecord) {
-  const module = approvalModule(row)
+function approvalQueueItem(row: ODataRecord, resolvedModule?: SupportedFrontendModule) {
+  const module = resolvedModule ?? approvalModule(row)
   const documentNo = text(row, ['DocumentNo', 'Document_No'])
   const status = text(row, ['Status'], 'Open')
+  const rawType = text(row, ['DocumentType', 'Description'])
+  const titleByModule: Partial<Record<SupportedFrontendModule, string>> = {
+    pettyCash: 'Petty Cash Settlement',
+    pettyCashReplenishment: 'Petty Cash Request',
+    purchaseRequisition: 'Purchase Requisition',
+    storeRequisition: 'Store Requisition',
+    imprest: 'Imprest Requisition',
+    imprestSurrender: 'Imprest Surrender',
+    staffClaim: 'Staff Claim',
+    maintenance: 'Maintenance Request',
+    fuelRequest: 'Fuel Requisition',
+  }
   return {
     id: `${module}-${documentNo}`,
     requestNo: documentNo,
     module,
-    title: text(row, ['DocumentType', 'Description'], `${module} approval`),
+    title: titleByModule[module] ?? rawType ?? `${module} approval`,
     makerEmployeeNo: text(row, ['SenderID', 'UserID', 'EmployeeNo']),
     makerName: text(row, ['SenderName', 'EmployeeName', 'UserID'], text(row, ['SenderID', 'EmployeeNo'])),
     amount: number(row, ['Amount', 'TotalAmount']),
@@ -530,6 +1242,104 @@ function approvalQueueItem(row: ODataRecord) {
     approverEmployeeNo: text(row, ['ApproverID']),
     sourceDocumentNo: documentNo,
   }
+}
+
+async function approvalQueueItems(rows: ODataRecord[]) {
+  const sharedDocuments = rows
+    .filter((row) => Number(row.TableID ?? row.TableId ?? 0) === APPROVAL_TABLE_IDS.fuel)
+    .map((row) => text(row, ['DocumentNo', 'Document_No']))
+    .filter(Boolean)
+  const sharedModules = await resolveFuelMaintenanceModules(sharedDocuments)
+
+  // Any approval that would otherwise show as Purchase Requisition must be
+  // probed against Payments Header — BC often stamps TableID 38 / 52121800 /
+  // Document Type "Purchase Requisition" on petty cash settlements.
+  const ambiguousRows = rows.filter((row) => {
+    const tableId = Number(row.TableID ?? row.TableId ?? 0)
+    const documentType = text(row, ['DocumentType', 'Document_Type'])
+    const syncModule = approvalModuleFromEntry(row)
+    return (
+      syncModule === 'purchaseRequisition' ||
+      syncModule === 'pettyCash' ||
+      syncModule === 'pettyCashReplenishment' ||
+      tableId === APPROVAL_TABLE_IDS.purchaseOrder ||
+      tableId === APPROVAL_TABLE_IDS.purchaseRequisition ||
+      tableId === APPROVAL_TABLE_IDS.pettyCash ||
+      tableId === APPROVAL_TABLE_IDS.pettyCashReplenishment ||
+      tableId === 0 ||
+      documentType === 'Order' ||
+      documentType === 'Quote' ||
+      /petty|payment|purchase/i.test(documentType)
+    )
+  })
+  const ambiguousModules = new Map<string, SupportedFrontendModule>()
+  await Promise.all(
+    ambiguousRows.map(async (row) => {
+      const documentNo = text(row, ['DocumentNo', 'Document_No'])
+      if (!documentNo) return
+      const key = normalizedApprovalDocKey(documentNo)
+      if (sharedModules.has(key) || ambiguousModules.has(key)) return
+      const module = (await resolveApprovalModuleFromEntry(
+        row,
+        documentNo,
+        approvalModuleFromEntry,
+      )) as SupportedFrontendModule
+      if (isSupportedModule(module)) ambiguousModules.set(key, module)
+    }),
+  )
+
+  return rows.map((row) => {
+    const documentNo = text(row, ['DocumentNo', 'Document_No'])
+    const key = normalizedApprovalDocKey(documentNo)
+    const resolved = sharedModules.get(key) ?? ambiguousModules.get(key)
+    return approvalQueueItem(row, resolved)
+  })
+}
+
+async function enrichApprovalQueueAmounts(
+  items: ReturnType<typeof approvalQueueItem>[],
+): Promise<ReturnType<typeof approvalQueueItem>[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      if (item.amount > 0) return item
+      if (item.module !== 'pettyCash' && item.module !== 'pettyCashReplenishment') return item
+      try {
+        if (item.module === 'pettyCash') {
+          const rows = (await fetchOData('QyPaymentsHeader', {
+            $filter: `No eq '${odataString(item.requestNo)}'`,
+            $top: 1,
+          })) as ODataRecord[] | null
+          const header = Array.isArray(rows) ? rows[0] : null
+          if (!header) return item
+          const amount = number(header, [
+            'TotalNetAmount',
+            'Total_Net_Amount',
+            'TotalPaymentAmount',
+            'Total_Payment_Amount',
+            'Amount',
+          ])
+          return amount > 0 ? { ...item, amount } : item
+        }
+        const rows = (await fetchOData('PgInterBankTransfers', {
+          $filter: `No eq '${odataString(item.requestNo)}'`,
+          $top: 1,
+        })) as ODataRecord[] | null
+        const header = Array.isArray(rows) ? rows[0] : null
+        if (!header) return item
+        const amount = number(header, [
+          'Amount_2',
+          'Source_Amount',
+          'SourceAmount',
+          'Receiving_Amount',
+          'ReceivingAmount',
+          'Amount',
+        ])
+        return amount > 0 ? { ...item, amount } : item
+      } catch {
+        return item
+      }
+    }),
+  )
 }
 
 function normalizedApprovalDocKey(value: string) {
@@ -581,7 +1391,12 @@ async function fetchExistingModuleDocumentNos(
     spec.module === 'gate-pass'
       ? ['GatePassNo', 'Gate_Pass_No']
       : spec.module === 'transport'
-        ? ['Transport_Requisition_No', 'No']
+        ? [
+            'Transport_Requisition_No',
+            'TransportRequisitionNo',
+            'RequisitionNo',
+            'Requisition_No',
+          ]
         : spec.module === 'fuel' || spec.module === 'maintenance'
           ? ['RequisitionNo', 'Requisition_No', 'No']
           : [spec.headerKey ?? 'No', 'No', 'ApplicationNo', 'Application_No']
@@ -672,6 +1487,31 @@ function optionCode(value: string, labels: Record<string, string>) {
 function mapStoreLine(row: ODataRecord, index: number) {
   const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
   const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
+  const quantityIssued = number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued'])
+  const quantityReceived = number(row, [
+    'quantityReceived',
+    'QuantityReceived',
+    'Quantity_Received',
+  ])
+  const quantityToIssue = number(row, [
+    'quantityToIssue',
+    'QuantityToIssue',
+    'Quantity_To_Issue',
+  ])
+  const quantityOutstanding =
+    number(row, ['quantityOutstanding', 'QuantityOutstanding', 'Quantity_Outstanding', 'OutstandingQuantity']) ||
+    Math.max(0, quantityRequested - quantityIssued)
+  const quantityPendingReceipt = Math.max(0, quantityIssued - quantityReceived)
+  const fulfillmentStatus =
+    quantityIssued > 0 && quantityReceived < quantityIssued
+      ? 'Awaiting receipt confirmation'
+      : quantityRequested > 0 && quantityIssued >= quantityRequested && quantityReceived >= quantityIssued
+        ? 'Received'
+        : quantityIssued > 0
+          ? 'Partially issued'
+          : quantityToIssue > 0
+            ? 'Ready to issue'
+            : 'Awaiting store issue'
   return {
     id: lineNo,
     lineNo,
@@ -679,13 +1519,54 @@ function mapStoreLine(row: ODataRecord, index: number) {
     issuingStore: text(row, ['issuingStore', 'IssuingStore', 'Issuing_Store', 'LocationCode', 'Location']),
     itemNo: text(row, ['itemNo', 'ItemNo', 'Item_No', 'No', 'LineNo']),
     description: text(row, ['description', 'Description']),
+    tagNo: text(row, ['tagNo', 'TagNo', 'Tag_No', 'Tag No']),
     quantity: quantityRequested,
     quantityRequested,
-    quantityIssued: number(row, ['quantityIssued', 'QuantityIssued', 'Quantity_Issued']),
+    availableStock: number(row, [
+      'availableStock',
+      'AvailableStock',
+      'Qtyinstore',
+      'QtyInStore',
+      'QuantityInStore',
+    ]),
+    quantityToIssue,
+    currentIssueQuantity: number(row, [
+      'currentIssueQuantity',
+      'IssueQuantity',
+      'Issue_Quantity',
+    ]),
+    quantityIssued,
+    quantityOutstanding,
     quantityToReceive: number(row, ['quantityToReceive', 'QuantityToReceive', 'Quantity_to_Receive', 'Qtytoreceive']),
-    quantityReceived: number(row, ['quantityReceived', 'QuantityReceived', 'Quantity_Received']),
+    quantityReceived,
+    quantityPendingReceipt,
+    lastQuantityIssued: number(row, [
+      'lastQuantityIssued',
+      'LastQuantityIssued',
+      'Last_Quantity_Issued',
+    ]),
+    lastIssueDate: text(row, ['lastIssueDate', 'LastDateofIssue', 'Last_Date_of_Issue']),
     reason: text(row, ['reason', 'Reason', 'ReasonforlessQtyReceived']),
+    reasonForLessIssued: text(row, [
+      'reasonForLessIssued',
+      'Reasonforissuinglesss',
+      'Reason_for_issuing_less',
+    ]),
+    remarks: text(row, ['remarks', 'Remarks']),
+    requestStatus: text(row, ['requestStatus', 'RequestStatus', 'Request_Status']),
+    fulfillmentStatus,
     unitOfMeasure: text(row, ['unitOfMeasure', 'UnitofMeasure', 'UnitOfMeasure', 'Unit_of_Measure']),
+    unitCost: number(row, ['unitCost', 'UnitCost', 'Unit_Cost']),
+    lineAmount: number(row, ['lineAmount', 'LineAmount', 'Line_Amount']),
+    budgetBalance: number(row, ['budgetBalance', 'BudgetBalance', 'Budget_Balance']),
+    budgetName: text(row, ['budgetName', 'BudgetName', 'Budget_Name']),
+    currentMonthBudget: number(row, [
+      'currentMonthBudget',
+      'CurrentMonthBudget',
+      'Current_Month_Budget',
+    ]),
+    totalBudget: number(row, ['totalBudget', 'TotalBudget', 'Total_Budget']),
+    voteAccount: text(row, ['voteAccount', 'VoteAccount', 'Vote_Account']),
   }
 }
 
@@ -715,6 +1596,24 @@ function lineIdentity(row: ODataRecord, index: number) {
 
 function mapImprestLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
+  const amount = number(row, ['amount', 'Amount'])
+  const noOfDays = number(row, [
+    'noOfDays',
+    'NoOfDays',
+    'NoofDays',
+    'No_of_Days',
+    'NumberOfDays',
+    'Number_of_Days',
+  ])
+  const bcDailyRate = number(row, [
+    'dailyRate',
+    'DailyRate',
+    'DailyRateAmount',
+    'Daily_Rate_Amount',
+    'Daily_Rate_Amount_',
+    'Daily_Rate',
+    'Daily Rate(Amount)',
+  ])
   return {
     id: lineNo,
     lineNo,
@@ -723,28 +1622,89 @@ function mapImprestLine(row: ODataRecord, index: number) {
     dutyArea: text(row, ['dutyArea', 'DutyArea', 'Duty_Area']),
     accountNo: text(row, ['accountNo', 'AccountNo', 'Account_No']),
     accountName: text(row, ['accountName', 'AccountName', 'Account_Name']),
-    amount: number(row, ['amount', 'Amount']),
-    noOfDays: number(row, ['noOfDays', 'NoOfDays', 'No_of_Days']),
+    dailyRate: bcDailyRate > 0 ? bcDailyRate : noOfDays > 0 ? amount / noOfDays : 0,
+    amount,
+    noOfDays,
   }
 }
 
 function mapSurrenderLine(row: ODataRecord, index: number) {
-  const lineNo = lineIdentity(row, index)
+  const lineNo = imprestSurrenderLineNo(row, index)
+  const amount = number(row, ['amount', 'Amount'])
+  const cashReceiptAmount = imprestSurrenderLineCashReceiptAmount(row)
+  const actualSpent = imprestSurrenderLineActualSpent(row)
+  const bcOutstanding = imprestSurrenderLineOutstanding(row)
+  const calculatedRemaining = Math.max(0, amount - actualSpent - cashReceiptAmount)
+  const displayRemaining =
+    bcOutstanding !== undefined ? Math.max(0, bcOutstanding) : calculatedRemaining
   return {
-    id: lineNo,
+    id: String(lineNo),
     lineNo,
-    accountNo: text(row, ['accountNo', 'AccountNo', 'Account_No']),
+    accountNo: imprestSurrenderAccountNo(row),
     surrenderDocNo: text(row, ['surrenderDocNo', 'SurrenderDocNo', 'Surrender_Doc_No']),
     accountName: text(row, ['accountName', 'AccountName', 'Account_Name']),
-    amount: number(row, ['amount', 'Amount']),
-    actualSpent: number(row, ['actualSpent', 'ActualSpent', 'Actual_Spent']),
-    cashReceiptNo: text(row, ['cashReceiptNo', 'CashReceiptNo', 'Cash_Receipt_No']),
-    cashReceiptAmount: number(row, ['cashReceiptAmount', 'CashReceiptAmount', 'Cash_Receipt_Amount']),
+    amount,
+    actualSpent,
+    cashReceiptNo: text(row, [
+      'cashReceiptNo',
+      'CashReceiptNo',
+      'Cash_Receipt_No',
+      'Cash Receipt No',
+    ]),
+    cashReceiptAmount,
+    outstandingAmount: displayRemaining,
+    bcOutstandingAmount:
+      bcOutstanding ??
+      number(row, [
+        'OutstandingAmount',
+        'Outstanding_Amount',
+        'Outstanding Amount',
+      ]),
+    approvedDailyRate: number(row, [
+      'ApprovedDailyRate',
+      'Approved_Daily_Rate',
+    ]),
+    refundAmount: number(row, ['RefundAmount', 'Refund_Amount']),
+    additionalPayment: number(row, [
+      'AdditionalPayment',
+      'Additional_Payment',
+    ]),
   }
+}
+
+function medicalClaimCoveragePercent(
+  medicalAmount: number,
+  amountToRefund: number,
+  stored: number,
+) {
+  if (stored > 0) return stored
+  if (medicalAmount <= 0 || amountToRefund < 0) return 0
+  return Math.round((amountToRefund / medicalAmount) * 10000) / 100
 }
 
 function mapClaimLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
+  const medicalAmount = number(row, ['medicalAmount', 'MedicalAmount', 'Medical_Amount'])
+  const amountToRefund = number(row, [
+    'amountToRefund',
+    'AmountToRefund',
+    'Amount_to_refund',
+    'Amount to refund',
+  ])
+  const amount = number(row, ['amount', 'Amount'])
+  const coveragePercent = medicalClaimCoveragePercent(
+    medicalAmount,
+    amountToRefund,
+    number(row, [
+      'coveragePercent',
+      'CoveragePercent',
+      'Coverage_Percent',
+      'CoveragePercentValue',
+    ]),
+  )
+  const isMedical = medicalAmount > 0 || amountToRefund > 0
+  const netClaimAmount =
+    isMedical && amountToRefund > 0 ? amountToRefund : isMedical ? amount : amount
   return {
     id: lineNo,
     lineNo,
@@ -755,8 +1715,11 @@ function mapClaimLine(row: ODataRecord, index: number) {
       text(row, ['hospitalCategory', 'HospitalCategory', 'Hospital_Category']),
       { government: '1', private: '2', online: '3' },
     ),
-    medicalAmount: number(row, ['medicalAmount', 'MedicalAmount', 'Medical_Amount']),
-    amount: number(row, ['amount', 'Amount']),
+    medicalAmount,
+    coveragePercent,
+    amount: netClaimAmount,
+    amountToRefund,
+    netClaimAmount,
     claimReceiptNo: text(row, ['claimReceiptNo', 'ClaimReceiptNo', 'Claim_ReceiptNo']),
     expenditureDate: text(row, ['expenditureDate', 'ExpenditureDate', 'Expenditure_Date']),
     expenditureDescription: text(row, ['expenditureDescription', 'ExpenditureDescription', 'Purpose']),
@@ -765,13 +1728,24 @@ function mapClaimLine(row: ODataRecord, index: number) {
 
 function mapPettyCashLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
+  const type = text(row, ['type', 'Type'])
+  const name = text(row, [
+    'name',
+    'Name',
+    'AccountName',
+    'Account_Name',
+    'TransactionName',
+    'Transaction_Name',
+    'Description',
+  ])
   return {
     id: lineNo,
     lineNo,
     recId: lineNo,
-    type: text(row, ['type', 'Type']),
-    name: text(row, ['name', 'Name', 'TransactionName']),
-    amount: number(row, ['amount', 'Amount']),
+    type,
+    name: name || type,
+    accountNo: text(row, ['AccountNo', 'Account_No', 'Account No.']),
+    amount: number(row, ['amount', 'Amount', 'NetAmount', 'Net_Amount']),
   }
 }
 
@@ -791,38 +1765,144 @@ function purchaseLineTypeCode(value: string) {
   return optionCode(normalized, { service: '1', item: '2', asset: '4' })
 }
 
+function purchaseLineDescription(row: ODataRecord) {
+  const primary = text(row, ['Description', 'description'])
+  const master = text(row, ['Description2', 'Description_2', 'description2'])
+  const summary = text(row, [
+    'RequestSummary',
+    'Request_Summary',
+    'Reason_for_Request',
+    'ReasonForRequest',
+    'reasonForRequest',
+  ])
+  if (primary && master && primary.trim().toLowerCase() !== master.trim().toLowerCase()) {
+    return primary
+  }
+  return summary || primary
+}
+
 function mapPurchaseLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
   const rawType = text(row, ['Type', 'type'])
+  const quantity = number(row, ['Quantity', 'quantity'])
+  const directUnitCost = number(row, [
+    'DirectUnitCost',
+    'Direct_Unit_Cost',
+    'UnitCost',
+    'Unit_Cost',
+    'unitCost',
+  ])
+  const amountIncludingVat = number(row, [
+    'AmountIncludingVAT',
+    'Amount_Including_VAT',
+    'amountIncludingVat',
+  ])
+  const lineAmount = number(row, ['LineAmount', 'Line_Amount', 'Amount', 'amount'])
+  const amount = amountIncludingVat || lineAmount || directUnitCost * quantity
   return {
     id: lineNo,
     lineNo,
     type: purchaseLineTypeLabel(rawType),
     typeCode: purchaseLineTypeCode(rawType),
     itemNo: text(row, ['No', 'No_', 'itemNo', 'ItemNo', 'Item_No', 'Item_No_']),
-    description: text(row, ['Description', 'description']),
+    description: purchaseLineDescription(row),
+    masterDescription: text(row, ['Description2', 'Description_2', 'description2']),
     location: text(row, ['Location_Code', 'LocationCode', 'Location', 'location']),
-    quantity: number(row, ['Quantity', 'quantity']),
+    quantity,
     reasonForRequest: text(row, ['RequestSummary', 'Reason_for_Request', 'ReasonForRequest', 'reasonForRequest']),
     procurementPlan: text(row, ['Procurement_Plan', 'ProcurementPlan', 'procurementPlan']),
     unitOfMeasure: text(row, ['Unit_of_Measure', 'UnitofMeasure', 'UnitOfMeasure', 'unitOfMeasure']),
-    amount: number(row, ['AmountIncludingVAT', 'Amount_Including_VAT', 'Amount', 'amount']),
+    directUnitCost,
+    lineAmount,
+    amountIncludingVat,
+    amount,
   }
+}
+
+export function transportRequestTypeLabel(value: unknown) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === '') return ''
+  // The transport request contract uses 0=City and 1=Field Trip. OData may
+  // serialise the option as its member name or ordinal.
+  if (normalized === '0' || normalized === 'city' || normalized === 'city transport') return 'City'
+  if (
+    normalized === '1' ||
+    normalized === '2' ||
+    normalized === 'trip' ||
+    normalized === 'field' ||
+    normalized === 'field trip' ||
+    normalized === 'field transport'
+  ) {
+    return 'Field Trip'
+  }
+  return String(value ?? '').trim()
+}
+
+/** Translate the portal/BC maintenance option value into a readable label. */
+export function maintenanceRequestTypeLabel(row: ODataRecord) {
+  const headerType = text(row, ['Type', 'Type_Field', 'DocumentType', 'Document_Type'])
+    .trim()
+    .toLowerCase()
+  const raw = text(row, [
+    'RequestType',
+    'Request_Type',
+    'MaintenanceType',
+  ])
+  const normalized = raw.trim().toLowerCase()
+  if (
+    normalized === '1' ||
+    normalized === 'fixed asset' ||
+    normalized === 'fixed asset maintenance'
+  ) {
+    return 'Fixed Asset Maintenance'
+  }
+  if (
+    normalized === '2' ||
+    normalized === 'vehicle' ||
+    normalized === 'vehicle service' ||
+    normalized === 'vehicle service maintenance'
+  ) {
+    return 'Vehicle Service Maintenance'
+  }
+  const maintenanceType = text(row, [
+    'TypeofMaintenance',
+    'Type_of_Maintenance',
+    'MaintenanceDescription',
+  ])
+  if (maintenanceType) return maintenanceType
+  if (
+    (headerType === 'maintenance' || headerType === '1') &&
+    text(row, ['VehicleRegNo', 'Vehicle_Reg_No', 'VehicleNo', 'Vehicle_No'])
+  ) {
+    return 'Vehicle Service Maintenance'
+  }
+  if (headerType === 'maintenance' || headerType === '1') {
+    return 'Fixed Asset Maintenance'
+  }
+  return raw || 'Maintenance'
 }
 
 function mapTransportPassenger(row: ODataRecord, index: number) {
   const recId = text(row, ['RecId', 'recId', 'SystemId', 'SystemID'], lineIdentity(row, index))
   const passengerType = text(row, ['PassengerType', 'passengerType', 'Type'])
+  const passengerName = text(row, ['PassengerName', 'Passenger_Names', 'Name'])
+  const passengerOrganization = text(row, [
+    'PassengerOrganization',
+    'Passenger_Organization',
+    'Position',
+  ])
   return {
     id: recId,
     lineNo: recId,
     recId,
     passengerType,
     employeeNo: text(row, ['EmployeeNo', 'employeeNo', 'No']),
+    passengerName,
+    passengerOrganization,
     externalPassName: passengerType.toLowerCase() === 'external'
-      ? text(row, ['PassengerName', 'Passenger_Names', 'Name'])
+      ? passengerName
       : '',
-    externalPassOrganization: text(row, ['PassengerOrganization', 'Passenger_Organization', 'Position']),
+    externalPassOrganization: passengerOrganization,
   }
 }
 
@@ -843,8 +1923,44 @@ export function mapModuleLines(
   if (module === 'transferOrder') {
     return rows.map(mapTransferLine)
   }
+  if (module === 'assetTransfer') {
+    return rows.map((row, index) => ({
+      vehicleRegistrationNo: text(row, [
+        'VehicleRegistrationNo',
+        'Vehicle_Registration_No',
+        'RegistrationNo',
+        'Registration_No',
+      ]),
+      toolDescription: text(row, ['ToolDescription', 'Tool_Description', 'AccessoryName']),
+      toolCode: text(row, ['ToolCode', 'Tool_Code', 'AccessoryCode']),
+      accessoryEntryNo: number(row, ['AccessoryEntryNo', 'Accessory_Entry_No', 'EntryNo'], 0),
+      vehicleNo: text(row, ['VehicleNo', 'Vehicle_No']),
+      quantity: number(row, ['Quantity'], 0),
+      serialNo: text(row, ['SerialNo', 'Serial_No']),
+      condition: text(row, ['Condition']),
+      remarks: text(row, ['Remarks']),
+      id: text(row, ['LineNo', 'Line_No'], String(index + 1)),
+      lineNo: number(row, ['LineNo', 'Line_No'], (index + 1) * 10000),
+    }))
+  }
   if (module === 'gatePass') {
     const source = gatePassSourceFromRow(header)
+    if (source === 'maintenance') {
+      return rows.map((row, index) => ({
+        id: lineIdentity(row, index),
+        lineNo: lineIdentity(row, index),
+        itemNo: text(row, [
+          'VehicleRegNo',
+          'Vehicle_Reg_No',
+          'VehicleNo',
+          'FixedAssetNo',
+          'Fixed_Asset_No',
+        ]),
+        description: text(row, ['Description', 'Purpose', 'MaintenanceDescription']),
+        quantity: number(row, ['Quantity', 'QuantityofFuelLitres'], 1),
+        unitOfMeasure: 'Request',
+      }))
+    }
     return source === 'storeIssue'
       ? rows.map(mapStoreLine)
       : rows.map(mapTransferLine)
@@ -853,6 +1969,292 @@ export function mapModuleLines(
     return rows.map((row) => mapSalaryAdvanceLine(row, header))
   }
   return rows
+}
+
+export interface FacilityListSummary {
+  amount?: number
+  totalQuantity?: number
+  passengerCount?: number
+}
+
+function firstNonZeroNumber(row: ODataRecord, keys: string[]) {
+  for (const key of keys) {
+    const parsed = Number(row[key])
+    if (Number.isFinite(parsed) && parsed !== 0) return parsed
+  }
+  return 0
+}
+
+/**
+ * Facility headers do not consistently calculate their FlowField totals for
+ * OData. Derive the list value from the saved lines when the header is zero,
+ * while keeping quantity/passenger workflows out of the currency column.
+ */
+export function facilityListSummary(
+  module: SupportedFrontendModule,
+  header: ODataRecord,
+  rawLines: ODataRecord[] = [],
+): FacilityListSummary {
+  if (module === 'storeRequisition') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    const amountFromHeader = firstNonZeroNumber(header, [
+      'TotalAmount',
+      'Total_Amount',
+      'Amount',
+      'ActualExpenditure',
+      'CommittedAmount',
+    ])
+    const amountFromLines = lines.reduce((total, line) => {
+      const value =
+        Number(line.lineAmount ?? 0) ||
+        Number(line.unitCost ?? 0) * Number(line.quantityRequested ?? line.quantity ?? 0)
+      return total + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return {
+      amount: amountFromHeader || amountFromLines,
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantityRequested ?? line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'purchaseRequisition') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    const amountFromHeader = firstNonZeroNumber(header, [
+      'AmountIncludingVAT',
+      'Amount_Including_VAT',
+      'TotalAmount',
+      'Total_Amount',
+      'Amount',
+      'CommittedAmount',
+      'ActualExpenditure',
+    ])
+    const amountFromLines = lines.reduce((total, line) => {
+      const value =
+        Number(line.amount ?? 0) ||
+        Number(line.directUnitCost ?? 0) * Number(line.quantity ?? 0)
+      return total + (Number.isFinite(value) ? value : 0)
+    }, 0)
+    return {
+      amount: amountFromHeader || amountFromLines,
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'fuelRequest') {
+    const quantity = firstNonZeroNumber(header, [
+      'QuantityofFuelLitres',
+      'Quantity_of_Fuel_Litres',
+      'Quantity',
+    ])
+    const price = firstNonZeroNumber(header, ['PriceLitre', 'Price_Litre', 'Price'])
+    return {
+      amount:
+        firstNonZeroNumber(header, [
+          'TotalPriceofFuel',
+          'Total_Price_of_Fuel',
+          'TotalCost',
+          'Total_Cost',
+          'Amount',
+        ]) ||
+        quantity * price,
+      totalQuantity: quantity,
+    }
+  }
+
+  if (module === 'transferOrder') {
+    const lines = mapModuleLines(module, header, rawLines) as Array<Record<string, unknown>>
+    return {
+      totalQuantity: lines.reduce(
+        (total, line) => total + Number(line.quantity ?? 0),
+        0,
+      ),
+    }
+  }
+
+  if (module === 'transport') {
+    return {
+      passengerCount: firstNonZeroNumber(header, [
+        'No_Of_Passangers',
+        'NoOfPassengers',
+        'No_of_Passengers',
+      ]),
+    }
+  }
+
+  return {}
+}
+
+const GATE_PASS_EMPLOYEE_NO_FIELDS = [
+  'EmployeeNo',
+  'Employee_No',
+  'StaffNo',
+  'Staff_No',
+  'RequesterID',
+  'Requested_By',
+]
+const GATE_PASS_DEPARTMENT_CODE_FIELDS = [
+  'Department',
+  'DepartmentCode',
+  'Department_Code',
+  'GlobalDimension1Code',
+  'Global_Dimension_1_Code',
+  'DistrictDepartmentCode',
+  'District_Department_Code',
+]
+const GATE_PASS_DEPARTMENT_NAME_FIELDS = [
+  'DistrictDepartmentName',
+  'District_Department_Name',
+  'DepartmentName',
+  'Department_Name',
+]
+const GATE_PASS_SECTOR_CODE_FIELDS = [
+  'Sector',
+  'SectorCode',
+  'Sector_Code',
+  'Branch',
+  'BranchCode',
+  'Branch_Code',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+]
+const GATE_PASS_SECTOR_NAME_FIELDS = [
+  'SectorName',
+  'Sector_Name',
+  'BranchName',
+  'Branch_Name',
+]
+
+/**
+ * QyGatePass does not consistently expose the Department/Sector FlowFields.
+ * Populate the display aliases from the row first, then the gate-pass owner's
+ * employee card. This keeps unscoped Transfer/Asset lists accurate per row.
+ */
+export function enrichGatePassRowDimensions(
+  row: ODataRecord,
+  employeeRecord: ODataRecord | null = null,
+  currentUser?: AuthUser,
+) {
+  const employeeNo = text(row, GATE_PASS_EMPLOYEE_NO_FIELDS)
+  const employeeName = text(row, ['EmployeeName', 'Employee_Name', 'StaffName'])
+  const belongsToCurrentUser =
+    Boolean(currentUser) &&
+    (
+      employeeNo.toLowerCase() === currentUser!.employeeNo.toLowerCase() ||
+      (!employeeNo &&
+        employeeName.trim().toLowerCase() ===
+          (currentUser!.displayName || currentUser!.name).trim().toLowerCase())
+    )
+  const userFallback: ODataRecord | null = belongsToCurrentUser
+    ? {
+        Department: currentUser!.department,
+        DepartmentName: currentUser!.departmentName,
+        BranchCode: currentUser!.branchCode,
+        BranchName: currentUser!.branchName,
+      }
+    : null
+  const employee = employeeRecord ?? userFallback
+
+  const departmentCode = text(
+    row,
+    GATE_PASS_DEPARTMENT_CODE_FIELDS,
+    employee ? text(employee, GATE_PASS_DEPARTMENT_CODE_FIELDS) : '',
+  )
+  const departmentName = text(
+    row,
+    GATE_PASS_DEPARTMENT_NAME_FIELDS,
+    employee
+      ? text(employee, GATE_PASS_DEPARTMENT_NAME_FIELDS, departmentCode)
+      : departmentCode,
+  )
+  const sectorCode = text(
+    row,
+    GATE_PASS_SECTOR_CODE_FIELDS,
+    employee ? text(employee, GATE_PASS_SECTOR_CODE_FIELDS) : '',
+  )
+  const sectorName = text(
+    row,
+    GATE_PASS_SECTOR_NAME_FIELDS,
+    employee ? text(employee, GATE_PASS_SECTOR_NAME_FIELDS, sectorCode) : sectorCode,
+  )
+
+  return {
+    ...row,
+    ...(departmentCode ? { Department: departmentCode, DepartmentCode: departmentCode } : {}),
+    ...(departmentName
+      ? {
+          DepartmentName: departmentName,
+          DistrictDepartmentName: departmentName,
+        }
+      : {}),
+    ...(sectorCode ? { Sector: sectorCode, BranchCode: sectorCode } : {}),
+    ...(sectorName ? { SectorName: sectorName, BranchName: sectorName } : {}),
+  }
+}
+
+async function enrichGatePassRowsWithReturns(rows: ODataRecord[]) {
+  const returns = (await fetchOData('QyGatePassReturns').catch(() => [])) as ODataRecord[]
+  const byGatePass = new Map<string, ODataRecord>()
+  for (const row of Array.isArray(returns) ? returns : []) {
+    const gatePassNo = text(row, ['GatePassNo', 'Gate_Pass_No']).trim().toUpperCase()
+    if (gatePassNo) byGatePass.set(gatePassNo, row)
+  }
+  return rows.map((row) => {
+    const gatePassNo = text(row, ['GatePassNo', 'Gate_Pass_No', 'No']).trim().toUpperCase()
+    const returnRecord = byGatePass.get(gatePassNo)
+    if (!returnRecord) return row
+    const returnedStatus =
+      returnRecord.ReturnedStatus ??
+      returnRecord.Returned_Status ??
+      returnRecord.Returned
+    const dateIn = filterBcDate(
+      text(returnRecord, ['DateIn', 'Date_In', 'ReturnDate', 'Return_Date']),
+    )
+    return {
+      ...row,
+      ReturnedStatus: returnedStatus ?? row.ReturnedStatus,
+      Returned: returnedStatus ?? row.Returned,
+      DateIn: dateIn || row.DateIn,
+      ReturnDate: dateIn || row.ReturnDate,
+      GatePassClosed: ['true', 'yes', '1'].includes(String(returnedStatus ?? '').toLowerCase()),
+    }
+  })
+}
+async function enrichGatePassRowsWithEmployeeDimensions(
+  rows: ODataRecord[],
+  currentUser: AuthUser,
+) {
+  const recordsByEmployeeNo = new Map<string, Promise<ODataRecord | null>>()
+  const recordFor = (employeeNo: string) => {
+    const key = employeeNo.trim().toLowerCase()
+    if (!key || key === currentUser.employeeNo.trim().toLowerCase()) {
+      return Promise.resolve(null)
+    }
+    const existing = recordsByEmployeeNo.get(key)
+    if (existing) return existing
+    const pending = fetchEmployeeRecordFast(employeeNo).catch(() => null)
+    recordsByEmployeeNo.set(key, pending)
+    return pending
+  }
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const hasDepartment = Boolean(
+        text(row, [...GATE_PASS_DEPARTMENT_NAME_FIELDS, ...GATE_PASS_DEPARTMENT_CODE_FIELDS]),
+      )
+      const hasSector = Boolean(
+        text(row, [...GATE_PASS_SECTOR_NAME_FIELDS, ...GATE_PASS_SECTOR_CODE_FIELDS]),
+      )
+      const employeeNo = text(row, GATE_PASS_EMPLOYEE_NO_FIELDS)
+      const employeeRecord =
+        hasDepartment && hasSector ? null : await recordFor(employeeNo)
+      return enrichGatePassRowDimensions(row, employeeRecord, currentUser)
+    }),
+  )
 }
 
 async function mappedModuleRows(
@@ -869,36 +2271,139 @@ async function mappedModuleRows(
     const salaryBase =
       authUser.monthlySalaryBase && authUser.monthlySalaryBase > 0
         ? authUser.monthlySalaryBase
-        : await fetchEmployeeSalaryBaseFast(authUser.employeeNo)
-    const enrichedRows =
-      salaryBase > 0
-        ? rows.map((row) => injectSalaryAdvanceSalaryHint(row, salaryBase))
-        : rows
-    return enrichedRows
-      .map((row) => mapRequest(row, module as PortalModuleKey))
-      .filter((row) => true)
-  }
-  if (isFinanceDetailModule(module)) {
-    const hints = financeSessionHints(authUser)
-    return rows
-      .map((row) => {
-        const mapped = mapRequest(
-          enrichFinanceHeaderRow(module as PortalModuleKey, row, hints),
-          module as PortalModuleKey,
-        )
-        return {
-          ...mapped,
-          status: resolveModuleRequestStatus(row, module as PortalModuleKey),
-        }
+        : await fetchEmployeeSalaryBaseFast(authUser.employeeNo, {
+            customerNo: authUser.imprestNo || authUser.accountNumber,
+          })
+    return mapInBatches(rows, 6, async (row) => {
+      const no = text(row, ['No', 'DocumentNo', 'Document_No', 'ApplicationNo'])
+      const rawLines = no
+        ? await listPortalModuleLines(spec, row, no).catch(() => [] as ODataRecord[])
+        : []
+      const customerNo =
+        text(row, ['CustomerNo', 'Customer_No']) ||
+        authUser.imprestNo ||
+        authUser.accountNumber ||
+        ''
+      const enriched = await enrichSalaryAdvanceLines(row, rawLines, {
+        employeeNo:
+          text(row, ['StaffNo', 'Staff_No', 'EmployeeNo', 'Employee_No']) ||
+          authUser.employeeNo,
+        customerNo,
+        docNo: no,
+        monthlySalaryBase: salaryBase,
+        fast: true,
+        skipSoap: true,
       })
-      .filter((row) => true)
+      const mapped = mapRequest(enriched.header, module as PortalModuleKey)
+      const amount = salaryAdvanceLinesTotal(enriched.lines, enriched.header)
+      return {
+        ...mapped,
+        ...(amount > 0 ? { amount } : {}),
+        payload: {
+          ...enriched.header,
+          ...(enriched.salaryBase > 0
+            ? { monthlySalaryBase: enriched.salaryBase }
+            : {}),
+          lines: enriched.lines,
+        },
+      }
+    })
   }
-  return rows
-    .map((row) => {
+  if (module === 'training') {
+    const enrichedRows = await mapInBatches(rows, 6, async (row) => {
+      const no = text(row, ['ApplicationNo', 'Application_No', 'No'])
+      const assessment = no
+        ? await fetchTrainingAssessment(no).catch(() => null)
+        : null
+      return enrichTrainingRow(row, assessment, authUser)
+    })
+    return enrichedRows.map((row) => {
       const mapped = mapRequest(row, module as PortalModuleKey)
       return {
         ...mapped,
+        title:
+          text(row, ['trainingNeed', 'CourseTitle', 'Course_Title', 'Description']) ||
+          mapped.title,
         status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+      }
+    })
+  }
+  if (isFinanceDetailModule(module)) {
+    const mappedRows = await mapInBatches(rows, 6, async (row) => {
+        const enriched = await enrichFinanceHeaderFromEmployee(
+          module as PortalModuleKey,
+          row,
+          authUser,
+        )
+        const mapped = mapRequest(enriched, module as PortalModuleKey)
+        let status = resolveModuleRequestStatus(row, module as PortalModuleKey)
+        // BC turns some rejected Finance headers into Cancelled. Only fetch
+        // approval history for those ambiguous rows so large requester lists
+        // stay fast while genuine requester cancellations remain Cancelled.
+        if (status === 'Cancelled' && mapped.requestNo) {
+          const approvalEntries = await fetchPortalApprovalEntries(
+            spec,
+            mapped.requestNo,
+            row,
+          ).catch(() => [] as ODataRecord[])
+          status = resolveModuleRequestStatus(
+            row,
+            module as PortalModuleKey,
+            approvalEntries,
+          )
+        }
+        return {
+          ...mapped,
+          status,
+        }
+      })
+    return mappedRows.filter((row) => true)
+  }
+
+  if (
+    module === 'storeRequisition' ||
+    module === 'purchaseRequisition' ||
+    module === 'transferOrder'
+  ) {
+    return mapInBatches(rows, 6, async (row) => {
+      const mapped = mapRequest(row, module as PortalModuleKey)
+      const rawLines = mapped.requestNo
+        ? await listPortalModuleLines(spec, row, mapped.requestNo).catch(
+            () => [] as ODataRecord[],
+          )
+        : []
+      const summary = facilityListSummary(
+        module,
+        row,
+        Array.isArray(rawLines) ? rawLines : [],
+      )
+      return {
+        ...mapped,
+        ...(summary.amount !== undefined ? { amount: summary.amount } : {}),
+        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+        payload: { ...row, ...summary },
+      }
+    })
+  }
+
+  const displayRows =
+    module === 'gatePass'
+      ? await enrichGatePassRowsWithReturns(
+          await enrichGatePassRowsWithEmployeeDimensions(rows, authUser),
+        )
+      : rows
+  return displayRows
+    .map((row) => {
+      const mapped = mapRequest(row, module as PortalModuleKey)
+      const summary = facilityListSummary(module, row)
+      return {
+        ...mapped,
+        ...(summary.amount !== undefined ? { amount: summary.amount } : {}),
+        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+        payload:
+          Object.keys(summary).length > 0
+            ? { ...row, ...summary }
+            : mapped.payload,
       }
     })
     .filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
@@ -1017,13 +2522,51 @@ function leaveHintsFromApprovalEntry(entry?: ODataRecord): LeaveLookupHints {
   }
 }
 
-function leavePayloadFromRow(row: ODataRecord, no: string, entry?: ODataRecord) {
+export function leaveTypeDescriptionForDisplay(
+  row: ODataRecord,
+  resolvedDescription = '',
+) {
+  const explicit = text(row, [
+    'LeaveTypeDescription',
+    'Leave_Type_Description',
+    'LeaveDescription',
+  ])
+  if (explicit) return explicit
+  if (resolvedDescription.trim()) return resolvedDescription.trim()
+
+  const raw = text(row, ['LeaveType', 'Leave_Type'])
+  return raw && !/^\d+$/.test(raw) ? raw : ''
+}
+
+async function fetchLeaveTypeDescription(leaveTypeCode: string) {
+  const code = leaveTypeCode.trim()
+  if (!code) return ''
+  const rows = (await fetchOData('QyHRLeaveType', {
+    $filter: `Code eq '${odataString(code)}'`,
+    $top: 1,
+  }).catch(() => [])) as ODataRecord[] | null
+  const row = Array.isArray(rows) ? rows[0] : undefined
+  return row ? text(row, ['Description', 'Name']) : ''
+}
+
+function leavePayloadFromRow(
+  row: ODataRecord,
+  no: string,
+  entry?: ODataRecord,
+  resolvedLeaveTypeDescription = '',
+) {
+  const leaveTypeCode = text(row, ['LeaveTypeCode', 'Leave_Type_Code', 'LeaveType', 'Leave_Type'])
   return {
     ...row,
     sourceDocumentAvailable: true,
     ApplicationCode: text(row, ['ApplicationCode', 'Application_Code'], no),
     EmployeeNo: text(row, ['EmployeeNo', 'Employee_No']),
     LeaveType: text(row, ['LeaveType', 'Leave_Type']),
+    LeaveTypeCode: leaveTypeCode,
+    LeaveTypeDescription: leaveTypeDescriptionForDisplay(
+      row,
+      resolvedLeaveTypeDescription,
+    ),
     DaysApplied: text(row, ['DaysApplied', 'Days_Applied']),
     StartDate: text(row, ['StartDate', 'Start_Date']),
     EndDate: text(row, ['EndDate', 'End_Date']),
@@ -1051,6 +2594,7 @@ function buildLeaveRequestDetail(
   approvalSteps: unknown,
   attachments: unknown,
   entry?: ODataRecord,
+  resolvedLeaveTypeDescription = '',
 ) {
   const mapped = mapRequest(row, 'leave')
   const steps = mapApprovalSteps(approvalSteps)
@@ -1063,7 +2607,7 @@ function buildLeaveRequestDetail(
   return {
     ...mapped,
     status: resolvedStatus,
-    payload: leavePayloadFromRow(row, no, entry),
+    payload: leavePayloadFromRow(row, no, entry, resolvedLeaveTypeDescription),
     approvalSteps: steps,
     attachments: mapAttachments(attachments),
   }
@@ -1127,11 +2671,15 @@ async function resolveLeaveRequestDetail(
   const entry = approvalEntries[0]
   const hints = leaveHintsFromApprovalEntry(entry)
   const row = await fetchLeaveApplication(no, hints, entry)
-  const [approvers, attachments] = await Promise.all([
+  const leaveTypeCode = row
+    ? text(row, ['LeaveTypeCode', 'Leave_Type_Code', 'LeaveType', 'Leave_Type'])
+    : ''
+  const [approvers, attachments, leaveTypeDescription] = await Promise.all([
     approvalEntries.length
       ? enrichLeaveApprovalEntries(approvalEntries)
       : enrichLeaveApprovalEntries(await fetchLeaveApprovalEntries(no)),
     fetchDocumentAttachments(no, 50532).catch(() => [] as ODataRecord[]),
+    fetchLeaveTypeDescription(leaveTypeCode),
   ])
 
   if (row) {
@@ -1140,7 +2688,14 @@ async function resolveLeaveRequestDetail(
       : entry
         ? [entry]
         : []
-    const detail = buildLeaveRequestDetail(row, no, approvers, attachments, entry)
+    const detail = buildLeaveRequestDetail(
+      row,
+      no,
+      approvers,
+      attachments,
+      entry,
+      leaveTypeDescription,
+    )
     const approvalStepsResolved = await resolveLeaveApprovalStepsAsync(row, approvalEntryRows, no, {
       employeeNo: text(row, ['EmployeeNo', 'Employee_No'], authUser.employeeNo),
       userID: authUser.userID,
@@ -1183,32 +2738,102 @@ async function requestDetail(
   if (!spec) throw portalError(`${module} is not supported`, 501)
 
   // ESS showHeader / approval viewDocument load by document number only (no owner filter).
-  let row = await getPortalModuleDocument(spec, authUser, no, false)
-  if (!row) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
+  const sourceRow = await getPortalModuleDocument(spec, authUser, no, false)
+  if (!sourceRow) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
+  const row =
+    module === 'gatePass'
+      ? (await enrichGatePassRowsWithEmployeeDimensions([sourceRow], authUser))[0]!
+      : sourceRow
   const attachmentDocNo = resolveAttachmentDocNo(spec, row, no)
   const gatePassBinding = module === 'gatePass' ? gatePassLineBinding(row, no) : null
-  const [lines, approvers, attachments] = await Promise.all([
+  const [lines, approvers, attachments, maintenanceExtras] = await Promise.all([
     listPortalModuleLines(spec, row, no),
     fetchPortalApprovalEntries(spec, no, row),
     spec.headerTableId > 0
       ? fetchDocumentAttachments(attachmentDocNo, spec.headerTableId).catch(() => [] as ODataRecord[])
+      : Promise.resolve([] as ODataRecord[]),
+    module === 'maintenance' || module === 'fuelRequest'
+      ? fetchOData('QyPortalFuelMaintExtra', {
+          $filter: `RequisitionNo eq '${odataString(no)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[])
       : Promise.resolve([] as ODataRecord[]),
   ])
   let headerForMapping: ODataRecord = row
   let mappedLines = mapModuleLines(module, row, Array.isArray(lines) ? lines : [])
   let enrichedSalaryBase = 0
   let payloadRow: ODataRecord = row
+  if (module === 'workTickets') {
+    const flights = (await fetchOData('QyWorkTicketFlight', {
+      $filter: `TicketNo eq '${odataString(no)}'`,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    payloadRow = {
+      ...payloadRow,
+      ...workTicketFlight(Array.isArray(flights) ? flights[0] : undefined),
+    }
+  }
+  if (module === 'training') {
+    try {
+      const assessment = await fetchTrainingAssessment(no)
+      payloadRow = enrichTrainingRow(payloadRow, assessment, authUser)
+    } catch {
+      // A legacy training header must remain readable even before the companion
+      // assessment web service is installed.
+      payloadRow = enrichTrainingRow(payloadRow, null, authUser)
+    }
+  }
+  if (
+    (module === 'maintenance' || module === 'fuelRequest') &&
+    Array.isArray(maintenanceExtras) &&
+    maintenanceExtras[0]
+  ) {
+    payloadRow = { ...payloadRow, ...maintenanceExtras[0] }
+  }
+  if (module === 'maintenance') {
+    payloadRow = {
+      ...payloadRow,
+      maintenanceRequestTypeLabel: maintenanceRequestTypeLabel(payloadRow),
+    }
+  }
+  if (module === 'assetTransfer') {
+    const enrichedTransfer = await enrichAssetTransferDetail(
+      payloadRow,
+      mappedLines as Array<Record<string, unknown>>,
+    )
+    payloadRow = enrichedTransfer.payloadRow
+    mappedLines = enrichedTransfer.lines
+  }
+  if (module === 'gatePass' && gatePassSourceFromRow(row) === 'storeIssue') {
+    mappedLines = await enrichGatePassStoreIssueLines(mappedLines as Array<Record<string, unknown>>)
+  }
   if (isFinanceDetailModule(module)) {
-    if (module === 'imprestSurrender') {
-      row = await enrichImprestSurrenderFromSourceImprest(row, Array.isArray(lines) ? lines : [])
+    let financeRow = row
+    if (module === 'imprest') {
+      financeRow = await enrichImprestRemainingSettlement(row)
+    } else if (module === 'imprestSurrender') {
+      financeRow = await enrichImprestSurrenderFromSourceImprest(
+        row,
+        Array.isArray(lines) ? (lines as Record<string, unknown>[]) : [],
+      )
     }
     headerForMapping = await enrichFinanceHeaderFromEmployee(
       module as PortalModuleKey,
-      row,
+      financeRow,
       authUser,
       mappedLines,
+      Array.isArray(lines) ? (lines as Record<string, unknown>[]) : [],
     )
     payloadRow = headerForMapping
+    if (module === 'pettyCashReplenishment') {
+      const departmentLimit = await getPortalPettyCashDepartmentLimit(authUser)
+      payloadRow = {
+        ...payloadRow,
+        PettyCashDepartmentLimit: departmentLimit.limit,
+        PettyCashLimitConfigured: departmentLimit.configured,
+        PettyCashLimitDepartment: departmentLimit.departmentName,
+      }
+    }
   }
   if (module === 'salaryAdvance') {
     const staffNo =
@@ -1234,36 +2859,25 @@ async function requestDetail(
       payloadRow = { ...payloadRow, monthlySalaryBase: enriched.salaryBase }
     }
   }
-  if (module === 'training') {
-    try {
-      const assessment = await fetchPortalTrainingAssessment(no)
-      if (assessment) {
-        payloadRow = {
-          ...payloadRow,
-          trainingNeed:
-            assessment.otherTrainingName?.trim() ||
-            assessment.trainingNeed ||
-            text(payloadRow, ['CourseTitle', 'Course_Title']),
-          department: assessment.department || text(payloadRow, ['Department', 'DepartmentName']),
-          periodStart: assessment.periodStart || '',
-          periodEnd: assessment.periodEnd || '',
-          trainingType: assessment.trainingType || text(payloadRow, ['TrainingType']),
-          purpose: assessment.purpose || text(payloadRow, ['PurposeofTraining', 'Purpose']),
-          targetGroup: assessment.targetGroup || '',
-          participants: assessment.participants || '',
-          quarter: assessment.quarter || '',
-          priority: assessment.priority || '',
-          vendor: assessment.vendor || '',
-          estimatedBudget: assessment.estimatedBudget || '',
-          remark: assessment.remark || '',
-        }
-      }
-    } catch {
-      // CuPortalTraining is additive — detail still works from the ERP header alone.
-    }
-  }
   const mapped = mapRequest(headerForMapping, module as PortalModuleKey)
   const resolvedStatus = resolveModuleRequestStatus(headerForMapping, module as PortalModuleKey, approvers)
+  const approvalSteps = await resolveRequestApprovalSteps(
+    approvers,
+    row,
+    resolvedStatus,
+    no,
+    spec.headerTableId,
+  )
+  const rejectionReason =
+    approvalSteps.find((step) => /reject|declin/i.test(String(step.status ?? '')))?.note?.trim() ||
+    (resolvedStatus === 'Rejected'
+      ? [...approvalSteps]
+          .reverse()
+          .map((step) => String(step.note ?? '').trim())
+          .find((note) => note.length >= 3) ||
+        text(headerForMapping, ['Comment', 'Comments', 'RejectionReason', 'Rejection_Reason'])
+      : '') ||
+    ''
   const salaryAdvanceAmount =
     module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
   const displayAmount =
@@ -1272,8 +2886,21 @@ async function requestDetail(
         ? salaryAdvanceAmount
         : mapped.amount
       : salaryAdvanceAmount
+  const rawTransportRequestType =
+    module === 'transport'
+      ? text(payloadRow, ['RequestType', 'Request_Type', 'VehicleType', 'Vehicle_Type'])
+      : ''
+  const storeRequestOwnedByCurrentUser =
+    module === 'storeRequisition' &&
+    (mapped.makerEmployeeNo.trim().toLowerCase() === authUser.employeeNo.trim().toLowerCase() ||
+      text(payloadRow, ['UserID', 'RequesterID']).trim().toLowerCase() ===
+        authUser.userID.trim().toLowerCase())
+  const storeRequesterName = storeRequestOwnedByCurrentUser
+    ? authUser.displayName || authUser.name || mapped.makerName
+    : ''
   return {
     ...mapped,
+    ...(storeRequesterName ? { makerName: storeRequesterName } : {}),
     status: resolvedStatus,
     ...(displayAmount > 0 ? { amount: displayAmount } : {}),
     payload: {
@@ -1288,17 +2915,34 @@ async function requestDetail(
             gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
           }
         : {}),
+      ...(rejectionReason ? { RejectionReason: rejectionReason, rejectionReason } : {}),
+      ...(module === 'transport' && rawTransportRequestType !== ''
+        ? {
+            transportRequestType: rawTransportRequestType,
+            transportRequestTypeLabel: transportRequestTypeLabel(rawTransportRequestType),
+          }
+        : {}),
+      ...(storeRequesterName
+        ? {
+            RequesterName: storeRequesterName,
+            RequesterJobTitle: authUser.jobTitle,
+            RequesterBranch: authUser.branchName || authUser.branchCode,
+            RequesterPlaceOfDuty: authUser.placeOfDuty,
+          }
+        : {}),
       lines: mappedLines,
     },
-    approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
+    approvalSteps,
     attachments: mapAttachments(attachments),
   }
 }
 
-function resolveRequestApprovalSteps(
+async function resolveRequestApprovalSteps(
   approvers: ODataRecord[],
   row: ODataRecord,
   mappedStatus: string,
+  documentNo = '',
+  tableId = 0,
 ) {
   if (
     mappedStatus !== 'Pending Approval' &&
@@ -1310,7 +2954,17 @@ function resolveRequestApprovalSteps(
   // Sequential clamp: a later step (e.g. ADMIN auto-approving its own future
   // step) must not show "Approved" while an earlier step is still pending.
   const steps = mapApprovalStepsWithSequence(approvers)
-  return steps.length ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
+  const resolved =
+    steps.length > 0 ? steps : fallbackApprovalStepsFromHeader(row, mappedStatus)
+  const docNo =
+    documentNo ||
+    text(row, ['No', 'ApplicationNo', 'Application_No', 'DocumentNo', 'Document_No'])
+  const withComments = await enrichApprovalStepsWithCommentLines(
+    resolved,
+    docNo,
+    tableId > 0 ? tableId : undefined,
+  )
+  return enrichMappedApprovalSteps(withComments)
 }
 
 export { mapApprovalSteps } from './leaveApprovalSteps.js'
@@ -1380,6 +3034,8 @@ function attendanceClockValue(row: ODataRecord, keys: string[]) {
   const normalized = raw.replace(/\.\d+$/, '')
   const parts = normalized.split(':').map((part) => Number(part))
   if (parts.length >= 2 && parts.every((part) => Number.isFinite(part) && part === 0)) return ''
+  const isoMatch = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)/.exec(normalized)
+  if (isoMatch) return isoMatch[2]
   return raw
 }
 
@@ -1394,12 +3050,21 @@ function employeeDisplayName(row: ODataRecord) {
 async function fetchHodDepartmentStaff(authUser: AuthUser) {
   const department = odataString(authUser.department)
   if (!department) return [] as ODataRecord[]
-  return (await fetchOData('QyHREmployee', {
-    $filter:
-      `No ne '${odataString(authUser.employeeNo)}'` +
-      ` and Status eq 'Active'` +
-      ` and GlobalDimension2Code eq '${department}'`,
-  }).catch(() => [])) as ODataRecord[]
+  // Try GD2 first (department), then GD1 (responsibility/cost center) — HOD
+  // org codes vary by bank company setup.
+  const filters = [
+    `No ne '${odataString(authUser.employeeNo)}' and Status eq 'Active' and GlobalDimension2Code eq '${department}'`,
+    `No ne '${odataString(authUser.employeeNo)}' and Status eq 'Active' and GlobalDimension1Code eq '${department}'`,
+  ]
+  const merged = new Map<string, ODataRecord>()
+  for (const filter of filters) {
+    const rows = (await fetchOData('QyHREmployee', { $filter: filter }).catch(() => [])) as ODataRecord[]
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const no = text(row, ['No', 'EmployeeNo', 'Employee_No'])
+      if (no) merged.set(no, row)
+    }
+  }
+  return [...merged.values()]
 }
 
 async function activeLeaveForEmployee(employeeNo: string) {
@@ -1498,21 +3163,42 @@ async function resolveAttendanceMacForAction(
   return resolveAttendanceIdentifier({ deviceId })
 }
 
-function attendanceRow(row: ODataRecord, authUser: AuthUser) {
+function attendanceRow(
+  row: ODataRecord,
+  authUser: AuthUser,
+  extras?: { staffName?: string; jobTitle?: string; department?: string; employeeNo?: string },
+) {
   const date = text(row, ['Date', 'AttendanceDate', 'PostingDate'])
   const today = new Date().toISOString().slice(0, 10)
-  const employeeNo = text(row, ['StaffNo', 'EmployeeNo'], authUser.employeeNo)
+  const employeeNo =
+    extras?.employeeNo || text(row, ['StaffNo', 'EmployeeNo'], authUser.employeeNo)
   const macAddress =
     attendanceMacValue(row) ||
     cachedAttendanceMac(employeeNo, date) ||
     persistedEmployeeMac(employeeNo)
+  const timeIn = attendanceClockValue(row, ['TimeIn', 'CheckInTime', 'SignInTime'])
+  const timeOut = attendanceClockValue(row, ['Timeout', 'TimeOut', 'CheckOutTime', 'SignOutTime'])
+  const status = timeOut
+    ? 'Signed Out'
+    : timeIn
+      ? 'Signed In'
+      : 'Not Signed In'
   return {
-    id: text(row, ['EntryNo', 'Entry_No', 'SystemId'], `${authUser.employeeNo}-${date}`),
-    date,
-    staffName: text(row, ['StaffName', 'EmployeeName'], authUser.displayName),
-    employeeNo: text(row, ['StaffNo', 'EmployeeNo'], authUser.employeeNo),
-    timeIn: attendanceClockValue(row, ['TimeIn', 'CheckInTime', 'SignInTime']),
-    timeOut: attendanceClockValue(row, ['Timeout', 'TimeOut', 'CheckOutTime', 'SignOutTime']),
+    id: text(row, ['EntryNo', 'Entry_No', 'SystemId'], `${employeeNo}-${date || today}`),
+    date: date || today,
+    staffName:
+      extras?.staffName ||
+      text(row, ['StaffName', 'EmployeeName']) ||
+      employeeNo,
+    employeeNo,
+    jobTitle: extras?.jobTitle || text(row, ['JobTitle', 'Job_Title']) || '',
+    department:
+      extras?.department ||
+      text(row, ['GlobalDimension2Code', 'GlobalDimension1Code', 'Department']) ||
+      '',
+    status,
+    timeIn,
+    timeOut,
     hoursWorked: text(row, ['HoursWorked', 'Hours']),
     macAddress,
     location: macAddress,
@@ -1521,7 +3207,7 @@ function attendanceRow(row: ODataRecord, authUser: AuthUser) {
       text(row, ['SignoutComments', 'SignOutComments']),
       text(row, ['Comments', 'Comment']),
     ].filter(Boolean).join(' · '),
-    highlight: date.slice(0, 10) === today,
+    highlight: (date || today).slice(0, 10) === today,
   }
 }
 
@@ -1540,14 +3226,64 @@ export function buildPortalApiRouter() {
     '/lookups/:catalog',
     safe(async (req, res) => {
       const catalog = String(req.params.catalog)
+      const assetNoFilter = String(req.query.assetNo ?? req.query.asset ?? '').trim()
       let spec = LOOKUP_SPECS[catalog]
       if (!spec) throw portalError(`Unsupported lookup catalog: ${catalog}`, 404)
       let rows: unknown
       try {
+        const odataFilter =
+          catalog === 'vehicle-tools' && assetNoFilter
+            ? `AssetNo eq '${odataString(assetNoFilter)}'`
+            : spec.filter
         rows = await fetchOData(spec.service, {
-          ...(spec.filter ? { $filter: spec.filter } : {}),
+          ...(odataFilter ? { $filter: odataFilter } : {}),
         })
-        if (spec.fallback && (!Array.isArray(rows) || rows.length === 0)) {
+        if (catalog === 'vehicle-tools' && assetNoFilter) {
+          // Accessories may be keyed by FA No, Tag No, or Registration No.
+          const merged = new Map<string, ODataRecord>()
+          const addRows = (list: unknown) => {
+            for (const row of Array.isArray(list) ? list : []) {
+              const key = text(row as ODataRecord, ['EntryNo', 'Entry_No']) || JSON.stringify(row)
+              merged.set(key, row as ODataRecord)
+            }
+          }
+          addRows(rows)
+          if (merged.size === 0 || Array.isArray(rows)) {
+            const tagRows = (await fetchOData('QyFixedAssets', {
+              $filter: `(No eq '${odataString(assetNoFilter)}' or No_ eq '${odataString(assetNoFilter)}')`,
+              $top: 1,
+            }).catch(() => [])) as ODataRecord[] | null
+            const tagNo = tagRows?.[0] ? text(tagRows[0], ['AssetTag', 'Asset_Tag']) : ''
+            if (tagNo) {
+              addRows(
+                await fetchOData(spec.service, {
+                  $filter: `TagNo eq '${odataString(tagNo)}'`,
+                }).catch(() => []),
+              )
+            }
+            const vehicleRows = (await fetchOData('QyVehicleHeader', {
+              $filter: `(No eq '${odataString(assetNoFilter)}' or No_ eq '${odataString(assetNoFilter)}')`,
+              $top: 1,
+            }).catch(() => [])) as ODataRecord[] | null
+            const registration = vehicleRows?.[0]
+              ? text(vehicleRows[0], ['RegistrationNo', 'Registration_No'])
+              : ''
+            if (registration) {
+              addRows(
+                await fetchOData(spec.service, {
+                  $filter: `AssetNo eq '${odataString(registration)}'`,
+                }).catch(() => []),
+              )
+              addRows(
+                await fetchOData(spec.service, {
+                  $filter: `TagNo eq '${odataString(registration)}'`,
+                }).catch(() => []),
+              )
+            }
+          }
+          rows = [...merged.values()]
+        }
+        if (spec.fallback && (!Array.isArray(rows) || rows.length === 0) && !assetNoFilter) {
           throw new Error('empty primary lookup')
         }
       } catch (error) {
@@ -1558,18 +3294,84 @@ export function buildPortalApiRouter() {
           ...(spec.filter ? { $filter: spec.filter } : {}),
         })
       }
+      let gatePassRowsForStoreIssue: ODataRecord[] | null = null
+      if (catalog === 'gate-pass-store-issue') {
+        gatePassRowsForStoreIssue = (await fetchOData('QyGatePass', { $top: 5000 }).catch(
+          () => [],
+        )) as ODataRecord[]
+      }
+      const vehicleAssetTags = catalog === 'vehicles' ? await fixedAssetTagIndex() : null
+      let lookupRows = (Array.isArray(rows) ? rows : []) as ODataRecord[]
+      if (catalog === 'petty-cash-types') {
+        const glRows = (await fetchOData('QyGlAccounts', {
+          $filter: 'DirectPosting eq true',
+          $top: 5000,
+        }).catch(() => null)) as ODataRecord[] | null
+        if (Array.isArray(glRows) && glRows.length > 0) {
+          const usableGl = new Set(
+            glRows
+              .filter((row) => {
+                const blocked = row.Blocked ?? row.blocked
+                return !(
+                  blocked === true ||
+                  blocked === 1 ||
+                  String(blocked).toLowerCase() === 'true'
+                )
+              })
+              .map((row) => text(row, ['No', 'No_']).trim())
+              .filter(Boolean),
+          )
+          lookupRows = lookupRows.filter((row) => {
+            const accountNo = text(row, [
+              'GLAccount',
+              'GL_Account',
+              'G_L_Account',
+              'GLAccountNo',
+              'GL_Account_No',
+              'G_L_Account_No',
+              'AccountNo',
+              'Account_No',
+            ]).trim()
+            // Keep types with a live Direct Posting G/L only (drops LOCAL CHARGE → 101006 etc.).
+            return Boolean(accountNo) && usableGl.has(accountNo)
+          })
+        }
+      }
       res.json({
-        rows: (Array.isArray(rows) ? rows : [])
+        rows: lookupRows
           .filter((row) => lookupMatches(row, spec))
+          .filter((row) => {
+            if (catalog !== 'gate-pass-store-issue') return true
+            const storeNo = text(row, spec.valueKeys)
+            const existing = storeIssueGatePassFromRows(
+              storeNo,
+              row,
+              gatePassRowsForStoreIssue ?? [],
+            )
+            return !existing
+          })
           .map((row) => {
+            if (catalog === 'training-courses') {
+              return trainingCourseLookupOption(row)
+            }
             const value = text(row, spec.valueKeys)
             if (!value) return null
+            if (catalog === 'assets' || catalog === 'purchase-assets') {
+              return fixedAssetLookupOption(row, value)
+            }
             const meta = Object.fromEntries(
               Object.entries(spec.meta ?? {}).map(([key, keys]) => [key, text(row, keys)]),
             )
+            if (catalog === 'vehicles' && vehicleAssetTags) {
+              const assetNo = text(row, ['No', 'No_']).trim().toUpperCase()
+              if (assetNo) meta.assetTag = vehicleAssetTags.get(assetNo) ?? ''
+            }
             return {
               value,
-              label: lookupLabel(row, spec, value),
+              label:
+                catalog === 'vehicle-tools'
+                  ? vehicleToolLookupLabel(row, value)
+                  : lookupLabel(row, spec, value),
               ...(Object.keys(meta).length ? { meta } : {}),
             }
           })
@@ -1618,8 +3420,198 @@ export function buildPortalApiRouter() {
           'DEDICATED_MODULE_ENDPOINT',
         )
       }
-      const no = await createPortalModuleRequest(spec, user(req), req.body ?? {})
-      res.status(201).json(await requestDetail(`${module}-${no}`, user(req), { fast: true }))
+      const authUser = user(req)
+      if (module === 'transport') {
+        // Excel: prevent duplicate request from same user for same route (origin→destination on same trip date).
+        const tripDate = String(req.body?.dateOfTrip ?? req.body?.tripDate ?? '').slice(0, 10)
+        const tripTime = String(
+          req.body?.timeOfTrip ?? req.body?.tripTime ?? req.body?.departureTime ?? '',
+        )
+          .trim()
+          .toLowerCase()
+        const origin = String(
+          req.body?.commencement ?? req.body?.commenceFrom ?? req.body?.startingFrom ?? '',
+        )
+          .trim()
+          .toLocaleLowerCase()
+        const destination = String(req.body?.destination ?? '').trim().toLocaleLowerCase()
+        if (!origin || !destination) {
+          throw portalError(
+            'Trip origin and destination are required so the system can prevent duplicate route requests.',
+            422,
+            'TRANSPORT_ROUTE_REQUIRED',
+          )
+        }
+        const existing = await listPortalModuleRows(spec, authUser)
+        const duplicate = existing.find((row) => {
+          const status = resolveModuleRequestStatus(row, 'transport')
+          if (['Cancelled', 'Rejected'].includes(status)) return false
+          const existingDate = text(row, ['Date_of_Trip', 'DateOfTrip', 'TripDate']).slice(0, 10)
+          const existingTime = text(row, [
+            'Time_of_Trip',
+            'TimeOfTrip',
+            'DepartureTime',
+            'TripTime',
+          ])
+            .trim()
+            .toLowerCase()
+          const existingOrigin = text(row, [
+            'Commencement',
+            'CommenceFrom',
+            'StartingFrom',
+          ])
+            .trim()
+            .toLocaleLowerCase()
+          const existingDestination = text(row, ['Destination']).trim().toLocaleLowerCase()
+          if (!existingOrigin || !existingDestination) return false
+          const sameRoute =
+            existingOrigin === origin &&
+            existingDestination === destination &&
+            (!tripDate || !existingDate || existingDate === tripDate)
+          const sameTime = !tripTime || !existingTime || existingTime === tripTime
+          return sameRoute && sameTime
+        })
+        if (duplicate) {
+          const docNo = text(duplicate, ['TransportRequisitionNo', 'No', 'Document_No', 'DocumentNo'])
+          throw portalError(
+            `Duplicate transport request for the same route (${origin} → ${destination}` +
+              `${tripDate ? ` on ${tripDate}` : ''}). ` +
+              `Cancel or update your existing request${docNo ? ` ${docNo}` : ''} before creating another.`,
+            409,
+            'DUPLICATE_TRANSPORT_REQUEST',
+          )
+        }
+      }
+      if (module === 'assetTransfer') {
+        // Excel VTH_08: same asset + same receiving employee on an active transfer.
+        const assetNo = String(
+          req.body?.assetNo ?? req.body?.fixedAssetNo ?? req.body?.assetToTransfer ?? '',
+        ).trim()
+        const toEmployee = String(
+          req.body?.toEmployeeNo ??
+            req.body?.toResponsibleEmployee ??
+            req.body?.employeeNo ??
+            req.body?.newResponsibleEmployee ??
+            req.body?.responsibleEmployee ??
+            '',
+        ).trim()
+        await assertNoDuplicateAssetHandover(assetNo, toEmployee)
+      }
+      const trainingCourseCode =
+        module === 'training'
+          ? await resolveTrainingCourseCodeForBc(
+              req.body?.trainingCourseCode ??
+                req.body?.trainingNeed ??
+                req.body?.trainingTitle ??
+                '',
+            )
+          : ''
+      const no =
+        module === 'training'
+          ? String(
+              (
+                await callSoapMethod(
+                  'SaveTrainingHeader',
+                  {
+                    requesterUserId: authUser.userID,
+                    myAction: 'create',
+                    docNo: '',
+                    trainingCourseCode,
+                    purpose:
+                      req.body?.purpose ??
+                      req.body?.comments ??
+                      req.body?.justification ??
+                      '',
+                    employeeNo: authUser.employeeNo,
+                  },
+                  trainingSoapEndpoint,
+                )
+              ).returnValue ?? '',
+            ).trim()
+          : await createPortalModuleRequest(spec, authUser, req.body ?? {})
+      if (!no) {
+        throw portalError(`Business Central did not create the ${module} request`, 502)
+      }
+      if (module === 'maintenance') {
+        const maintenanceRequestType = Number(req.body?.requestType ?? 1)
+        const resolvedFaReference = await resolveMaintenanceFaReference(
+          maintenanceRequestType,
+          String(req.body?.faTagNumber ?? ''),
+          String(req.body?.vehicleNo ?? ''),
+        )
+        const result = await callSoapMethod(
+          'MarkAsMaintenanceRequest',
+          {
+            requisitionNo: no,
+            employeeNo: authUser.employeeNo,
+            requestType: maintenanceRequestType,
+            faTagNumber: resolvedFaReference,
+            vehicleNo: req.body?.vehicleNo ?? '',
+            item: req.body?.item ?? '',
+            quantity: Number(req.body?.quantity ?? 0),
+            priority: req.body?.priority ?? '',
+            location: req.body?.location ?? '',
+            issueDescription: req.body?.issueDescription ?? req.body?.purpose ?? '',
+            currentOdometer: Number(req.body?.odometer ?? 0),
+            lastServiceOdometer: Number(req.body?.lastServiceOdometer ?? 0),
+          },
+          facilitySoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the maintenance details', 502)
+        }
+      }
+      if (module === 'fuelRequest') {
+        const result = await callSoapMethod(
+          'SaveFuelRequestStandard',
+          {
+            requisitionNo: no,
+            employeeNo: authUser.employeeNo,
+            vehicleNo: req.body?.vehicleNo ?? '',
+            currentOdometer: Number(req.body?.odometer ?? 0),
+            requestedLitres: Number(req.body?.quantity ?? 0),
+          },
+          facilitySoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the fuel standard/odometer details', 502)
+        }
+      }
+      if (module === 'training') {
+        const result = await callSoapMethod(
+          'SaveTrainingAssessment',
+          {
+            applicationNo: no,
+            employeeNo: authUser.employeeNo,
+            requesterUserId: authUser.userID,
+            detailsJson: JSON.stringify({
+              trainingNeed: trainingCourseCode,
+              trainingCourseTitle: req.body?.trainingCourseTitle ?? req.body?.title ?? '',
+              purpose: req.body?.purpose ?? req.body?.comments ?? req.body?.justification ?? '',
+              otherTrainingName:
+                req.body?.otherTrainingName ?? req.body?.additionalTrainingNeeds ?? '',
+              trainingType: req.body?.trainingType ?? '',
+              durationDays: Number(req.body?.durationDays ?? 0),
+              targetGroup: req.body?.targetGroup ?? '',
+              participants: Number(req.body?.participants ?? 0),
+              quarter: req.body?.quarter ?? '',
+              priority: req.body?.priority ?? '',
+              vendor: req.body?.vendor ?? req.body?.provider ?? '',
+              estimatedBudget:
+                req.body?.estimatedBudget ?? req.body?.estimatedCost ?? '',
+              remark: req.body?.remark ?? '',
+              department: req.body?.department ?? authUser.department ?? '',
+              periodStart: req.body?.periodStart ?? '',
+              periodEnd: req.body?.periodEnd ?? '',
+            }),
+          },
+          trainingSoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not save the complete training assessment', 502)
+        }
+      }
+      res.status(201).json(await requestDetail(`${module}-${no}`, authUser, { fast: true }))
     }),
   )
 
@@ -1633,9 +3625,21 @@ export function buildPortalApiRouter() {
       }
       const spec = findFrontendModuleSpec(module)
       if (!spec) throw portalError(`${module} is not supported`, 501)
-      await submitPortalModuleRequest(spec, user(req), no)
+      const authUser = user(req)
+      if (module === 'training') {
+        const result = await callSoapMethod(
+          'RequestTrainingApproval',
+          { applicationNo: no, requesterUserId: authUser.userID },
+          trainingSoapEndpoint,
+        )
+        if (String(result.returnValue).toLowerCase() !== 'true') {
+          throw portalError('Business Central did not submit the training request for approval', 502)
+        }
+      } else {
+        await submitPortalModuleRequest(spec, authUser, no)
+      }
       res.json(
-        await requestDetail(requestId, user(req)).catch(() => ({
+        await requestDetail(requestId, authUser).catch(() => ({
           id: requestId,
           status: 'Pending Approval',
         })),
@@ -1798,9 +3802,36 @@ export function buildPortalApiRouter() {
     '/requests/:id/post-receipt',
     safe(async (req, res) => {
       const requestId = String(req.params.id)
+      const authUser = user(req)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'storeRequisition') {
         throw portalError('Posting receipts is only supported for Store Requisition', 422)
+      }
+      const detail = await requestDetail(requestId, authUser)
+      const lines = Array.isArray((detail.payload as Record<string, unknown> | undefined)?.lines)
+        ? (((detail.payload as Record<string, unknown>).lines) as Record<string, unknown>[])
+        : []
+      for (const line of lines) {
+        const lineNo = String(line.lineNo ?? line.id ?? '').trim()
+        const received = Number(line.quantityReceived ?? 0)
+        const issued = Number(line.quantityIssued ?? 0)
+        const staged = Number(line.quantityToReceive ?? 0)
+        // Only stage against store-issued quantity — never fall back to requested.
+        if (issued <= 0) continue
+        const quantityToReceive = staged > 0 ? staged : Math.max(0, issued - received)
+        if (!lineNo || quantityToReceive <= 0) continue
+        const stagedResult = await callSoapMethod('ReceiveStoreLineItems', {
+          lineNo,
+          requisitionNo: no,
+          quantityToReceive,
+          reason: String(req.body?.reason ?? ''),
+        })
+        if (!stagedResult.returnValue || String(stagedResult.returnValue).toLowerCase() === 'false') {
+          throw portalError(
+            `Could not receive line ${lineNo}. Confirm store issue first, or enter quantity on Receive Items.`,
+            502,
+          )
+        }
       }
       const result = await callSoapMethod('PostToReceiveStoreRequisition', {
         requisitionNo: no,
@@ -1808,7 +3839,128 @@ export function buildPortalApiRouter() {
       if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
         throw portalError('Business Central did not post the store requisition receipt', 502)
       }
+      res.json(await requestDetail(requestId, authUser))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/post-asset-transfer',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'assetTransfer') {
+        throw portalError('Posting asset transfers is only supported for Asset Transfer', 422)
+      }
+      await postPortalAssetTransfer(user(req), no)
       res.json(await requestDetail(requestId, user(req)))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/assign-technician',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'maintenance') {
+        throw portalError('Technician assignment is only supported for Maintenance Request', 422)
+      }
+      const authUser = user(req)
+      if (!authUser.canApprove) {
+        throw portalError(
+          'Only an authorized maintenance approver or technical manager can assign a technician',
+          403,
+          'MAINTENANCE_ASSIGN_FORBIDDEN',
+        )
+      }
+      const technicianNo = String(req.body?.technicianNo ?? '').trim()
+      if (!technicianNo) {
+        throw portalError('Select an internal technician', 422, 'TECHNICIAN_REQUIRED')
+      }
+      const detail = await requestDetail(requestId, authUser)
+      if (['Draft', 'Open', 'Pending Approval', 'Rejected', 'Cancelled'].includes(detail.status)) {
+        throw portalError(
+          `Maintenance ${no} must be approved before a technician can be assigned`,
+          422,
+          'MAINTENANCE_NOT_APPROVED',
+        )
+      }
+      const result = await callSoapMethod(
+        'AssignMaintenanceTechnician',
+        {
+          requisitionNo: no,
+          technicianNo,
+          myUserID: authUser.userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue ?? '').trim().toLowerCase() !== 'true') {
+        throw portalError('Business Central did not assign the maintenance technician', 502)
+      }
+      res.json(await requestDetail(requestId, authUser))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/confirm-maintenance-receipt',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'maintenance') {
+        throw portalError('Receipt confirmation is only supported for Maintenance Request', 422)
+      }
+      const authUser = user(req)
+      const detail = await requestDetail(requestId, authUser)
+      const payload = (detail.payload ?? {}) as Record<string, unknown>
+      const requesterNo = String(
+        detail.makerEmployeeNo ??
+          payload.EmployeeNo ??
+          payload.Employee_No ??
+          payload.employeeNo ??
+          '',
+      ).trim()
+      if (!requesterNo || requesterNo.toLocaleLowerCase() !== authUser.employeeNo.toLocaleLowerCase()) {
+        throw portalError(
+          'Only the employee who submitted this maintenance request can confirm receipt',
+          403,
+          'MAINTENANCE_RECEIPT_FORBIDDEN',
+        )
+      }
+      const assignedTechnician = String(
+        payload.AssignedTechnician ??
+          payload.Assigned_Technician ??
+          payload.assignedTechnician ??
+          '',
+      ).trim()
+      if (!assignedTechnician) {
+        throw portalError(
+          'A technician must be assigned before the requestor can confirm receipt',
+          422,
+          'MAINTENANCE_TECHNICIAN_REQUIRED',
+        )
+      }
+      const receivedDate = String(
+        payload.FAReceivedDate ??
+          payload.FA_Received_Date ??
+          payload.faReceivedDate ??
+          '',
+      ).trim()
+      if (receivedDate && !receivedDate.startsWith('0001-01-01')) {
+        throw portalError('Receipt has already been confirmed for this maintenance request', 409)
+      }
+      const remarks = String(req.body?.remarks ?? '').trim().slice(0, 100)
+      const result = await callSoapMethod(
+        'ConfirmMaintenanceReceipt',
+        {
+          requisitionNo: no,
+          remarks,
+          myUserID: authUser.userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue ?? '').trim().toLowerCase() !== 'true') {
+        throw portalError('Business Central did not save the maintenance receipt confirmation', 502)
+      }
+      res.json(await requestDetail(requestId, authUser))
     }),
   )
 
@@ -1906,7 +4058,9 @@ export function buildPortalApiRouter() {
       })) as ODataRecord[] | null
       const liveRows = await filterApprovalEntriesWithExistingSource(Array.isArray(rows) ? rows : [])
       res.json({
-        rows: liveRows.map(approvalQueueItem).filter((item) => item.requestNo),
+        rows: (await enrichApprovalQueueAmounts(await approvalQueueItems(liveRows))).filter(
+          (item) => item.requestNo,
+        ),
       })
     }),
   )
@@ -1920,8 +4074,12 @@ export function buildPortalApiRouter() {
       const entry = entryRows[0]
       if (!entry) throw portalError('Approval entry not found', 404)
 
-      const queueItem = approvalQueueItem(entry)
-      const approvalSteps = mapApprovalStepsWithSequence(entryRows)
+      const queueItem = approvalQueueItem(entry, module)
+      const approvalSteps = await enrichApprovalStepsWithCommentLines(
+        mapApprovalStepsWithSequence(entryRows),
+        no,
+        findFrontendModuleSpec(module)?.headerTableId,
+      )
       const source =
         module === 'leave'
           ? await resolveLeaveRequestDetail(requestId, authUser, {
@@ -1996,6 +4154,10 @@ export function buildPortalApiRouter() {
       if (!entry) throw portalError('Open approval entry not found', 404)
 
       const decision = req.body?.decision === 'Rejected' ? 'Rejected' : 'Approved'
+      const comment = String(req.body?.comment ?? '').trim()
+      if (decision === 'Rejected' && comment.length < 3) {
+        throw portalError('A rejection reason of at least 3 characters is required', 422)
+      }
       // Approve/reject as the identity BC actually recorded on the entry — it can
       // differ from the login User ID (see approverIdCandidates), and BC rejects
       // the action if the userID does not own the open entry.
@@ -2005,12 +4167,61 @@ export function buildPortalApiRouter() {
         docNo: no,
         userID: entryApproverId,
         isApprove: decision === 'Approved',
-        comments: String(req.body?.comment ?? ''),
+        comments: comment,
       })
       if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
         throw portalError(`Business Central did not mark ${no} as ${decision.toLowerCase()}`, 502)
       }
       res.json({ ...(await requestDetail(requestId, authUser, { forApproval: true }).catch(() => ({ id: requestId }))), status: decision })
+    }),
+  )
+
+  router.post(
+    '/approvals/:id/assign-vehicle',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const rawId = String(req.params.id)
+      const { requestId, module, no } = await resolveApprovalReference(rawId, authUser)
+      if (module !== 'transport') {
+        throw portalError('Vehicle assignment is only available for transport requisitions', 422)
+      }
+      const vehicleNo = String(req.body?.vehicleNo ?? req.body?.vehiclePrimaryNo ?? '').trim()
+      const hintedPrimary = String(req.body?.vehiclePrimaryNo ?? req.body?.assetNo ?? '').trim()
+      if (!vehicleNo && !hintedPrimary) throw portalError('Select a vehicle to assign', 422)
+      // Dropdown value is Registration No.; Vehicle Allocated TableRelation is FA "No.".
+      const resolvedPrimary =
+        hintedPrimary ||
+        (await lookupVehiclePrimaryNo(vehicleNo || hintedPrimary)) ||
+        (await lookupVehiclePrimaryNo(hintedPrimary || vehicleNo))
+      const vehiclePrimaryNo = resolvedPrimary.trim()
+      if (!vehiclePrimaryNo) {
+        throw portalError(
+          `Could not resolve vehicle ${vehicleNo || hintedPrimary} to a Fixed Asset No. Refresh the page and try again.`,
+          422,
+        )
+      }
+      if (vehiclePrimaryNo.toUpperCase() === (vehicleNo || '').toUpperCase() && vehicleNo.includes('-')) {
+        // Registration-looking value with no separate FA No. — BC will reject TableRelation.
+        const again = await lookupVehiclePrimaryNo(vehicleNo)
+        if (!again || again.toUpperCase() === vehicleNo.toUpperCase()) {
+          throw portalError(
+            `Vehicle ${vehicleNo} has no Fixed Asset No. in Business Central vehicle master. Open FLT Vehicle Card and confirm No. is set, then refresh.`,
+            422,
+          )
+        }
+      }
+      const result = await callSoapMethod(
+        'AssignTransportVehicle',
+        { reqNo: no, vehicleNo: vehiclePrimaryNo, myUserID: authUser.userID },
+        facilitySoapEndpoint,
+      )
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError(
+          `Business Central did not assign vehicle ${vehicleNo || vehiclePrimaryNo} (${vehiclePrimaryNo}) to ${no}`,
+          502,
+        )
+      }
+      res.json(await requestDetail(requestId, authUser, { forApproval: true }).catch(() => ({ id: requestId })))
     }),
   )
 
@@ -2093,33 +4304,89 @@ export function buildPortalApiRouter() {
   router.post(
     '/claims/validate-hospital-category',
     safe(async (req, res) => {
+      const medicalAmount = Number(req.body?.medicalAmount ?? 0)
       const result = await callSoapMethod('FetchMedicalClaimAmount', {
-        medicalAmount: Number(req.body?.medicalAmount ?? 0),
+        medicalAmount,
         hospitalCategory: hospitalCategoryCode(req.body?.hospitalCategory),
       })
       const raw = String(result.returnValue ?? '{}').trim()
+      let parsed: Record<string, unknown> = {}
       try {
-        res.json(JSON.parse(raw))
+        parsed = JSON.parse(raw) as Record<string, unknown>
       } catch {
-        res.json({ Amount: Number(raw) || 0, AmountToRefund: 0 })
+        parsed = { Amount: Number(raw) || 0, AmountToRefund: 0 }
       }
+      const amount = Number(parsed.Amount ?? parsed.amount ?? 0)
+      const amountToRefund = Number(
+        parsed.AmountToRefund ?? parsed.amountToRefund ?? parsed.Amount ?? parsed.amount ?? 0,
+      )
+      const coveragePercent = medicalClaimCoveragePercent(
+        medicalAmount,
+        amountToRefund,
+        Number(parsed.CoveragePercent ?? parsed.coveragePercent ?? 0),
+      )
+      const netAmount = amountToRefund > 0 ? amountToRefund : amount
+      res.json({
+        ...parsed,
+        Amount: netAmount,
+        amount: netAmount,
+        AmountToRefund: amountToRefund,
+        amountToRefund,
+        coveragePercent,
+        CoveragePercent: coveragePercent,
+      })
     }),
   )
 
   router.post(
     '/imprest/fetch-line-amount',
     safe(async (req, res) => {
-      const result = await callSoapMethod('FetchImprestLineAmount', {
-        headerNo: String(req.body?.headerNo ?? ''),
-        noOfDays: Number(req.body?.noOfDays ?? 0),
-        advanceType: String(req.body?.advanceType ?? ''),
-        destinationCode: String(req.body?.destinationCode ?? req.body?.destination ?? ''),
-      })
-      const amount = Number(result.returnValue ?? 0)
-      if (!Number.isFinite(amount)) {
-        throw portalError('Business Central did not return an imprest line amount', 502)
+      let result
+      try {
+        result = await callSoapMethod('FetchImprestLineAmount', {
+          headerNo: String(req.body?.headerNo ?? ''),
+          noOfDays: Number(req.body?.noOfDays ?? 0),
+          advanceType: String(req.body?.advanceType ?? ''),
+          destinationCode: String(req.body?.destinationCode ?? req.body?.destination ?? ''),
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (/please enter daily rate/i.test(message)) {
+          res.json({ amount: 0, dailyRate: 0, requiresManualRate: true })
+          return
+        }
+        throw error
       }
-      res.json({ amount })
+      const noOfDays = Number(req.body?.noOfDays ?? 0)
+      const amount = Number(result.returnValue ?? 0)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        // Business Central has no usable Job-Grade rate for this advance type + the
+        // requester's grade (or the advance type is a manual-rate type). Fall back to
+        // manual entry gracefully — the requester types the daily rate and BC stamps it
+        // on save — instead of surfacing a blocking error on the form.
+        res.json({ amount: 0, dailyRate: 0, requiresManualRate: true })
+        return
+      }
+      const dailyRate =
+        amount > 0 && noOfDays > 0 ? Math.round((amount / noOfDays) * 100) / 100 : 0
+      res.json({ amount, dailyRate })
+    }),
+  )
+
+  router.get(
+    '/imprest/surrender-preview',
+    safe(async (req, res) => {
+      const imprestNo = String(req.query.imprestNo ?? '').trim()
+      if (!imprestNo) throw portalError('imprestNo is required', 400)
+      const enriched = await buildImprestSurrenderPreview(imprestNo, user(req))
+      res.json(enriched)
+    }),
+  )
+
+  router.get(
+    '/petty-cash/department-limit',
+    safe(async (req, res) => {
+      res.json(await getPortalPettyCashDepartmentLimit(user(req)))
     }),
   )
 
@@ -2140,12 +4407,67 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       if (!authUser.HOD) throw portalError('HOD access required', 403)
       const today = new Date().toISOString().slice(0, 10)
-      const rows = (await fetchOData('QyAttendanceLedger', {
-        $filter: authUser.department
-          ? `DepartmentCode eq '${odataString(authUser.department)}' and Date eq ${today}`
-          : `Date eq ${today}`,
-      })) as ODataRecord[] | null
-      res.json({ rows: (Array.isArray(rows) ? rows : []).map((row) => attendanceRow(row, authUser)) })
+      const department = authUser.department
+      // Merge active department staff (even if not signed in) with today's ledger.
+      const [staffRows, ledgerGd1, ledgerGd2] = await Promise.all([
+        fetchHodDepartmentStaff(authUser),
+        department
+          ? (fetchOData('QyAttendanceLedger', {
+              $filter: `GlobalDimension1Code eq '${odataString(department)}' and Date eq ${today}`,
+            }).catch(() => [])) as Promise<ODataRecord[] | null>
+          : Promise.resolve([] as ODataRecord[]),
+        department
+          ? (fetchOData('QyAttendanceLedger', {
+              $filter: `GlobalDimension2Code eq '${odataString(department)}' and Date eq ${today}`,
+            }).catch(() => [])) as Promise<ODataRecord[] | null>
+          : (fetchOData('QyAttendanceLedger', {
+              $filter: `Date eq ${today}`,
+            }).catch(() => [])) as Promise<ODataRecord[] | null>,
+      ])
+
+      const ledgerByEmployee = new Map<string, ODataRecord>()
+      for (const row of [...(Array.isArray(ledgerGd1) ? ledgerGd1 : []), ...(Array.isArray(ledgerGd2) ? ledgerGd2 : [])]) {
+        const empNo = text(row, ['StaffNo', 'EmployeeNo']).trim().toUpperCase()
+        if (empNo) ledgerByEmployee.set(empNo, row)
+      }
+
+      const team = (Array.isArray(staffRows) ? staffRows : []).map((staff) => {
+        const empNo = text(staff, ['No', 'EmployeeNo', 'Employee_No'])
+        const ledger = ledgerByEmployee.get(empNo.trim().toUpperCase())
+        const staffName = employeeDisplayName(staff) || empNo
+        const jobTitle = text(staff, ['JobTitle', 'Job_Title', 'CurrentJobTitle'])
+        const dept =
+          text(staff, ['GlobalDimension2Name', 'GlobalDimension2Code', 'GlobalDimension1Code']) ||
+          authUser.departmentName ||
+          authUser.department
+        if (ledger) {
+          ledgerByEmployee.delete(empNo.trim().toUpperCase())
+          return attendanceRow(ledger, authUser, {
+            staffName,
+            jobTitle,
+            department: dept,
+            employeeNo: empNo,
+          })
+        }
+        return attendanceRow({}, authUser, {
+          staffName,
+          jobTitle,
+          department: dept,
+          employeeNo: empNo,
+        })
+      })
+
+      // Include any ledger rows for the department that were not in the staff roster.
+      for (const [, ledger] of ledgerByEmployee) {
+        const empNo = text(ledger, ['StaffNo', 'EmployeeNo'])
+        if (empNo.trim().toUpperCase() === authUser.employeeNo.trim().toUpperCase()) continue
+        team.push(attendanceRow(ledger, authUser, { employeeNo: empNo }))
+      }
+
+      team.sort((left, right) =>
+        String(left.staffName || left.employeeNo).localeCompare(String(right.staffName || right.employeeNo)),
+      )
+      res.json({ rows: team })
     }),
   )
 
@@ -2190,11 +4512,8 @@ export function buildPortalApiRouter() {
     '/profile/details',
     safe(async (req, res) => {
       const authUser = user(req)
-      const [employees, kin, history, qualifications, assets] = await Promise.all([
-        fetchOData('QyHREmployee', {
-          $filter: `No eq '${odataString(authUser.employeeNo)}'`,
-          $top: 1,
-        }) as Promise<ODataRecord[] | null>,
+      const [employeeMerged, kin, history, qualifications, assets] = await Promise.all([
+        fetchMergedEmployeeRecord(authUser.employeeNo).catch(() => null),
         fetchOData('QyHREmployeeKin', {
           $filter: `EmployeeCode eq '${odataString(authUser.employeeNo)}'`,
         }).catch(() => [] as ODataRecord[]),
@@ -2208,9 +4527,16 @@ export function buildPortalApiRouter() {
           $filter: `ResponsibleEmployee eq '${odataString(authUser.employeeNo)}'`,
         }).catch(() => [] as ODataRecord[]),
       ])
-      const employee = Array.isArray(employees) ? employees[0] ?? {} : {}
+      let employee = employeeMerged ?? {}
+      if (!employeeMerged || Object.keys(employeeMerged).length === 0) {
+        const employees = (await fetchOData('QyHREmployee', {
+          $filter: `No eq '${odataString(authUser.employeeNo)}'`,
+          $top: 1,
+        }).catch(() => [])) as ODataRecord[] | null
+        employee = Array.isArray(employees) ? employees[0] ?? {} : {}
+      }
       const jobTitle =
-        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'], authUser.jobTitle) ||
+        text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle', 'JobTitleDescription'], authUser.jobTitle) ||
         (await resolveEmployeeJobTitleByNo(authUser.employeeNo))
       const dateOfJoin = filterBcDate(
         text(employee, [
@@ -2218,29 +4544,76 @@ export function buildPortalApiRouter() {
           'Employment_Date',
           'DateOfJoin',
           'DateOfJoiningtheCompany',
+          'DateOfJoiningTheCompany',
+          'Date_Of_Joining_the_Company',
           'HireDate',
           'DateEmployed',
+          'StartEmploymentDate',
+          'EmploymentStartDate',
+          'JoiningDate',
+          'Joining_Date',
+          'DateJoined',
+          'Date_Joined',
         ]),
       )
       const dateOfBirth = filterBcDate(
-        text(employee, ['BirthDate', 'Birth_Date', 'DateOfBirth', 'DOB']),
+        text(employee, [
+          'BirthDate',
+          'Birth_Date',
+          'DateOfBirth',
+          'Date_Of_Birth',
+          'DOB',
+          'DateofBirth',
+        ]),
       )
       const yearsOfService = yearsOfServiceFromJoin(dateOfJoin)
       const jobGrade = text(
         employee,
-        ['JobGrade', 'Job_Grade', 'JobGradeCode', 'Grade', 'GradeCode', 'SalaryGrade'],
+        [
+          'JobGrade',
+          'Job_Grade',
+          'JobGradeCode',
+          'Job_Grade_Code',
+          'Grade',
+          'GradeCode',
+          'Grade_Code',
+          'SalaryGrade',
+          'Salary_Grade',
+          'CurrentSalaryGrade',
+          'Current_Salary_Grade',
+          'PositionGrade',
+          'Position_Grade',
+          'JobGradeDescription',
+          'Job_Grade_Description',
+          'GradeDescription',
+          'Grade_Description',
+        ],
         authUser.jobGrade,
       )
+      const phoneNumber = text(
+        employee,
+        ['CellPhoneNumber', 'Cell_Phone_Number', 'PhoneNo', 'Phone_No', 'PhoneNumber', 'MobilePhoneNo'],
+        authUser.phoneNumber,
+      )
+      const gender = text(employee, ['Gender', 'Sex'], authUser.gender)
+      const org = await resolveEmployeeOrgDisplayFields(employee, authUser)
       res.json({
         jobTitle,
         jobGrade,
-        sector: text(employee, ['Sector', 'GlobalDimension1Code']),
-        division: text(employee, ['Division']),
-        district: text(employee, ['District', 'GlobalDimension2Code']),
+        phoneNumber,
+        gender,
+        departmentName: org.departmentName || authUser.departmentName,
+        departmentCode: org.departmentCode || authUser.department,
+        sector: text(employee, ['Sector', 'SectorName', 'Sector_Name']),
+        division: org.division,
+        district: org.district,
+        branchName: org.branchName,
+        branchCode: org.branchCode,
         maritalStatus: text(employee, ['MaritalStatus', 'Marital_Status']),
         employmentType:
           employmentTypeLabel(
             text(employee, [
+              'EmployementType',
               'EmployeeContractType',
               'Employee_Contract_Type',
               'EmploymentType',
@@ -2250,56 +4623,119 @@ export function buildPortalApiRouter() {
               'EmployeeType',
               'Employee_Type',
               'StaffType',
+              'Staff_Type',
               'EmploymentStatus',
+              'Employment_Status',
               'EmploymentCategory',
+              'Employment_Category',
               'EmployeesType',
+              'Employee_Type_Code',
+              'ContractStatus',
             ]),
           ) || '—',
         employmentDate: dateOfJoin,
         dateOfJoin,
         yearsOfService,
         contractStartDate: filterBcDate(
-          text(employee, ['ContractStartDate', 'Contract_Start_Date', 'ContractStart', 'StartDate']),
+          text(employee, [
+            'ContractStartDate',
+            'Contract_Start_Date',
+            'ContractStart',
+            'StartDate',
+            'EmploymentDate',
+            'Employment_Date',
+            'DateOfJoiningtheCompany',
+            'ActingjobStartDate',
+          ]),
         ),
         contractEndDate: filterBcDate(
-          text(employee, ['ContractEndDate', 'Contract_End_Date', 'ContractExpiryDate', 'ContractEnd', 'EndDate']),
+          text(employee, [
+            'ContractEndDate',
+            'Contract_End_Date',
+            'EndofContractDate',
+            'ContractExpiryDate',
+            'Contract_Expiry_Date',
+            'ContractEnd',
+            'EndDate',
+            'ContractExpirationDate',
+            'TemporaryjobExpiryDate',
+            'ActingjobExpiryDate',
+          ]),
         ),
         probationEndDate: filterBcDate(
           text(employee, [
+            'EndOfProbationDate',
+            'End_Of_Probation_Date',
             'ProbationEndDate',
             'Probation_End_Date',
             'ProbationEnd',
             'ConfirmationDate',
             'Confirmation_Date',
             'DateConfirmed',
+            'Probation_Date',
           ]),
         ),
         confirmationDate: filterBcDate(
-          text(employee, ['ConfirmationDate', 'Confirmation_Date', 'DateConfirmed', 'ProbationEndDate']),
+          text(employee, [
+            'ConfirmationDate',
+            'Confirmation_Date',
+            'DateConfirmed',
+            'Date_Confirmed',
+            'EndOfProbationDate',
+            'ProbationEndDate',
+            'Probation_End_Date',
+          ]),
         ),
         birthDate: dateOfBirth,
         dateOfBirth,
         lastPromotionDate: filterBcDate(
-          text(employee, ['LastPromotionDate', 'PromotionDate', 'Last_Promotion_Date']),
+          text(employee, [
+            'DemotionTransferPromotionDate',
+            'LastPromotionDate',
+            'Last_Promotion_Date',
+            'PromotionDate',
+            'Promotion_Date',
+            'DateOfLastPromotion',
+          ]),
+        ),
+        retirementDate: filterBcDate(
+          text(employee, ['Retirementdate', 'RetirementDate', 'Retirement_Date', 'ExpectedRetirementDate']),
+        ),
+        lastDateWorked: filterBcDate(
+          text(employee, ['LastDateWorked', 'Last_Date_Worked', 'TerminationDate', 'DateLeft']),
         ),
         nextOfKin: (Array.isArray(kin) ? kin : []).map((row) => ({
-          name: text(row, ['Name', 'FullName']),
-          relationship: text(row, ['Relationship']),
-          phone: text(row, ['PhoneNo', 'PhoneNumber']),
-          address: text(row, ['Address']),
+          // BC's dependants/kin query splits the name into "Other Names" + "SurName".
+          name:
+            [text(row, ['OtherNames', 'Other_Names']), text(row, ['SurName', 'Sur_Name', 'Surname'])]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || text(row, ['Name', 'FullName', 'KinName', 'Kin_Name', 'NextOfKinName']),
+          relationship: text(row, ['Relationship', 'KinRelationship', 'Kin_Relationship']),
+          phone: text(row, [
+            'HomeTelNo',
+            'Home_Tel_No',
+            'OfficeTelNo',
+            'Office_Tel_No',
+            'PhoneNo',
+            'PhoneNumber',
+            'Phone_No',
+          ]),
+          address: text(row, ['Address', 'KinAddress', 'Kin_Address']),
         })),
         employmentHistory: (Array.isArray(history) ? history : []).map((row) => ({
-          organisation: text(row, ['Employer', 'Organisation', 'CompanyName']),
-          position: text(row, ['Position', 'JobTitle']),
-          fromDate: text(row, ['FromDate', 'StartDate']),
-          toDate: text(row, ['ToDate', 'EndDate'], 'Present'),
+          organisation: text(row, ['Company_Name', 'CompanyName', 'Employer', 'Organisation']),
+          position: text(row, ['Job_Title', 'JobTitle', 'Position']),
+          fromDate: filterBcDate(text(row, ['From', 'FromDate', 'StartDate'])),
+          toDate: filterBcDate(text(row, ['To_Date', 'ToDate', 'EndDate'])) || 'Present',
           type: text(row, ['Type'], 'External'),
         })),
         qualifications: (Array.isArray(qualifications) ? qualifications : []).map((row) => ({
-          title: text(row, ['Qualification', 'Description']),
-          institution: text(row, ['Institution']),
-          year: text(row, ['Year', 'CompletionYear']),
-          level: text(row, ['Level', 'QualificationType']),
+          title: text(row, ['Qualification', 'Description', 'HighestQualification']),
+          institution: text(row, ['Institution', 'InstitutionName']),
+          year: filterBcDate(text(row, ['Year', 'CompletionYear', 'ToDate', 'FromDate'])) ||
+            text(row, ['Year', 'CompletionYear']),
+          level: text(row, ['HighestQualification', 'Type', 'Rank', 'Level', 'QualificationType']),
         })),
         assignedAssets: (Array.isArray(assets) ? assets : []).map((row) => ({
           tagNumber: text(row, ['No', 'FATagNumber']),
@@ -2308,6 +4744,55 @@ export function buildPortalApiRouter() {
           status: text(row, ['Status'], 'Active'),
         })),
       })
+    }),
+  )
+
+  router.get(
+    '/profile/trainings',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const rows = await fetchOData('QyTrainingApplicationHeader', {
+        $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
+      }).catch(() => [] as ODataRecord[])
+      const enriched = await Promise.all(
+        (Array.isArray(rows) ? rows : []).map(async (row) => {
+          const applicationNo = text(row, ['ApplicationNo', 'Application_No', 'No'])
+          const courseTitle = text(row, ['CourseTitle', 'Course_Title', 'TrainingNeed'])
+          let assessment: ODataRecord | null = null
+          if (applicationNo) {
+            try {
+              const assessmentResult = await callSoapMethod(
+                'GetTrainingAssessment',
+                { applicationNo },
+                trainingSoapEndpoint,
+              )
+              assessment = JSON.parse(String(assessmentResult.returnValue ?? '{}')) as ODataRecord
+            } catch {
+              assessment = null
+            }
+          }
+          const periodStart = String(assessment?.periodStart ?? '')
+          const periodEnd = String(assessment?.periodEnd ?? '')
+          return {
+            applicationNo,
+            course:
+              String(assessment?.otherTrainingName ?? '').trim() ||
+              String(assessment?.trainingNeed ?? '') ||
+              courseTitle,
+            fromDate: periodStart,
+            toDate: periodEnd,
+            trainer: String(assessment?.vendor ?? ''),
+            location: String(assessment?.department ?? authUser.departmentName ?? ''),
+            status: text(row, ['Status', 'ApprovalStatus']),
+            result: String(assessment?.remark ?? ''),
+            purpose: String(assessment?.purpose ?? text(row, ['PurposeofTraining', 'Purpose_of_Training'])),
+            year: periodStart
+              ? periodStart.slice(0, 4)
+              : text(row, ['ApplicationDate', 'Application_Date']).slice(0, 4),
+          }
+        }),
+      )
+      res.json({ rows: enriched })
     }),
   )
 
@@ -2417,6 +4902,35 @@ export function buildPortalApiRouter() {
   )
 
   router.post(
+    '/work-tickets/:ticketNo/flight',
+    safe(async (req, res) => {
+      const ticketNo = String(req.params.ticketNo)
+      const ticketClassRaw = String(req.body?.ticketClass ?? '1')
+      const ticketClass =
+        ticketClassRaw.toLowerCase() === 'business' || ticketClassRaw === '2' ? 2 : 1
+      const result = await callSoapMethod(
+        'SaveWorkTicketFlightDetails',
+        {
+          ticketNo,
+          travelerEmployeeNo: req.body?.travelerEmployeeNo ?? user(req).employeeNo,
+          flightFrom: req.body?.flightFrom ?? '',
+          flightTo: req.body?.flightTo ?? '',
+          departureDate: req.body?.departureDate ?? '',
+          returnDate: req.body?.returnDate ?? '',
+          ticketClass,
+          airlinePreference: req.body?.airlinePreference ?? '',
+          justification: req.body?.justification ?? '',
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not save the flight-booking details', 502)
+      }
+      res.json({ ok: true })
+    }),
+  )
+
+  router.post(
     '/work-tickets/:ticketNo/lines',
     safe(async (req, res) => {
       const spec = findModuleSpec('work-tickets')
@@ -2431,7 +4945,29 @@ export function buildPortalApiRouter() {
     '/work-tickets',
     safe(async (req, res) => {
       const authUser = user(req)
-      const rows = (await fetchOData('QyWorkTickets')) as ODataRecord[] | null
+      const [rows, flights, approvals] = await Promise.all([
+        fetchOData('QyWorkTickets') as Promise<ODataRecord[] | null>,
+        fetchOData('QyWorkTicketFlight').catch(() => [] as ODataRecord[]) as Promise<
+          ODataRecord[] | null
+        >,
+        fetchOData('QyApprovalEntry', {
+          $filter: `TableID eq ${APPROVAL_TABLE_IDS.workTicket}`,
+          $top: 1000,
+        }).catch(() => [] as ODataRecord[]) as Promise<ODataRecord[] | null>,
+      ])
+      const flightsByTicket = new Map(
+        (Array.isArray(flights) ? flights : []).map((flight) => [
+          text(flight, ['TicketNo']),
+          flight,
+        ]),
+      )
+      const approvalsByTicket = new Map<string, ODataRecord[]>()
+      for (const approval of Array.isArray(approvals) ? approvals : []) {
+        const documentNo = text(approval, ['DocumentNo', 'Document_No'])
+        const bucket = approvalsByTicket.get(documentNo) ?? []
+        bucket.push(approval)
+        approvalsByTicket.set(documentNo, bucket)
+      }
       res.json({
         rows: (Array.isArray(rows) ? rows : []).map((row) => {
           const ticketNo = text(row, ['TicketNo', 'No'])
@@ -2442,8 +4978,9 @@ export function buildPortalApiRouter() {
             gkNo: text(row, ['GKNo']),
             type: text(row, ['Type']),
             department: text(row, ['DepartmentName', 'Department']),
-            status: text(row, ['Status'], 'Open'),
+            status: resolveModuleRequestStatus(row, 'workTickets', approvalsByTicket.get(ticketNo) ?? []),
             employeeNo: text(row, ['EmployeeNo'], authUser.employeeNo),
+            ...workTicketFlight(flightsByTicket.get(ticketNo)),
           }
         }),
       })
@@ -2454,7 +4991,7 @@ export function buildPortalApiRouter() {
     '/work-tickets/:ticketNo',
     safe(async (req, res) => {
       const ticketNo = String(req.params.ticketNo)
-      const [tickets, lines] = await Promise.all([
+      const [tickets, lines, flights, approvals] = await Promise.all([
         fetchOData('QyWorkTickets', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
           $top: 1,
@@ -2462,8 +4999,18 @@ export function buildPortalApiRouter() {
         fetchOData('QyWorkTicketLines', {
           $filter: `TicketNo eq '${odataString(ticketNo)}'`,
         }).catch(() => [] as ODataRecord[]),
+        fetchOData('QyWorkTicketFlight', {
+          $filter: `TicketNo eq '${odataString(ticketNo)}'`,
+          $top: 1,
+        }).catch(() => [] as ODataRecord[]),
+        fetchOData('QyApprovalEntry', {
+          $filter:
+            `DocumentNo eq '${odataString(ticketNo)}' and ` +
+            `TableID eq ${APPROVAL_TABLE_IDS.workTicket}`,
+        }).catch(() => [] as ODataRecord[]),
       ])
       const row = Array.isArray(tickets) ? tickets[0] : undefined
+      const flight = Array.isArray(flights) ? flights[0] : undefined
       if (!row) throw portalError('Work ticket was not found', 404)
       res.json({
         id: ticketNo,
@@ -2472,7 +5019,12 @@ export function buildPortalApiRouter() {
         gkNo: text(row, ['GKNo']),
         type: text(row, ['Type']),
         department: text(row, ['DepartmentName', 'Department']),
-        status: text(row, ['Status'], 'Open'),
+        status: resolveModuleRequestStatus(
+          row,
+          'workTickets',
+          Array.isArray(approvals) ? approvals : [],
+        ),
+        ...workTicketFlight(flight),
         lines: (Array.isArray(lines) ? lines : []).map((line, index) => ({
           id: text(line, ['LineNo', 'Line_No', 'SystemId'], String(index + 1)),
           lineNo: text(line, ['LineNo', 'Line_No'], String(index + 1)),
@@ -2483,6 +5035,57 @@ export function buildPortalApiRouter() {
           authorizingOfficerName: text(line, ['AuthorizingOfficerName']),
         })),
       })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/confirmation',
+    safe(async (req, res) => {
+      const confirmationNo = String(req.body?.confirmationNo ?? '').trim()
+      if (!confirmationNo) throw portalError('Booking confirmation number is required')
+      const result = await callSoapMethod(
+        'ConfirmWorkTicketBooking',
+        {
+          ticketNo: req.params.ticketNo,
+          confirmationNo,
+          myUserID: user(req).userID,
+        },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not confirm the flight booking', 502)
+      }
+      res.json({ ok: true })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/submit',
+    safe(async (req, res) => {
+      const result = await callSoapMethod(
+        'RequestWorkTicketApproval',
+        { ticketNo: req.params.ticketNo },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not submit the work ticket for approval', 502)
+      }
+      res.json({ ok: true })
+    }),
+  )
+
+  router.post(
+    '/work-tickets/:ticketNo/cancel',
+    safe(async (req, res) => {
+      const result = await callSoapMethod(
+        'CancelWorkTicketApproval',
+        { ticketNo: req.params.ticketNo },
+        facilitySoapEndpoint,
+      )
+      if (String(result.returnValue).toLowerCase() !== 'true') {
+        throw portalError('Business Central did not cancel the work-ticket approval', 502)
+      }
+      res.json({ ok: true })
     }),
   )
 
@@ -2635,6 +5238,7 @@ export function buildPortalApiRouter() {
       res.json({
         rows: rows.map((row) => {
           const employeeNo = text(row, ['No', 'EmployeeNo'])
+          const annualLeaveBalance = employeeAnnualLeaveBalance(row)
           return {
             id: employeeNo,
             employeeNo,
@@ -2643,6 +5247,9 @@ export function buildPortalApiRouter() {
             department: text(row, ['DepartmentName', 'Department_Name'], authUser.departmentName),
             employmentDate: text(row, ['EmploymentDate', 'DateOfJoin']),
             status: text(row, ['Status'], 'Active'),
+            // HOD Department Staff view surfaces each member's annual leave balance
+            // (from the QyHREmployee card). null when BC does not expose it.
+            leaveBalance: annualLeaveBalance,
           }
         }),
       })
@@ -2658,6 +5265,7 @@ export function buildPortalApiRouter() {
       res.json({
         rows: rows.map((row) => {
           const employeeNo = text(row, ['No', 'EmployeeNo'])
+          const annualLeaveBalance = employeeAnnualLeaveBalance(row)
           return {
             id: employeeNo,
             employeeNo,
@@ -2666,6 +5274,9 @@ export function buildPortalApiRouter() {
             department: text(row, ['DepartmentName', 'Department_Name'], authUser.departmentName),
             employmentDate: text(row, ['EmploymentDate', 'DateOfJoin']),
             status: text(row, ['Status'], 'Active'),
+            // HOD Department Staff view surfaces each member's annual leave balance
+            // (from the QyHREmployee card). null when BC does not expose it.
+            leaveBalance: annualLeaveBalance,
           }
         }),
       })
@@ -2718,7 +5329,7 @@ export function buildPortalApiRouter() {
         $filter:
           `No eq '${odataString(employeeNo)}'` +
           ` and Status eq 'Active'` +
-          ` and DepartmentCode eq '${odataString(authUser.department)}'`,
+          ` and GlobalDimension1Code eq '${odataString(authUser.department)}'`,
         $top: 1,
       }).catch(() => [])) as ODataRecord[]
       const employee = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
@@ -2741,15 +5352,90 @@ export function buildPortalApiRouter() {
   )
   router.get(
     '/reports/store-usage',
-    safe(async (_req, res) => {
-      const rows = await fetchOData('QyStoreRequisitionLines').catch(() => [] as ODataRecord[])
-      res.json((Array.isArray(rows) ? rows : []).map((row) => ({
-        itemCode: text(row, ['No', 'ItemNo']),
-        description: text(row, ['Description']),
-        issuedQty: number(row, ['QuantityIssued', 'Quantity', 'QtyIssued']),
-        department: text(row, ['Department', 'DepartmentName']),
-        month: text(row, ['PostingDate', 'Date']),
-      })))
+    safe(async (req, res) => {
+      const from = String(req.query.from ?? '').slice(0, 10)
+      const to = String(req.query.to ?? '').slice(0, 10)
+      const department = String(req.query.department ?? '').trim().toLowerCase()
+      const lineType = String(req.query.type ?? '').trim().toLowerCase()
+
+      const [linesResult, headersResult] = await Promise.all([
+        fetchOData('QyStoreRequisitionLines').catch(() => [] as ODataRecord[]),
+        fetchOData('QyStoreRequisitionHeader').catch(() => [] as ODataRecord[]),
+      ])
+      const lines = Array.isArray(linesResult) ? linesResult : []
+      const headers = Array.isArray(headersResult) ? headersResult : []
+      const headerByNo = new Map<string, ODataRecord>()
+      for (const header of headers) {
+        const no = text(header, ['No', 'No_']).trim().toUpperCase()
+        if (no) headerByNo.set(no, header)
+      }
+
+      const storeLineTypeLabel = (value: string) => {
+        const normalized = value.trim().toLowerCase()
+        if (normalized === '1' || normalized === 'item') return 'Item'
+        if (normalized === '2' || normalized === 'asset') return 'Fixed Asset'
+        return value || 'Item'
+      }
+
+      const mapped = lines
+        .map((row) => {
+          const requisitionNo = text(row, ['RequistionNo', 'RequisitionNo', 'Requisition_No', 'DocumentNo'])
+          const header = headerByNo.get(requisitionNo.trim().toUpperCase()) ?? {}
+          const typeRaw = text(row, ['Type', 'type'], '1')
+          const typeLabel = storeLineTypeLabel(typeRaw)
+          const issueDate =
+            filterBcDate(text(row, ['LastDateofIssue', 'Last_Date_of_Issue', 'lastIssueDate'])) ||
+            filterBcDate(text(header, ['IssueDate', 'Issue_Date', 'PostingDate', 'Posting_Date']))
+          const qtyIssued = number(row, ['QuantityIssued', 'Quantity_Issued', 'IssueQuantity', 'Issue_Quantity'])
+          const qtyRequested = number(row, ['QuantityRequested', 'Quantity_Requested', 'Quantity'])
+          const unitCost = number(row, ['UnitCost', 'Unit_Cost'])
+          const lineAmount = number(row, ['LineAmount', 'Line_Amount'])
+          const departmentName = text(header, [
+            'ShortcutDimension2Code',
+            'Shortcut_Dimension_2_Code',
+            'GlobalDimension2Code',
+            'DepartmentName',
+            'Department_Name',
+          ])
+          const departmentCode = text(row, [
+            'ShortcutDimension2Code',
+            'Shortcut_Dimension_2_Code',
+          ], departmentName)
+          return {
+            requisitionNo,
+            lineNo: text(row, ['LineNo', 'Line_No']),
+            type: typeLabel,
+            typeCode: typeRaw,
+            itemCode: text(row, ['No', 'ItemNo', 'Item_No']),
+            description: text(row, ['Description']),
+            tagNo: text(row, ['TagNo', 'Tag_No', 'Tag No']),
+            issuingStore: text(row, ['IssuingStore', 'Issuing_Store']),
+            quantityRequested: qtyRequested,
+            quantityIssued: qtyIssued,
+            unitOfMeasure: text(row, ['UnitofMeasure', 'Unit_of_Measure', 'UnitOfMeasure']),
+            unitCost,
+            lineAmount: lineAmount > 0 ? lineAmount : unitCost > 0 && qtyIssued > 0 ? unitCost * qtyIssued : 0,
+            department: departmentName || departmentCode,
+            departmentCode,
+            issueDate,
+            budgetName: text(row, ['BudgetName', 'Budget_Name']),
+            voteAccount: text(row, ['VoteAccount', 'Vote_Account']),
+            requestStatus: text(row, ['RequestStatus', 'Request_Status']),
+          }
+        })
+        .filter((row) => {
+          if (lineType === 'item' && row.type !== 'Item') return false
+          if (lineType === 'asset' && row.type !== 'Fixed Asset') return false
+          if (department) {
+            const haystack = `${row.department} ${row.departmentCode}`.trim().toLowerCase()
+            if (!haystack.includes(department)) return false
+          }
+          if (from && row.issueDate && row.issueDate < from) return false
+          if (to && row.issueDate && row.issueDate > to) return false
+          return Boolean(row.requisitionNo || row.itemCode)
+        })
+
+      res.json(mapped)
     }),
   )
   router.get(
@@ -2819,34 +5505,59 @@ export function buildPortalApiRouter() {
   router.get(
     '/reports/gate-pass-log',
     safe(async (_req, res) => {
-      const rows = await fetchOData('QyGatePass').catch(() => [] as ODataRecord[])
-      res.json((Array.isArray(rows) ? rows : []).map((row) => ({
-        gatePassNo: text(row, ['GatePassNo']),
-        type: text(row, ['Linkto', 'LinkTo', 'Link_To'], 'Store Issue'),
-        assetTag: text(row, ['ItemNo', 'AssetTagNumber']),
-        destination: text(row, ['ToLocation']),
-        returnDate: text(row, ['ReturnDate'], '-'),
-        status: text(row, ['Status']),
-      })))
-    }),
-  )
+      const [
+        rowsResult,
+        storeIssuesResult,
+        transferShipmentsResult,
+        assetTransfersResult,
+        maintenanceResult,
+        returnsResult,
+      ] = await Promise.all([
+        fetchOData('QyGatePass').catch(() => [] as ODataRecord[]),
+        fetchOData('QyStoreRequisitionHeader').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassTransferShipments').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassAssetTransfers').catch(() => [] as ODataRecord[]),
+        fetchOData('QyFuelMaintenanceRequests').catch(() => [] as ODataRecord[]),
+        fetchOData('QyGatePassReturns').catch(() => [] as ODataRecord[]),
+      ])
+      const rows = Array.isArray(rowsResult) ? rowsResult : []
+      const storeIssues = gatePassRecordIndex(
+        Array.isArray(storeIssuesResult) ? storeIssuesResult : [],
+        ['No', 'No_'],
+      )
+      const transferShipments = gatePassRecordIndex(
+        Array.isArray(transferShipmentsResult) ? transferShipmentsResult : [],
+        ['No', 'No_'],
+      )
+      const assetTransfers = gatePassRecordIndex(
+        Array.isArray(assetTransfersResult) ? assetTransfersResult : [],
+        ['No', 'No_'],
+      )
+      const maintenance = gatePassRecordIndex(
+        Array.isArray(maintenanceResult) ? maintenanceResult : [],
+        ['RequisitionNo', 'Requisition_No', 'No', 'No_'],
+      )
+      const returns = gatePassRecordIndex(
+        Array.isArray(returnsResult) ? returnsResult : [],
+        ['AssetRecordNo', 'Asset_Record_No', 'GatePassNo', 'Gate_Pass_No'],
+      )
 
-  router.get(
-    '/profile/trainings',
-    safe(async (req, res) => {
-      const authUser = user(req)
-      const rows = await fetchOData('QyTrainingApplicationHeader', {
-        $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
-      }).catch(() => [] as ODataRecord[])
-      res.json({
-        rows: (Array.isArray(rows) ? rows : []).map((row) => ({
-          applicationNo: text(row, ['ApplicationNo', 'Application_No']),
-          courseTitle: text(row, ['CourseTitle', 'Course_Title']),
-          purpose: text(row, ['PurposeofTraining', 'Purpose_of_Training', 'Purpose']),
-          applicationDate: filterBcDate(text(row, ['ApplicationDate', 'Application_Date'])),
-          status: text(row, ['Status', 'ApprovalStatus']),
-        })),
-      })
+      res.json(rows.map((row) => {
+        const sourceDocumentNo = text(row, ['TransferNo', 'Transfer_No']).trim().toUpperCase()
+        const source = gatePassSourceFromRow(row)
+        const sourceRecord =
+          source === 'storeIssue'
+            ? storeIssues.get(sourceDocumentNo)
+            : source === 'transferOrder'
+              ? transferShipments.get(sourceDocumentNo)
+              : source === 'assetTransfer'
+                ? assetTransfers.get(sourceDocumentNo)
+                : maintenance.get(sourceDocumentNo)
+        const returnRecord =
+          returns.get(text(row, ['No']).trim().toUpperCase()) ??
+          returns.get(text(row, ['GatePassNo', 'Gate_Pass_No']).trim().toUpperCase())
+        return mapGatePassLogRow(row, sourceRecord ?? {}, returnRecord ?? {})
+      }))
     }),
   )
 
@@ -2866,15 +5577,16 @@ export function buildPortalApiRouter() {
       if (!EMPLOYEE_EXIT_REQUEST_TYPES.includes(requestType)) {
         throw portalError('Invalid employee exit request type', 422, 'INVALID_EXIT_TYPE')
       }
-      const row = await createEmployeeExitRequest({
-        requestType,
-        employeeNo: authUser.employeeNo,
-        employeeName: authUser.displayName,
-        departmentName: authUser.departmentName || authUser.department,
-        requesterUserId: authUser.userID,
-        details: (req.body?.details ?? {}) as Record<string, unknown>,
-      })
-      res.json(row)
+      res.json(
+        await createEmployeeExitRequest({
+          requestType,
+          employeeNo: authUser.employeeNo,
+          employeeName: authUser.displayName,
+          departmentName: authUser.departmentName || authUser.department,
+          requesterUserId: authUser.userID,
+          details: (req.body?.details ?? {}) as Record<string, unknown>,
+        }),
+      )
     }),
   )
 
@@ -2882,12 +5594,13 @@ export function buildPortalApiRouter() {
     '/hr/employee-exit/:id/request-cancellation',
     safe(async (req, res) => {
       const authUser = user(req)
-      const row = await requestEmployeeExitCancellation({
-        id: String(req.params.id ?? ''),
-        employeeNo: authUser.employeeNo,
-        reason: String(req.body?.reason ?? ''),
-      })
-      res.json(row)
+      res.json(
+        await requestEmployeeExitCancellation({
+          id: String(req.params.id ?? ''),
+          employeeNo: authUser.employeeNo,
+          reason: String(req.body?.reason ?? ''),
+        }),
+      )
     }),
   )
 
@@ -2895,11 +5608,12 @@ export function buildPortalApiRouter() {
     '/hr/employee-exit/:id/cancel',
     safe(async (req, res) => {
       const authUser = user(req)
-      const row = await withdrawEmployeeExitRequest({
-        id: String(req.params.id ?? ''),
-        employeeNo: authUser.employeeNo,
-      })
-      res.json(row)
+      res.json(
+        await withdrawEmployeeExitRequest({
+          id: String(req.params.id ?? ''),
+          employeeNo: authUser.employeeNo,
+        }),
+      )
     }),
   )
 
@@ -2911,6 +5625,28 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  router.get(
+    '/hr/monthly-salary-base',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      let monthlySalaryBase = Number(authUser.monthlySalaryBase ?? 0)
+      if (!(monthlySalaryBase > 0)) {
+        monthlySalaryBase = await fetchEmployeeSalaryBaseFast(authUser.employeeNo, {
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+        })
+      }
+      if (!(monthlySalaryBase > 0)) {
+        monthlySalaryBase = await resolveEmployeeMonthlySalaryBase(authUser.employeeNo, {
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+        })
+      }
+      if (monthlySalaryBase > 0) {
+        req.session.authUser = { ...authUser, monthlySalaryBase }
+      }
+      res.json({ monthlySalaryBase })
+    }),
+  )
+
   router.post(
     '/hr/service-letters',
     safe(async (req, res) => {
@@ -2919,15 +5655,17 @@ export function buildPortalApiRouter() {
       if (!REQUESTABLE_HR_SERVICE_LETTER_TYPES.includes(letterType)) {
         throw portalError('Invalid HR service letter type', 422, 'INVALID_LETTER_TYPE')
       }
-      const row = await createHrServiceLetterRequest({
-        letterType,
-        employeeNo: authUser.employeeNo,
-        employeeName: authUser.displayName,
-        departmentName: authUser.departmentName || authUser.department,
-        monthlySalaryBase: authUser.monthlySalaryBase,
-        details: (req.body?.details ?? {}) as Record<string, unknown>,
-      })
-      res.json(row)
+      res.json(
+        await createHrServiceLetterRequest({
+          letterType,
+          employeeNo: authUser.employeeNo,
+          employeeName: authUser.displayName,
+          departmentName: authUser.departmentName || authUser.department,
+          monthlySalaryBase: authUser.monthlySalaryBase,
+          customerNo: authUser.imprestNo || authUser.accountNumber,
+          details: (req.body?.details ?? {}) as Record<string, unknown>,
+        }),
+      )
     }),
   )
 
@@ -2935,8 +5673,12 @@ export function buildPortalApiRouter() {
     '/hr/service-letters/:id/cancel',
     safe(async (req, res) => {
       const authUser = user(req)
-      const row = await cancelHrServiceLetterRequest(String(req.params.id ?? ''), authUser.employeeNo)
-      res.json(row)
+      res.json(
+        await cancelHrServiceLetterRequest(
+          String(req.params.id ?? ''),
+          authUser.employeeNo,
+        ),
+      )
     }),
   )
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.3.121"
-AL_PATCH_VERSION="1.0.5.80"
+VERSION="1.0.3.292"
+AL_INSTALLED_VERSION="1.0.5.173"
+AL_PATCH_VERSION="${AL_INSTALLED_VERSION}"
 BUNDLE="HIJRA-${VERSION}-COMPLETE-SUITE-FINAL"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUITE="$REPO_ROOT/SelfServiceSuite"
@@ -16,7 +17,7 @@ cd "$SUITE/SelfServiceBackend"
 rm -rf "$SUITE/SelfServiceBackend/dist"
 npm run build
 npm run build:portal
-echo "hijra-portal-${VERSION}-FINAL-2026-07-29-select-relation-guard" > dist/BUILD_ID.txt
+echo "hijra-portal-${VERSION}-FINAL-2026-08-21-same-origin-api" > dist/BUILD_ID.txt
 
 echo "==> Staging $BUNDLE..."
 rm -rf "$STAGE"
@@ -25,6 +26,7 @@ mkdir -p "$ROOT/SelfServiceSuite/SelfServicePortal/self-service-portal"
 mkdir -p "$ROOT/BC-AL"
 
 cp -R "$SUITE/SelfServiceBackend/dist" "$SUITE/SelfServiceBackend/public" "$SUITE/SelfServiceBackend/deploy" "$ROOT/SelfServiceSuite/SelfServiceBackend/"
+cp -R "$SUITE/SelfServiceBackend/src" "$ROOT/SelfServiceSuite/SelfServiceBackend/"
 cp "$SUITE/SelfServiceBackend/package.json" "$SUITE/SelfServiceBackend/package-lock.json" "$ROOT/SelfServiceSuite/SelfServiceBackend/"
 cp "$SUITE/SelfServiceBackend/README.md" "$SUITE/SelfServiceBackend/.env.example" "$ROOT/SelfServiceSuite/SelfServiceBackend/" 2>/dev/null || true
 
@@ -34,13 +36,26 @@ cp "$PORTAL/package.json" "$PORTAL/package-lock.json" "$PORTAL/tsconfig.json" "$
 
 # BC AL — validated, path-aware patch. Do not include the obsolete duplicate
 # PortalAttachmentsMgt.Codeunit.al or the old wrong-folder query copies.
-cp -R "$REPO_ROOT/deploy/HIJRA-FELIX-SAFE-PATCH-1.0.5.71/." "$ROOT/BC-AL/"
+FELIX_PATCH="$REPO_ROOT/deploy/HIJRA-FELIX-SAFE-PATCH-1.0.5.75"
+if [[ ! -d "$FELIX_PATCH" ]]; then
+  echo "ERROR: Felix AL patch base not found at: $FELIX_PATCH" >&2
+  exit 1
+fi
+cp -R "$FELIX_PATCH/." "$ROOT/BC-AL/"
 # Build the deploy patch from the current reviewed AL project so the package
 # cannot silently omit Employee Exit, HR Letters, Training, Facility, Gate Pass,
 # approval comments, or the department petty-cash limit.
-AL_PROJECT="${HIJRA_AL_PROJECT:-$HOME/Hijra Al ERP Apps V3/hijraERP/Hijra}"
-if [[ ! -d "$AL_PROJECT/src/staffPortal" ]]; then
-  echo "ERROR: HIJRA AL project was not found at: $AL_PROJECT" >&2
+AL_PROJECT="${HIJRA_AL_PROJECT:-}"
+if [[ -z "$AL_PROJECT" ]]; then
+  for candidate in "$HOME/Hijra Al ERP Apps V5/hijraERP/Hijra" "$HOME/Hijra Al ERP Apps V3/hijraERP/Hijra"; do
+    if [[ -d "$candidate/src/staffPortal" ]]; then
+      AL_PROJECT="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$AL_PROJECT" || ! -d "$AL_PROJECT/src/staffPortal" ]]; then
+  echo "ERROR: HIJRA AL project was not found. Set HIJRA_AL_PROJECT." >&2
   exit 1
 fi
 for folder in employeeExit hrLetter training facilityUat; do
@@ -58,9 +73,97 @@ cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/Fleet/GatePass.Table.al" "$R
 cp "$AL_PROJECT/src/Query/GatePass.Query.al" "$AL_PROJECT/src/Query/GatePassAssetTransfers.Query.al" "$AL_PROJECT/src/Query/GatePassTransferShipments.Query.al" "$ROOT/BC-AL/FILES/Query/"
 cp "$AL_PROJECT/src/Query/ImprestHeaders.Query.al" "$AL_PROJECT/src/Query/ImprestLines2.Query.al" "$AL_PROJECT/src/Query/ReceiptPaymentTypes.Query.al" "$ROOT/BC-AL/FILES/Query/"
 
-echo "HIJRA Self Service Suite v${VERSION} FINAL — 29 July 2026" > "$ROOT/SelfServiceSuite/VERSION.txt"
-cp "$REPO_ROOT/deploy/HIJRA-UAT-ROW-BY-ROW-IMPLEMENTATION-REPORT-2026-07-28.md" "$ROOT/"
-cp "$REPO_ROOT/outputs/hijra-uat-2026-07-28/HIJRA-SSP-UAT-ROW-BY-ROW-EVIDENCE-2026-07-28.xlsx" "$ROOT/"
+AL_FIXES="$REPO_ROOT/HIJRA-AL-FIXES-2026-07-25"
+if [[ -d "$AL_FIXES" ]]; then
+  # Keep live Hijra V5 objects (CuPortalFacility 52161, CuPortalAssetTransfer).
+  # Copy every reviewed AL file into the zip so Felix has the last-3-days set.
+  mkdir -p "$ROOT/BC-AL/REVIEWED-AL-FIXES-16-19-AUG"
+  cp -R "$AL_FIXES/." "$ROOT/BC-AL/REVIEWED-AL-FIXES-16-19-AUG/"
+fi
+mkdir -p "$ROOT/BC-AL/FILES/src/NEWCHANGES"
+cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al" \
+  "$ROOT/BC-AL/FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al"
+
+echo "HIJRA Self Service Suite v${VERSION} FINAL — 19 August 2026" > "$ROOT/SelfServiceSuite/VERSION.txt"
+REPLACE_AL="$REPO_ROOT/HIJRA-FELIX-REPLACE-THESE-AL"
+if [[ -d "$REPLACE_AL" ]]; then
+  mkdir -p "$ROOT/FELIX-REPLACE-THESE-AL"
+  cp -R "$REPLACE_AL/." "$ROOT/FELIX-REPLACE-THESE-AL/"
+fi
+cp "$REPO_ROOT/deploy/HIJRA-UAT-ROW-BY-ROW-IMPLEMENTATION-REPORT-2026-07-28.md" "$ROOT/" 2>/dev/null || true
+cp "$REPO_ROOT/outputs/hijra-uat-2026-07-28/HIJRA-SSP-UAT-ROW-BY-ROW-EVIDENCE-2026-07-28.xlsx" "$ROOT/" 2>/dev/null || true
+
+cat > "$ROOT/UNDEPLOYED-FIXES-16-19-AUG-2026.txt" << 'EOF'
+HIJRA SSP — ALL UNDEPLOYED FIXES (16–19 August 2026)
+===================================================
+You have not deployed these yet. Deploy THIS zip once (v1.0.3.292).
+Do not use 1.0.3.288–1.0.3.291 (291 still baked API ports 4000/4001).
+
+PORTAL / BACKEND (already compiled into dist + public; source also in this zip)
+------------------------------------------------------------------------------
+Salary advance (v1.0.3.284)
+  Approver amount = percentage × payroll salary (not BC Basic 40k).
+  Files: src/salaryAdvanceAmount.ts, src/erpMappings.ts, src/employeeProfile.ts,
+         src/portalApi.ts
+
+Imprest surrender travel days (v1.0.3.285)
+  Multi-day travel no longer stamps 1 day. Portal syncs travel start from source imprest.
+  Files: src/staffModules.ts, src/financeRequestEnrichment.ts, src/imprestSurrenderLines.ts
+         portal: components/finance/ImprestSurrenderLinesEditor.tsx
+  AL: StaffPortalCodeunit — EnsureImprestSurrenderTravelStartDate,
+      DeduplicateImprestSurrenderLines
+
+Petty cash limit warning (v1.0.3.286)
+  Branch users no longer get a false “no positive petty-cash limit” amber warning.
+  Files: src/staffModules.ts (getPortalPettyCashDepartmentLimit), src/employeeProfile.ts
+         portal: pages/finance/PettyCashReplenishment.tsx
+
+Petty cash Limit Source / Responsibility Center (v1.0.3.287)
+  Branch staff: Limit Source = branch name; Responsibility Center = branch (not CENTRAL).
+  Files: src/portalApi.ts, src/financeRequestEnrichment.ts
+         portal: pages/finance/PettyCashReplenishment.tsx
+
+Finance org display — all finance modules (v1.0.3.288)
+  Branch (district-line): District + Branch; hide Department/Division.
+  HQ (department-line): Department + Division; hide District/Branch.
+  Responsibility Center: branch name for branch staff; division/department for HQ.
+  Modules: Petty Cash Settlement, Petty Cash Request, Imprest, Imprest Surrender, Staff Claim.
+  Files: src/financeRequestEnrichment.ts, src/employeeProfile.ts, src/portalApi.ts
+         portal: data/financeOrgDetailFields.ts, utils/financeOrgDisplay.ts,
+                 data/approvalDetailFields.ts, components/finance/FinanceEmployeeOrgBanner.tsx,
+                 pages/finance/PettyCash.tsx, pages/finance/PettyCashReplenishment.tsx,
+                 components/shared/RequestFormPage.tsx, MultiStepRequestPage.tsx,
+                 pages/approvals/ApprovalDetail.tsx
+
+Procurement Individual Budget (v1.0.3.289–290) — UAT R59–R61
+  Department OR district opens their own template (org from employee card).
+  Itemise lines against that unit. Submit itemised plan.
+  Files: src/portalApi.ts, src/employeeProfile.ts
+         portal: pages/facility/ProcurementPlan.tsx, api/endpoints/procurementPlan.ts
+  AL: PortalFacilityMgt.Codeunit.al (52161) Save/SubmitProcurementPlan*
+      PortalProcurementPlanHeader.Table.al, PortalProcurementPlanLine.Table.al
+
+AL FELIX MUST PUBLISH (from BC-AL/FILES — live object IDs)
+----------------------------------------------------------
+  FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+    imprest surrender travel start, surrender line dedupe, petty cash Insert-before-Validate
+  FILES/staffPortal/facilityUat/PortalFacilityMgt.Codeunit.al   (codeunit 52161)
+    procurement budget template enter / itemise / submit
+  FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
+    vehicle tools on asset transfer
+  FILES/staffPortal/facilityUat/PortalProcurementPlanHeader.Table.al
+  FILES/staffPortal/facilityUat/PortalProcurementPlanLine.Table.al
+
+Extra reviewed AL copies (do not overwrite live IDs blindly):
+  BC-AL/REVIEWED-AL-FIXES-16-19-AUG/
+
+DEPLOY ORDER
+------------
+1. Felix: APPLY-HIJRA-PATCH.ps1 → AL: Package → publish (keep AL 1.0.5.173)
+2. TA: extract this zip to C:\TA\SelfServiceSuite, restore .env, START-HIJRA-PORTAL.bat
+3. Verify: http://10.30.4.23:4000/api/health → v1.0.3.292 then Ctrl+F5
+   (UI + /api share one PORT from .env — clear browser site data once after upgrade)
+EOF
 
 cat > "$ROOT/START-HIJRA-PORTAL.bat" << BAT
 @echo off
@@ -360,24 +463,44 @@ FULL ALL MODULES — HR + Finance + Facility — deploy once.
 See ALL-FIXES-MANIFEST.txt inside the zip.
 EOF
 
-DEPLOY_ZIP="$REPO_ROOT/deploy/${BUNDLE}.zip"
-FELIX_ZIP="$REPO_ROOT/deploy/HIJRA-FELIX-SAFE-PATCH-${AL_PATCH_VERSION}.zip"
 DESKTOP_ZIP="$HOME/Desktop/${BUNDLE}.zip"
-DESKTOP_FELIX="$HOME/Desktop/HIJRA-FELIX-SAFE-PATCH-${AL_PATCH_VERSION}.zip"
+DESKTOP_FELIX="$HOME/Desktop/HIJRA-FELIX-AL-BUNDLE-${VERSION}.zip"
 cd "$STAGE"
-rm -f "$DEPLOY_ZIP" "$FELIX_ZIP"
-zip -r "$DEPLOY_ZIP" "$BUNDLE" -x "*.DS_Store"
+rm -f "$DESKTOP_ZIP" "$DESKTOP_FELIX"
+zip -r "$DESKTOP_ZIP" "$BUNDLE" -x "*.DS_Store"
 # Standalone AL zip for Felix — script and README are at the ZIP root.
 mkdir -p "$STAGE/felix-al-only"
 cp -R "$ROOT/BC-AL/." "$STAGE/felix-al-only/"
+cp "$ROOT/UNDEPLOYED-FIXES-16-19-AUG-2026.txt" "$STAGE/felix-al-only/"
+if [[ -d "$ROOT/FELIX-REPLACE-THESE-AL" ]]; then
+  mkdir -p "$STAGE/felix-al-only/FELIX-REPLACE-THESE-AL"
+  cp -R "$ROOT/FELIX-REPLACE-THESE-AL/." "$STAGE/felix-al-only/FELIX-REPLACE-THESE-AL/"
+  # Also drop the 8 replace files at the Felix zip root.
+  cp "$ROOT/FELIX-REPLACE-THESE-AL/"*.al "$STAGE/felix-al-only/" 2>/dev/null || true
+  cp "$ROOT/FELIX-REPLACE-THESE-AL/REPLACE-THESE.txt" "$STAGE/felix-al-only/" 2>/dev/null || true
+fi
+cat > "$STAGE/felix-al-only/FELIX-NOTES-${VERSION}.txt" << EOF
+HIJRA Felix REPLACE files v${VERSION} — keep AL ${AL_INSTALLED_VERSION}
+=======================================================================
+Overwrite the .al files at the ZIP ROOT (same file names). Then AL: Package.
+
+  StaffPortalCodeunit.Codeunit.al
+  PortalFacilityMgt.Codeunit.al
+  PortalProcurementPlanHeader.Table.al
+  PortalProcurementPlanLine.Table.al
+  PortalAssetTransferMgt.Codeunit.al
+  QyProcurementPlanHeader.Query.al
+  QyProcurementPlanLines.Query.al
+  QyAssetTransfer.Query.al
+
+See REPLACE-THESE.txt for the Hijra project paths.
+Publish BEFORE the portal zip ${VERSION}.
+EOF
 cd "$STAGE/felix-al-only"
-zip -r "$FELIX_ZIP" . -x "*.DS_Store"
-cp "$DEPLOY_ZIP" "$DESKTOP_ZIP" 2>/dev/null || true
-cp "$FELIX_ZIP" "$DESKTOP_FELIX" 2>/dev/null || true
+zip -r "$DESKTOP_FELIX" . -x "*.DS_Store"
 
 echo ""
-echo "Created: $DEPLOY_ZIP"
-echo "Created: $FELIX_ZIP  (Felix only — publish BEFORE portal)"
-ls -lh "$DEPLOY_ZIP" "$FELIX_ZIP"
-[[ -f "$DESKTOP_ZIP" ]] && ls -lh "$DESKTOP_ZIP"
-unzip -l "$DEPLOY_ZIP" | tail -3
+echo "Created (Desktop only): $DESKTOP_ZIP"
+echo "Created (Desktop only): $DESKTOP_FELIX  (Felix — publish BEFORE portal)"
+ls -lh "$DESKTOP_ZIP" "$DESKTOP_FELIX"
+unzip -l "$DESKTOP_ZIP" | tail -3

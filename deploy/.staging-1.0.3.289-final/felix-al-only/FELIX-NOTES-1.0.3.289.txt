@@ -1,0 +1,10 @@
+HIJRA Felix AL bundle v1.0.3.289 — keep AL 1.0.5.173 installed
+=============================================================================
+Portal build: 1.0.3.289 — finance org labels, salary advance, imprest surrender, petty cash.
+
+Key files reviewed in this bundle:
+  FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+  FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
+
+Run APPLY-HIJRA-PATCH.ps1 against the Hijra AL project, then AL: Package.
+Publish BEFORE deploying the portal zip on UAT.

@@ -3,6 +3,30 @@ import { execFile } from 'node:child_process'
 import { completeBcCall, failBcCall, startBcCall } from './requestLogger.js'
 
 export type ODataRecord = Record<string, unknown>
+export type SoapEndpoint = {
+  url: string
+  namespace: string
+}
+
+/** Standard Microsoft Dynamics SOAP namespace for a published codeunit service. */
+export function codeunitSoapNamespace(serviceName: string) {
+  return `urn:microsoft-dynamics-schemas/codeunit/${serviceName.trim()}`
+}
+
+/**
+ * Replace only the published codeunit service at the end of a SOAP URL.
+ * URL handles trailing slashes, escaped company names, query strings and tenants safely.
+ */
+export function deriveCodeunitSoapUrl(baseUrl: string, serviceName: string) {
+  const url = new URL(baseUrl)
+  const pathParts = url.pathname.split('/').filter(Boolean)
+  if (pathParts.length === 0) {
+    throw new Error(`Cannot derive a Business Central codeunit URL from ${baseUrl}`)
+  }
+  pathParts[pathParts.length - 1] = serviceName.trim()
+  url.pathname = `/${pathParts.join('/')}`
+  return url.toString()
+}
 
 function authHeaders(): Record<string, string> {
   if (config.BC_AUTH_MODE !== 'basic') return {}
@@ -188,75 +212,6 @@ export async function fetchODataRaw(
     failBcCall(call, error, statusCode)
     throw error
   }
-}
-
-/**
- * Fetch the WSDL of a published SOAP codeunit.
- *
- * BC advertises the exact parameter list of every procedure here, so callers can read the
- * deployed signature instead of guessing it and correcting after a failed call.
- */
-export async function fetchSoapWsdl(soapUrl: string = config.BC_SOAP_CODEUNIT_URL) {
-  const url = new URL(soapUrl)
-  url.searchParams.set('wsdl', '')
-  // BC wants a bare `?wsdl`, not `?wsdl=`.
-  const wsdlUrl = url.toString().replace(/wsdl=$/, 'wsdl')
-
-  const call = startBcCall({
-    protocol: 'SOAP',
-    method: 'GET',
-    operation: 'wsdl',
-    target: logTarget(wsdlUrl),
-  })
-  let statusCode: number | undefined
-
-  try {
-    if (config.BC_AUTH_MODE === 'ntlm') {
-      const response = await requestWithCurlNtlm({
-        method: 'GET',
-        url: wsdlUrl,
-        headers: { Accept: 'text/xml' },
-        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
-      })
-      statusCode = response.statusCode
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw new Error(`Business Central WSDL ${response.statusCode}: ${response.body}`)
-      }
-      completeBcCall(call, response.statusCode, responseBytes(response.body))
-      return response.body
-    }
-
-    const response = await fetch(wsdlUrl, {
-      headers: { Accept: 'text/xml', ...authHeaders() },
-      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
-    })
-    statusCode = response.status
-    const text = await response.text()
-    if (!response.ok) throw new Error(`Business Central WSDL ${response.status}: ${text}`)
-    completeBcCall(call, response.status, responseBytes(text))
-    return text
-  } catch (error) {
-    failBcCall(call, error, statusCode)
-    throw error
-  }
-}
-
-/**
- * Swap the trailing service name of a published-codeunit SOAP URL for another one, preserving
- * any query string. A naive string replace mangles the path when the configured URL carries a
- * `?tenant=` or a trailing slash.
- */
-export function deriveCodeunitSoapUrl(baseUrl: string, serviceName: string) {
-  const url = new URL(baseUrl)
-  const segments = url.pathname.split('/').filter(Boolean)
-  if (segments.length === 0) throw new Error(`Cannot derive a SOAP URL from ${baseUrl}`)
-  segments[segments.length - 1] = serviceName
-  url.pathname = `/${segments.join('/')}`
-  return url.toString()
-}
-
-export function codeunitSoapNamespace(serviceName: string) {
-  return `urn:microsoft-dynamics-schemas/codeunit/${serviceName}`
 }
 
 export async function fetchOData(serviceName: string, query: Record<string, unknown> = {}) {
@@ -520,9 +475,16 @@ export function soapFaultMessage(xml: string) {
   return match ? decodeXml(match[1]!.trim()) : ''
 }
 
-function soapFaultError(status: number, xml: string) {
-  const fault = soapFaultMessage(xml)
-  const friendlyFault = /not supported by related approval workflow/i.test(fault)
+export function friendlySoapFaultMessage(fault: string) {
+  return /can only be applied by\s*(male|female)/i.test(fault)
+    ? (() => {
+        const gender = (fault.match(/can only be applied by\s*(male|female)/i)?.[1] ?? '').toLowerCase()
+        const who = gender === 'female' ? 'female' : 'male'
+        return `This leave type can be applied only by ${who} employees. If that is incorrect, ask HR to set your gender on your Business Central employee profile.`
+      })()
+    : /leave application cannot be sent for approval or was not found/i.test(fault)
+      ? 'This leave application could not be sent for approval. It must be an open draft with an approver configured in Business Central. Refresh and try again, or ask the BC administrator to check the leave approval workflow and your approver setup.'
+    : /not supported by related approval workflow/i.test(fault)
     ? 'The Business Central approval workflow is not configured for this document type. Ask the BC administrator to enable it before requesting or cancelling approval.'
     : /Vendor Posting Group does not exist/i.test(fault)
       ? 'The Business Central vendor used by this requisition has no Vendor Posting Group. Ask the BC administrator to complete the vendor posting setup, then add the line again.'
@@ -545,7 +507,21 @@ function soapFaultError(status: number, xml: string) {
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
+    : /contains a value \(([^)]+)\) that cannot be found in the related table \(([^)]+)\)/i.test(fault)
+      ? (() => {
+          const match = fault.match(
+            /contains a value \(([^)]+)\) that cannot be found in the related table \(([^)]+)\)/i,
+          )
+          const value = match?.[1]?.trim() ?? 'selected value'
+          const table = match?.[2]?.trim() ?? 'related table'
+          return `The selected value "${value}" is no longer available in Business Central (${table}). Refresh the page and select it again from the current list.`
+        })()
       : fault
+}
+
+function soapFaultError(status: number, xml: string) {
+  const fault = soapFaultMessage(xml)
+  const friendlyFault = friendlySoapFaultMessage(fault)
   const message = friendlyFault
     ? `Business Central rejected the request: ${friendlyFault}`
     : `Business Central SOAP request failed with status ${status}`
@@ -559,22 +535,23 @@ function soapFaultError(status: number, xml: string) {
 export async function callSoapMethod(
   methodName: string,
   params: Record<string, unknown>,
-  endpoint?: { url: string; namespace: string },
+  endpoint: SoapEndpoint = {
+    url: config.BC_SOAP_CODEUNIT_URL,
+    namespace: config.BC_SOAP_NAMESPACE,
+  },
 ) {
-  const soapUrl = endpoint?.url ?? config.BC_SOAP_CODEUNIT_URL
-  const soapNamespace = endpoint?.namespace ?? config.BC_SOAP_NAMESPACE
-  const body = soapEnvelope(methodName, params, soapNamespace)
+  const body = soapEnvelope(methodName, params, endpoint.namespace)
   const headers = {
     Accept: 'text/xml',
     'Content-Type': 'text/xml; charset=utf-8',
-    SOAPAction: `${soapNamespace}:${methodName}`,
+    SOAPAction: `${endpoint.namespace}:${methodName}`,
   }
 
   const call = startBcCall({
     protocol: 'SOAP',
     method: 'POST',
     operation: methodName,
-    target: logTarget(soapUrl),
+    target: logTarget(endpoint.url),
     metadata: `paramKeys=${Object.keys(params).sort().join(',') || '-'}`,
   })
   let statusCode: number | undefined
@@ -583,7 +560,7 @@ export async function callSoapMethod(
     if (config.BC_AUTH_MODE === 'ntlm') {
       const response = await requestWithCurlNtlm({
         method: 'POST',
-        url: soapUrl,
+        url: endpoint.url,
         headers,
         body,
       })
@@ -598,7 +575,7 @@ export async function callSoapMethod(
       }
     }
 
-    const response = await fetch(soapUrl, {
+    const response = await fetch(endpoint.url, {
       method: 'POST',
       headers: {
         ...headers,

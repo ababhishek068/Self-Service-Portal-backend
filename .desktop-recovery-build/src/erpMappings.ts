@@ -13,8 +13,9 @@ export const requestServices = {
   transport: 'QyTransportRequisition',
   maintenance: 'QyFuelMaintenanceRequests',
   transferOrder: 'QyTransferOrderHeader',
-  assetTransfer: 'QyAssetTransfer',
+  workTickets: 'QyWorkTickets',
   gatePass: 'QyGatePass',
+  assetTransfer: 'QyAssetTransfer',
   leave: 'QyHRLeaveApplications',
   overtime: 'QyHRLeaveApplications',
   travel: 'QyTransportRequisition',
@@ -24,20 +25,21 @@ export const requestServices = {
 
 export type PortalModuleKey = keyof typeof requestServices
 
-export const moduleLabels: Record<PortalModuleKey, string> = {
+const moduleLabels: Record<PortalModuleKey, string> = {
   imprest: 'Imprest Requisition',
   imprestSurrender: 'Imprest Surrender',
   staffClaim: 'Staff Claims',
-  pettyCash: 'Petty Cash Settlement',
-  pettyCashReplenishment: 'Petty Cash Request',
+  pettyCash: 'Petty Cash',
+  pettyCashReplenishment: 'Petty Cash Replenishment',
   storeRequisition: 'Store Requisition',
   purchaseRequisition: 'Purchase Requisition',
   fuelRequest: 'Fuel Requisition',
   transport: 'Transport Requisition',
   maintenance: 'Maintenance Request',
   transferOrder: 'Transfer Orders',
-  assetTransfer: 'Asset Transfer',
+  workTickets: 'Work Tickets / Flight Booking',
   gatePass: 'Gate Pass',
+  assetTransfer: 'Asset Transfer',
   leave: 'Leave Requisition',
   overtime: 'Overtime Request',
   travel: 'Travel Request',
@@ -81,13 +83,6 @@ const SALARY_ADVANCE_AMOUNT_KEYS = [
   'RequestedAmount',
   'TotalAmount',
   'Total_Amount',
-  // Staff Advance Header FlowField (field 64 "Total Net Amount" = SUM of line amounts), plus the
-  // per-document total the salary-advance list stamps on from QyStaffAdvanceLines. Without these
-  // the list has no amount to read and every row renders as ETB 0.
-  'TotalNetAmount',
-  'Total_Net_Amount',
-  'TotalNetAmountLCY',
-  'Total_Net_Amount_LCY',
 ]
 
 const SALARY_ADVANCE_PERCENTAGE_KEYS = [
@@ -207,8 +202,6 @@ export function statusFromBc(raw: string) {
   // Finance modules (claims, imprest, salary advance, etc.) use BC Status=Pending before approval is requested.
   if (status === 'pending') return 'Draft'
   if (status === 'open') return 'Open'
-  // Asset Transfer (table 50278) starts life as "New" — same lifecycle position as Open.
-  if (status === 'new') return 'Open'
   if (status === 'draft') return 'Draft'
   if (status.includes('approve')) return 'Approved'
   if (status.includes('reject')) return 'Rejected'
@@ -218,29 +211,10 @@ export function statusFromBc(raw: string) {
   return raw.trim() || 'Open'
 }
 
-/** ESS transfer orders use ApprovalStatus; leave uses the same when Status stays Open.
- * Purchase/store/transport headers often keep Status=Open while ApprovalStatus (or
- * QyApprovalEntry) already says Pending Approval — prefer the approval signal. */
+/** ESS transfer orders use ApprovalStatus; leave uses the same when Status stays Open. */
 export function documentStatusFromBc(row: ODataRecord, requestType: PortalModuleKey) {
   if (requestType === 'transferOrder' || requestType === 'leave') {
     return text(row, ['ApprovalStatus', 'Approval_Status', 'Status', 'DocumentStatus'])
-  }
-  if (OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)) {
-    const documentStatus = text(row, ['Status', 'DocumentStatus'])
-    const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status', 'Status2', 'Status_2'])
-    const docLc = documentStatus.trim().toLowerCase()
-    const approvalLc = approvalStatus.trim().toLowerCase()
-    if (
-      approvalLc &&
-      (!docLc || docLc === 'open' || docLc === 'draft' || docLc === 'new' || docLc === 'released') &&
-      (approvalLc.includes('pending') ||
-        approvalLc.includes('approv') ||
-        approvalLc.includes('reject') ||
-        approvalLc.includes('cancel'))
-    ) {
-      return approvalStatus
-    }
-    return documentStatus || approvalStatus
   }
   return text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])
 }
@@ -252,14 +226,10 @@ const OPEN_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
   'training',
   'fuelRequest',
   'maintenance',
-  'assetTransfer',
   'gatePass',
+  'assetTransfer',
+  'workTickets',
 ])
-
-/** Modules whose BC header Status often stays Open after Request Approval. */
-export function moduleUsesOpenHeaderApprovalWorkflow(requestType: PortalModuleKey) {
-  return OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)
-}
 
 function approvalEntryStatus(entry: ODataRecord) {
   return text(entry, ['Status']).trim().toLowerCase()
@@ -297,8 +267,10 @@ export function resolveModuleRequestStatus(
   approvalEntries: ODataRecord[] = [],
 ) {
   const base = statusFromBc(documentStatusFromBc(row, requestType))
-  if (!OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)) return base
 
+  // A BC workflow rejection can set the source header to Cancelled even though
+  // the Approval Entry correctly says Rejected. The approval decision is the
+  // authoritative terminal status and must be visible to Finance requesters.
   if (approvalEntries.some((entry) => approvalEntryStatus(entry) === 'rejected') || base === 'Rejected') {
     return 'Rejected'
   }
@@ -309,6 +281,12 @@ export function resolveModuleRequestStatus(
   ) {
     return 'Approved'
   }
+
+  // Finance headers can be Pending before approval is requested. Only the
+  // modules below use Open/Pending approval-entry signals to promote a header
+  // into Pending Approval; terminal decisions above apply to every module.
+  if (!OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)) return base
+
   if (
     base === 'Pending Approval' ||
     hasActiveApprovalEntries(approvalEntries) ||
@@ -326,6 +304,36 @@ export function leaveSentForApproval(row: ODataRecord) {
     'DateTimeSentForApproval',
   ])
   return Boolean(sentAt && !sentAt.startsWith('0001-01-01'))
+}
+
+/** True once the employee (or BC) has sent this leave into the approval workflow. */
+export function leaveHasEnteredApprovalWorkflow(row: ODataRecord) {
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') return true
+  if (leaveSentForApproval(row)) return true
+  if (leaveSentForApprovalFlag(row)) return true
+  return false
+}
+
+/** Open/Draft leave that has not been sent for approval must stay a draft in the portal. */
+export function leaveDraftNotYetSubmitted(row: ODataRecord) {
+  const headerStatus = text(row, ['Status', 'DocumentStatus']).trim().toLowerCase()
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+
+  if (
+    headerStatus.includes('approved') ||
+    headerStatus.includes('cancel') ||
+    headerStatus.includes('reject')
+  ) {
+    return false
+  }
+
+  // BC keeps Status=Open until the employee clicks Request Approval, then sets ApprovalStatus.
+  if (headerStatus === 'open' || headerStatus === 'draft' || headerStatus === '') {
+    return approvalStatus !== 'pending approval' && approvalStatus !== 'pending'
+  }
+
+  return false
 }
 
 function leaveApprovalEntryIsActive(entry: ODataRecord) {
@@ -367,9 +375,8 @@ function validDateTimestamp(value: unknown) {
 
 /**
  * A reused/reset BC number series can leave historical Approval Entry rows with
- * the same document number as a newly-created leave. Never let those rows make
- * a fresh draft appear Approved. Keep only leave-table entries for the exact
- * document whose sent/created timestamp is on or after this application date.
+ * the same document number as a newly-created leave. Keep only leave-table entries
+ * for the exact document whose sent/created timestamp is on or after this application date.
  */
 export function currentLeaveApplicationApprovalEntries(
   row: ODataRecord,
@@ -420,8 +427,7 @@ export function currentLeaveApplicationApprovalEntries(
 
 /**
  * Approval Entry retains every submission/cancellation cycle for a document.
- * Use only the newest cycle when resolving the current leave state; otherwise
- * an old Approved row can keep a newly-cancelled request Open/Pending forever.
+ * Use only the newest cycle when resolving the current leave state.
  */
 export function latestLeaveApprovalCycleEntries(entries: ODataRecord[]) {
   if (entries.length <= 1) return [...entries]
@@ -436,8 +442,6 @@ export function latestLeaveApprovalCycleEntries(entries: ODataRecord[]) {
       .map((item) => item.entry)
   }
 
-  // Very old query pages may not expose DateTimeSentforApproval. Entry No. is
-  // monotonic in BC, so the newest row is the safest current-state fallback.
   const numbered = entries
     .map((entry) => ({ entry, entryNo: leaveApprovalEntryNumber(entry) }))
     .filter((item): item is { entry: ODataRecord; entryNo: number } => item.entryNo !== null)
@@ -457,8 +461,6 @@ function leaveApprovalCycleStatus(entries: ODataRecord[]) {
     return 'Pending Approval'
   }
   if (statuses.some((status) => status === 'Rejected')) return 'Rejected'
-  // A partially-approved workflow becomes cancelled when the remaining open
-  // steps are cancelled, so cancellation wins over Approved within one cycle.
   if (statuses.some((status) => status === 'Cancelled')) return 'Cancelled'
   if (statuses.every((status) => status === 'Approved')) return 'Approved'
   return ''
@@ -512,10 +514,12 @@ function leaveHeaderSignalsPending(row: ODataRecord) {
  * approval entries). BC is the single source of truth — nothing is stored locally.
  */
 export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
-  // Terminal states are immutable. Check every header field first because some
-  // BC query versions expose Status=Approved while ApprovalStatus remains Open.
   const headerTerminal = leaveHeaderTerminalStatus(row)
   if (headerTerminal) return headerTerminal
+
+  if (leaveDraftNotYetSubmitted(row)) {
+    return statusFromBc(documentStatusFromBc(row, 'leave'))
+  }
 
   const applicationApprovalEntries = currentLeaveApplicationApprovalEntries(row, approvalEntries)
   const cycleStatus = leaveApprovalCycleStatus(applicationApprovalEntries)
@@ -544,13 +548,12 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
   const mapped = statusFromBc(documentStatusFromBc(row, 'leave'))
   if (mapped !== 'Open' && mapped !== 'Draft') return mapped
 
-  // Only promote Open/Draft → Pending below; terminal states already returned.
   if (leaveHeaderSignalsPending(row)) return 'Pending Approval'
 
   if (
     currentApprovalEntries.some((entry) => {
       const stepStatus = statusFromBc(text(entry, ['Status'], 'Open'))
-      return ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(stepStatus)
+      return ['Pending Approval', 'Submitted'].includes(stepStatus)
     })
   ) {
     return 'Pending Approval'
@@ -570,7 +573,17 @@ export function mapEmployee(row: ODataRecord) {
   const middleName = text(row, ['MiddleName', 'Middle_Name'])
   const lastName = text(row, ['LastName', 'Last_Name'])
   const displayName = text(row, ['FullName', 'Name', 'EmployeeName'], [firstName, middleName, lastName].filter(Boolean).join(' '))
-  const departmentCode = text(row, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code'])
+  const departmentCode = text(
+    row,
+    [
+      'GlobalDimension1Code',
+      'ShortcutDimension2Code',
+      'DepartmentCode',
+      'Department_Code',
+      'Department',
+    ],
+    text(row, ['GlobalDimension2Code']),
+  )
 
   return {
     id: employeeNo || crypto.randomUUID(),
@@ -578,8 +591,12 @@ export function mapEmployee(row: ODataRecord) {
     displayName,
     email: text(row, ['Email', 'CompanyEMail', 'CompanyEmail', 'E_Mail']),
     departmentCode,
-    departmentName: text(row, ['DepartmentName', 'Department_Name'], departmentCode),
-    branchCode: text(row, ['GlobalDimension2Code', 'BranchCode', 'Branch_Code'], 'HO'),
+    departmentName: text(
+      row,
+      ['DepartmentName', 'Department_Name'],
+      departmentCode,
+    ),
+    branchCode: text(row, ['BranchCode', 'Branch_Code', 'GlobalDimension3Code', 'ShortcutDimension3Code'], 'HO'),
     branchName: text(row, ['BranchName', 'Branch_Name'], 'Head Office'),
     jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),
@@ -630,6 +647,16 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'Application_Code',
     'No',
     'ApplicationNo',
+  ] : requestType === 'transport' ? [
+    // QyTransportRequisition also exposes a generic `No` that contains the
+    // employee/application number (for example A00052). The transport document
+    // key is Transport_Requisition_No (for example TR0023), and must win in both
+    // list labels and the View route.
+    'Transport_Requisition_No',
+    'TransportRequisitionNo',
+    'RequisitionNo',
+    'Requisition_No',
+    'No',
   ] : [
     'No',
     'ApplicationCode',
@@ -642,15 +669,17 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     'GatePassNo',
     'InterBankTransferNo',
   ])
-  const makerEmployeeNo = text(row, ['EmployeeNo', 'StaffNo', 'RequesterID', 'Requested_By', 'RaisedBy', 'Raised_By', 'UserID'])
-  const title = text(
-    row,
-    requestType === 'training'
-      ? ['otherTrainingName', 'OtherTrainingName', 'CourseTitle', 'Course_Title', 'TrainingNeed', 'Purpose', 'Description']
-      : ['Purpose', 'Description', 'AssetDescription', 'PostingDescription', 'RequestDescription', 'Narration', 'Reason', 'Linkto'],
-    moduleLabels[requestType],
-  )
-  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
+  const makerEmployeeNo = text(row, [
+    'EmployeeNo',
+    'StaffNo',
+    'RequesterID',
+    'Requested_By',
+    'UserID',
+    'RaisedBy',
+    'Raised_By',
+  ])
+  const title = text(row, ['Purpose', 'Purpose_of_Trip', 'PurposeOfTrip', 'Description', 'PostingDescription', 'PaymentNarration', 'Payment_Narration', 'RequestDescription', 'Narration', 'Reason', 'Linkto'], moduleLabels[requestType])
+  const createdAt = text(row, ['CreatedAt', 'DateCreated', 'Date_of_Request', 'DateOfRequest', 'Date', 'Requestdate', 'ApplicationDate', 'DocumentDate', 'OrderDate', 'SurrenderDate'], new Date().toISOString())
 
   return {
     id: `${requestType}-${requestNo || crypto.randomUUID()}`,
@@ -659,12 +688,27 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     title,
     status: statusFromBc(documentStatusFromBc(row, requestType)),
     makerEmployeeNo,
-    makerName: text(row, ['EmployeeName', 'StaffName', 'RequesterName'], makerEmployeeNo),
-    departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code', 'DistrictDepartmentCode']),
-    departmentName: text(row, ['DepartmentName', 'Department_Name', 'DistrictDepartmentName']),
+    makerName: text(row, ['EmployeeName', 'Employee_Name', 'StaffName', 'RequesterName'], makerEmployeeNo),
+    departmentCode: text(row, [
+      'Department',
+      'DepartmentCode',
+      'Department_Code',
+      'GlobalDimension1Code',
+      'Global_Dimension_1_Code',
+      'DistrictDepartmentCode',
+      'District_Department_Code',
+    ]),
+    departmentName: text(row, [
+      'DepartmentName',
+      'Department_Name',
+      'DistrictDepartmentName',
+      'District_Department_Name',
+    ]),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
     amount:
-      requestType === 'salaryAdvance'
+      requestType === 'leave'
+        ? num(row, ['DaysApplied', 'Days_Applied', 'NoofDays', 'No_of_Days'], 0)
+        : requestType === 'salaryAdvance'
         ? resolveSalaryAdvanceAmount(
             {
               PercentageofSalary: num(row, SALARY_ADVANCE_PERCENTAGE_KEYS, 0),
@@ -677,6 +721,8 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
             row,
             requestType === 'pettyCashReplenishment'
               ? ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
+              : requestType === 'pettyCash'
+                ? ['TotalNetAmount', 'Total_Net_Amount', 'TotalPaymentAmount', 'Total_Payment_Amount', 'Amount', 'NetAmount']
               : ['Amount', 'TotalAmount', 'NetAmount', 'TotalNetAmount', 'Total_Net_Amount', 'Quantity'],
             0,
           ),
