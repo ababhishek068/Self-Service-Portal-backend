@@ -18,3 +18,9 @@ export function createLocalId(prefix = 'id') {
 }
 
 export const safeRandomId = createLocalId
+
+/** BC finance documents may be cancelled before or during approval. */
+export const FINANCE_CANCEL_STATUSES: Array<'Draft' | 'Pending Approval'> = [
+  'Draft',
+  'Pending Approval',
+]

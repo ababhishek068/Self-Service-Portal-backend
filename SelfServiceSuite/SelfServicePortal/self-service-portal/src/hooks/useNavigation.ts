@@ -3,7 +3,8 @@ import { navigationMenu, type NavItem } from '@/config/navigation'
 import { hasAnyRole, type PortalRole } from '@/config/roles'
 import { useAuth } from '@/hooks/useAuth'
 
-const UNDER_CONSTRUCTION_MESSAGE = '🚧 Feature under construction — coming soon!'
+const UNDER_CONSTRUCTION_MESSAGE =
+  'This module is listed for UAT and will be enabled in a later release. Coming soon.'
 
 /**
  * Filter the static navigation menu down to the items the current user's roles

@@ -62,6 +62,23 @@ const envSchema = z.object({
     z.string().url().optional(),
   ),
   BC_SOAP_NAMESPACE: z.string().default('urn:microsoft-dynamics-schemas/codeunit/CuStaffPortal'),
+  /** Optional Employee Exit SOAP endpoint. Defaults to the CuStaffPortal URL with the service name replaced. */
+  BC_SOAP_EXIT_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_EXIT_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
+  BC_SOAP_LETTERS_CODEUNIT_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().url().optional(),
+  ),
+  BC_SOAP_LETTERS_NAMESPACE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined),
+    z.string().optional(),
+  ),
   BC_AUTH_MODE: z.enum(['none', 'basic', 'ntlm']).default('ntlm'),
   BC_DOMAIN: z.string().optional().default(''),
   BC_NAV_USER: z.string().optional().default(''),
@@ -96,6 +113,30 @@ const envSchema = z.object({
 
   HOD_OVERRIDE_EMPNOS: csvList,
   CEO_OVERRIDE_EMPNOS: csvList,
+  /** Explicit ICT Helpdesk desk admins when HR "ICT Officer" is not exposed via OData. */
+  ICT_OVERRIDE_EMPNOS: z
+    .string()
+    .optional()
+    .default('ABH-114')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  /** Explicit HR portal administrators when the employee department/title is not usable. */
+  HR_OVERRIDE_EMPNOS: csvList,
+  /** BC department codes/names that grant HR policy administration. */
+  HR_DEPARTMENT_CODES: z
+    .string()
+    .optional()
+    .default('HR,HUMAN RESOURCE,HUMAN RESOURCES')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
   /** Extra BC OData page names for employee/job title resolution (comma-separated). */
   BC_EMPLOYEE_ODATA_EXTRA_SERVICES: csvList,
   BC_JOB_ODATA_EXTRA_SERVICES: csvList,
@@ -115,6 +156,12 @@ const envSchema = z.object({
   BC_SALARY_LOOKUP_SERVICE: csvList,
   /** Per-request timeout for Business Central HTTP calls (milliseconds). */
   BC_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  /** How often the portal asks BC to close attendance sessions after 7:00 PM. */
+  ATTENDANCE_AUTO_SIGN_OUT_INTERVAL_MS: z.coerce.number().int().positive().default(300000),
+  /** Weekly late-arrival count that triggers an employee notification. */
+  ATTENDANCE_WEEKLY_LATE_NOTIFY_COUNT: z.coerce.number().int().positive().default(3),
+  /** Shorter timeout for login employee OData probes (parallel — avoids 45s login hang). */
+  BC_LOGIN_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   /** UAT parity with legacy ESS login where HOD menu is visible to all staff. */
   HOD_GRANT_ALL_AUTHENTICATED: z
     .string()

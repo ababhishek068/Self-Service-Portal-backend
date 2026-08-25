@@ -1,7 +1,30 @@
+
+const LEAVE_FAMILY_MEMBER_OPTIONS = [
+  'Aunt',
+  'Brother',
+  'Child',
+  'Father',
+  'Father-in-law',
+  'Grand-Parents',
+  'Mother',
+  'Mother-in-Law',
+  'Sister',
+  'Step-Dad',
+  'Step-Mom',
+  'Inlaw',
+  'Uncle',
+] as const
+
+function normalizeLeaveFamilyMember(value: unknown): string {
+  const trimmed = String(value ?? '').trim()
+  return (LEAVE_FAMILY_MEMBER_OPTIONS as readonly string[]).includes(trimmed) ? trimmed : ''
+}
+
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import { callSoapMethod, fetchOData, fetchODataCount, odataString, type ODataRecord } from './bcClient.js'
 import { requireAuth } from './auth.js'
+import { sortNewestFirst } from './sortNewestFirst.js'
 import { approvalTableFilter, approvalModuleFromEntry, resolveApprovalModuleFromEntry, approvalTableIdsFor, type ApprovalTableKey } from './approvalTableIds.js'
 import {
   findFrontendModuleSpec,
@@ -26,16 +49,27 @@ import {
 import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
 import { fetchEmployeeRecordWithCardFields } from './employeeProfile.js'
+import {
+  employeeAnnualLeaveBalance,
+  leaveApplicationExceedsAvailableBalance,
+  parseBcLeaveSummary,
+  resolveAnnualAvailableLeaveBalance,
+  resolveBcLeaveBalance,
+  resolveLeaveBalanceBreakdown,
+} from './leaveBalance.js'
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function normalizeAuthGender(gender: string | undefined | null): 'Male' | 'Female' | '' {
+export function normalizeAuthGender(gender: string | undefined | null): 'Male' | 'Female' | '' {
   const g = String(gender ?? '').trim().toLowerCase()
   if (!g) return ''
-  if (g === 'f' || g.startsWith('female') || g === 'woman') return 'Female'
-  if (g === 'm' || g.startsWith('male') || g === 'man') return 'Male'
+  // HR-Employee.Gender uses Female=0, Male=1. Keep 2 as a compatibility
+  // alias because some published queries expose the Leave Type option ordinal
+  // (Both=0, Male=1, Female=2) in profile-shaped payloads.
+  if (g === '0' || g === '2' || g === 'f' || g.startsWith('female') || g === 'woman') return 'Female'
+  if (g === '1' || g === 'm' || g.startsWith('male') || g === 'man') return 'Male'
   if (g === 'female') return 'Female'
   if (g === 'male') return 'Male'
   return ''
@@ -45,6 +79,101 @@ function leaveTypesGenderFilter(user: ReturnType<typeof authUser>) {
   const normalized = normalizeAuthGender(user.Gender)
   const notGender = normalized === 'Male' ? 'Female' : 'Male'
   return `Gender ne '${odataString(notGender)}'`
+}
+
+
+function leaveTypeGenderRestriction(row: ODataRecord): 'Male' | 'Female' | '' {
+  const raw = String((row.Gender ?? (row as Record<string, unknown>).gender) ?? '')
+    .trim()
+    .toLowerCase()
+  if (raw === '2' || raw.startsWith('female')) return 'Female'
+  if (raw === '1' || raw.startsWith('male')) return 'Male'
+  const name = `${row.Description ?? (row as Record<string, unknown>).description ?? ''} ${
+    row.Code ?? (row as Record<string, unknown>).code ?? ''
+  }`.toLowerCase()
+  if (/patern/.test(name)) return 'Male'
+  if (/matern|pre-?natal|ante-?natal/.test(name)) return 'Female'
+  return ''
+}
+
+function leaveTypeMatchesGender(row: ODataRecord, userGender: 'Male' | 'Female' | '') {
+  const restriction = leaveTypeGenderRestriction(row)
+  if (!restriction || !userGender) return true
+  return restriction === userGender
+}
+
+function employeeMaritalStatus(row: ODataRecord | null | undefined) {
+  const raw = String(row?.MaritalStatus ?? row?.Marital_Status ?? '').trim().toLowerCase()
+  if (raw === '1' || raw.startsWith('single')) return 'Single'
+  if (raw === '2' || raw.startsWith('married')) return 'Married'
+  if (raw === '3' || raw.startsWith('separated')) return 'Separated'
+  if (raw === '4' || raw.startsWith('divorced')) return 'Divorced'
+  if (raw === '5' || raw.startsWith('widow')) return 'Widowed'
+  return raw ? 'Other' : ''
+}
+
+export function leaveTypeIsMarriage(row: ODataRecord | null | undefined) {
+  if (!row) return false
+  const name = `${row.Description ?? row.description ?? ''} ${row.Code ?? row.code ?? ''}`
+  return /marriage|wedding/i.test(name)
+}
+
+export function leaveTypeMatchesMaritalStatus(
+  row: ODataRecord,
+  maritalStatus: string | undefined | null,
+) {
+  if (!leaveTypeIsMarriage(row)) return true
+  const normalized = employeeMaritalStatus({ MaritalStatus: maritalStatus })
+  // The reported defect is an already-married employee being offered Marriage
+  // Leave. Keep the type visible for Single/unknown/divorced/widowed employees;
+  // HR may still need to assess eligibility for remarriage under company policy.
+  return normalized !== 'Married'
+}
+
+export function parseEmployeeProfileReturn(rawValue: unknown) {
+  const values: Record<string, string> = {}
+  for (const segment of String(rawValue ?? '').split('#')) {
+    const equals = segment.indexOf('=')
+    if (equals < 0) continue
+    const key = segment.slice(0, equals).trim().toLowerCase()
+    const value = segment.slice(equals + 1).trim()
+    if (key && value) values[key] = value
+  }
+  return {
+    gender: values.gender ?? '',
+    maritalStatus: values.maritalstatus ?? values.marital_status ?? '',
+  }
+}
+
+async function employeeLeaveEligibility(
+  employeeNo: string,
+  employeeRow: ODataRecord | null | undefined,
+) {
+  const fromCard = await callSoapMethod('FnGetEmployeeProfile', { employeeNo })
+    .then((result) => parseEmployeeProfileReturn(result.returnValue))
+    .catch(() => ({ gender: '', maritalStatus: '' }))
+  return {
+    gender:
+      fromCard.gender ||
+      fieldText(employeeRow, ['Gender', 'Sex']),
+    maritalStatus:
+      fromCard.maritalStatus ||
+      fieldText(employeeRow, ['MaritalStatus', 'Marital_Status']),
+  }
+}
+
+function fieldBoolean(row: ODataRecord | null | undefined, keys: string[]) {
+  if (!row) return null
+  for (const key of keys) {
+    if (!(key in row)) continue
+    const value = row[key]
+    if (value === undefined || value === null || String(value).trim() === '') continue
+    if (typeof value === 'boolean') return value
+    const normalized = String(value).trim().toLowerCase()
+    if (['true', '1', 'yes', 'y'].includes(normalized)) return true
+    if (['false', '0', 'no', 'n'].includes(normalized)) return false
+  }
+  return null
 }
 
 function yearWindow(now = new Date()) {
@@ -96,6 +225,15 @@ function soapTruthy(value: string | null | undefined) {
   return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized.length > 0
 }
 
+/** True when BC returned a leave application / document number (not an error string). */
+function soapLeaveDocumentNo(value: string) {
+  if (/^lv-?\d+/i.test(value)) return true
+  if (/^abh-lap-\d+$/i.test(value)) return true
+  if (/^[a-z]{1,6}(?:-[a-z0-9]+)+\d+$/i.test(value)) return true
+  if (/^[a-z]{1,6}\d{2,}$/i.test(value)) return true
+  return false
+}
+
 /** Leave create/update should not treat arbitrary BC error text as success. */
 export function soapLeaveActionOk(value: unknown) {
   const raw = String(value ?? '').trim()
@@ -103,8 +241,7 @@ export function soapLeaveActionOk(value: unknown) {
   const normalized = raw.toLowerCase()
   if (['false', '0', 'no', 'n'].includes(normalized)) return false
   if (['true', '1', 'yes'].includes(normalized)) return true
-  if (/^lv-?\d+/i.test(raw)) return true
-  return /^[a-z]{1,6}\d{2,}$/i.test(raw)
+  return soapLeaveDocumentNo(raw)
 }
 
 /** Convert the portal's normal/first-half/second-half selection to BC's Boolean flag. */
@@ -148,6 +285,33 @@ function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback
     if (value !== undefined && value !== null && String(value) !== '') return String(value)
   }
   return fallback
+}
+
+function isSickLeaveValue(value: unknown) {
+  return /\b(sick|medical|illness|hospital)\b/i.test(String(value ?? '').replaceAll('_', ' '))
+}
+
+function isSickLeaveRow(row: ODataRecord | null | undefined) {
+  if (!row) return false
+  return [
+    fieldText(row, ['LeaveType', 'Leave_Type', 'LeaveTypeCode', 'Leave_Type_Code']),
+    fieldText(row, ['LeaveTypeDescription', 'Leave_Type_Description', 'Description']),
+  ].some(isSickLeaveValue)
+}
+
+async function assertSickLeaveAttachment(no: string, leave: ODataRecord | string) {
+  const sick = typeof leave === 'string' ? isSickLeaveValue(leave) : isSickLeaveRow(leave)
+  if (!sick) return
+  const attachments = (await fetchOData('QyDocumentAttachments', {
+    $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
+    $top: 1,
+  })) as ODataRecord[] | null
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    throw Object.assign(
+      new Error('A supporting attachment is required before requesting approval for sick leave.'),
+      { status: 422, code: 'SICK_LEAVE_ATTACHMENT_REQUIRED' },
+    )
+  }
 }
 
 function fieldNumber(row: ODataRecord | null | undefined, keys: string[]) {
@@ -196,16 +360,36 @@ export function parseEmployeeLeaveBalancesReturn(value: unknown): ODataRecord | 
     const numeric = Number(part.slice(separator + 1).trim().replaceAll(',', ''))
     if (key && Number.isFinite(numeric)) parsed[key] = numeric
   }
-  return Object.keys(parsed).length > 0 ? parsed : null
+  if (Object.keys(parsed).length === 0) return null
+
+  // Normalize AccruedDays into EarnedLeaveDays field name used by OData/employee metrics
+  // when the updated SOAP sends both AccruedDays and Leave Accrued To-Date.
+  if (parsed.AccruedDays !== undefined && parsed.EarnedLeaveDays === undefined) {
+    parsed.EarnedLeaveDays = parsed.AccruedDays
+  }
+  return parsed
 }
 
-export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: ReturnType<typeof authUser>) {
+export interface EmployeeLeaveMetrics {
+  leaveBalance: number | null
+  employeeCardLeaveBalance: number | null
+  accruedDays: number | null
+  earnedLeaveDays: number | null
+  carryForwardBalance?: number | null
+}
+
+export function employeeLeaveMetrics(
+  row: ODataRecord | null | undefined,
+  user: ReturnType<typeof authUser>,
+): EmployeeLeaveMetrics {
   if (!row) {
     const sessionBalance = Number(user.leaveBalance)
     return {
       leaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
       employeeCardLeaveBalance: Number.isFinite(sessionBalance) ? sessionBalance : null,
+      accruedDays: null,
       earnedLeaveDays: null,
+      carryForwardBalance: null,
     }
   }
 
@@ -220,15 +404,67 @@ export function employeeLeaveMetrics(row: ODataRecord | null | undefined, user: 
       (key) => key === 'annualleavebalance',
     ])
 
-  const employeeCardLeaveBalance =
-    fieldNumber(row, ['LeaveBalance', 'Leave_Balance']) ??
-    discoverLeaveFieldNumber(row, [(key) => key === 'leavebalance'])
+  // BC Employee Card captions (ABH):
+  // - "Earned Leave Days" field → Accrued Days (period accrual, e.g. 1.92)
+  // - "Leave Balance" field → Leave Accrued To-Date (carry forward + accrued, e.g. 11.92)
+  // - Page OnAfterGetRecord: Leave Balance := Carry forward Balance + Earned Leave Days
+  const accruedDays =
+    fieldNumber(row, [
+      'AccruedDays',
+      'Accrued_Days',
+      'EarnedLeaveDays',
+      'Earned_Leave_Days',
+      'EarnedLeave',
+      'Earned_Leave',
+    ]) ??
+    discoverLeaveFieldNumber(row, [
+      (key) =>
+        key === 'accrueddays' || key === 'earnedleavedays' || key === 'earnedleave',
+    ])
 
-  const earnedLeaveDays =
-    fieldNumber(row, ['EarnedLeaveDays', 'Earned_Leave_Days', 'EarnedLeave', 'Earned_Leave']) ??
-    discoverLeaveFieldNumber(row, [(key) => key === 'earnedleavedays' || key === 'earnedleave'])
+  const carryForwardBalance =
+    fieldNumber(row, [
+      'CarryForwardBalance',
+      'Carry_forward_Balance',
+      'Carry_Forward_Balance',
+      'CarryforwardBalance',
+      'CarryForward',
+      'Carry_forward',
+      'Carry_Forward',
+    ]) ??
+    discoverLeaveFieldNumber(row, [
+      (key) => key === 'carryforwardbalance' || key === 'carryforward',
+    ])
 
-  return { leaveBalance, employeeCardLeaveBalance, earnedLeaveDays }
+  const leaveBalanceField =
+    fieldNumber(row, ['LeaveBalance', 'Leave_Balance', 'LeaveAccruedToDate', 'Leave_Accrued_To_Date']) ??
+    discoverLeaveFieldNumber(row, [
+      (key) => key === 'leavebalance' || key === 'leaveaccruedtodate',
+    ])
+
+  // Prefer the same formula BC uses on the employee card. Do NOT trust LeaveBalance alone:
+  // legacy FnGetEmployeeLeaveBalances SOAP wrongly sets LeaveBalance = AnnualLeaveBalance.
+  const computedAccruedToDate =
+    accruedDays !== null && carryForwardBalance !== null
+      ? roundLeaveValue(accruedDays + carryForwardBalance)
+      : null
+
+  const leaveAccruedToDate =
+    computedAccruedToDate ??
+    (leaveBalanceField !== null &&
+    leaveBalance !== null &&
+    Math.abs(leaveBalanceField - leaveBalance) < 0.001
+      ? null
+      : leaveBalanceField) ??
+    accruedDays
+
+  return {
+    leaveBalance,
+    employeeCardLeaveBalance: leaveAccruedToDate,
+    accruedDays,
+    earnedLeaveDays: leaveAccruedToDate,
+    carryForwardBalance,
+  }
 }
 
 export function resolveAnnualLeaveBalance(
@@ -251,6 +487,17 @@ export function resolveAnnualLeaveEntitlement(
 
 async function fetchCurrentEmployeeRow(employeeNo: string) {
   return fetchEmployeeRecordWithCardFields(employeeNo).catch(() => null)
+}
+
+async function fetchLeaveApplicationBalanceRows(employeeNo: string, leaveTypeCode: string) {
+  const rows = (await fetchOData('QyHRLeaveApplications', {
+    $filter:
+      `EmployeeNo eq '${odataString(employeeNo)}'` +
+      ` and LeaveType eq '${odataString(leaveTypeCode)}'`,
+    $orderby: 'ApplicationDate desc',
+    $top: 10,
+  }).catch(() => [])) as ODataRecord[] | null
+  return Array.isArray(rows) ? rows : []
 }
 
 function likelyActiveEmployee(row: ODataRecord) {
@@ -299,7 +546,7 @@ function employeeDisplayFromRow(row: ODataRecord) {
         .filter(Boolean)
         .join(' '),
     jobTitle: fieldText(row, ['JobTitle', 'Job_Title', 'JobTitleDescription', 'Job_Title_Description', 'Position']),
-    departmentCode: fieldText(row, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code']),
+    departmentCode: fieldText(row, ['GlobalDimension2Code', 'DepartmentCode', 'Department_Code']),
   }
 }
 
@@ -371,12 +618,10 @@ async function fetchScheduleEmployeeDirectory(user: ReturnType<typeof authUser>,
   }
 
   const department = odataString(user.department)
-  const branch = odataString(user.branchCode)
   const filters = [
-    department ? `GlobalDimension1Code eq '${department}' and Status eq 'Active'` : '',
+    department ? `GlobalDimension2Code eq '${department}' and Status eq 'Active'` : '',
     department ? `DepartmentCode eq '${department}' and Status eq 'Active'` : '',
-    department ? `GlobalDimension1Code eq '${department}'` : '',
-    branch ? `GlobalDimension2Code eq '${branch}' and Status eq 'Active'` : '',
+    department ? `GlobalDimension2Code eq '${department}'` : '',
     `Status eq 'Active'`,
   ].filter(Boolean)
 
@@ -670,7 +915,7 @@ function submittedLeaveNoFromReturn(value: unknown) {
   if (!normalized) return ''
   const lower = normalized.toLowerCase()
   if (['true', 'false', '1', '0', 'yes', 'no'].includes(lower)) return ''
-  return normalized
+  return soapLeaveDocumentNo(normalized) ? normalized : ''
 }
 
 function sameBcDate(left: unknown, right: string) {
@@ -912,13 +1157,33 @@ async function cancelLeaveApplicationInBc(
   throw Object.assign(new Error(message), { status: 422 })
 }
 
+async function deleteLeaveApplicationInBc(
+  user: ReturnType<typeof authUser>,
+  portalNo: string,
+  row: ODataRecord,
+) {
+  for (const candidate of expandLeaveCancelDocumentNos(portalNo, row)) {
+    try {
+      const result = await callSoapMethod('DeleteLeaveApplication', {
+        requisitionNo: candidate,
+        employeeNo: user.employeeNo,
+      })
+      if (soapCancelOk(result.returnValue)) return
+    } catch {
+      // Try the next known document-number shape.
+    }
+  }
+  throw Object.assign(
+    new Error('This leave draft could not be deleted in Business Central. Please try again.'),
+    { status: 422, code: 'LEAVE_DELETE_FAILED' },
+  )
+}
+
 async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string) {
   const filters = [
     `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
     `ApplicationCode eq '${odataString(no)}' and UserID eq '${odataString(user.userID)}'`,
-    `Application_Code eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
     `ApplicationCode eq '${odataString(no)}'`,
-    `No eq '${odataString(no)}'`,
   ]
   for (const filter of filters) {
     const rows = (await fetchOData('QyHRLeaveApplications', {
@@ -999,6 +1264,18 @@ async function buildLeavePortalDetail(
 }
 
 /** Business Central SOAP dates must use yyyy-mm-dd (locale-neutral). */
+export function isErpWorkingDate(value: string) {
+  const formatted = formatBcSoapDate(value)
+  if (!formatted) return false
+  const now = new Date()
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const utcToday = now.toISOString().slice(0, 10)
+  // Accept the local OR the UTC calendar day. A claim raised near midnight — or a date
+  // serialised as an ISO/UTC timestamp (formatBcSoapDate slices the UTC day) — must not be
+  // rejected just because the portal server and Business Central sit in different time zones.
+  return formatted === localToday || formatted === utcToday
+}
+
 export function formatBcSoapDate(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return ''
@@ -1082,6 +1359,18 @@ function addCalendarDays(iso: string, days: number) {
   return toIsoDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate())
 }
 
+function localCalendarDate(now = new Date()) {
+  return toIsoDate(now.getFullYear(), now.getMonth() + 1, now.getDate())
+}
+
+export function sickLeaveStartDateAllowed(startDate: string, now = new Date()) {
+  const start = formatBcSoapDate(startDate)
+  if (!start) return false
+  const today = localCalendarDate(now)
+  const tomorrow = addCalendarDays(today, 1)
+  return start >= today && start <= tomorrow
+}
+
 function isWeekendIso(iso: string) {
   const parts = parseIsoDateParts(iso)
   if (!parts) return false
@@ -1109,7 +1398,7 @@ export function computeLeaveDatesFallback(startDate: string, noOfDays: number, h
   if (half === 1 || half === 2 || noOfDays <= 0.5) {
     return {
       endDate: start,
-      returnDate: nextWorkingDayIso(start),
+      returnDate: addCalendarDays(start, 1),
     }
   }
 
@@ -1117,7 +1406,7 @@ export function computeLeaveDatesFallback(startDate: string, noOfDays: number, h
   const endDate = addCalendarDays(start, calendarSpan - 1)
   return {
     endDate,
-    returnDate: nextWorkingDayIso(endDate),
+    returnDate: addCalendarDays(endDate, 1),
   }
 }
 
@@ -1130,6 +1419,7 @@ async function resolveLeaveDatesFromBc(
 ) {
   const start = normalizeLeaveStartDate(startDate)
   const half = halfDayOptionValue(halfDay)
+  const productionDates = computeLeaveDatesFallback(start, noOfDays, halfDay)
   const attempts: Array<Record<string, unknown>> = [
     {
       empNo: user.employeeNo,
@@ -1169,16 +1459,106 @@ async function resolveLeaveDatesFromBc(
         const ret =
           formatBcSoapDate(parsed.returnDate) ||
           parsed.returnDate ||
-          nextWorkingDayIso(end)
-        return { endDate: end, returnDate: ret, source: 'bc' as const }
+          addCalendarDays(end, 1)
+        if (end === productionDates.endDate && ret === productionDates.returnDate) {
+          return { endDate: end, returnDate: ret, source: 'bc' as const }
+        }
+        // ABH production rule: End is the final calendar leave day and Return
+        // is exactly the following calendar day. Older BC date routines have
+        // returned the same End/Return date or extended a two-day request to
+        // four days, so correct those responses before they reach the form.
+        return { ...productionDates, source: 'portal-corrected' as const }
       }
     } catch {
       // Try the next BC parameter strategy.
     }
   }
 
-  const fallback = computeLeaveDatesFallback(start, noOfDays, halfDay)
-  return { ...fallback, source: 'fallback' as const }
+  return { ...productionDates, source: 'fallback' as const }
+}
+
+export function overlappingLeaveApplication(
+  rows: ODataRecord[],
+  requestedStartDate: string,
+  requestedEndDate: string,
+  excludedApplicationNo = '',
+) {
+  const requestedStart = formatBcSoapDate(requestedStartDate)
+  const requestedEnd = formatBcSoapDate(requestedEndDate)
+  if (!requestedStart || !requestedEnd) return null
+
+  for (const row of rows) {
+    const applicationNo = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+    if (
+      excludedApplicationNo &&
+      applicationNo.trim().toUpperCase() === excludedApplicationNo.trim().toUpperCase()
+    ) {
+      continue
+    }
+    const status = resolveLeaveStatus(row)
+    if (['Rejected', 'Cancelled'].includes(status)) continue
+
+    const startDate = formatBcSoapDate(fieldText(row, ['StartDate', 'Start_Date']))
+    const endDate =
+      formatBcSoapDate(fieldText(row, ['EndDate', 'End_Date'])) || startDate
+    if (!startDate || !endDate) continue
+    if (requestedStart <= endDate && requestedEnd >= startDate) {
+      return { applicationNo, startDate, endDate, status }
+    }
+  }
+  return null
+}
+
+async function employeeLeaveRowsForValidation(user: ReturnType<typeof authUser>) {
+  const filters = [
+    `EmployeeNo eq '${odataString(user.employeeNo)}'`,
+    `UserID eq '${odataString(user.userID)}'`,
+  ]
+  const collected = new Map<string, ODataRecord>()
+  let successfulLookup = false
+  for (const filter of filters) {
+    try {
+      const rows = (await fetchOData('QyHRLeaveApplications', {
+        $filter: filter,
+        $top: 500,
+      })) as ODataRecord[] | null
+      successfulLookup = true
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const no = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])
+        if (no) collected.set(no, row)
+      }
+    } catch {
+      // Try the other ownership field. If both fail, validation fails closed.
+    }
+  }
+  if (!successfulLookup) {
+    throw Object.assign(
+      new Error('Existing leave dates could not be verified in Business Central. Please try again.'),
+      { status: 503, code: 'LEAVE_OVERLAP_CHECK_UNAVAILABLE' },
+    )
+  }
+  return [...collected.values()]
+}
+
+async function assertNoOverlappingLeaveApplication(
+  user: ReturnType<typeof authUser>,
+  requestedStartDate: string,
+  requestedEndDate: string,
+  excludedApplicationNo = '',
+) {
+  const conflict = overlappingLeaveApplication(
+    await employeeLeaveRowsForValidation(user),
+    requestedStartDate,
+    requestedEndDate,
+    excludedApplicationNo,
+  )
+  if (!conflict) return
+  throw Object.assign(
+    new Error(
+      `These dates overlap leave application ${conflict.applicationNo} (${conflict.startDate} to ${conflict.endDate}, ${conflict.status}). Delete or change the existing draft, or choose different dates.`,
+    ),
+    { status: 409, code: 'LEAVE_DATE_OVERLAP' },
+  )
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1474,7 +1854,7 @@ export function buildStaffRouter() {
           collected.set(code, row)
         }
       }
-      const list = [...collected.values()]
+      const list = sortNewestFirst([...collected.values()])
       const [approvalsByDoc, senderEntries] = await Promise.all([
         fetchLeaveApprovalEntriesByDocumentNos(
           list.map((row) => fieldText(row, ['ApplicationCode', 'Application_Code', 'No'])),
@@ -1524,26 +1904,96 @@ export function buildStaffRouter() {
     safe(async (req, res) => {
       const user = authUser(req)
       const [rows, employeeRow] = await Promise.all([
-        fetchOData('QyHRLeaveType', {
-          $filter: leaveTypesGenderFilter(user),
-        }),
+        fetchOData('QyHRLeaveType'),
         fetchCurrentEmployeeRow(user.employeeNo),
       ])
+      const eligibility = await employeeLeaveEligibility(user.employeeNo, employeeRow)
       const metrics = employeeLeaveMetrics(employeeRow, user)
-      res.json({
-        rows: (Array.isArray(rows) ? rows : []).map((row) => {
+      const userGender = normalizeAuthGender(eligibility.gender || user.Gender || user.gender)
+      const maritalStatus = eligibility.maritalStatus
+      let mappedRows = (Array.isArray(rows) ? rows : [])
+        .filter((row) => leaveTypeMatchesGender(row, userGender))
+        .filter((row) => leaveTypeMatchesMaritalStatus(row, maritalStatus))
+        .map((row) => {
           const annual = leaveTypeIsAnnual(row)
           const genericDays = Number(row.Days ?? row.NoofDays ?? 0)
+          const description = String(row.Description ?? row.description ?? '')
+          const code = String(row.Code ?? row.code ?? '')
+          const requiresFamilyMember =
+            fieldBoolean(row, ['RequiresFamilyMember', 'Requires_Family_Member']) ??
+            /mourn|bereav|funeral|compassionate/i.test(`${description} ${code}`)
+          const requiresMedicalAttachment =
+            fieldBoolean(row, ['RequiresMedicalAttachment', 'Requires_Medical_Attachment']) ??
+            /sick|medical|illness|hospital/i.test(`${description} ${code}`)
+          const requiresDeliveryDate =
+            fieldBoolean(row, ['Maternity', 'Maternity?', 'Maternity_']) ??
+            /matern|prenatal|pre-natal|pre natal/i.test(`${description} ${code}`)
+          const requiresWeddingAttachment =
+            fieldBoolean(row, ['RequiresWeddingAttachment', 'Requires_Wedding_Attachment']) ??
+            /wedding|marriage/i.test(`${description} ${code}`)
           return {
             ...row,
             Hourly: Boolean(row.Hourly ?? row.Allow_Hourly ?? false),
+            UnlimitedDays: fieldBoolean(row, ['UnlimitedDays', 'Unlimited_Days']) ?? false,
+            RequiresDeliveryDate: requiresDeliveryDate,
+            RequiresWeddingAttachment: requiresWeddingAttachment,
+            MaximumApplicationDays: fieldNumber(row, [
+              'MaximumApplicationDays',
+              'Maximum_Application_Days',
+              'MaxApplicationDays',
+              'Max_Application_Days',
+            ]),
+            RequiresMedicalAttachment: requiresMedicalAttachment,
+            RequiresFamilyMember: requiresFamilyMember,
             Days: roundLeaveValue(
               annual ? resolveAnnualLeaveEntitlement(metrics, genericDays) : genericDays,
             ),
             Annual: annual,
           }
-        }),
-      })
+        })
+
+      if (mappedRows.length === 0) {
+        try {
+          const apps = (await fetchOData('QyHRLeaveApplication', {
+            $filter: `EmployeeNo eq '${odataString(user.employeeNo)}'`,
+            $top: 100,
+          })) as ODataRecord[] | null
+          const seen = new Set<string>()
+          mappedRows = (Array.isArray(apps) ? apps : [])
+            .map((row) => {
+              const code = String(
+                row.LeaveTypeCode ??
+                  row.Leave_Type_Code ??
+                  row.LeaveType ??
+                  row.Leave_Type ??
+                  '',
+              ).trim()
+              if (!code || seen.has(code.toUpperCase())) return null
+              seen.add(code.toUpperCase())
+              const description = String(row.LeaveType ?? row.Leave_Type ?? code)
+              return {
+                Code: code,
+                Description: description,
+                Days: 0,
+                Hourly: false,
+                UnlimitedDays: false,
+                RequiresDeliveryDate: /matern|prenatal/i.test(`${description} ${code}`),
+                RequiresWeddingAttachment: /wedding|marriage/i.test(`${description} ${code}`),
+                MaximumApplicationDays: null,
+                RequiresMedicalAttachment: /sick|medical|illness|hospital/i.test(`${description} ${code}`),
+                RequiresFamilyMember: /mourn|bereav|funeral|compassionate/i.test(`${description} ${code}`),
+                Annual: /annual/i.test(`${description} ${code}`),
+              }
+            })
+            .filter(Boolean)
+            .filter((row) => leaveTypeMatchesGender(row as ODataRecord, userGender))
+            .filter((row) => leaveTypeMatchesMaritalStatus(row as ODataRecord, maritalStatus)) as typeof mappedRows
+        } catch {
+          // keep empty
+        }
+      }
+
+      res.json({ rows: mappedRows })
     }),
   )
 
@@ -1573,72 +2023,176 @@ export function buildStaffRouter() {
     '/leave/balance/:type',
     safe(async (req, res) => {
       const user = authUser(req)
-      const leaveTypeCode = req.params.type
+      const leaveTypeCode = String(req.params.type ?? '')
       const today = new Date().toISOString().slice(0, 10)
+      const currentPeriod = new Date().getFullYear()
 
-      const [typeRows, pendingCount, ledgerRows, employeeRow] = await Promise.all([
+      const [typeRows, pendingCount, ledgerRows, employeeRow, applicationRows, soapEmployeeBalances, summarySoap] = await Promise.all([
         fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(leaveTypeCode)}'`,
           $top: 1,
         }) as Promise<ODataRecord[] | null>,
-        fetchODataCount('QyHRLeaveApplications', {
-          $filter:
-            `Status eq 'Pending Approval'` +
-            ` and EmployeeNo eq '${odataString(user.employeeNo)}'` +
-            ` and LeaveType eq '${odataString(leaveTypeCode)}'` +
-            ` and EndDate gt ${today}`,
-        }),
+        (fetchOData('QyHRLeaveApplications', {
+          $filter: `Status eq 'Pending Approval' and EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}' and EndDate gt ${today}`,
+        }) as Promise<ODataRecord[] | null>)
+          .then((rows) => (Array.isArray(rows) ? rows : []).filter((row) => resolveLeaveStatus(row) === 'Pending Approval').length)
+          .catch(() => 0),
         fetchOData('QyHRLeaveLedger', {
           $filter: `EmployeeNo eq '${odataString(user.employeeNo)}' and LeaveType eq '${odataString(leaveTypeCode)}'`,
         }) as Promise<ODataRecord[] | null>,
         fetchCurrentEmployeeRow(user.employeeNo),
+        fetchLeaveApplicationBalanceRows(user.employeeNo, leaveTypeCode),
+        callSoapMethod('FnGetEmployeeLeaveBalances', { employeeNo: user.employeeNo }).catch(() => null),
+        callSoapMethod('GetLeaveBalance', {
+          employeeNo: user.employeeNo,
+          leaveType: leaveTypeCode,
+        }).catch(() => null),
       ])
 
-      const soapEmployeeBalances = await callSoapMethod('FnGetEmployeeLeaveBalances', {
-        employeeNo: user.employeeNo,
-      })
-        .then((result) => parseEmployeeLeaveBalancesReturn(result.returnValue))
-        .catch(() => null)
-
       const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
-      const leaveTypeDays = Number(leaveTypeRow?.Days ?? 0)
+      if (!leaveTypeRow) {
+        res.status(404).json({ message: 'The selected leave type was not found in Business Central.' })
+        return
+      }
+      const leaveTypeDays = Number(leaveTypeRow.Days ?? leaveTypeRow.NoofDays ?? 0)
+      const unlimitedDays = fieldBoolean(leaveTypeRow, ['UnlimitedDays', 'Unlimited_Days']) ?? false
+      const maximumApplicationDays = fieldNumber(leaveTypeRow, [
+        'MaximumApplicationDays',
+        'Maximum_Application_Days',
+        'MaxApplicationDays',
+        'Max_Application_Days',
+      ])
       const isHourly = Boolean(leaveTypeRow?.Allow_Hourly ?? leaveTypeRow?.Hourly ?? false)
       const isAnnual = leaveTypeIsAnnual(leaveTypeRow)
-      const metrics = employeeLeaveMetrics(
-        soapEmployeeBalances ? { ...(employeeRow ?? {}), ...soapEmployeeBalances } : employeeRow,
-        user,
-      )
+      const parsedSoapBalances = parseEmployeeLeaveBalancesReturn(soapEmployeeBalances?.returnValue)
+      // Legacy SOAP sets LeaveBalance=AnnualLeaveBalance and EarnedLeaveDays=Accrued Days.
+      // Only merge Annual from SOAP; leave Accrued/CF/LeaveBalance to the employee OData row
+      // (and GetLeaveBalance JSON below) so earned days stay Leave Accrued To-Date.
+      const metricsSource: ODataRecord = { ...(employeeRow ?? {}) }
+      if (parsedSoapBalances) {
+        for (const key of [
+          'AnnualLeaveBalance',
+          'Annual_Leave_Balance',
+          'Annual_Leave_balance',
+          'AccruedDays',
+          'CarryForwardBalance',
+          'Carry_forward_Balance',
+        ] as const) {
+          if (parsedSoapBalances[key] !== undefined) metricsSource[key] = parsedSoapBalances[key]
+        }
+      }
+      const metrics = employeeLeaveMetrics(metricsSource, user)
 
       let additions = 0
       let deductions = 0
+      let openNet = 0
+      let currentPeriodNet = 0
+      let hasOpenEntries = false
+      let hasCurrentPeriodEntries = false
       if (Array.isArray(ledgerRows)) {
         for (const entry of ledgerRows) {
           const noOfDays = Number(entry?.NoofDays ?? entry?.['No_of_Days'] ?? 0)
           if (Number.isFinite(noOfDays)) {
             if (noOfDays < 0) deductions += -noOfDays
             else additions += noOfDays
+            const closed = entry.Closed === true || String(entry.Closed ?? '').toLowerCase() === 'true'
+            if (!closed) {
+              hasOpenEntries = true
+              openNet += noOfDays
+              if (Number(entry.LeavePeriod ?? entry.Leave_Period) === currentPeriod) {
+                hasCurrentPeriodEntries = true
+                currentPeriodNet += noOfDays
+              }
+            }
           }
         }
       }
 
+      const applicationBalance = applicationRows
+        .map((row) => fieldNumber(row, ['CurrentLeaveBalance', 'Current_Leave_Balance']))
+        .find((value): value is number => value !== null)
+      const exactSummary = parseBcLeaveSummary(summarySoap?.returnValue)
+      const cardAnnualBalance =
+        employeeAnnualLeaveBalance(employeeRow) ??
+        metrics.leaveBalance ??
+        (isAnnual ? applicationBalance ?? null : null)
+      const earnedLeaveDays = isAnnual
+        ? exactSummary?.leaveAccruedToDate ?? metrics.earnedLeaveDays
+        : null
       const ledgerNet = additions - deductions
-      let leaveBalance = 0
-      if (isAnnual) {
-        leaveBalance = resolveAnnualLeaveBalance(metrics, ledgerNet)
-      } else {
-        leaveBalance = leaveTypeDays - (deductions - additions)
-      }
-      const balance = leaveBalance >= 0 ? roundLeaveValue(leaveBalance) : 0
       const entitlement = roundLeaveValue(
-        isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
+        exactSummary?.leaveEntitlement ??
+          exactSummary?.allocatedDays ??
+          (isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays),
       )
-      const applicationLimit = balance
+      const carryForwardBalance = isAnnual
+        ? exactSummary?.carryForward ??
+          exactSummary?.carryForwardBalanceForType ??
+          metrics.carryForwardBalance ??
+          null
+        : exactSummary?.carryForwardBalanceForType ?? null
+      const totalLeaveTakenToDate =
+        exactSummary?.totalLeaveTakenToDate ??
+        exactSummary?.currentTotalLeaveTaken ??
+        roundLeaveValue(deductions)
+      const leaveAccruedToDate = isAnnual
+        ? exactSummary?.leaveAccruedToDate ?? earnedLeaveDays
+        : null
+      const balance = roundLeaveValue(resolveBcLeaveBalance({
+        isAnnual,
+        leaveTypeDays,
+        leaveTypeUnlimitedDays: unlimitedDays,
+        maximumApplicationDays,
+        summary: exactSummary,
+        cardAnnualBalance,
+        leaveAccruedToDate,
+        totalLeaveTakenToDate,
+        hasCurrentPeriodEntries,
+        currentPeriodNet,
+        hasOpenEntries,
+        openNet,
+        ledgerNetDays: ledgerNet,
+      }))
+      const breakdown = resolveLeaveBalanceBreakdown({
+        summary: exactSummary,
+        entitlement,
+        carryForward: carryForwardBalance,
+        leaveAccruedToDate,
+        totalLeaveTakenToDate,
+        availableLeaveBalance: balance,
+      })
+      const balanceSource = isAnnual
+        ? exactSummary?.availableLeaveBalance !== null &&
+          exactSummary?.availableLeaveBalance !== undefined
+          ? 'employeeCardAvailable'
+          : leaveAccruedToDate !== null
+            ? 'employeeCardAccruedLimit'
+            : 'unavailable'
+        : (exactSummary?.availableLeaveBalance !== null &&
+              exactSummary?.availableLeaveBalance !== undefined) ||
+            (exactSummary?.currentLeaveBalance !== null &&
+              exactSummary?.currentLeaveBalance !== undefined)
+          ? 'leaveLedger'
+          : 'leaveTypeSetup'
 
       res.json({
-        balance,
-        entitlement,
-        earnedLeaveDays: metrics.earnedLeaveDays,
-        applicationLimit,
+        // Canonical six employee-facing values. These names are intentionally
+        // explicit so Total Available can never be mistaken for the balance
+        // against which a leave application is validated.
+        ...breakdown,
+        // Backward-compatible aliases used by older portal builds.
+        balance: breakdown.availableLeaveBalance,
+        entitlement: breakdown.leaveEntitlement,
+        allocatedDays: breakdown.leaveEntitlement,
+        currentLeaveBalance: breakdown.availableLeaveBalance,
+        earnedLeaveDays: breakdown.leaveAccruedToDate,
+        carryForwardBalance: breakdown.carryForward,
+        balanceSource,
+        isAnnual,
+        unlimitedDays: exactSummary?.unlimitedDays ?? unlimitedDays,
+        maximumApplicationDays:
+          exactSummary?.maximumApplicationDays ?? maximumApplicationDays,
+        applicationLimit: breakdown.availableLeaveBalance,
         pendingCount,
         isHourly,
       })
@@ -1850,6 +2404,38 @@ export function buildStaffRouter() {
     }),
   )
 
+  router.delete(
+    '/leave/:no',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const no = String(req.params.no ?? '').trim()
+      const row = await fetchOwnedLeaveRow(user, no)
+      if (!row) {
+        res.status(404).json({ ok: false, message: 'Leave application not found.' })
+        return
+      }
+      const approvalEntries = leaveApprovalEntriesForDocument(
+        await fetchLeaveApprovalEntriesByDocumentNos(expandLeaveCancelDocumentNos(no, row)),
+        no,
+      )
+      const status = resolveLeaveStatus(row, approvalEntries)
+      if (!['Open', 'Draft'].includes(status)) {
+        res.status(422).json({
+          ok: false,
+          code: 'LEAVE_DELETE_NOT_ALLOWED',
+          message:
+            status === 'Pending Approval'
+              ? 'Cancel the pending approval first; then the reopened draft can be deleted.'
+              : 'Only an open draft can be permanently deleted. Approved leave applications cannot be deleted.',
+        })
+        return
+      }
+
+      await deleteLeaveApplicationInBc(user, no, row)
+      res.json({ ok: true, message: 'Leave draft permanently deleted.' })
+    }),
+  )
+
   router.post(
     '/leave',
     safe(async (req, res) => {
@@ -1857,24 +2443,67 @@ export function buildStaffRouter() {
       const body = z
         .object({
           leaveType: z.string().min(1),
-          appliedDays: z.coerce.number(),
+          appliedDays: z.coerce.number().positive(),
           startDate: z.string().min(1),
           isHalfDayLeave: z.union([z.literal('0'), z.literal('1'), z.literal('2')]).default('0'),
           reliever: z.string().optional().default(''),
           reason: z.string().min(1),
           requisitionNo: z.string().optional().default(''),
           requestApproval: z.boolean().optional().default(true),
+          endDate: z.string().optional().default(''),
+          returnDate: z.string().optional().default(''),
+          familyMember: z.string().optional().default(''),
+          deliveryDate: z.string().optional().default(''),
         })
         .parse(req.body)
 
       const action = body.requisitionNo ? 'edit' : 'create'
 
-      if (halfDayRequiresAnnualLeave(body.isHalfDayLeave)) {
-        const typeRows = (await fetchOData('QyHRLeaveType', {
+      const [typeRows, employeeRow, balanceSummarySoap] = await Promise.all([
+        fetchOData('QyHRLeaveType', {
           $filter: `Code eq '${odataString(body.leaveType)}'`,
           $top: 1,
-        })) as ODataRecord[] | null
-        const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
+        }) as Promise<ODataRecord[] | null>,
+        fetchCurrentEmployeeRow(user.employeeNo),
+        callSoapMethod('GetLeaveBalance', {
+          employeeNo: user.employeeNo,
+          leaveType: body.leaveType,
+        }).catch(() => null),
+      ])
+      const leaveTypeRow = Array.isArray(typeRows) && typeRows.length > 0 ? typeRows[0]! : null
+      const eligibility = await employeeLeaveEligibility(user.employeeNo, employeeRow)
+      if (leaveTypeRow) {
+        const userGender = normalizeAuthGender(
+          eligibility.gender || user.Gender || user.gender,
+        )
+        if (!leaveTypeMatchesGender(leaveTypeRow, userGender)) {
+          res.status(422).json({
+            ok: false,
+            message: 'This leave type is not available for the gender recorded on your Employee Card.',
+          })
+          return
+        }
+        if (leaveTypeIsMarriage(leaveTypeRow)) {
+          if (!leaveTypeMatchesMaritalStatus(leaveTypeRow, eligibility.maritalStatus)) {
+            res.status(422).json({
+              ok: false,
+              message:
+                'Marriage leave is not available because your Business Central Employee Card is already marked Married.',
+            })
+            return
+          }
+        }
+        if (isSickLeaveRow(leaveTypeRow) && !sickLeaveStartDateAllowed(body.startDate)) {
+          res.status(422).json({
+            ok: false,
+            code: 'SICK_LEAVE_DATE_NOT_ALLOWED',
+            message: 'Sick leave can only start today or tomorrow.',
+          })
+          return
+        }
+      }
+
+      if (halfDayRequiresAnnualLeave(body.isHalfDayLeave)) {
         if (!leaveTypeIsAnnual(leaveTypeRow)) {
           res.status(422).json({
             ok: false,
@@ -1885,19 +2514,82 @@ export function buildStaffRouter() {
         }
       }
 
+      // Enforce the employee-facing Available Leave Balance, never the larger
+      // Total Available Leave Balance. BC repeats this validation when saving;
+      // doing it here gives the employee a clear error before any draft is
+      // created and protects older BC builds that only validate in the UI.
+      const balanceSummary = parseBcLeaveSummary(balanceSummarySoap?.returnValue)
+      const employeeBalanceMetrics = employeeLeaveMetrics(employeeRow, user)
+      const employeeTakenRaw = fieldNumber(employeeRow, [
+        'TotalLeaveTaken',
+        'Total_Leave_Taken',
+        'TotalLeaveTakenToDate',
+        'Total_Leave_Taken_To_Date',
+      ])
+      const employeeLeaveEntitlement = fieldNumber(employeeRow, [
+        'LeaveAllocation',
+        'Leave_Allocation',
+        'LeaveEntitlement',
+        'Leave_Entitlement',
+      ])
+      const employeeCarryForward = fieldNumber(employeeRow, [
+        'CarryForward',
+        'Carry_forward',
+        'Carry_Forward',
+      ])
+      const availableLeaveBalance = leaveTypeIsAnnual(leaveTypeRow)
+        ? resolveAnnualAvailableLeaveBalance({
+            summary: balanceSummary,
+            leaveEntitlement: employeeLeaveEntitlement,
+            carryForward: employeeCarryForward,
+            leaveAccruedToDate: employeeBalanceMetrics.earnedLeaveDays,
+            totalLeaveTakenToDate:
+              employeeTakenRaw === null ? null : Math.abs(employeeTakenRaw),
+          })
+        : balanceSummary?.availableLeaveBalance ?? balanceSummary?.currentLeaveBalance ?? 0
+      const requestedBalanceDays = body.deliveryDate
+        ? 1
+        : isHalfDaySelection(body.isHalfDayLeave)
+          ? 0.5
+          : body.appliedDays
+      if (
+        leaveApplicationExceedsAvailableBalance(
+          requestedBalanceDays,
+          availableLeaveBalance,
+        )
+      ) {
+        res.status(422).json({
+          ok: false,
+          code: 'LEAVE_BALANCE_EXCEEDED',
+          message: `You can apply for at most ${Math.max(0, Number(availableLeaveBalance ?? 0))} day(s), based on your Available Leave Balance.`,
+          availableLeaveBalance,
+        })
+        return
+      }
+
+      const deliveryDate = formatBcSoapDate(body.deliveryDate)
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
-      const { endDate, returnDate } = await resolveLeaveDatesFromBc(
-        user,
-        body.leaveType,
-        body.appliedDays,
-        body.startDate,
-        body.isHalfDayLeave,
+      // Maternity/prenatal leave uses Delivery Date in BC; skip date math when provided.
+      const calculatedDates = deliveryDate
+        ? { endDate: body.endDate, returnDate: body.returnDate, source: 'maternity' as const }
+        : await resolveLeaveDatesFromBc(
+            user,
+            body.leaveType,
+            body.appliedDays,
+            body.startDate,
+            body.isHalfDayLeave,
+          )
+      const formattedStartDate = formatBcSoapDate(deliveryDate || body.startDate)
+      const formattedEndDate = formatBcSoapDate(
+        calculatedDates.endDate || body.endDate || (deliveryDate ? deliveryDate : ''),
       )
-      const formattedStartDate = formatBcSoapDate(body.startDate)
-      const formattedEndDate = formatBcSoapDate(endDate)
-      const formattedReturnDate =
-        formatBcSoapDate(returnDate) || (formattedEndDate ? nextWorkingDayIso(formattedEndDate) : '')
-      if (!formattedStartDate || !formattedEndDate || !formattedReturnDate) {
+      // Return Date is a production invariant: it is exactly one calendar day
+      // after End Date. Never persist the legacy BC response where both dates
+      // are the same.
+      const formattedReturnDate = formattedEndDate
+        ? addCalendarDays(formattedEndDate, 1)
+        : ''
+      if (!deliveryDate && (!formattedStartDate || !formattedEndDate || !formattedReturnDate)) {
         res.status(422).json({
           ok: false,
           message: 'Could not compute leave dates — please verify start date and applied days.',
@@ -1905,14 +2597,23 @@ export function buildStaffRouter() {
         return
       }
 
+      if (!deliveryDate) {
+        await assertNoOverlappingLeaveApplication(
+          user,
+          formattedStartDate,
+          formattedEndDate,
+          body.requisitionNo,
+        )
+      }
+
       const result = await callSoapMethod('LeaveApplication', {
         action,
         leaveNo: body.requisitionNo,
         employeeNo: user.employeeNo,
-        daysApplied: bcLeaveDaysApplied(body.appliedDays, body.isHalfDayLeave),
+        daysApplied: deliveryDate ? 1 : bcLeaveDaysApplied(body.appliedDays, body.isHalfDayLeave),
         startDate: formattedStartDate,
-        endDate: formattedEndDate,
-        returnDate: formattedReturnDate,
+        endDate: formattedEndDate || formattedStartDate,
+        returnDate: formattedReturnDate || formattedEndDate || formattedStartDate,
         reason: body.reason,
         reliever: body.reliever,
         myUserID: user.userID,
@@ -1920,18 +2621,23 @@ export function buildStaffRouter() {
         isRequestLeaveAllowance: false,
         // LeaveApplication declares this as Boolean; GetLeaveDates uses 0/1/2 separately.
         isHalfDayLeave: isHalfDaySelection(body.isHalfDayLeave),
+        familyMember: normalizeLeaveFamilyMember(body.familyMember),
+        deliveryDate: deliveryDate || '',
       })
 
+      const fromReturn = submittedLeaveNoFromReturn(result.returnValue)
       const soapOk = soapLeaveActionOk(result.returnValue)
       const documentNo =
-        soapOk && action === 'create'
-          ? await pollSubmittedLeaveNo(user, body, endDate, result.returnValue).catch(() => '')
-          : soapOk
-            ? body.requisitionNo || submittedLeaveNoFromReturn(result.returnValue)
-            : ''
+        action === 'create'
+          ? fromReturn ||
+            (await pollSubmittedLeaveNo(user, body, formattedEndDate, result.returnValue).catch(
+              () => '',
+            ))
+          : body.requisitionNo || fromReturn
 
       let status = 'Open'
       if (documentNo && action === 'create' && body.requestApproval !== false) {
+        await assertSickLeaveAttachment(documentNo, body.leaveType)
         const approvalResult = await callSoapMethod('RequestLeaveApproval', {
           requisitionNo: documentNo,
           employeeNo: user.employeeNo,
@@ -1946,7 +2652,7 @@ export function buildStaffRouter() {
         }
       }
 
-      const ok = action === 'create' ? Boolean(soapOk && documentNo) : soapOk
+      const ok = action === 'create' ? Boolean(documentNo) : soapOk
 
       res.json({
         ok,
@@ -1958,7 +2664,12 @@ export function buildStaffRouter() {
               : 'Leave application created successfully'
           : soapOk && action === 'create' && !documentNo
             ? 'Your leave was saved, but the application number could not be confirmed. Refresh the list and open the latest application.'
-            : 'Leave application failed. Please verify reliever, dates, and leave balance, then try again.',
+            : String(result.returnValue ?? '').trim() &&
+                !['false', '0', 'true', '1'].includes(
+                  String(result.returnValue).trim().toLowerCase(),
+                )
+              ? String(result.returnValue).trim()
+              : 'Leave application failed. Please verify reliever, dates, and leave balance, then try again.',
         returnValue: result.returnValue,
         documentNo: documentNo || undefined,
         request: documentNo
@@ -1984,19 +2695,29 @@ export function buildStaffRouter() {
         return
       }
       const status = resolveLeaveStatus(row)
-      if (!['Open', 'Draft', 'Pending Approval'].includes(status)) {
+      if (status !== 'Pending Approval') {
         res.status(422).json({
           ok: false,
-          message: 'Only open or pending leave applications can be cancelled.',
+          message:
+            ['Open', 'Draft'].includes(status)
+              ? 'This application is already a draft. Use Delete Draft to remove it permanently.'
+              : 'Only a pending leave approval can be cancelled.',
         })
         return
       }
       await cancelLeaveApplicationInBc(user, body.no, row)
+      let updatedRow: ODataRecord | null = null
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        updatedRow = await fetchOwnedLeaveRow(user, body.no)
+        if (updatedRow && leaveIsOpenInBc(updatedRow)) break
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      const updatedStatus = updatedRow ? resolveLeaveStatus(updatedRow) : 'Open'
       res.json({
         ok: true,
-        message: leaveIsOpenInBc(row)
-          ? 'Leave application discarded successfully'
-          : 'Leave application cancelled successfully',
+        message: 'Approval cancelled. The leave application is open as a draft and can now be deleted.',
+        status: ['Open', 'Draft'].includes(updatedStatus) ? updatedStatus : 'Open',
+        confirmedInBc: Boolean(updatedRow && leaveIsOpenInBc(updatedRow)),
       })
     }),
   )
@@ -2109,8 +2830,9 @@ async function tryRequestLeaveApproval(
           return { ok: true as const, candidate, returnValue: raw }
         }
         if (raw) lastMessage = raw
-      } catch {
-        // try the next BC parameter shape
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (message) lastMessage = message
       }
     }
   }
@@ -2175,13 +2897,11 @@ async function waitForLeavePendingInBc(
         return
       }
 
-      const currentStatus = resolveLeaveStatus(
-        row,
-        leaveApprovalEntriesForDocument(
-          await fetchLeaveApprovalEntriesByDocumentNos(expandLeaveCancelDocumentNos(body.no, row)),
-          body.no,
-        ),
+      const existingApprovalEntries = leaveApprovalEntriesForDocument(
+        await fetchLeaveApprovalEntriesByDocumentNos(expandLeaveCancelDocumentNos(body.no, row)),
+        body.no,
       )
+      const currentStatus = resolveLeaveStatus(row, existingApprovalEntries)
       if (currentStatus === 'Pending Approval') {
         res.json({
           ok: true,
@@ -2189,7 +2909,7 @@ async function waitForLeavePendingInBc(
           message: 'Leave application is already pending approval.',
           status: 'Pending Approval',
           requestId: `leave-${body.no}`,
-          approvalSteps: await resolveLeaveApprovalStepsAsync(row, [], body.no, {
+          approvalSteps: await resolveLeaveApprovalStepsAsync(row, existingApprovalEntries, body.no, {
             employeeNo: user.employeeNo,
             userID: user.userID,
             department: user.department,
@@ -2205,10 +2925,12 @@ async function waitForLeavePendingInBc(
         return
       }
 
+      await assertSickLeaveAttachment(body.no, row)
+
       const candidates = expandLeaveCancelDocumentNos(body.no, row)
       const soap = await tryRequestLeaveApproval(user, candidates)
       if (!soap.ok) {
-        res.json({ ok: false, message: soap.message })
+        res.status(422).json({ ok: false, message: soap.message })
         return
       }
 
@@ -2245,7 +2967,7 @@ async function waitForLeavePendingInBc(
 
       if (!approvalSteps.length && wait.confirmed) {
         const fallbackSteps = wait.row
-          ? await resolveLeaveApprovalStepsAsync(wait.row, [], body.no, {
+          ? await resolveLeaveApprovalStepsAsync(wait.row, wait.approvalEntries, body.no, {
               employeeNo: user.employeeNo,
               userID: user.userID,
               department: user.department,
@@ -2254,6 +2976,7 @@ async function waitForLeavePendingInBc(
               {
                 Status: 'Pending Approval',
                 SequenceNo: 1,
+                Role: 'Approver',
                 ApproverName: 'Awaiting approver assignment',
                 Comment: 'Submitted for approval',
               },

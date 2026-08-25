@@ -128,30 +128,27 @@ function entryText(row: ODataRecord, keys: string[]) {
   return ''
 }
 
-/** ESS `ApprovalsController::viewDocument` store-vs-purchase check on table 38 headers. */
-function isEssStoreRequisitionHeader(row: ODataRecord) {
-  return (
-    entryText(row, ['DocApprovalType', 'Doc_Approval_Type']) === 'Requisition' &&
-    entryText(row, ['DocumentType', 'Document_Type']) === 'Quote' &&
-    entryText(row, ['DocumentType2', 'Document_Type2']) === 'Requisition'
-  )
-}
-
+/**
+ * ABH store requisitions use table 50575 (`QyStoreRequisitionHeader`).
+ * Purchase requisitions are Purchase Header Quote + DocApprovalType Requisition
+ * (same flags HIJRA used for an older store-on-purchase-header model).
+ * Never treat ABH purchase quotes as store — check the real store header first.
+ */
 async function resolvePurchaseOrderTableModule(
   docNo: string,
 ): Promise<'storeRequisition' | 'purchaseRequisition' | null> {
-  const purchaseRows = (await fetchOData('QyPurchaseHeader', {
-    $filter: `No eq '${odataString(docNo)}'`,
-    $top: 1,
-  })) as ODataRecord[] | null
-  if (Array.isArray(purchaseRows) && purchaseRows[0]) {
-    return isEssStoreRequisitionHeader(purchaseRows[0]) ? 'storeRequisition' : 'purchaseRequisition'
-  }
   const storeRows = (await fetchOData('QyStoreRequisitionHeader', {
     $filter: `No eq '${odataString(docNo)}'`,
     $top: 1,
-  })) as ODataRecord[] | null
+  }).catch(() => null)) as ODataRecord[] | null
   if (Array.isArray(storeRows) && storeRows[0]) return 'storeRequisition'
+
+  const purchaseRows = (await fetchOData('QyPurchaseHeader', {
+    $filter: `No eq '${odataString(docNo)}'`,
+    $top: 1,
+  }).catch(() => null)) as ODataRecord[] | null
+  if (Array.isArray(purchaseRows) && purchaseRows[0]) return 'purchaseRequisition'
+
   return null
 }
 
@@ -167,10 +164,18 @@ export async function resolveApprovalModuleFromEntry(
   const documentType = entryText(entry, ['DocumentType', 'Document_Type'])
   if (documentType === 'TransportRequest') return 'transport'
   if (documentType === 'Petty Cash') return 'pettyCash'
-  if (documentType === 'Order') return 'purchaseRequisition'
+  // Purchase requisitions approve as Quote (Document Type); Orders are also purchase.
+  if (documentType === 'Order' || documentType === 'Quote') {
+    const resolved = await resolvePurchaseOrderTableModule(docNo)
+    if (resolved) return resolved
+    return 'purchaseRequisition'
+  }
 
   const tableId = Number(entry.TableID ?? entry.TableId ?? 0)
-  if (tableId === APPROVAL_TABLE_IDS.purchaseOrder) {
+  if (
+    tableId === APPROVAL_TABLE_IDS.purchaseOrder ||
+    tableId === APPROVAL_TABLE_IDS.purchaseRequisition
+  ) {
     const resolved = await resolvePurchaseOrderTableModule(docNo)
     if (resolved) return resolved
   }

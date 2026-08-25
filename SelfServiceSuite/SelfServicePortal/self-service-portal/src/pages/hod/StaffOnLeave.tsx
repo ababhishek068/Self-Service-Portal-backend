@@ -5,6 +5,7 @@ import { Search } from 'lucide-react'
 import { listHodStaffOnLeave, type HodStaffLeaveRow } from '@/api/endpoints/hod'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
+import { StatusBadge } from '@/components/shared/StatusBadge'
 import { Input } from '@/components/ui/input'
 import { formatDate } from '@/utils/formatters'
 
@@ -15,6 +16,8 @@ const columns: DataTableColumn<HodStaffLeaveRow>[] = [
   { id: 'days', header: 'Days Applied', cell: (row) => row.daysApplied || '—' },
   { id: 'from', header: 'From', cell: (row) => formatDate(row.from) },
   { id: 'to', header: 'To', cell: (row) => formatDate(row.to) },
+  { id: 'returnDate', header: 'Return Date', cell: (row) => formatDate(row.returnDate) },
+  { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
 ]
 
 export function StaffOnLeave() {
@@ -51,7 +54,13 @@ export function StaffOnLeave() {
         columns={columns}
         getRowId={(row) => row.id}
         onRowClick={(row) => navigate(`/hod/employee/${encodeURIComponent(row.employeeNo)}`)}
-        emptyTitle={query.isLoading ? 'Loading staff leave...' : '*** No staff found ***'}
+        emptyTitle={
+          query.isLoading
+            ? 'Loading staff leave...'
+            : query.isError
+              ? 'Department leave could not be loaded.'
+              : 'No department staff are currently on approved leave.'
+        }
         compact
       />
     </PageWrapper>

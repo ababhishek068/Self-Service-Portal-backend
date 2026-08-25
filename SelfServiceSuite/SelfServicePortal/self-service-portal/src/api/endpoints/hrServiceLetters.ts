@@ -1,42 +1,67 @@
-import {
-  cancelHrServiceLetterRequest as cancelHrServiceLetterRequestInStore,
-  createHrServiceLetterRequest,
-  listHrServiceLetterRequests,
-  resetHrServiceLetterDemoData,
-  type HrServiceLetterRequest,
-} from '@/api/mock/hrServiceLettersStore'
+import { authDelete, authGet, authPost } from '@/api/client/authClient'
+import { requireAuthApiUrl } from '@/api/requireBackend'
 import type { HrLetterType } from '@/data/hrServiceLetters'
 
-export type { HrServiceLetterRequest }
-
-export async function fetchHrServiceLetterRequests(employeeNo: string) {
-  await pause()
-  return listHrServiceLetterRequests(employeeNo)
-}
-
-export async function submitHrServiceLetterRequest(input: {
+export interface HrServiceLetterRequest {
+  id: string
+  requestNo: string
   letterType: HrLetterType
+  letterTypeLabel: string
+  status:
+    | 'Submitted'
+    | 'In Progress'
+    | 'Approved'
+    | 'Rejected'
+    | 'Ready for Collection'
+    | 'Completed'
+    | 'Cancelled'
+  submittedAt: string
+  updatedAt: string
   employeeNo: string
   employeeName: string
   departmentName: string
   details: Record<string, string>
+  hrRemarks?: string
+  hrDecisionAt?: string
+  hrDecisionBy?: string
+  approvalRequired: boolean
+}
+
+export async function fetchHrServiceLetterRequests() {
+  requireAuthApiUrl()
+  const { rows } = await authGet<{ rows: HrServiceLetterRequest[] }>(
+    '/api/hr/service-letters',
+  )
+  return rows
+}
+
+export async function fetchMonthlySalaryBase() {
+  requireAuthApiUrl()
+  const { monthlySalaryBase } = await authGet<{ monthlySalaryBase: number }>(
+    '/api/hr/monthly-salary-base',
+  )
+  return Number(monthlySalaryBase ?? 0)
+}
+
+export async function submitHrServiceLetterRequest(input: {
+  letterType: HrLetterType
+  details: Record<string, string>
 }) {
-  await pause(450)
-  return createHrServiceLetterRequest(input)
+  requireAuthApiUrl()
+  return authPost<HrServiceLetterRequest>('/api/hr/service-letters', input)
 }
 
 export async function cancelHrServiceLetterRequest(id: string) {
-  await pause(250)
-  cancelHrServiceLetterRequestInStore(id)
+  requireAuthApiUrl()
+  return authPost<HrServiceLetterRequest>(
+    `/api/hr/service-letters/${encodeURIComponent(id)}/cancel`,
+    {},
+  )
 }
 
-export async function resetHrServiceLetterMockData() {
-  await pause(150)
-  resetHrServiceLetterDemoData()
-}
-
-function pause(ms = 180) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
+export async function deleteHrServiceLetterRequest(id: string) {
+  requireAuthApiUrl()
+  return authDelete<{ ok: boolean; id: string }>(
+    `/api/hr/service-letters/${encodeURIComponent(id)}`,
+  )
 }

@@ -21,6 +21,8 @@ export const moduleLabels: Record<PortalModuleKey, string> = {
   salaryAdvance: 'Salary Advance',
   training: 'Training Request',
   documentRequisition: 'Document Requisition',
+  employeeExit: 'Employee Exit',
+  hrServiceLetter: 'HR Service Letters',
 }
 
 /** Ordered list of statuses a request can transition through. */

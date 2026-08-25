@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
@@ -16,6 +16,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { extractApplicationReason } from '@/utils/applicationReason'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import { isMakerAllowedToApprove } from '@/utils/validators'
+import { useToast } from '@/components/feedback/ToastProvider'
 
 const hiddenLineFields = new Set([
   'id',
@@ -91,6 +92,105 @@ function firstPayloadNumber(payload: Record<string, unknown>, keys: string[]) {
   return 0
 }
 
+function firstPayloadText(payload: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key]
+    if (value === undefined || value === null) continue
+    const text = String(value).trim()
+    if (text && !ZERO_DATE.test(text) && text !== '-') return text
+  }
+  return ''
+}
+
+function approvalHeaderFacts(
+  requestType: string | undefined,
+  payload: Record<string, unknown>,
+): Array<{ label: string; value: string }> {
+  if (requestType === 'leave') {
+    const facts: Array<{ label: string; value: string }> = []
+    const push = (label: string, keys: string[]) => {
+      const value = firstPayloadText(payload, keys)
+      if (value) facts.push({ label, value })
+    }
+    push('Leave type', ['LeaveType', 'Leave_Type'])
+    push('Start date', ['StartDate', 'Start_Date'])
+    push('End date', ['EndDate', 'End_Date'])
+    push('Return date', ['ReturnDate', 'Return_Date'])
+    push('Reliever', ['RelieverName', 'Reliever_Name', 'Reliever'])
+    push('Application reason', ['reason', 'Reasonforleave', 'Reason_for_leave'])
+    push('Current leave balance', ['CurrentLeaveBalance', 'Current_Leave_Balance'])
+    push('Earned leave days', ['EarnedLeaveDays', 'Earned_Leave_Days'])
+    return facts
+  }
+  if (requestType === 'employeeExit' || requestType === 'hrServiceLetter') {
+    const facts = Array.isArray(payload.detailFacts)
+      ? (payload.detailFacts as Array<{ label?: unknown; value?: unknown }>)
+      : []
+    return facts
+      .map((fact) => ({ label: String(fact.label ?? '').trim(), value: String(fact.value ?? '').trim() }))
+      .filter((fact) => fact.label && fact.value)
+  }
+  if (requestType !== 'purchaseRequisition' && requestType !== 'storeRequisition') return []
+  const facts: Array<{ label: string; value: string }> = []
+  const push = (label: string, keys: string[]) => {
+    const value = firstPayloadText(payload, keys)
+    if (value) facts.push({ label, value })
+  }
+  if (requestType === 'purchaseRequisition') {
+    push('Required date', ['RequestedReceiptDate', 'Requested_Receipt_Date', 'OrderDate', 'Order_Date'])
+    push('Department', ['Department', 'RequestingDepartment', 'ShortcutDimension2Code'])
+    push('Cost center / project', ['ProjectCode', 'Project_Code'])
+    push('Purchase type', ['PurchaseRequestType', 'Purchase_Request_Type'])
+    push('Priority', ['Priority', 'priority'])
+    push('Currency', ['CurrencyCode', 'Currency_Code'])
+    push('Justification', ['Justification', 'PostingDescription', 'Posting_Description'])
+  } else {
+    push('Required date', ['RequiredDate', 'Required_Date', 'RequestDate'])
+    push('Request type', ['StoreRequisitionType', 'Store_Requisition_Type'])
+    push('Priority', ['Priority', 'priority'])
+    push('Issuing store', ['IssuingStore', 'Issuing_Store'])
+    push('Justification', ['Justification', 'justification', 'RequestDescription'])
+  }
+  return facts
+}
+
+/** Prefer stable columns for purchase/store lines instead of dumping every OData key. */
+function preferredLineKeys(requestType: string | undefined, lines: Record<string, unknown>[]) {
+  if (requestType === 'purchaseRequisition') {
+    const preferred = [
+      'type',
+      'itemNo',
+      'description',
+      'specification',
+      'category',
+      'quantity',
+      'unitOfMeasure',
+      'directUnitCost',
+      'amount',
+      'preferredBrandModel',
+      'suggestedSupplier',
+      'requiredDate',
+    ]
+    const present = preferred.filter((key) => lines.some((line) => !isBlankLineValue(line[key])))
+    if (present.length) return present
+  }
+  if (requestType === 'storeRequisition') {
+    const preferred = [
+      'type',
+      'itemNo',
+      'description',
+      'preferredBrandModel',
+      'unitOfMeasure',
+      'quantity',
+      'lineAmount',
+      'fulfillmentStatus',
+    ]
+    const present = preferred.filter((key) => lines.some((line) => !isBlankLineValue(line[key])))
+    if (present.length) return present
+  }
+  return visibleLineKeys(lines)
+}
+
 function sumLineNumbers(lines: Record<string, unknown>[], keys: string[]) {
   return lines.reduce((total, line) => {
     for (const key of keys) {
@@ -129,11 +229,20 @@ function approvalMetric(
   if (requestType === 'fuelRequest') {
     return { label: 'Quantity', value: String(amount || 0) }
   }
+  if (requestType === 'employeeExit') {
+    return { label: 'Stage', value: String(payload.pendingStageLabel || 'Approval') }
+  }
+  if (requestType === 'hrServiceLetter') {
+    const loan = firstPayloadNumber(payload, ['loanAmount'])
+    if (loan > 0) return { label: 'Amount', value: formatCurrency(loan) }
+    return { label: 'Letter', value: String(payload.letterTypeLabel || 'HR letter') }
+  }
   return { label: 'Amount', value: formatCurrency(amount) }
 }
 
 export function ApprovalDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { employee } = useAuth()
   const { canApprove: hasApproverRole } = usePermissions()
@@ -141,8 +250,13 @@ export function ApprovalDetail() {
   const [decision, setDecision] = useState<'Approved' | 'Rejected' | null>(null)
   const detail = useApprovalDetail(id ?? '')
   const approval = useApprovalDecision(id ?? '')
+  const toast = useToast()
   const request = detail.data
-  const applicationReason = request ? extractApplicationReason(request.payload, request.title) : ''
+  const applicationReason = request
+    ? request.requestType === 'hrServiceLetter'
+      ? ''
+      : extractApplicationReason(request.payload, request.title)
+    : ''
   const queueType = searchParams.get('queue')
   const displayStatus = queueType === 'approved'
     ? 'Approved'
@@ -154,13 +268,28 @@ export function ApprovalDetail() {
     displayStatus === 'Rejected' ||
     displayStatus === 'Cancelled'
   const isNotMaker = request && employee ? isMakerAllowedToApprove(request.makerEmployeeNo, employee.employeeNo) : false
-  const canApprove = hasApproverRole && isNotMaker && !isReadOnly
+  const assignedPendingApprover = Boolean(
+    request &&
+      employee &&
+      (request.approvalSteps ?? []).some((step) => {
+        if (step.status !== 'Pending Approval') return false
+        const identities = [employee.userID, employee.employeeNo, employee.displayName]
+          .map((value) => String(value ?? '').trim().toLowerCase())
+          .filter(Boolean)
+        const actor = [step.actorEmployeeNo, step.actorName]
+          .map((value) => String(value ?? '').trim().toLowerCase())
+          .filter(Boolean)
+        return actor.some((id) => identities.includes(id))
+      }),
+  )
+  const canApprove = (hasApproverRole || assignedPendingApprover) && isNotMaker && !isReadOnly
   const payload = request?.payload ?? {}
   const lines = Array.isArray(payload.lines)
     ? (payload.lines as Record<string, unknown>[])
     : []
-  const lineKeys = visibleLineKeys(lines)
+  const lineKeys = preferredLineKeys(request?.requestType, lines)
   const metric = request ? approvalMetric(request.requestType, request.amount, payload, lines) : null
+  const headerFacts = request ? approvalHeaderFacts(request.requestType, payload) : []
 
   useEffect(() => {
     if (request && applicationReason) {
@@ -219,9 +348,9 @@ export function ApprovalDetail() {
       {detail.isLoading || !request ? (
         <Skeleton className="h-96" />
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Card className="min-w-0">
-            <CardHeader>
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <Card className="min-w-0 overflow-hidden">
+            <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle>{request.title}</CardTitle>
@@ -230,26 +359,52 @@ export function ApprovalDetail() {
                 <StatusBadge status={displayStatus ?? request.status} />
               </div>
             </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="text-xs uppercase text-slate-500">Maker</p>
-                  <p className="font-medium text-slate-900">{request.makerName}</p>
+            <CardContent className="space-y-6 p-5 sm:p-6">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Maker</p>
+                  <p className="mt-1 font-semibold text-slate-900">{request.makerName}</p>
                 </div>
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="text-xs uppercase text-slate-500">{metric?.label ?? 'Amount'}</p>
-                  <p className="font-medium text-slate-900">{metric?.value ?? formatCurrency(request.amount)}</p>
+                <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{metric?.label ?? 'Amount'}</p>
+                  <p className="mt-1 font-semibold text-slate-900">{metric?.value ?? formatCurrency(request.amount)}</p>
                 </div>
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="text-xs uppercase text-slate-500">Submitted</p>
-                  <p className="font-medium text-slate-900">{formatDateTime(request.submittedAt)}</p>
+                <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Submitted</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDateTime(request.submittedAt)}</p>
                 </div>
               </div>
 
+              {request.requestType === 'employeeExit' || request.requestType === 'hrServiceLetter' ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+                  {request.requestType === 'employeeExit'
+                    ? `Hijra-style routing: Immediate Supervisor, then HR.${
+                        payload.pendingStageLabel
+                          ? ` This document is waiting on ${String(payload.pendingStageLabel)}.`
+                          : ''
+                      }`
+                    : 'Hijra-style routing: submitted directly to HR. There is no supervisor step — record remarks and approve or reject.'}
+                </div>
+              ) : null}
+
               {applicationReason ? (
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs uppercase text-slate-500">Application reason</p>
+                <div className="rounded-lg border border-[var(--portal-navy)]/15 bg-[var(--portal-navy)]/[0.035] p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--portal-navy-dark)]">Application reason</p>
                   <p className="mt-1 whitespace-pre-wrap text-sm text-slate-900">{applicationReason}</p>
+                </div>
+              ) : null}
+
+              {headerFacts.length ? (
+                <div className="border-t border-slate-200 pt-4">
+                  <p className="mb-2 text-sm font-semibold text-slate-900">Request details</p>
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    {headerFacts.map((fact, index) => (
+                      <div key={`${fact.label}-${index}`} className="rounded-md bg-slate-50 p-3">
+                        <dt className="text-xs uppercase text-slate-500">{fact.label}</dt>
+                        <dd className="mt-1 whitespace-pre-wrap text-sm font-medium text-slate-900">{fact.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
               ) : null}
 
@@ -259,14 +414,17 @@ export function ApprovalDetail() {
                 </div>
               ) : null}
 
-              {payload.sourceDocumentAvailable === false ? (
+              {payload.sourceDocumentAvailable === false &&
+              request.requestType !== 'leave' &&
+              payload.hideDocumentLines !== true ? (
                 <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                   <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                   <div>
-                    <p className="font-semibold">Source document details could not be loaded from Business Central</p>
+                    <p className="font-semibold">Petty cash / source header could not be read from Business Central</p>
                     <p className="mt-1 text-amber-800">
-                      The approval entry and timeline are still valid — this is not auto-approved.
-                      You can still Approve or Reject. For purchase requisitions, refresh after deploy if lines stay missing.
+                      {isReadOnly
+                        ? 'The approval itself is valid. This screen is showing the approval entry because the published Payments Header query did not return this document number after it was approved.'
+                        : 'The approval entry is still valid. You can Approve or Reject. Header and lines will appear once Business Central returns the source document.'}
                     </p>
                   </div>
                 </div>
@@ -275,9 +433,9 @@ export function ApprovalDetail() {
               {lines.length && lineKeys.length ? (
                 <div className="border-t border-slate-200 pt-4">
                   <p className="mb-2 text-sm font-semibold text-slate-900">Document lines</p>
-                  <div className="overflow-x-auto rounded-md border border-slate-200">
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
                     <table className="min-w-full border-collapse text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <thead className="border-b border-slate-200 bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                           {lineKeys.map((key) => (
                             <th
@@ -310,7 +468,13 @@ export function ApprovalDetail() {
                     </table>
                   </div>
                 </div>
-              ) : null}
+              ) : request.requestType === 'leave' ||
+                payload.sourceDocumentAvailable === false ||
+                payload.hideDocumentLines === true ? null : (
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                  No document lines were returned from Business Central for this request.
+                </div>
+              )}
 
               <RequestAttachments
                 requestId={request.id}
@@ -327,24 +491,42 @@ export function ApprovalDetail() {
                 </div>
               ) : (
                 <>
-                  <div>
-                    <p className="mb-2 text-sm font-semibold text-slate-900">Approval comment</p>
+                  <div className="border-t border-slate-200 pt-5">
+                    <p className="mb-2 text-sm font-semibold text-slate-900">
+                      {request.requestType === 'hrServiceLetter' ? 'HR remarks (required)' : 'Approval comment'}
+                    </p>
                     <Textarea
                       value={comment}
                       onChange={(event) => setComment(event.target.value)}
-                      placeholder="Add approval note (pre-filled from application reason)"
+                      placeholder={
+                        request.requestType === 'hrServiceLetter'
+                          ? 'Enter HR remarks (shown to the employee)'
+                          : request.requestType === 'employeeExit'
+                            ? 'Add a note. A reason is required to reject.'
+                            : 'Add approval note (pre-filled from application reason)'
+                      }
                     />
+                    {request.requestType === 'hrServiceLetter' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Remarks are required for both approve and reject, the same as Hijra letter processing.
+                      </p>
+                    ) : request.requestType === 'employeeExit' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Transfer and resignation go to the Immediate Supervisor first, then HR. Exit forms do not
+                        appear here.
+                      </p>
+                    ) : null}
                   </div>
 
                   {!canApprove ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                      {!hasApproverRole
+                      {!hasApproverRole && !assignedPendingApprover
                         ? 'Your role does not have approval authority for this document.'
                         : 'Maker cannot approve own request.'}
                     </div>
                   ) : null}
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-5">
                     <Button disabled={!canApprove || approval.isPending} onClick={() => setDecision('Approved')}>
                       <Check className="h-4 w-4" />
                       Approve
@@ -363,12 +545,12 @@ export function ApprovalDetail() {
             </CardContent>
           </Card>
 
-          <Card className="min-w-0">
-            <CardHeader>
+          <Card className="min-w-0 overflow-hidden xl:sticky xl:top-5">
+            <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
               <CardTitle>Maker/checker timeline</CardTitle>
               <CardDescription>Audit trail with timestamps.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-5">
               <ApprovalTimeline steps={request.approvalSteps} />
             </CardContent>
           </Card>
@@ -382,7 +564,35 @@ export function ApprovalDetail() {
         confirmLabel={decision ?? 'Submit'}
         onCancel={() => setDecision(null)}
         onConfirm={() => {
-          if (decision) approval.mutate({ decision, comment: comment.trim() || applicationReason })
+          const chosen = decision
+          if (!chosen) {
+            setDecision(null)
+            return
+          }
+          if (chosen === 'Rejected' && comment.trim().length < 3) {
+            toast.error('Enter a reason of at least 3 characters to reject or return this request.')
+            setDecision(null)
+            return
+          }
+          const note = comment.trim() || applicationReason
+          if (request?.requestType === 'hrServiceLetter' && note.length < 3) {
+            toast.error('Enter HR remarks of at least 3 characters before recording the decision.')
+            setDecision(null)
+            return
+          }
+          approval.mutate(
+            { decision: chosen, comment: note },
+            {
+              // Leave the detail page once BC has recorded the decision: the
+              // document drops out of the pending-approval query straight
+              // away, so staying here renders an unloadable blank screen.
+              onSuccess: () => {
+                navigate(chosen === 'Approved' ? '/approvals/approved' : '/approvals/rejected', {
+                  replace: true,
+                })
+              },
+            },
+          )
           setDecision(null)
         }}
       />

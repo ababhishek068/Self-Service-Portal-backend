@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, isBefore, isSameDay, parseISO } from 'date-fns'
+import { differenceInCalendarDays, formatISO, isBefore, isSameDay, parseISO } from 'date-fns'
 import { z } from 'zod'
 import { isErpWorkingDate } from '@/utils/validators'
 
@@ -13,6 +13,12 @@ const workingDateField = dateField.refine(
   (value) => isErpWorkingDate(value),
   'Date must equal the ERP working date (no backdating or future-dating)',
 )
+/** Need-by / required dates may be today or later. Document/posting dates stay on working date. */
+const needByDateField = dateField.refine((value) => {
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseISO(`${value}T12:00:00`) : parseISO(value)
+  const startOfToday = parseISO(`${formatISO(today(), { representation: 'date' })}T00:00:00`)
+  return !Number.isNaN(parsed.getTime()) && !isBefore(parsed, startOfToday)
+}, 'Required date cannot be in the past')
 const faTagPattern = /^FA\/[A-Z0-9]+\/[A-Z0-9]+\/[A-Z0-9]+\/\d{3,5}\/\d{4}$/
 const moneyField = z.coerce.number().positive('Amount must be greater than zero')
 const quantityField = z.coerce.number().positive('Quantity must be greater than zero')
@@ -119,23 +125,62 @@ export const staffClaimHeaderSchema = z.object({
   purpose: z.string().min(3, 'Claim purpose is required'),
 })
 
-export const staffClaimLineSchema = z.object({
-  claimType: z.string().min(1, 'Claim type is required'),
-  accountNo: z.string().min(1, 'Account number is required'),
-  accountName: optionalText,
-  hospitalCategory: optionalText,
-  medicalAmount: z.coerce.number().min(0).default(0),
-  amount: moneyField,
-  amountToRefund: z.coerce.number().min(0).optional().default(0),
-  claimReceiptNo: optionalText,
-  expenditureDate: workingDateField,
-  expenditureDescription: z.string().min(3, 'Expenditure description is required'),
-})
+export const staffClaimLineSchema = z
+  .object({
+    claimType: z.string().min(1, 'Claim type is required'),
+    accountNo: z.string().min(1, 'Choose a claim type with a G/L account, or select one manually'),
+    accountName: optionalText,
+    hospitalCategory: optionalText,
+    patient: optionalText,
+    relationship: optionalText,
+    dependant: optionalText,
+    dependantDateOfBirth: optionalText,
+    medicalAmount: z.coerce.number().min(0).default(0),
+    amount: moneyField,
+    amountToRefund: z.coerce.number().min(0).optional().default(0),
+    claimReceiptNo: optionalText,
+    expenditureDate: workingDateField,
+    expenditureDescription: z.string().min(3, 'Expenditure description is required'),
+  })
+  .superRefine((data, ctx) => {
+    const claimType = String(data.claimType ?? '').toUpperCase()
+    if (!claimType.includes('MEDICAL') && !claimType.startsWith('MED')) return
+    const patient = String(data.patient ?? 'self').toLowerCase()
+    if (patient !== 'dependant') return
+    if (!String(data.relationship ?? '').trim()) {
+      ctx.addIssue({ code: 'custom', path: ['relationship'], message: 'Relationship is required for dependant claims' })
+    }
+    if (!String(data.dependant ?? '').trim()) {
+      ctx.addIssue({ code: 'custom', path: ['dependant'], message: 'Select the dependant from HR next of kin' })
+    }
+    if (String(data.relationship ?? '').toLowerCase() === 'child') {
+      const dob = String(data.dependantDateOfBirth ?? '').trim()
+      if (!dob) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dependant'],
+          message: 'Child dependants need a date of birth in Business Central (HR Employee Kin)',
+        })
+        return
+      }
+      const born = parseISO(dob.length === 10 ? `${dob}T12:00:00` : dob)
+      if (Number.isNaN(born.getTime())) return
+      const age = differenceInCalendarDays(today(), born) / 365.25
+      if (age > 18) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dependant'],
+          message: 'Child dependants above 18 years are not eligible for medical claims',
+        })
+      }
+    }
+  })
 
 export const imprestHeaderSchema = z
   .object({
     dateRequired: workingDateField,
     purpose: z.string().min(3, 'Imprest purpose is required'),
+    travelDestination: optionalText,
     travelDate: dateField,
     returnDate: dateField,
   })
@@ -150,6 +195,7 @@ export const imprestLineHeaderSchema = z.object({
   destination: z.string().min(1, 'Travel destination is required'),
   dutyArea: z.string().min(1, 'Duty area is required'),
   noOfDays: z.coerce.number().positive('No. of days is required'),
+  dailyRate: z.coerce.number().min(0).optional().default(0),
   amount: moneyField,
 })
 
@@ -169,26 +215,31 @@ export const imprestSurrenderHeaderSchema = z.object({
 })
 
 export const storeHeaderSchema = z.object({
-  dateRequired: workingDateField,
-  description: z.string().min(3, 'Request description is required'),
-  // Optional until AL 1.0.2.360 is published; the backend omits it when blank
-  // so older AL builds keep working.
-  issuingStore: optionalText,
+  requestDate: workingDateField,
+  dateRequired: needByDateField,
+  requestedBy: optionalText,
+  division: optionalText,
+  department: optionalText,
+  requestType: z.enum(['item', 'asset']).default('item'),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+  justification: z.string().min(3, 'Purpose / justification is required'),
 })
 
 export const storeLineSchema = z
   .object({
     type: z.string().min(1, 'Type is required'),
-    issuingStore: z.string().min(1, 'Issuing store is required'),
-    itemNo: z.string().min(1, 'Item or asset number is required'),
-    description: optionalText,
+    itemNo: optionalText,
+    itemName: z.string().min(2, 'Item / asset name is required'),
+    description: z.string().min(2, 'Description is required'),
+    uom: z.string().min(1, 'UOM is required'),
     quantity: quantityField,
+    preferredBrandModel: optionalText,
   })
   .superRefine((data, ctx) => {
-    if (data.type === '1' && Number(data.quantity) <= 0) {
+    if (Number(data.quantity) <= 0) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Quantity is required for item lines',
+        message: 'Quantity is required',
         path: ['quantity'],
       })
     }
@@ -232,19 +283,57 @@ export const transportPassengerLineSchema = z.object({
   }
 })
 
-export const purchaseHeaderSchema = z.object({
-  dateNeeded: workingDateField,
-  description: z.string().min(3, 'Description is required'),
-  requestingDepartment: optionalText,
-})
+export const purchaseHeaderSchema = z
+  .object({
+    requestDate: workingDateField,
+    requestedBy: optionalText,
+    employeeNo: optionalText,
+    division: optionalText,
+    dateNeeded: needByDateField,
+    purchaseMode: z.literal('local').default('local'),
+    budgetType: z.enum(['project', 'nonProject']).default('nonProject'),
+    purchaseRequestType: z.enum(['goods', 'service', 'consultancy', 'other']).default('goods'),
+    otherPurchaseType: optionalText,
+    priority: z.enum(['normal', 'urgent', 'critical']).default('normal'),
+    requestingDepartment: z.string().min(1, 'Department is required'),
+    projectCode: optionalText,
+    justification: z.string().min(3, 'Purpose / justification is required'),
+    technicalRequirement: optionalText,
+    scopeOfWork: optionalText,
+    otherRequirements: optionalText,
+  })
+  .superRefine((data, ctx) => {
+    if (data.budgetType === 'project' && !String(data.projectCode ?? '').trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['projectCode'],
+        message: 'Project Name / Code is required for project-funded purchases',
+      })
+    }
+    if (data.purchaseRequestType === 'other' && !String(data.otherPurchaseType ?? '').trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['otherPurchaseType'],
+        message: 'Specify the purchase type',
+      })
+    }
+  })
 
 export const purchaseLineSchema = z.object({
-  itemNo: z.string().min(1, 'Item number is required'),
-  location: optionalText,
-  reasonForRequest: z.string().min(3, 'Reason for request is required'),
-  specification: optionalText,
-  quantity: quantityField,
   type: z.string().min(1, 'Type is required'),
+  itemNo: optionalText,
+  itemName: z.string().min(1, 'Item / service name is required'),
+  category: z.string().min(1, 'Category is required'),
+  description: z.string().min(2, 'Description is required'),
+  specification: z.string().min(3, 'Specification is required'),
+  quantity: quantityField,
+  uom: z.string().min(1, 'UOM is required'),
+  estimatedUnitPrice: z.coerce.number().min(0).optional().default(0),
+  estimatedTotalPrice: z.coerce.number().min(0).optional(),
+  preferredBrandModel: optionalText,
+  requiredDate: needByDateField,
+  suggestedSupplier: optionalText,
+  remarks: optionalText,
 })
 
 export const transferOrderHeaderSchema = z

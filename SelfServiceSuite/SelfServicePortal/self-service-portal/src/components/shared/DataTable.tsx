@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+import { sortNewestFirst } from '@/utils/sortNewestFirst'
 
 export interface DataTableColumn<T> {
   id: string
@@ -34,8 +35,12 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const [page, setPage] = useState(1)
   const pageSize = compact ? 20 : 10
-  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
-  const pagedRows = useMemo(() => rows.slice((page - 1) * pageSize, page * pageSize), [page, pageSize, rows])
+  const orderedRows = useMemo(() => sortNewestFirst(rows, getRowId), [getRowId, rows])
+  const pageCount = Math.max(1, Math.ceil(orderedRows.length / pageSize))
+  const pagedRows = useMemo(
+    () => orderedRows.slice((page - 1) * pageSize, page * pageSize),
+    [page, pageSize, orderedRows],
+  )
 
   return (
     <div className="animate-page-in space-y-3 transition-opacity duration-300">
@@ -80,7 +85,7 @@ export function DataTable<T>({
         </TableBody>
       </Table>
 
-      {rows.length > pageSize ? (
+      {orderedRows.length > pageSize ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-slate-600 sm:text-sm">
             Page {page} of {pageCount}

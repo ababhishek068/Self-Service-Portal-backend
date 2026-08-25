@@ -1,10 +1,11 @@
 import { config } from './config.js'
 import {
+  callSoapMethod,
+  configuredODataBases,
+  fetchODataFirstBase,
   fetchODataFromBase,
   fetchODataMetadata,
-  fetchOData,
   odataString,
-  patchODataRecord,
   type ODataRecord,
 } from './bcClient.js'
 
@@ -82,12 +83,83 @@ const JOB_TITLE_FIELDS = [
 let jobCatalogCache: { expiresAt: number; rows: Array<{ code: string; title: string }> } | null = null
 const entitySetCache = new Map<string, { expiresAt: number; names: string[] }>()
 
-function employeeFieldText(record: Record<string, unknown>, keys: string[], fallback = '') {
+export function employeeFieldText(record: Record<string, unknown>, keys: string[], fallback = '') {
   for (const key of keys) {
     const value = record[key]
     if (value !== undefined && value !== null && String(value).trim()) return String(value).trim()
   }
   return fallback
+}
+
+/**
+ * ABH employee card: Global Dimension 1 = Division, Global Dimension 2 = Department,
+ * Location/Division Code = District, Branch Name = branch. Do not treat GD1 as department
+ * or GD2 as branch — that swapped Zerihun to Department = Finance and Admin / District = IT.
+ */
+export function mapAbhEmployeeOrg(record: Record<string, unknown>) {
+  const divisionCode = employeeFieldText(record, ['GlobalDimension1Code', 'Division', 'Global_Dimension_1_Code'])
+  const divisionName = employeeFieldText(
+    record,
+    ['DivisionName', 'Division_Name', 'GlobalDimension1Name', 'Global_Dimension_1_Name'],
+    divisionCode,
+  )
+  const departmentCode = employeeFieldText(record, [
+    'GlobalDimension2Code',
+    'Global_Dimension_2_Code',
+    'DepartmentCode',
+    'Department_Code',
+  ])
+  let departmentName = employeeFieldText(record, [
+    'GlobalDimension2Name',
+    'Global_Dimension_2_Name',
+    'DepartmentName',
+    'Department_Name',
+  ], departmentCode)
+  if (
+    departmentName &&
+    divisionName &&
+    departmentName.toLowerCase() === divisionName.toLowerCase() &&
+    departmentCode &&
+    departmentCode.toLowerCase() !== divisionCode.toLowerCase()
+  ) {
+    departmentName = employeeFieldText(record, ['GlobalDimension2Name', 'Global_Dimension_2_Name'], departmentCode)
+  }
+  const district = employeeFieldText(record, [
+    'DistrictName',
+    'District_Name',
+    'DistrictCode',
+    'LocationDivisionCode',
+    'Location_Division_Code',
+    'District',
+    'GlobalDimension3Name',
+    'Global_Dimension_3_Name',
+    'GlobalDimension3Code',
+    'Global_Dimension_3_Code',
+  ])
+  const branchName = employeeFieldText(record, [
+    'BranchName',
+    'Branch_Name',
+    'BranchDisplayName',
+    'Branch_Display_Name',
+  ])
+  const responsibilityCenter = employeeFieldText(record, [
+    'ResponsibilityCenter',
+    'Responsibility_Center',
+  ])
+  const resolvedBranch =
+    branchName ||
+    (/head\s*office|^ho$/i.test(responsibilityCenter) ? 'Head Office' : '') ||
+    (district ? '' : 'Head Office')
+  return {
+    divisionCode,
+    divisionName,
+    departmentCode,
+    departmentName,
+    district,
+    branchCode: resolvedBranch === 'Head Office' ? 'HO' : resolvedBranch,
+    branchName: resolvedBranch,
+    sector: employeeFieldText(record, ['SectorName', 'Sector_Name', 'Sector']),
+  }
 }
 
 export const EMPLOYEE_ACCOUNT_NO_FIELDS = [
@@ -404,6 +476,15 @@ export async function fetchEmployeeSalaryBaseFast(
   return 0
 }
 
+export async function resolveEmployeeMonthlySalaryBase(
+  employeeNo: string,
+  hints: { customerNo?: string; existing?: number } = {},
+) {
+  const existing = Number(hints.existing ?? 0)
+  if (Number.isFinite(existing) && existing > 0) return existing
+  return fetchEmployeeSalaryBaseForAdvance(employeeNo, { customerNo: hints.customerNo })
+}
+
 export async function fetchEmployeeSalaryBaseForAdvance(
   employeeNo: string,
   hints: {
@@ -453,10 +534,45 @@ export async function fetchEmployeeSalaryBaseForAdvance(
 
 const DIMENSION_SERVICES = ['QyDimensionValues', 'DimensionValue', 'Dimension_Values']
 const DIMENSION_LIST_FILTERS = [
+  // ABH query 50036 publishes column Global_Dimension_No_ with the trailing
+  // underscore. Keep this first so the normal UAT lookup succeeds immediately.
+  'Global_Dimension_No_ eq 2',
+  "Dimension_Code eq 'DEPARTMENT'",
+  "DimensionCode eq 'DEPARTMENT'",
   "Dimension_Code eq 'DEPARTMENTS'",
   "DimensionCode eq 'DEPARTMENTS'",
   "Auxiliary_Index_1 eq 'DEPART/DIST'",
   "AuxiliaryIndex1 eq 'DEPART/DIST'",
+  'Global_Dimension_No eq 2',
+  'GlobalDimensionNo eq 2',
+]
+
+const DEPARTMENT_PAGE_CODE_KEYS = [
+  'Department_Code',
+  'DepartmentCode',
+  'Department_x0020_Code',
+  'Code',
+]
+
+const DEPARTMENT_PAGE_NAME_KEYS = [
+  'Department_Name',
+  'DepartmentName',
+  'Department_x0020_Name',
+  'Name',
+]
+
+const DIMENSION_CODE_KEYS = [
+  'Code',
+  'Code_',
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+]
+
+const DIMENSION_GLOBAL_NO_KEYS = [
+  'Global_Dimension_No_',
+  'GlobalDimensionNo',
+  'Global_Dimension_No',
+  'Global_x0020_Dimension_x0020_No_x002e_',
 ]
 
 function dimensionRowText(row: ODataRecord, keys: string[]) {
@@ -469,11 +585,25 @@ function dimensionRowText(row: ODataRecord, keys: string[]) {
   return ''
 }
 
+/** Identify department rows when BC cannot filter the published dimension query. */
+export function isRequestingDepartmentDimensionRow(row: ODataRecord) {
+  const dimensionCode = dimensionRowText(row, [
+    'Dimension_Code',
+    'DimensionCode',
+    'Auxiliary_Index_1',
+    'AuxiliaryIndex1',
+  ]).toUpperCase()
+  if (['DEPARTMENT', 'DEPARTMENTS', 'DEPART/DIST'].includes(dimensionCode)) return true
+
+  const globalDimensionNo = Number(dimensionRowText(row, DIMENSION_GLOBAL_NO_KEYS))
+  return Number.isFinite(globalDimensionNo) && globalDimensionNo === 2
+}
+
 /** Match a dimension OData row to a human label or code (for tests and lookup). */
 export function pickDimensionCodeFromRow(row: ODataRecord, label: string, maxLen = 20) {
   const normalized = label.trim().toLowerCase()
   if (!normalized) return ''
-  const code = dimensionRowText(row, ['Code', 'Code_', 'GlobalDimension1Code'])
+  const code = dimensionRowText(row, ['Code', 'Code_', 'GlobalDimension2Code'])
   const name = dimensionRowText(row, ['Name', 'Description', 'Dimension_Value_Name'])
   if (!code || code.length > maxLen) return ''
   if (name.toLowerCase() === normalized) return code
@@ -484,7 +614,9 @@ export function pickDimensionCodeFromRow(row: ODataRecord, label: string, maxLen
 async function fetchDimensionRows(filter: string, top = 1) {
   for (const base of odataBases()) {
     for (const service of DIMENSION_SERVICES) {
-      const rows = (await fetchODataFromBase(base, service, { $filter: filter, $top: top }).catch(
+      const query: Record<string, unknown> = { $top: top }
+      if (filter.trim()) query.$filter = filter
+      const rows = (await fetchODataFromBase(base, service, query).catch(
         () => null,
       )) as ODataRecord[] | null
       if (Array.isArray(rows) && rows.length > 0) return rows
@@ -507,10 +639,13 @@ async function scanDimensionListForLabel(label: string, maxLen = 20) {
 function dimensionNameFilters(label: string) {
   const escaped = odataString(label)
   const scoped = [
+    `Name eq '${escaped}' and Dimension_Code eq 'DEPARTMENT'`,
+    `Name eq '${escaped}' and DimensionCode eq 'DEPARTMENT'`,
     `Name eq '${escaped}' and Dimension_Code eq 'DEPARTMENTS'`,
     `Name eq '${escaped}' and DimensionCode eq 'DEPARTMENTS'`,
     `Name eq '${escaped}' and Auxiliary_Index_1 eq 'DEPART/DIST'`,
     `Name eq '${escaped}' and AuxiliaryIndex1 eq 'DEPART/DIST'`,
+    `Description eq '${escaped}' and Dimension_Code eq 'DEPARTMENT'`,
     `Description eq '${escaped}' and Dimension_Code eq 'DEPARTMENTS'`,
     `Description eq '${escaped}' and Auxiliary_Index_1 eq 'DEPART/DIST'`,
   ]
@@ -525,13 +660,12 @@ function dimensionNameFilters(label: string) {
 async function resolveDimensionCodeByName(name: string, maxLen = 20) {
   const trimmed = name.trim()
   if (!trimmed) return ''
-  if (trimmed.length <= maxLen) {
+  if (trimmed.length <= maxLen && !trimmed.includes(' ')) {
     const byCode = await fetchDimensionRows(`Code eq '${odataString(trimmed)}'`, 1)
     if (byCode.length > 0) {
       const code = dimensionRowText(byCode[0]!, ['Code', 'Code_'])
       if (code && code.length <= maxLen) return code
     }
-    return trimmed
   }
 
   for (const filter of dimensionNameFilters(trimmed)) {
@@ -539,6 +673,11 @@ async function resolveDimensionCodeByName(name: string, maxLen = 20) {
     if (rows.length === 0) continue
     const code = pickDimensionCodeFromRow(rows[0]!, trimmed, maxLen)
     if (code) return code
+    // Only trust an unverified first row when BC gave us no name to check it
+    // against. Taking the code regardless books the document against whatever
+    // department happened to sort first.
+    const rowName = dimensionRowText(rows[0]!, ['Name', 'Description', 'Dimension_Value_Name'])
+    if (rowName) continue
     const fallback = dimensionRowText(rows[0]!, ['Code', 'Code_'])
     if (fallback && fallback.length <= maxLen) return fallback
   }
@@ -549,37 +688,6 @@ async function resolveDimensionCodeByName(name: string, maxLen = 20) {
   return ''
 }
 
-const EMPLOYEE_PATCH_SERVICES = ['QyHREmployee', 'Employee_Card', 'EmployeeCard', 'QyHREmployeeCard']
-
-async function patchEmployeeGlobalDimension1Code(employeeNo: string, departmentCode: string) {
-  const trimmed = employeeNo.trim()
-  const code = departmentCode.trim()
-  if (!trimmed || !code) return false
-
-  const bodies = [{ GlobalDimension1Code: code }, { Global_Dimension_1_Code: code }]
-  for (const base of odataBases()) {
-    for (const service of EMPLOYEE_PATCH_SERVICES) {
-      for (const body of bodies) {
-        try {
-          await patchODataRecord(base, service, trimmed, body)
-          return true
-        } catch {
-          /* try next service/field shape */
-        }
-      }
-    }
-  }
-  return false
-}
-
-async function syncEmployeeGlobalDimension1Code(employeeNo: string, departmentCode: string) {
-  const emp = await fetchEmployeeRecordFast(employeeNo)
-  const current = String(emp?.GlobalDimension1Code ?? '').trim()
-  if (!departmentCode || current === departmentCode) return
-  if (current.length <= 20) return
-  await patchEmployeeGlobalDimension1Code(employeeNo, departmentCode)
-}
-
 /** Resolve department/branch codes that fit BC Code[20] fields on finance documents. */
 export async function resolveEmployeeDimensionCodesForSoap(
   employeeNo: string,
@@ -587,45 +695,200 @@ export async function resolveEmployeeDimensionCodesForSoap(
 ) {
   const emp = await fetchEmployeeRecordFast(employeeNo)
   const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
+    emp?.GlobalDimension2Code ?? emp?.DepartmentCode ?? emp?.Department ?? hints.department ?? '',
   ).trim()
   const branchRaw = String(
-    emp?.GlobalDimension2Code ?? emp?.Branch ?? hints.branchCode ?? '',
+    emp?.BranchCode ?? emp?.BranchName ?? emp?.Branch ?? hints.branchCode ?? '',
   ).trim()
 
-  const [departmentCode, branchCode] = await Promise.all([
-    resolveDimensionCodeByName(departmentRaw),
-    resolveDimensionCodeByName(branchRaw),
-  ])
+  const departmentCode = await resolveDimensionCodeByName(departmentRaw)
+  const branchCode = branchRaw.length <= 20 ? branchRaw : ''
 
   return { departmentCode, branchCode }
 }
 
 /**
- * Before finance documents (claims, etc.), ensure the employee's Global Dimension 1
- * fits BC Code[20]. HIJRA sometimes stores the full department name on the employee card.
+ * Before finance documents (claims, etc.), ensure the employee's Global Dimension 2
+ * department can be resolved to the Code[20] expected by SOAP.
  */
+function firstEmployeeFieldText(
+  record: ODataRecord | null | undefined,
+  keys: string[],
+) {
+  if (!record) return ''
+  return employeeFieldText(record, keys)
+}
+async function resolveDimensionCodeCandidate(raw: string, maxLen = 20) {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  // Anything short enough to BE a Code[20] gets a direct code lookup first —
+  // including codes with spaces. Skipping that fast path pushed spaced codes
+  // through a dozen name-shaped filters before finding the same row.
+  if (trimmed.length <= maxLen) {
+    const byCode = await fetchDimensionRows(`Code eq '${odataString(trimmed)}'`, 1)
+    if (byCode.length > 0) {
+      const code = dimensionRowText(byCode[0]!, ['Code', 'Code_'])
+      if (code && code.length <= maxLen) return code
+    }
+  }
+  const byName = await resolveDimensionCodeByName(trimmed, maxLen)
+  if (byName) return byName
+
+  // Last resort: the Departments master (table 50935) can carry codes that are
+  // not published as Dimension Values. Match by code OR label, then hand the
+  // code to BC (AL ValidateTableRelation=false on Purchase Header.Department).
+  if (trimmed.length <= maxLen) {
+    const departments = await fetchRequestingDepartmentOptions().catch(() => [])
+    const exact = departments.find((row) => row.value.toLowerCase() === trimmed.toLowerCase())
+    if (exact) return exact.value
+  }
+  {
+    const departments = await fetchRequestingDepartmentOptions().catch(() => [])
+    const byLabel = departments.find((row) => row.label.toLowerCase() === trimmed.toLowerCase())
+    if (byLabel?.value && byLabel.value.length <= maxLen) return byLabel.value
+  }
+  return ''
+}
+
+function isDepartmentPageLevel(row: ODataRecord) {
+  const level = dimensionRowText(row, ['level', 'Level'])
+  if (!level) return true
+  const normalized = level.trim().toLowerCase()
+  return normalized === 'department' || normalized === '0'
+}
+
+function inferDepartmentCodeFromRow(row: ODataRecord) {
+  const direct = dimensionRowText(row, DEPARTMENT_PAGE_CODE_KEYS)
+  if (direct) return direct
+  for (const [key, value] of Object.entries(row)) {
+    if (!/department/i.test(key) || !/code/i.test(key)) continue
+    const text = String(value ?? '').trim()
+    if (text && text.length <= 20) return text
+  }
+  return dimensionRowText(row, DIMENSION_CODE_KEYS)
+}
+
+/** All department codes for purchase/store requisition dropdowns — merged from BC masters. */
+export async function fetchRequestingDepartmentOptions() {
+  const byCode = new Map<string, { value: string; label: string }>()
+  const add = (value: string, label: string) => {
+    const code = value.trim()
+    // BC Code[20] permits spaces, and ABH UAT does use codes like "FIN ADMIN".
+    // Only the length cap is a real BC constraint here — rejecting spaces
+    // silently emptied the whole dropdown ("No matches"). Values reaching this
+    // point already came from a Code/Department Code column, not a free label.
+    if (!code || code.length > 20) return
+    const name = (label || code).trim()
+    const previous = byCode.get(code)
+    byCode.set(code, {
+      value: code,
+      label: previous?.label && previous.label !== code ? previous.label : name !== code ? name : code,
+    })
+  }
+
+  const pageRows = await fetchODataFirstBase('PgDepartmentsList', { $top: 5000 })
+  for (const row of pageRows) {
+    if (!isDepartmentPageLevel(row)) continue
+    const code = inferDepartmentCodeFromRow(row)
+    const name = dimensionRowText(row, DEPARTMENT_PAGE_NAME_KEYS)
+    if (code) add(code, name || code)
+  }
+
+  // The custom Departments page is authoritative. If it is not published,
+  // fall back to Dimension Values global dimension 2 (the table relation used
+  // by Departments."Department Code"). Stop at the first valid field shape so
+  // one dropdown does not generate a long chain of rejected OData filters.
+  if (byCode.size === 0) {
+    for (const listFilter of DIMENSION_LIST_FILTERS) {
+      const rows = await fetchDimensionRows(listFilter, 5000)
+      for (const row of rows) {
+        const code = dimensionRowText(row, DIMENSION_CODE_KEYS)
+        const name = dimensionRowText(row, ['Name', 'Description', 'Dimension_Value_Name'])
+        if (code) add(code, name || code)
+      }
+      if (byCode.size > 0) break
+    }
+  }
+
+  // Last fallback: some BC publications expose the rows but reject filters on
+  // their generated field names. Fetch once and apply the dimension test here.
+  if (byCode.size === 0) {
+    const rows = await fetchDimensionRows('', 5000)
+    for (const row of rows) {
+      if (!isRequestingDepartmentDimensionRow(row)) continue
+      const code = dimensionRowText(row, DIMENSION_CODE_KEYS)
+      const name = dimensionRowText(row, ['Name', 'Description', 'Dimension_Value_Name'])
+      if (code) add(code, name || code)
+    }
+  }
+
+  return [...byCode.values()].sort((a, b) => a.label.localeCompare(b.label))
+}
+
+/** Map a portal department label/code to a BC Dimension Value code (Purchase Req, etc.). */
+export async function resolveRequestingDepartmentCode(raw: string, maxLen = 20) {
+  return resolveDimensionCodeCandidate(String(raw ?? '').trim(), maxLen)
+}
+
+
+const EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS = [
+  'GlobalDimension2Code',
+  'Global_Dimension_2_Code',
+  'DepartmentCode',
+  'Department_Code',
+  'Department',
+  'ShortcutDimension2Code',
+  'Shortcut_Dimension_2_Code',
+]
+
+const EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS = [
+  'GlobalDimension2Name',
+  'Global_Dimension_2_Name',
+  'DepartmentName',
+  'Department_Name',
+]
+
+export async function resolveFinanceDepartmentCodeForSoap(
+  employeeNo: string,
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
+) {
+  const emp = (await fetchMergedEmployeeRecord(employeeNo)) ?? (await fetchEmployeeRecordFast(employeeNo))
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_CODE_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const key of EMPLOYEE_FINANCE_DEPARTMENT_NAME_FIELDS) {
+    const resolved = await resolveDimensionCodeCandidate(firstEmployeeFieldText(emp, [key]))
+    if (resolved) return resolved
+  }
+
+  for (const hint of [hints.department, hints.departmentName]) {
+    const resolved = await resolveDimensionCodeCandidate(String(hint ?? ''))
+    if (resolved) return resolved
+  }
+
+  return ''
+}
+
 export async function ensureEmployeeDepartmentCodeForFinance(
   employeeNo: string,
-  hints: { department?: string; branchCode?: string } = {},
+  hints: { department?: string; departmentName?: string; branchCode?: string } = {},
 ) {
   const dims = await resolveEmployeeDimensionCodesForSoap(employeeNo, hints)
   const emp = await fetchEmployeeRecordFast(employeeNo)
   const departmentRaw = String(
-    emp?.GlobalDimension1Code ?? emp?.Department ?? hints.department ?? '',
+    emp?.GlobalDimension2Code ?? emp?.DepartmentCode ?? emp?.Department ?? hints.department ?? '',
   ).trim()
 
   if (departmentRaw.length > 20 && !dims.departmentCode) {
     throw Object.assign(
       new Error(
-        `Your BC employee department (${departmentRaw}) is too long and could not be mapped to a dimension code. Ask HR to fix Global Dimension 1 on employee ${employeeNo}.`,
+        `Your BC employee department (${departmentRaw}) is too long and could not be mapped to a dimension code. Ask HR to fix Global Dimension 2 on employee ${employeeNo}.`,
       ),
       { status: 422, code: 'EMPLOYEE_DIMENSION_TOO_LONG' },
     )
-  }
-
-  if (dims.departmentCode) {
-    await syncEmployeeGlobalDimension1Code(employeeNo, dims.departmentCode)
   }
 
   return dims
@@ -665,14 +928,7 @@ export function derivePageODataBaseFromSoapCodeunit(soapCodeunitUrl: string) {
 }
 
 function odataBases() {
-  const derivedPageBase = derivePageODataBaseFromSoapCodeunit(config.BC_SOAP_CODEUNIT_URL)
-  const bases = [
-    config.BC_ODATA_BASE_URL,
-    config.BC_SOAP_PAGE_BASE_URL,
-    config.BC_ODATA_PAGE_BASE_URL,
-    derivedPageBase,
-  ].filter((base): base is string => Boolean(base))
-  return [...new Set(bases.map((base) => normalizeBaseUrl(base)))]
+  return configuredODataBases()
 }
 
 function configuredJobTitle(jobId: string) {
@@ -965,7 +1221,7 @@ export async function probeEmployeeSalarySources(
   }
 }
 
-/** Single fast lookup for login/auth — avoids metadata scans and brute-force OData probing. */
+/** Single fast lookup for login/auth — parallel probes, short per-URL timeout. */
 export async function fetchEmployeeRecordFast(employeeNo: string): Promise<ODataRecord | null> {
   const trimmed = employeeNo.trim()
   if (!trimmed) return null
@@ -980,16 +1236,22 @@ export async function fetchEmployeeRecordFast(employeeNo: string): Promise<OData
     .filter((base): base is string => Boolean(base))
     .map((base) => normalizeBaseUrl(base))
 
-  for (const base of [...new Set(bases)]) {
-    for (const service of FAST_EMPLOYEE_SERVICES) {
-      const rows = (await fetchODataFromBase(base, service, { $filter: filter, $top: 1 }).catch(
-        () => null,
-      )) as ODataRecord[] | null
+  const timeoutMs = config.BC_LOGIN_PROBE_TIMEOUT_MS
+  const probes = [...new Set(bases)].flatMap((base) =>
+    FAST_EMPLOYEE_SERVICES.map(async (service) => {
+      const rows = (await fetchODataFromBase(
+        base,
+        service,
+        { $filter: filter, $top: 1 },
+        timeoutMs,
+      ).catch(() => null)) as ODataRecord[] | null
       if (Array.isArray(rows) && rows.length > 0) return rows[0]!
-    }
-  }
+      return null
+    }),
+  )
 
-  return null
+  const results = await Promise.all(probes)
+  return results.find((row): row is ODataRecord => Boolean(row)) ?? null
 }
 
 async function enrichEmployeeRecordFromPageBases(employeeNo: string, merged: ODataRecord) {
@@ -1106,6 +1368,17 @@ export async function resolveAuthUserJobTitle(
 
   const fromEmployee = await resolveEmployeeJobTitleFast(record, employeeNo)
   if (fromEmployee.trim()) return fromEmployee.trim()
+
+  // ABH StaffPortal SOAP — Job Title from HR-Employee card (designation)
+  try {
+    const profile = await callSoapMethod('FnGetEmployeeProfile', { employeeNo })
+    const raw = String(profile.returnValue ?? '')
+    const match = raw.match(/(?:^|#)JobTitle=([^#]*)/i)
+    const soapTitle = String(match?.[1] ?? '').trim()
+    if (soapTitle && !looksLikeJobCode(soapTitle)) return soapTitle
+  } catch {
+    // SOAP profile optional — fall through to OData / config
+  }
 
   const fromEmployeeNo = configuredJobTitleByEmployeeNo(employeeNo)
   if (fromEmployeeNo) return fromEmployeeNo

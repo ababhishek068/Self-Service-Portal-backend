@@ -233,11 +233,11 @@ export function Profile() {
                 <InfoField label="Marital Status" value={profile.maritalStatus} icon={Users} />
                 <InfoField label="Job Title" value={employee?.jobTitle} icon={Briefcase} />
                 <InfoField label="Job Grade" value={employee?.jobGrade} icon={Briefcase} />
-                <InfoField label="Department" value={employee?.departmentName} icon={Building2} />
+                <InfoField label="Department" value={profile.department || employee?.departmentName} icon={Building2} />
                 <InfoField label="Sector" value={profile.sector} icon={Building2} />
                 <InfoField label="Division" value={profile.division} icon={Building2} />
                 <InfoField label="District" value={profile.district} icon={MapPin} />
-                <InfoField label="Branch" value={employee?.branchName} icon={MapPin} />
+                <InfoField label="Branch" value={profile.branch || employee?.branchName} icon={MapPin} />
                 <InfoField label="Place of Duty" value={employee?.placeOfDuty} icon={MapPin} />
                 <InfoField label="Employment Type" value={profile.employmentType} icon={Briefcase} />
                 <InfoField label="Responsible Center" value={employee?.responsibleCenter} icon={Building2} />

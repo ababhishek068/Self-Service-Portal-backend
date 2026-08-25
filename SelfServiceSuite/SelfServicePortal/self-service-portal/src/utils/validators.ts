@@ -1,9 +1,17 @@
-import { isSameDay, parseISO } from 'date-fns'
+import { formatISO, isSameDay, parseISO } from 'date-fns'
 
 export const workingDate = () => new Date()
 
+/** Local calendar YYYY-MM-DD, recomputed on every use. */
+export function todayIsoDate() {
+  return formatISO(workingDate(), { representation: 'date' })
+}
+
 export function isErpWorkingDate(value: string) {
-  return isSameDay(parseISO(value), workingDate())
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return false
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed === todayIsoDate()
+  return isSameDay(parseISO(trimmed), workingDate())
 }
 
 export function buildFaTagNumber(

@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 import { AttachmentPanel } from './AttachmentPanel'
 import { attachmentVisual, formatFileSize } from './attachmentUi'
 
-const ALLOWED = new Set(['pdf', 'doc', 'docx', 'jpeg', 'jpg', 'png'])
+const ALLOWED = new Set(['pdf', 'doc', 'docx', 'jpg', 'png'])
 
 interface RequestAttachmentsProps {
   requestId: string
@@ -24,6 +24,9 @@ interface RequestAttachmentsProps {
   canUpload: boolean
   canDelete: boolean
   onUpdated: (request: PortalRequest) => void
+  /** When set, user picks a template category before uploading. */
+  categoryOptions?: Array<{ label: string; value: string }>
+  categoryHint?: string
 }
 
 function readFileBase64(file: File): Promise<string> {
@@ -59,10 +62,13 @@ export function RequestAttachments({
   canUpload,
   canDelete,
   onUpdated,
+  categoryOptions,
+  categoryHint,
 }: RequestAttachmentsProps) {
   const toast = useToast()
   const confirm = useConfirm()
   const fileRef = useRef<HTMLInputElement>(null)
+  const [category, setCategory] = useState(categoryOptions?.[0]?.value ?? '')
   const [description, setDescription] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [progress, setProgress] = useState(0)
@@ -88,11 +94,17 @@ export function RequestAttachments({
 
   const submitAttachment = async () => {
     if (!canUpload || uploading) return
+    const categoryPrefix = categoryOptions?.length ? category.trim() : ''
     const desc = description.trim()
-    if (!desc) {
-      toast.error('Enter an attachment description/name first.', 'Description required')
+    if (categoryOptions?.length && !categoryPrefix) {
+      toast.error('Select an attachment category first.', 'Category required')
       return
     }
+    if (!desc) {
+      toast.error('Enter attachment description / remarks first.', 'Description required')
+      return
+    }
+    const attachmentDescription = categoryPrefix ? `${categoryPrefix}: ${desc}` : desc
     if (!selectedFile) {
       toast.error('Choose a file to upload.', 'File required')
       return
@@ -126,7 +138,7 @@ export function RequestAttachments({
               fileType: selectedFile.type || 'application/octet-stream',
               size: selectedFile.size,
               contentBase64,
-              description: desc,
+              description: attachmentDescription,
             })
             return fetchLeaveRequestDetail(documentNo)
           })()
@@ -135,7 +147,7 @@ export function RequestAttachments({
             fileType: selectedFile.type || 'application/octet-stream',
             size: selectedFile.size,
             contentBase64,
-            description: desc,
+            description: attachmentDescription,
           })
       setProgress(100)
       onUpdated(updated)
@@ -187,15 +199,36 @@ export function RequestAttachments({
 
   const uploadSlot = canUpload ? (
     <div className="space-y-3">
+      {categoryOptions?.length ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`attachment-category-${requestId}`} className="text-slate-700">
+            Attachment type
+          </Label>
+          <select
+            id={`attachment-category-${requestId}`}
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+            disabled={uploading}
+            className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+          >
+            {categoryOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {categoryHint ? <p className="text-xs text-slate-500">{categoryHint}</p> : null}
+        </div>
+      ) : null}
       <div className="space-y-1.5">
         <Label htmlFor={`attachment-desc-${requestId}`} className="text-slate-700">
-          Description / name
+          Attachment description / remarks
         </Label>
         <Input
           id={`attachment-desc-${requestId}`}
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="e.g. Receipt, Invoice, Supporting document"
+          placeholder="Brief note about this file"
           disabled={uploading}
           className="bg-white"
         />
@@ -244,7 +277,7 @@ export function RequestAttachments({
           ref={fileRef}
           className="sr-only"
           type="file"
-          accept=".doc,.docx,.pdf,image/*"
+          accept=".pdf,.doc,.docx,.jpg,.png"
           disabled={uploading}
           onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
         />

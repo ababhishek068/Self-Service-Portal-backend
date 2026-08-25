@@ -32,7 +32,10 @@ export function useApprovalDecision(id: string) {
     mutationFn: ({ decision, comment }: { decision: 'Approved' | 'Rejected'; comment: string }) =>
       decideApproval(id, decision, comment),
     onSuccess: async (request, variables) => {
-      queryClient.setQueryData(['approvals', 'detail', id], request)
+      // Do not seed the detail cache with the decision response — it is only
+      // {id, requestNo, status}, not a full PortalRequest, and the detail page
+      // rendered that partial object as a blank screen. Invalidate and let the
+      // detail query refetch instead.
       await queryClient.invalidateQueries({ queryKey: ['approvals'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       toast.success(

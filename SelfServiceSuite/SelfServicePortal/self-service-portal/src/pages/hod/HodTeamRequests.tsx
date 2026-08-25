@@ -10,6 +10,14 @@ import { Input } from '@/components/ui/input'
 const columns: DataTableColumn<HodDepartmentStaffRow>[] = [
   { id: 'employeeNo', header: 'Staff No.', cell: (row) => row.employeeNo },
   { id: 'employee', header: 'Name', cell: (row) => row.employee },
+  {
+    id: 'leaveBalance',
+    header: 'Annual Leave Balance',
+    cell: (row) =>
+      row.leaveBalance === null || row.leaveBalance === undefined
+        ? '—'
+        : `${row.leaveBalance} day${row.leaveBalance === 1 ? '' : 's'}`,
+  },
 ]
 
 export function HodTeamRequests() {
@@ -46,7 +54,13 @@ export function HodTeamRequests() {
         columns={columns}
         getRowId={(row) => row.id}
         onRowClick={(row) => navigate(`/hod/employee/${encodeURIComponent(row.employeeNo)}`)}
-        emptyTitle={query.isLoading ? 'Loading department staff...' : '*** No staff found ***'}
+        emptyTitle={
+          query.isLoading
+            ? 'Loading department staff...'
+            : query.isError
+              ? 'Department staff could not be loaded.'
+              : 'No active staff were found in your department.'
+        }
       />
     </PageWrapper>
   )

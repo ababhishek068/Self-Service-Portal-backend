@@ -7,6 +7,9 @@ export interface AttendanceRow {
   date: string
   staffName: string
   employeeNo?: string
+  jobTitle?: string
+  department?: string
+  status?: 'Signed In' | 'Signed Out' | 'Not Signed In'
   timeIn: string
   timeOut: string
   hoursWorked: string
@@ -15,6 +18,15 @@ export interface AttendanceRow {
   location: string
   comments: string
   highlight?: boolean
+}
+
+export interface WeeklyLateAttendanceSummary {
+  weekStart: string
+  throughDate: string
+  lateCount: number
+  threshold: number
+  notify: boolean
+  message: string
 }
 
 export async function listAttendanceRecords(): Promise<AttendanceRow[]> {
@@ -27,6 +39,11 @@ export async function listTeamAttendanceRecords(): Promise<AttendanceRow[]> {
   requireAuthApiUrl()
   const { rows } = await authGet<{ rows: AttendanceRow[] }>('/api/attendance/team')
   return rows
+}
+
+export async function getWeeklyLateAttendanceSummary(): Promise<WeeklyLateAttendanceSummary> {
+  requireAuthApiUrl()
+  return authGet<WeeklyLateAttendanceSummary>('/api/attendance/weekly-summary')
 }
 
 export async function signInAttendance(): Promise<AttendanceRow> {

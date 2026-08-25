@@ -6,6 +6,7 @@ import { useLayout } from '@/hooks/useLayout'
 import { handleUnderConstructionClick, useNavigation } from '@/hooks/useNavigation'
 import { cn } from '@/lib/utils'
 import { brand } from '@/config/brand'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 function isGroupActive(item: NavItem, pathname: string): boolean {
   if (item.path) return pathname === item.path || (item.path !== '/' && pathname.startsWith(item.path))
@@ -26,10 +27,8 @@ function NavLeaf({ item, depth = 0 }: { item: NavItem; depth?: number }) {
           'group relative flex items-center gap-2.5 py-2.5 text-sm text-white/95 transition-all duration-200',
           depth >= 2 ? 'pl-16 pr-4' : depth === 1 ? 'pl-11 pr-4' : 'px-4',
           isActive && !item.underConstruction
-            ? 'portal-nav-active-bar animate-nav-active bg-gradient-to-r from-[var(--portal-orange)] to-[#f97316] font-medium text-white shadow-[inset_3px_0_0_#fff,0_0_24px_var(--portal-glow-orange)]'
-            : 'hover:bg-white/10 hover:pl-[calc(1rem+2px)] hover:shadow-[inset_3px_0_0_rgba(255,255,255,0.35)]',
-          depth === 1 && 'hover:pl-[calc(2.75rem+2px)]',
-          depth >= 2 && 'hover:pl-[calc(4rem+2px)]',
+            ? 'portal-nav-active-bar bg-white/15 font-semibold text-white shadow-[inset_3px_0_0_#fff]'
+            : 'hover:bg-white/8 hover:shadow-[inset_3px_0_0_rgba(255,255,255,0.28)]',
           item.underConstruction && 'opacity-75',
         )
       }
@@ -82,7 +81,7 @@ function NavGroup({ item, depth = 0 }: { item: NavItem; depth?: number }) {
         <ChevronDown className={cn('chevron-rotate h-4 w-4 opacity-80')} data-open={open ? 'true' : 'false'} />
       </button>
 
-      <div className="nav-submenu-grid bg-[var(--portal-navy-panel)]" data-open={open ? 'true' : 'false'}>
+      <div className="nav-submenu-grid bg-black/10" data-open={open ? 'true' : 'false'}>
         <div className="nav-submenu-inner">
           {item.children?.map((child) =>
             child.children
@@ -116,9 +115,13 @@ export function Sidebar() {
         sidebarOpen ? 'w-[var(--sidebar-width)]' : 'w-0',
       )}
     >
-      <div className="portal-sidebar-brand portal-shimmer-bar shrink-0 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/70">{brand.company}</p>
-        <p className="text-sm font-bold text-white">{brand.productShort}</p>
+      <div className="portal-sidebar-brand portal-shimmer-bar shrink-0 px-3 py-2">
+        <div className="mx-auto flex w-fit items-center justify-center rounded-md bg-white px-2 py-1 shadow-sm">
+          <BrandLogo variant="sidebar" />
+        </div>
+        <p className="mt-2 text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/80">
+          {brand.productShort}
+        </p>
       </div>
       <nav
         ref={navRef}

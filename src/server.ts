@@ -13,6 +13,7 @@ import { buildStaffRouter } from './staff.js'
 import { buildModulesRouter } from './staffModules.js'
 import { buildPortalApiRouter } from './portalApi.js'
 import { apiRequestLogger, currentRequestId, integrationLogPath } from './requestLogger.js'
+import { runAttendanceAutoSignOut } from './attendanceAutomation.js'
 
 const app = express()
 const portalStaticDir = resolve(config.PORTAL_STATIC_DIR)
@@ -68,6 +69,24 @@ app.get('/api/health', (_req, res) => {
     build: readBuildId(),
     time: new Date().toISOString(),
   })
+})
+
+app.get('/api/bc-health', async (_req, res) => {
+  const started = Date.now()
+  try {
+    const rows = (await fetchOData('QyHREmployee', { $top: 1 })) as unknown[] | null
+    res.json({
+      ok: true,
+      ms: Date.now() - started,
+      employeeRows: Array.isArray(rows) ? rows.length : 0,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      ms: Date.now() - started,
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
 })
 
 app.get('/api/config', (_req, res) => {
@@ -345,6 +364,18 @@ app.listen(config.PORT, config.HOST, () => {
       : `React portal build not found at ${portalStaticDir}`,
   )
   console.log(`BC integration logs are written to ${integrationLogPath}`)
+
+  const closeAttendance = async () => {
+    try {
+      const closed = await runAttendanceAutoSignOut()
+      if (closed > 0) console.log(`[attendance] automatically signed out ${closed} open session(s)`)
+    } catch (error) {
+      console.error('[attendance] automatic 7:00 PM sign-out failed', error)
+    }
+  }
+  const attendanceTimer = setInterval(closeAttendance, config.ATTENDANCE_AUTO_SIGN_OUT_INTERVAL_MS)
+  attendanceTimer.unref()
+  void closeAttendance()
 
   const odataCompany = decodeURIComponent(
     (config.BC_ODATA_BASE_URL.match(/Company\('([^']+)'\)/)?.[1] ?? '').replace(/\+/g, ' '),

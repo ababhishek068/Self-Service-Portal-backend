@@ -351,7 +351,13 @@ export async function resolveLeaveApproverHint(
 
   const department =
     context.department ||
-    text(leaveRow, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code', 'Department'])
+    text(leaveRow, [
+      'GlobalDimension2Code',
+      'ShortcutDimension2Code',
+      'DepartmentCode',
+      'Department_Code',
+      'Department',
+    ])
   if (department) {
     const dimensionFilters = [
       `Code eq '${odataString(department)}' and Dimension_Code eq 'DEPARTMENTS'`,
@@ -380,6 +386,20 @@ export async function resolveLeaveApprovalStepsAsync(
   documentNo = '',
   context: LeaveApproverContext = {},
 ) {
+  const resolvedStatus = resolveLeaveStatus(row, approvalEntries)
+
+  // The approver route is useful only after BC has actually received an
+  // approval request.  Previously an Open draft with no Approval Entry fell
+  // through to resolveLeaveApprovalRouteAsync(), which predicts the configured
+  // manager/HOD chain and made that prediction look like two active Pending
+  // Approval steps.  Configured approvers are not workflow entries.
+  if (
+    approvalEntries.length === 0 &&
+    !['Pending Approval', 'Approved', 'Rejected'].includes(resolvedStatus)
+  ) {
+    return []
+  }
+
   if (approvalEntries.length > 0) {
     const enriched = await enrichMappedApprovalSteps(mapApprovalSteps(approvalEntries))
     const needsBetterName = enriched.every(

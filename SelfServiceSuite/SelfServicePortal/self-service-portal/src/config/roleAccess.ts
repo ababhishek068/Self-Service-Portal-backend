@@ -1,4 +1,4 @@
-import { approverRoles, type PortalRole } from '@/config/roles'
+import type { PortalRole } from '@/config/roles'
 
 /** Roles that can open department/HR oversight reports. */
 export const leaveBalanceReportRoles: PortalRole[] = ['hod', 'hr', 'ceo']
@@ -23,6 +23,7 @@ export interface RoleQuickLink {
  * Shortcuts shown on the dashboard — only links the current role is allowed
  * to use. Staff always see self-service actions; managers/HOD/CEO see extras.
  */
+/** ABH UAT — quick links limited to the published self-service modules. */
 export const roleQuickLinks: RoleQuickLink[] = [
   {
     label: 'Submit leave',
@@ -33,7 +34,7 @@ export const roleQuickLinks: RoleQuickLink[] = [
   {
     label: 'New imprest request',
     href: '/finance/imprest',
-    description: 'Raise a staff advance requisition.',
+    description: 'Raise a staff imprest advance requisition.',
     roles: ['staff'],
   },
   {
@@ -46,37 +47,73 @@ export const roleQuickLinks: RoleQuickLink[] = [
     label: 'Approval queue',
     href: '/approvals',
     description: 'Review and approve or reject team requests.',
-    roles: approverRoles,
+    roles: ['lineManager', 'hod', 'finance', 'ceo'],
   },
   {
-    label: 'Staff on leave',
-    href: '/hod/staff-on-leave',
-    description: 'See who in your department is currently on leave.',
-    roles: ['hod'],
+    label: 'Attendance',
+    href: '/hr/attendance',
+    description: 'Sign in and sign out for the day.',
+    roles: ['staff'],
   },
   {
-    label: 'Team requests',
-    href: '/hod/team-requests',
-    description: 'Monitor requests submitted by your department.',
-    roles: ['hod'],
+    label: 'Leave Statement',
+    href: '/hr/leave-statement',
+    description: 'View your leave balances by type.',
+    roles: ['staff'],
   },
   {
-    label: 'Payroll master roll',
-    href: '/ceo/master-roll',
-    description: 'Executive payroll summary for the selected period.',
-    roles: ['ceo'],
+    label: 'Staff Claim',
+    href: '/finance/staff-claim',
+    description: 'Submit a staff claim request.',
+    roles: ['staff'],
   },
   {
-    label: 'Leave balance report',
-    href: '/reports/leave-balance',
-    description: 'Department leave balances across staff.',
-    roles: leaveBalanceReportRoles,
+    label: 'Medical Claim',
+    href: '/finance/medical-claim',
+    description: 'Submit a medical claim request.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Petty Cash',
+    href: '/finance/petty-cash',
+    description: 'Raise a petty cash request.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Imprest Surrender',
+    href: '/finance/imprest-surrender',
+    description: 'Surrender a posted or approved imprest.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Request Letters',
+    href: '/hr/request-letters',
+    description: 'Request guarantee, experience, embassy, and other HR letters.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Employee Exit',
+    href: '/hr/employee-exit',
+    description: 'Submit transfer, resignation, or employee exit form.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Local Purchase',
+    href: '/facility/local-purchase-request',
+    description: 'Request local goods, services, consultancy, or other needs.',
+    roles: ['staff'],
+  },
+  {
+    label: 'Store Requisitions',
+    href: '/facility/store-requisition',
+    description: 'Request items from store.',
+    roles: ['staff'],
   },
 ]
 
 /** One-line summary of what each primary role can do in the portal. */
 export const roleCapabilitySummary: Partial<Record<PortalRole, string>> = {
-  staff: 'Submit HR, finance, and facility requests and track your own activity.',
+  staff: 'Attendance, leave, payslip, claims, imprest, surrender, petty cash, requisitions, request letters, and employee exit.',
   lineManager: 'Everything staff can do, plus approve or reject team requests.',
   hod: 'Manager access plus department team views, attendance, and HR reports.',
   finance: 'Staff self-service plus finance approval authority on pending documents.',

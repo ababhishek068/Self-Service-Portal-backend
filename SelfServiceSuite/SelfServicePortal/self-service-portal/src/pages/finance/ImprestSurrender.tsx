@@ -18,8 +18,37 @@ function firstValue(source: Record<string, unknown>, keys: string[]) {
 }
 
 function isPosted(row: PortalRequest) {
-  const posted = row.payload?.Posted ?? row.payload?.posted
-  return row.status === 'Posted' || posted === true || ['true', 'yes', '1'].includes(String(posted).toLowerCase())
+  const payload = row.payload ?? {}
+  const posted = payload.Posted ?? payload.posted
+  const datePosted = String(
+    firstValue(payload, ['DatePosted', 'Date_Posted', 'PostedDate', 'Date Posted']) ?? '',
+  )
+  const hasPostingDate = Boolean(datePosted) && !datePosted.startsWith('0001-01-01')
+  return (
+    row.status === 'Posted' ||
+    posted === true ||
+    ['true', 'yes', '1'].includes(String(posted).toLowerCase()) ||
+    hasPostingDate
+  )
+}
+
+function isFullySurrendered(row: PortalRequest) {
+  const surrenderStatus = String(
+    firstValue(row.payload ?? {}, ['SurrenderStatus', 'Surrender_Status']) ?? '',
+  ).toLowerCase()
+  return (
+    surrenderStatus === 'full' ||
+    surrenderStatus === 'fully surrendered' ||
+    surrenderStatus === 'complete'
+  )
+}
+
+/** Hijra ESS: posted imprest that is not fully surrendered. ABH also accepts Approved when Posted is missing from status mapping. */
+function isSurrenderableImprest(row: PortalRequest) {
+  if (isFullySurrendered(row)) return false
+  const blocked = ['Draft', 'Pending Approval', 'Rejected', 'Cancelled', 'Canceled']
+  if (blocked.includes(row.status)) return false
+  return isPosted(row) || row.status === 'Approved'
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
@@ -39,18 +68,26 @@ export function ImprestSurrender() {
     queryFn: () => listModuleRequests(imprestModule),
   })
 
-  const imprestOptions = (imprestQuery.data ?? [])
-    .filter(isPosted)
-    .map((row) => ({
-      label: row.requestNo,
-      value: row.requestNo,
-    }))
+  const surrenderable = (imprestQuery.data ?? []).filter(isSurrenderableImprest)
+  const imprestOptions = surrenderable.map((row) => ({
+    label: `${row.requestNo}${row.status && row.status !== 'Posted' ? ` (${row.status})` : ''}`,
+    value: row.requestNo,
+  }))
+  const emptyImprestHint = imprestQuery.isLoading
+    ? 'Loading imprests…'
+    : imprestQuery.isError
+      ? 'Could not load imprests from Business Central.'
+      : (imprestQuery.data ?? []).length === 0
+        ? 'No imprest requisitions found for your employee number.'
+        : surrenderable.length === 0
+          ? 'No posted or approved imprest is available to surrender. Finance must post the imprest in Business Central first, and fully surrendered imprests are excluded.'
+          : 'Select imprest'
 
   return (
     <MultiStepRequestPage
       title="Imprest Surrender"
       headerLabel="New Imprest Surrender"
-      description="Select the imprest to surrender. Surrender lines are generated from the imprest; enter the actual spent and cash receipt details, then request approval."
+      description="Select a posted or approved imprest to surrender. Enter Actual Spent. Cash Receipt No. is only needed when unused cash is returned (fully spent → leave blank / amount 0). Then request approval."
       module={module}
       queryKey={['finance', 'imprest-surrender']}
       listRequests={() => listModuleRequests(module)}
@@ -65,7 +102,7 @@ export function ImprestSurrender() {
           type: 'select',
           valuePaths: ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo'],
           options: imprestOptions,
-          placeholder: imprestQuery.isLoading ? 'Loading imprests…' : 'Select imprest',
+          placeholder: emptyImprestHint,
         },
       ]}
       headerSupplement={(values) => {
@@ -174,7 +211,19 @@ export function ImprestSurrender() {
         fields: [],
         editableFields: [
           { name: 'actualSpent', label: 'Actual Spent', type: 'number' },
-          { name: 'cashReceiptNo', label: 'Cash Receipt No.', type: 'select', options: receipts.options },
+          {
+            name: 'cashReceiptNo',
+            label: 'Cash Receipt No. (optional if fully spent)',
+            type: receipts.options.length > 0 ? 'select' : 'text',
+            options:
+              receipts.options.length > 0
+                ? [{ value: '', label: '— None / not applicable —' }, ...receipts.options]
+                : undefined,
+            placeholder:
+              receipts.options.length > 0
+                ? 'Select posted cash receipt'
+                : 'No posted receipts found — type receipt no. or leave blank if fully spent',
+          },
           { name: 'cashReceiptAmount', label: 'Cash Receipt Amount', type: 'number' },
         ],
         columns: [

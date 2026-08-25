@@ -100,7 +100,7 @@ function TopProgressBar() {
           width: `${value}%`,
           transition: 'width 0.24s cubic-bezier(0.22, 1, 0.36, 1)',
           background:
-            'linear-gradient(90deg, var(--portal-navy) 0%, #0a5cad 45%, var(--portal-orange) 100%)',
+            'linear-gradient(90deg, var(--portal-navy) 0%, var(--portal-blue) 50%, var(--portal-green) 100%)',
           boxShadow: '0 0 10px var(--portal-glow-orange), 0 0 4px rgba(0, 51, 102, 0.4)',
         }}
       >
@@ -114,7 +114,7 @@ function TopProgressBar() {
         <span
           className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full"
           style={{
-            background: 'var(--portal-orange)',
+            background: 'var(--portal-green)',
             boxShadow: '0 0 12px 2px var(--portal-glow-orange)',
           }}
         />
@@ -139,7 +139,7 @@ function BlockingOverlay({ title, message }: ProgressOptions) {
         <div
           className="pointer-events-none absolute inset-x-0 top-0 h-1"
           style={{
-            background: 'linear-gradient(90deg, var(--portal-navy), var(--portal-orange))',
+            background: 'linear-gradient(90deg, var(--portal-navy), var(--portal-green))',
           }}
         />
         <div className="relative mx-auto mb-5 flex h-16 w-16 items-center justify-center">
@@ -148,10 +148,10 @@ function BlockingOverlay({ title, message }: ProgressOptions) {
             style={{ animation: 'portal-blocking-spin 2.4s linear infinite' }}
           />
           <span
-            className="absolute inset-1 rounded-full border-2 border-transparent border-t-[var(--portal-orange)] border-r-[var(--portal-navy)]/40"
+            className="absolute inset-1 rounded-full border-2 border-transparent border-t-[var(--portal-green)] border-r-[var(--portal-navy)]/40"
             style={{ animation: 'portal-blocking-spin 1.1s linear infinite reverse' }}
           />
-          <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/8 to-[var(--portal-orange)]/12">
+          <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/8 to-[var(--portal-green)]/12">
             <Loader2 className="h-6 w-6 animate-spin text-[var(--portal-navy)] motion-reduce:animate-none" />
           </span>
         </div>
@@ -179,7 +179,7 @@ function BackgroundProgressPill({ title, message }: ProgressOptions) {
         role="status"
         className="animate-toast-in flex max-w-[min(92vw,20rem)] items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/95 px-4 py-3 shadow-xl ring-1 ring-[var(--portal-navy)]/8 backdrop-blur-md"
       >
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/10 to-[var(--portal-orange)]/15">
+        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)]/10 to-[var(--portal-green)]/15">
           <Loader2 className="h-5 w-5 animate-spin text-[var(--portal-navy)] motion-reduce:animate-none" />
         </span>
         <div className="min-w-0 text-left">

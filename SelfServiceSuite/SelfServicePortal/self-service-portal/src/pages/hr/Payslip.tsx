@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { listPayrollPeriods, openPayslipPdf } from '@/api/endpoints/payroll'
@@ -13,6 +13,20 @@ const monthNames = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
+function monthSortKey(value: string) {
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 12) return numeric
+  const byName = monthNames.findIndex((name) => name.toLowerCase() === value.trim().toLowerCase())
+  return byName >= 0 ? byName + 1 : 99
+}
+
+function monthLabel(value: string) {
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 12) return monthNames[numeric - 1]!
+  const byName = monthNames.find((name) => name.toLowerCase() === value.trim().toLowerCase())
+  return byName ?? value
+}
+
 export function Payslip() {
   const [year, setYear] = useState('')
   const [month, setMonth] = useState('')
@@ -21,25 +35,29 @@ export function Payslip() {
   const periodsQuery = useQuery({ queryKey: ['payroll', 'periods'], queryFn: listPayrollPeriods })
   const periods = periodsQuery.data ?? []
   const years = useMemo(
-    () => [...new Set(periods.map((period) => String(period.year)))],
+    () => [...new Set(periods.map((period) => String(period.year)))].sort(),
     [periods],
   )
   const months = useMemo(
     () =>
       periods
         .filter((period) => !year || String(period.year) === year)
-        .map((period) => {
-          const numeric = Number(period.month)
-          return {
-            value: period.month,
-            label: Number.isInteger(numeric) && numeric >= 1 && numeric <= 12
-              ? monthNames[numeric - 1]!
-              : period.month,
-          }
-        })
-        .filter((period, index, rows) => rows.findIndex((row) => row.value === period.value) === index),
+        .map((period) => ({
+          value: String(period.month),
+          label: monthLabel(String(period.month)),
+        }))
+        .filter((period, index, rows) => rows.findIndex((row) => row.value === period.value) === index)
+        .sort((left, right) => monthSortKey(left.value) - monthSortKey(right.value)),
     [periods, year],
   )
+
+  useEffect(() => {
+    if (!year && years.length === 1) setYear(years[0]!)
+  }, [year, years])
+
+  useEffect(() => {
+    if (month && !months.some((option) => option.value === month)) setMonth('')
+  }, [month, months])
 
   const generate = async () => {
     setLoading(true)
@@ -55,16 +73,33 @@ export function Payslip() {
 
   return (
     <PageWrapper title="Payslip" showPageHeading={false}>
-      <PortalFormCard title="Payslip">
+      <PortalFormCard title="Payslip" allowOverflow>
         <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Only <span className="font-medium">closed</span> payroll periods from Business Central are listed.
+            Choose year and month, then open the payslip as a PDF (it is not shown on this page).
+          </p>
+          {periodsQuery.isLoading ? (
+            <p className="text-sm text-slate-500">Loading closed payroll periods…</p>
+          ) : null}
+          {!periodsQuery.isLoading && periods.length === 0 ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              No closed payroll periods were returned from Business Central. Confirm periods are closed in BC
+              and that OData query <span className="font-medium">QyPayrollPeriods</span> is published.
+            </p>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="year">Payroll Period Year</Label>
               <Select
                 id="year"
                 value={year}
-                onChange={(event) => setYear(event.target.value)}
+                onChange={(event) => {
+                  setYear(event.target.value)
+                  setMonth('')
+                }}
                 placeholder="Select year"
+                menuPosition="inline"
                 options={years.map((value) => ({ label: value, value }))}
               />
             </div>
@@ -74,11 +109,18 @@ export function Payslip() {
                 id="month"
                 value={month}
                 onChange={(event) => setMonth(event.target.value)}
-                placeholder="Select month"
+                placeholder={year ? 'Select month' : 'Select year first'}
+                menuPosition="inline"
                 options={months}
+                disabled={!year}
               />
             </div>
           </div>
+          {year && months.length > 0 ? (
+            <p className="text-xs text-slate-500">
+              Available for {year}: {months.map((option) => option.label).join(', ')}
+            </p>
+          ) : null}
           <div className="flex justify-center pt-2">
             <Button
               type="button"

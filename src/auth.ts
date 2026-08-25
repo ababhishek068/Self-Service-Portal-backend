@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomInt } from 'node:crypto'
-import { callSoapMethod, fetchOData, odataString, type ODataRecord } from './bcClient.js'
+import { callSoapMethod, fetchOData, fetchODataFromBase, odataString, type ODataRecord } from './bcClient.js'
 import { config } from './config.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
 
@@ -43,8 +43,14 @@ export interface AuthUser {
   monthlySalaryBase?: number
   HOD: boolean
   CEO: boolean
+  HR: boolean
+  ICT: boolean
   canApprove: boolean
   isNotified: boolean
+}
+
+export function authUserCanApprove(isHOD: boolean, isCEO: boolean, hasEntries: boolean) {
+  return isHOD || isCEO || hasEntries
 }
 
 declare module 'express-session' {
@@ -141,12 +147,22 @@ interface BcEmployee {
   Gender?: string
   GlobalDimension1Code?: string
   GlobalDimension2Code?: string
+  GlobalDimension1Name?: string
+  GlobalDimension2Name?: string
+  DepartmentCode?: string
   DepartmentName?: string
+  DivisionName?: string
+  DistrictName?: string
   BranchName?: string
+  BranchDisplayName?: string
   CustomerNo?: string
   JobID?: string
   JobTitle?: string
   JobGrade?: string
+  JobGroup?: string
+  IsHOD?: boolean | string | number
+  SalaryGrade?: string | number
+  Grade?: string | number
   PlaceOfDuty?: string
   ResponsibilityCenter?: string
   ManagerNo?: string
@@ -179,6 +195,7 @@ import {
   fetchEmployeeRecordFast,
   fetchEmployeeSalaryBase,
   fetchMergedEmployeeRecord,
+  mapAbhEmployeeOrg,
   resolveAuthUserJobTitle,
   resolveEmployeeJobTitle,
   resolveEmployeeJobTitleByNo,
@@ -421,35 +438,98 @@ export function employeeResetTokenMatches(employee: BcEmployee, resetToken: stri
 }
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
+  const fast = await fetchEmployeeRecordFast(staffNo)
+  if (fast) return fast as BcEmployee
   const rows = (await fetchOData('QyHREmployee', {
     $filter: `No eq '${odataString(staffNo)}'`,
     $top: 1,
-  })) as BcEmployee[] | null
+  }).catch(() => null)) as BcEmployee[] | null
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
-  const rows = (await fetchOData('QyUserSetup', {
+  const query = {
     $filter: `EmployeeNo eq '${odataString(staffNo)}'`,
     $top: 1,
-  })) as BcUserSetup[] | null
+  }
+  const rows = (await fetchODataFromBase(
+    config.BC_ODATA_BASE_URL,
+    'QyUserSetup',
+    query,
+    config.BC_LOGIN_PROBE_TIMEOUT_MS,
+  ).catch(() => null)) as BcUserSetup[] | null
   return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
 }
 
-async function isHeadOfDepartment(employeeNo: string) {
+async function isHeadOfDepartment(employeeNo: string, userID: string) {
   if (config.HOD_GRANT_ALL_AUTHENTICATED) return true
   if (config.HOD_OVERRIDE_EMPNOS.includes(employeeNo)) return true
-  const filters = [
-    `Staff_No eq '${odataString(employeeNo)}' and Dimension_Code eq 'DEPARTMENTS'`,
-    `StaffNo eq '${odataString(employeeNo)}' and DimensionCode eq 'DEPARTMENTS'`,
-  ]
+  const dimensionCodes = ['DEPARTMENT', 'DEPARTMENTS']
+  const filters = dimensionCodes.flatMap((dimensionCode) => [
+    `Staff_No eq '${odataString(employeeNo)}' and Dimension_Code eq '${dimensionCode}'`,
+    `StaffNo eq '${odataString(employeeNo)}' and DimensionCode eq '${dimensionCode}'`,
+    ...(userID
+      ? [
+          `HOD eq '${odataString(userID)}' and Dimension_Code eq '${dimensionCode}'`,
+          `HOD eq '${odataString(userID)}' and DimensionCode eq '${dimensionCode}'`,
+        ]
+      : []),
+  ])
   for (const filter of filters) {
-    const rows = (await fetchOData('QyDimensionValues', { $filter: filter, $top: 1 }).catch(
-      () => [],
-    )) as Array<Record<string, unknown>>
+    const rows = (await fetchODataFromBase(
+      config.BC_ODATA_BASE_URL,
+      'QyDimensionValues',
+      { $filter: filter, $top: 1 },
+      config.BC_LOGIN_PROBE_TIMEOUT_MS,
+    ).catch(() => [])) as Array<Record<string, unknown>>
     if (Array.isArray(rows) && rows.length > 0) return true
   }
   return false
+}
+
+export function employeeIsHod(record: Record<string, unknown>) {
+  const value = record.IsHOD ?? record.Is_HOD ?? record['Is HOD']
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  return ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase())
+}
+
+function normalizedHrRoleValue(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+}
+
+export function employeeHasHrAccess(
+  profile: {
+    employeeNo?: unknown
+    department?: unknown
+    departmentName?: unknown
+    jobTitle?: unknown
+  },
+  options: {
+    overrideEmployeeNos?: readonly string[]
+    departmentCodes?: readonly string[]
+  } = {},
+) {
+  const employeeNo = normalizedHrRoleValue(profile.employeeNo)
+  const overrides = (options.overrideEmployeeNos ?? config.HR_OVERRIDE_EMPNOS).map(
+    normalizedHrRoleValue,
+  )
+  if (employeeNo && overrides.includes(employeeNo)) return true
+
+  const allowedDepartments = new Set(
+    (options.departmentCodes ?? config.HR_DEPARTMENT_CODES).map(normalizedHrRoleValue),
+  )
+  for (const value of [profile.department, profile.departmentName]) {
+    const normalized = normalizedHrRoleValue(value)
+    if (normalized && allowedDepartments.has(normalized)) return true
+  }
+
+  const jobTitle = normalizedHrRoleValue(profile.jobTitle)
+  return /(^| )(HR|HUMAN RESOURCE|HUMAN RESOURCES)( |$)/.test(jobTitle)
 }
 
 async function hasApprovalEntries(userID: string) {
@@ -461,7 +541,11 @@ async function hasApprovalEntries(userID: string) {
   return Array.isArray(rows) && rows.length > 0
 }
 
-async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Promise<AuthUser> {
+async function buildAuthUser(
+  employee: BcEmployee,
+  userSetup: BcUserSetup,
+  options: { loginFast?: boolean } = {},
+): Promise<AuthUser> {
   const employeeNo = String(employee.No ?? '')
   const displayName = [employee.FirstName, employee.MiddleName, employee.LastName]
     .filter(Boolean)
@@ -470,18 +554,32 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
   const isCEO =
     employee.JobID === 'JOB_003' || config.CEO_OVERRIDE_EMPNOS.includes(employeeNo)
   const userID = String(userSetup.UserID ?? '')
-  const [isHOD, hasEntries] = await Promise.all([
-    isHeadOfDepartment(employeeNo),
+  const employeeHodField =
+    employee.IsHOD ??
+    (employee as Record<string, unknown>).Is_HOD ??
+    (employee as Record<string, unknown>)['Is HOD']
+  let isHOD =
+    config.HOD_GRANT_ALL_AUTHENTICATED ||
+    config.HOD_OVERRIDE_EMPNOS.includes(employeeNo) ||
+    employeeIsHod(employee as Record<string, unknown>)
+  let hasEntries = false
+  ;[isHOD, hasEntries] = await Promise.all([
+    isHOD
+      ? Promise.resolve(true)
+      : employeeHodField !== undefined
+        ? Promise.resolve(false)
+        : isHeadOfDepartment(employeeNo, userID),
     hasApprovalEntries(userID),
   ])
-  const roles = ['staff']
-  if (isHOD) roles.push('hod')
-  if (isCEO) roles.push('ceo')
-  const department = employee.GlobalDimension1Code ?? ''
+  const org = mapAbhEmployeeOrg(employee as Record<string, unknown>)
+  const department = org.departmentCode
   const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
   const gender = employee.Gender ?? ''
   const email = String(employee.EMail ?? employee.Email ?? '').trim()
-  const canApprove = isHOD || isCEO || Boolean(userSetup.ApproverID) || hasEntries
+  // `User Setup`.`Approver ID` is the person who approves this user; it is not
+  // evidence that the current user is an approver. Approval access comes from
+  // the user's role or approval entries actually assigned to their BC User ID.
+  const canApprove = authUserCanApprove(isHOD, isCEO, hasEntries)
   const rawJobTitle = employeeFieldText(employee as Record<string, unknown>, [
     'JobTitle',
     'Job_Title',
@@ -490,14 +588,40 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     'Job_Title_Description',
   ])
   const resolvedJobTitle = jobTitleNeedsRefresh(rawJobTitle)
-    ? await resolveAuthUserJobTitle(
-        employee as Record<string, unknown>,
-        employeeNo,
-        email,
-      )
+    ? options.loginFast
+      ? configuredJobTitleByEmployeeNo(employeeNo) || rawJobTitle
+      : await resolveAuthUserJobTitle(
+          employee as Record<string, unknown>,
+          employeeNo,
+          email,
+        )
     : rawJobTitle
   const jobTitle =
     resolvedJobTitle || configuredJobTitleByEmployeeNo(employeeNo) || ''
+  const isHR = employeeHasHrAccess({
+    employeeNo,
+    department,
+    departmentName: org.departmentName,
+    jobTitle,
+  })
+  const ictOfficerFlag = Boolean(
+    (employee as Record<string, unknown>).ICTOfficer ??
+      (employee as Record<string, unknown>).ICT_Officer ??
+      (employee as Record<string, unknown>)['ICT Officer'],
+  )
+  // Desk admins only: ICT Officer flag, explicit override, or ICT/IT Manager titles.
+  // Do NOT match bare "IT" (e.g. "Media and IT Expert" must stay staff).
+  const isICT =
+    ictOfficerFlag ||
+    config.ICT_OVERRIDE_EMPNOS.map((no) => no.toUpperCase()).includes(employeeNo.toUpperCase()) ||
+    /\bict\s*(officer|admin|administrator|help\s*desk)?\b|\bit\s*manag|\bhelp\s*desk\b|\binformation technology\b/i.test(
+      jobTitle,
+    )
+  const roles = ['staff']
+  if (isHOD) roles.push('hod')
+  if (isHR) roles.push('hr')
+  if (isCEO) roles.push('ceo')
+  if (isICT) roles.push('ictAdmin')
 
   return {
     employeeNo,
@@ -505,7 +629,7 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     displayName: displayName || employeeNo,
     userID,
     roles,
-    role: isCEO ? 'ceo' : isHOD ? 'hod' : 'staff',
+    role: isCEO ? 'ceo' : isHOD ? 'hod' : isHR ? 'hr' : isICT ? 'ictAdmin' : 'staff',
     email,
     phoneNumber: employee.CellPhoneNumber ?? '',
     gender,
@@ -514,11 +638,18 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     isChangedPassword: Boolean(employee.ChangedPassword),
     mustChangePassword: !Boolean(employee.ChangedPassword),
     department,
-    departmentName: employee.DepartmentName ?? department,
-    branchCode: employee.GlobalDimension2Code ?? '',
-    branchName: employee.BranchName ?? employee.GlobalDimension2Code ?? '',
+    departmentName: org.departmentName || department,
+    branchCode: org.branchCode,
+    branchName: org.branchName,
     jobTitle,
-    jobGrade: employee.JobGrade ?? '',
+    jobGrade: employeeFieldText(employee as Record<string, unknown>, [
+      'JobGrade',
+      'JobGroup',
+      'Job_Group',
+      'SalaryGrade',
+      'Salary_Grade',
+      'Grade',
+    ]),
     placeOfDuty: employee.PlaceOfDuty ?? '',
     accountNumber,
     managerEmployeeNo: employee.ManagerNo ?? employee.SupervisorNo ?? '',
@@ -528,6 +659,8 @@ async function buildAuthUser(employee: BcEmployee, userSetup: BcUserSetup): Prom
     imprestNo: accountNumber,
     HOD: isHOD,
     CEO: isCEO,
+    HR: isHR,
+    ICT: isICT,
     canApprove,
     isNotified: false,
   }
@@ -565,7 +698,10 @@ export async function authenticateBcUser(staffNo: string, password: string) {
     throw Object.assign(new Error('staffNo and password are required'), { status: 422 })
   }
 
-  const employee = await fetchEmployee(staffNo)
+  const [employee, userSetup] = await Promise.all([
+    fetchEmployee(staffNo),
+    fetchUserSetup(staffNo),
+  ])
   if (!employee) {
     throw Object.assign(new Error('Staff No or password is incorrect'), { status: 401 })
   }
@@ -589,16 +725,15 @@ export async function authenticateBcUser(staffNo: string, password: string) {
     throw Object.assign(new Error('Staff No or password is incorrect'), { status: 401 })
   }
 
-  const userSetup = await fetchUserSetup(staffNo)
   if (!userSetup) {
     throw Object.assign(new Error('User with that employee no not found in the user setup'), {
       status: 403,
     })
   }
 
-  const user = await buildAuthUser(employee, userSetup)
+  const user = await buildAuthUser(employee, userSetup, { loginFast: true })
   if (!user.imprestNo) {
-    const accountNumber = await fetchEmployeeCustomerAccountNo(user.employeeNo)
+    const accountNumber = employeeAccountNoFromRecord(employee as Record<string, unknown>)
     if (accountNumber) {
       return { ...user, accountNumber, imprestNo: accountNumber }
     }

@@ -42,6 +42,7 @@ export function usePermissions() {
       isHOD: roles.includes('hod'),
       isFinance: roles.includes('finance'),
       isHR: roles.includes('hr'),
+      isICT: roles.includes('ictAdmin'),
       canViewLeaveBalanceReport: hasAnyRole(roles, leaveBalanceReportRoles),
       canViewStoreUsageReport: hasAnyRole(roles, storeUsageReportRoles),
       canViewGatePassReport: hasAnyRole(roles, gatePassReportRoles),

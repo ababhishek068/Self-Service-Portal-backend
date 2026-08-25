@@ -15,13 +15,18 @@ import {
   gatePassSourceFromRow,
   isMedicalClaimType,
   passengerTypeCode,
+  parsePurchaseOtherRequirements,
+  portalModuleDocumentOwnedByUser,
+  purchasePriorityCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
+  uniqueExactMasterNoByName,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
 import {
   normalizeSequentialApprovalStatuses,
   resolveLeaveApprovalSteps,
+  resolveLeaveApprovalStepsAsync,
 } from './leaveApprovalSteps.js'
 import {
   isHalfDaySelection,
@@ -38,8 +43,40 @@ import {
   resolveAnnualLeaveEntitlement,
   parseEmployeeLeaveBalancesReturn,
   soapLeaveActionOk,
+  leaveTypeIsMarriage,
+  leaveTypeMatchesMaritalStatus,
+  normalizeAuthGender,
+  overlappingLeaveApplication,
+  parseEmployeeProfileReturn,
+  sickLeaveStartDateAllowed,
 } from './staff.js'
-import { approvalModule, mapApprovalSteps, mapModuleLines } from './portalApi.js'
+import {
+  approvalIdentityIdsFromUserSetupRows,
+  approvalModule,
+  assertPurchaseProcessActionAllowed,
+  assertStoreProcessActionAllowed,
+  canManagePurchaseStock,
+  facilityProcessRoles,
+  mapEmployeeDependantLookupRows,
+  mapApprovalSteps,
+  mapModuleLines,
+  parseEmployeeMedicalBalancesReturn,
+  parseApprovalDecision,
+  purchaseRequesterDisplayName,
+  storeRequisitionIsAsset,
+  weeklyLateAttendanceSummary,
+  authUserCanManageHrPolicies,
+  parseHrPolicyUpload,
+} from './portalApi.js'
+
+import { deriveCodeunitSoapUrl, codeunitSoapNamespace } from './bcClient.js'
+import {
+  employeeExitApprovalRequired,
+  employeeExitCallError,
+  validateEmployeeExitDetails,
+} from './employeeExit.js'
+import { hrServiceLetterCanBeDeleted } from './hrServiceLetters.js'
+
 import {
   cachedPasswordResetTokenMatches,
   cachePasswordResetToken,
@@ -47,24 +84,274 @@ import {
   employeeResetToken,
   employeeResetTokenIsExpired,
   employeeResetTokenMatches,
+  authUserCanApprove,
+  employeeHasHrAccess,
+  employeeIsHod,
   jobTitleNeedsRefresh,
   resetTokenIsExpired,
   type AuthUser,
 } from './auth.js'
-import { inferEmployeeJobId, resolveEmployeeJobTitle, pickDimensionCodeFromRow } from './employeeProfile.js'
+import {
+  inferEmployeeJobId,
+  isRequestingDepartmentDimensionRow,
+  resolveEmployeeJobTitle,
+  pickDimensionCodeFromRow,
+} from './employeeProfile.js'
+import {
+  leaveApplicationExceedsAvailableBalance,
+  parseBcLeaveSummary,
+  resolveAnnualAvailableLeaveBalance,
+  resolveBcLeaveBalance,
+  resolveLeaveBalanceBreakdown,
+} from './leaveBalance.js'
 import {
   documentStatusFromBc,
   injectSalaryAdvanceSalaryHint,
   mapRequest,
   resolveLeaveStatus,
   leaveIsPendingInBc,
+  resolveModuleRequestStatus,
   resolveSalaryAdvanceAmount,
+  statusFromBc,
 } from './erpMappings.js'
 import {
   bcDocumentStatus,
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+
+describe('purchase stock decision authorization', () => {
+  const base = { roles: ['staff'], jobTitle: '', department: 'IT', departmentName: 'IT' }
+
+  it('allows Operations/Store assignments (including real warehouse/inventory labels)', () => {
+    assert.equal(canManagePurchaseStock({ ...base, departmentName: 'Operations and Store' }), true)
+    assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'Warehouse Officer' }), true)
+    assert.equal(canManagePurchaseStock({ ...base, departmentName: 'Inventory' }), true)
+    assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'Procurement Officer' }), false)
+    assert.equal(canManagePurchaseStock({ ...base, roles: ['staff', 'procurement'] }), false)
+    assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'IT Expert' }), false)
+    assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'Finance Manager' }), false)
+  })
+
+  it('separates Operations, Procurement, Finance, and Audit assignments', () => {
+    assert.deepEqual(facilityProcessRoles({ ...base, roles: ['OPS'] }), ['operations'])
+    assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Purchasing Officer' }), ['procurement'])
+    assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Accountant' }), ['finance'])
+    assert.deepEqual(facilityProcessRoles({ ...base, departmentName: 'Internal Audit' }), ['auditor'])
+    assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'ICT Administrator' }), [])
+  })
+
+  it('authorizes every purchase-process correction loop by current stage and owner role', () => {
+    const operations = { ...base, roles: ['OPS'] }
+    const procurement = { ...base, roles: ['PROC'] }
+    const finance = { ...base, roles: ['finance'] }
+    const auditor = { ...base, roles: ['auditor'] }
+
+    assert.equal(
+      assertPurchaseProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
+      'STOCK_AVAILABLE',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(procurement, 'LPR_CORRECTION', 'LPR_RESUBMITTED'),
+      'LPR_RESUBMITTED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(procurement, 'PO_CORRECTION', 'PO_RESUBMITTED'),
+      'PO_RESUBMITTED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(procurement, 'INVOICE_CORRECTION', 'INVOICE_RESUBMITTED'),
+      'INVOICE_RESUBMITTED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(finance, 'PO_APPROVAL', 'PO_APPROVED'),
+      'PO_APPROVED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(finance, 'PAYMENT_APPROVAL', 'PAYMENT_RETURNED', 'Fix invoice'),
+      'PAYMENT_RETURNED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(auditor, 'AUDIT_REVIEW', 'AUDIT_RETURNED', 'Missing GRN'),
+      'AUDIT_RETURNED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(operations, 'AUDIT_RETURNED', 'AUDIT_RESUBMITTED'),
+      'AUDIT_RESUBMITTED',
+    )
+    assert.throws(
+      () => assertPurchaseProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
+      /not authorized/i,
+    )
+    assert.throws(
+      () => assertPurchaseProcessActionAllowed(finance, 'PROCUREMENT_APPROVAL', 'PROCUREMENT_RETURNED'),
+      /reason is required/i,
+    )
+    assert.throws(
+      () => assertPurchaseProcessActionAllowed(finance, 'PO_APPROVAL', 'PAYMENT_APPROVED'),
+      /not valid/i,
+    )
+  })
+
+  it('restricts Store actions to item stock checks owned by Operations', () => {
+    const operations = { ...base, roles: ['store'] }
+    const procurement = { ...base, roles: ['procurement'] }
+    assert.equal(
+      assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_UNAVAILABLE'),
+      'STOCK_UNAVAILABLE',
+    )
+    assert.throws(
+      () => assertStoreProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_UNAVAILABLE'),
+      /not authorized/i,
+    )
+    assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
+    assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
+    assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
+  })
+})
+
+describe('request ownership isolation', () => {
+  it('matches purchase/store aliases only to the logged-in employee identities', () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec)
+    const auth = {
+      employeeNo: 'ABH-114',
+      userID: 'HERMON_GETACHEW',
+    } as AuthUser
+    assert.equal(
+      portalModuleDocumentOwnedByUser({ Assigned_User_ID: 'HERMON_GETACHEW' }, spec!, auth),
+      true,
+    )
+    assert.equal(
+      portalModuleDocumentOwnedByUser({ EmployeeNo: 'ABH-114' }, spec!, auth),
+      true,
+    )
+    assert.equal(
+      portalModuleDocumentOwnedByUser({ AssignedUserID: 'ANOTHER_USER' }, spec!, auth),
+      false,
+    )
+  })
+})
+
+describe('approval decision validation', () => {
+  it('rejects missing/unknown decisions instead of silently approving', () => {
+    assert.throws(() => parseApprovalDecision('', ''), /must be Approved/i)
+    assert.throws(() => parseApprovalDecision('maybe', ''), /must be Approved/i)
+  })
+
+  it('requires reasons for rejection/return and marks returned SOAP comments', () => {
+    assert.throws(() => parseApprovalDecision('Rejected', ''), /reason is required/i)
+    assert.throws(() => parseApprovalDecision('Returned', '   '), /reason is required/i)
+    assert.deepEqual(parseApprovalDecision('Returned', 'Correct quantity'), {
+      decision: 'Returned',
+      comment: 'Correct quantity',
+      soapComment: '[RETURNED] Correct quantity',
+    })
+    assert.equal(parseApprovalDecision('Approved', '').decision, 'Approved')
+  })
+})
+
+describe('attendance production policy', () => {
+  it('counts only arrivals after the 8:50 AM grace time in the current week', () => {
+    const summary = weeklyLateAttendanceSummary(
+      [
+        { Date: '2026-08-17', TimeIn: '08:50:00' },
+        { Date: '2026-08-18', TimeIn: '08:51:00' },
+        { Date: '2026-08-19', TimeIn: '09:05:00' },
+        { Date: '2026-08-20', TimeIn: '09:15:00' },
+        { Date: '2026-08-10', TimeIn: '09:30:00' },
+      ],
+      3,
+      new Date(2026, 7, 20, 12, 0, 0),
+    )
+    assert.equal(summary.lateCount, 3)
+    assert.equal(summary.notify, true)
+    assert.equal(summary.weekStart, '2026-08-17')
+  })
+})
+
+describe('employee exit integration', () => {
+  it('derives the separately published Employee Exit SOAP endpoint safely', () => {
+    assert.equal(
+      deriveCodeunitSoapUrl(
+        'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Codeunit/CuStaffPortal?tenant=default',
+        'CuPortalEmployeeExit',
+      ),
+      'http://146.161.102.7:7047/BC240/WS/ABH_UAT_LIVE/Codeunit/CuPortalEmployeeExit?tenant=default',
+    )
+    assert.equal(
+      codeunitSoapNamespace('CuPortalEmployeeExit'),
+      'urn:microsoft-dynamics-schemas/codeunit/CuPortalEmployeeExit',
+    )
+  })
+
+  it('rejects incomplete transfer submissions before calling BC', () => {
+    const errors = validateEmployeeExitDetails('transfer', {
+      typeOfTransfer: 'Permanent',
+    })
+    assert.equal(errors.length > 0, true)
+  })
+
+  it('keeps transfer/resignation sequential while the exit form is information-only', () => {
+    assert.equal(employeeExitApprovalRequired('transfer'), true)
+    assert.equal(employeeExitApprovalRequired('resignation'), true)
+    assert.equal(employeeExitApprovalRequired('exit-interview'), false)
+  })
+
+  it('returns a production-safe message when HR routing cannot be resolved', () => {
+    const error = employeeExitCallError(
+      new Error('Business Central rejected the request: HR Approver User ID is blank.'),
+    ) as Error & { status?: number; code?: string }
+    assert.equal(error.status, 503)
+    assert.equal(error.code, 'EMPLOYEE_EXIT_HR_ROUTING_REQUIRED')
+    assert.match(error.message, /HR approval routing is not ready/i)
+    assert.doesNotMatch(error.message, /Baby steps/i)
+  })
+})
+
+describe('employee dependant lookup identity', () => {
+  it('uses SystemId so duplicate short dependant numbers remain distinct', () => {
+    const rows = mapEmployeeDependantLookupRows([
+      {
+        SystemId: '11111111-1111-1111-1111-111111111111',
+        No: '2',
+        SurName: 'Zerihun',
+        OtherNames: 'Evana',
+        Relationship: 'Child',
+        Type: 'Dependant',
+      },
+      {
+        SystemId: '22222222-2222-2222-2222-222222222222',
+        No: '2',
+        SurName: 'Alemayehu',
+        OtherNames: 'Etaferahu',
+        Relationship: 'Spouse',
+        Type: 'Dependant',
+      },
+    ])
+
+    assert.equal(rows.length, 2)
+    assert.equal(rows[0]?.value, '11111111-1111-1111-1111-111111111111')
+    assert.equal(rows[1]?.value, '22222222-2222-2222-2222-222222222222')
+    assert.notEqual(rows[0]?.value, rows[1]?.value)
+    assert.equal(rows[1]?.meta.dependantNo, '2')
+    assert.equal(rows[1]?.meta.relationship, 'Spouse')
+  })
+})
+
+describe('employee medical balances', () => {
+  it('parses both authoritative Employee Card balances without rounding', () => {
+    assert.deepEqual(
+      parseEmployeeMedicalBalancesReturn('{"self":53441.11,"dependant":53441.11}'),
+      { self: 53441.11, dependant: 53441.11 },
+    )
+  })
+
+  it('does not turn an invalid or incomplete BC response into a zero balance', () => {
+    assert.equal(parseEmployeeMedicalBalancesReturn(''), null)
+    assert.equal(parseEmployeeMedicalBalancesReturn('{"self":0}'), null)
+  })
+})
 
 describe('jobTitleNeedsRefresh', () => {
   it('refreshes missing titles, the STAFF fallback, and raw BC job codes', () => {
@@ -104,6 +391,27 @@ describe('approvalTableIds', () => {
     assert.equal(resolveApprovalModuleFromTableId(52202786), 'imprest')
     assert.equal(resolveApprovalModuleFromTableId(0, 'Transport Request'), 'transport')
     assert.equal(resolveApprovalModuleFromTableId(0, 'Training Request'), 'training')
+  })
+})
+
+describe('approval identity isolation', () => {
+  it('does not treat Zerihun\'s configured approver as a Zerihun login identity', () => {
+    const ids = approvalIdentityIdsFromUserSetupRows([
+      {
+        UserID: 'ZERIHUN_SISAY',
+        EmployeeNo: 'ABH-010',
+        ApproverID: 'HERMON_GETACHEW',
+        SalespersonCode: 'UNRELATED_CODE',
+      },
+    ])
+
+    assert.deepEqual(ids, ['ZERIHUN_SISAY'])
+    assert.equal(ids.includes('HERMON_GETACHEW'), false)
+  })
+
+  it('does not grant approval access merely because the user has an approver', () => {
+    assert.equal(authUserCanApprove(false, false, false), false)
+    assert.equal(authUserCanApprove(false, false, true), true)
   })
 })
 
@@ -164,6 +472,15 @@ describe('portalApprovalEntryFilter', () => {
     assert.match(filter, /61801/)
     assert.match(filter, /DocumentNo eq 'TRN-001'/)
   })
+
+  it('checks both purchase requisition and purchase header approval table IDs', () => {
+    const spec = findFrontendModuleSpec('purchaseRequisition')
+    assert.ok(spec)
+    const filter = portalApprovalEntryFilter(spec, 'ABH-PQ000022')
+    assert.match(filter, /52121800/)
+    assert.match(filter, /TableID eq 38/)
+    assert.match(filter, /DocumentNo eq 'ABH-PQ000022'/)
+  })
 })
 
 describe('soapFaultMessage', () => {
@@ -198,6 +515,26 @@ describe('leaveTypeIsAnnual', () => {
   })
 })
 
+describe('leave type employee-profile filtering', () => {
+  it('hides Marriage Leave for an employee already marked Married in Business Central', () => {
+    const marriage = { Code: 'MARRIAGE', Description: 'Marriage leave' }
+    assert.equal(leaveTypeIsMarriage(marriage), true)
+    assert.equal(leaveTypeMatchesMaritalStatus(marriage, 'Married'), false)
+    assert.equal(leaveTypeMatchesMaritalStatus(marriage, '2'), false)
+    assert.equal(leaveTypeMatchesMaritalStatus(marriage, 'Single'), true)
+    assert.equal(leaveTypeMatchesMaritalStatus({ Code: 'ANNUAL' }, 'Married'), true)
+  })
+
+  it('reads marital status from the authoritative Employee Card SOAP profile', () => {
+    assert.deepEqual(
+      parseEmployeeProfileReturn(
+        'JobTitle=IT Expert#Gender=Male#MaritalStatus=Married#FullName=Test User',
+      ),
+      { gender: 'Male', maritalStatus: 'Married' },
+    )
+  })
+})
+
 describe('halfDayRequiresAnnualLeave', () => {
   it('requires annual leave only for half-day selections', () => {
     assert.equal(halfDayRequiresAnnualLeave('0'), false)
@@ -219,6 +556,8 @@ describe('soapLeaveActionOk', () => {
   it('accepts the hyphenated document number returned by BC LeaveApplication', () => {
     assert.equal(soapLeaveActionOk('LV-00015'), true)
     assert.equal(soapLeaveActionOk('LV00015'), true)
+    assert.equal(soapLeaveActionOk('ABH-LAP-000027'), true)
+    assert.equal(soapLeaveActionOk('ABH-LAP-000028'), true)
     assert.equal(soapLeaveActionOk('false'), false)
     assert.equal(soapLeaveActionOk('Leave application failed'), false)
   })
@@ -235,26 +574,84 @@ describe('employeeLeaveMetrics', () => {
       },
       user,
     )
+    assert.equal(metrics.accruedDays, 16)
     assert.equal(metrics.earnedLeaveDays, 16)
     assert.equal(metrics.leaveBalance, 16)
-    assert.equal(metrics.employeeCardLeaveBalance, null)
+    assert.equal(metrics.employeeCardLeaveBalance, 16)
+  })
+
+  it('maps portal earned leave days to BC Leave Accrued To-Date', () => {
+    const metrics = employeeLeaveMetrics(
+      {
+        EarnedLeaveDays: 1.96,
+        Carry_forward_Balance: 27,
+        LeaveBalance: 28.96,
+        AnnualLeaveBalance: 48,
+      },
+      user,
+    )
+    assert.equal(metrics.accruedDays, 1.96)
+    assert.equal(metrics.earnedLeaveDays, 28.96)
+    assert.equal(metrics.employeeCardLeaveBalance, 28.96)
+    assert.equal(metrics.leaveBalance, 48)
+    assert.equal(metrics.carryForwardBalance, 27)
+  })
+
+  it('ignores SOAP LeaveBalance when it equals Annual Leave balance', () => {
+    const metrics = employeeLeaveMetrics(
+      {
+        EarnedLeaveDays: 1.92,
+        Carry_forward: 10,
+        LeaveBalance: 15,
+        AnnualLeaveBalance: 15,
+      },
+      user,
+    )
+    assert.equal(metrics.accruedDays, 1.92)
+    assert.equal(metrics.earnedLeaveDays, 11.92)
+    assert.equal(metrics.leaveBalance, 15)
+  })
+
+  it('computes Leave Accrued To-Date from carry forward + accrued when Leave Balance is missing', () => {
+    const metrics = employeeLeaveMetrics(
+      {
+        EarnedLeaveDays: 1.96,
+        Carry_forward_Balance: 27,
+        AnnualLeaveBalance: 48,
+      },
+      user,
+    )
+    assert.equal(metrics.accruedDays, 1.96)
+    assert.equal(metrics.earnedLeaveDays, 28.96)
   })
 
   it('does not treat missing leave fields as zero', () => {
     const metrics = employeeLeaveMetrics({ No: 'ABH-114', FirstName: 'Hermon' }, user)
     assert.equal(metrics.earnedLeaveDays, null)
+    assert.equal(metrics.accruedDays, null)
     assert.equal(metrics.leaveBalance, null)
     assert.equal(metrics.employeeCardLeaveBalance, null)
   })
 
   it('keeps the visible Employee Card leave balance separate from annual balance', () => {
     const metrics = employeeLeaveMetrics(
-      { LeaveBalance: -2.68, AnnualLeaveBalance: 18.32, EarnedLeaveDays: -1.44 },
+      { LeaveBalance: -2.68, AnnualLeaveBalance: 18.32, EarnedLeaveDays: -1.44, Carry_forward_Balance: -1.24 },
       user,
     )
     assert.equal(metrics.leaveBalance, 18.32)
     assert.equal(metrics.employeeCardLeaveBalance, -2.68)
-    assert.equal(metrics.earnedLeaveDays, -1.44)
+    assert.equal(metrics.accruedDays, -1.44)
+    assert.equal(metrics.earnedLeaveDays, -2.68)
+  })
+})
+
+describe('Employee Card gender normalization', () => {
+  it('supports the BC option ordinals as well as labels', () => {
+    assert.equal(normalizeAuthGender('0'), 'Female')
+    assert.equal(normalizeAuthGender('1'), 'Male')
+    assert.equal(normalizeAuthGender('2'), 'Female')
+    assert.equal(normalizeAuthGender('Female'), 'Female')
+    assert.equal(normalizeAuthGender(''), '')
   })
 })
 
@@ -276,22 +673,247 @@ describe('parseEmployeeLeaveBalancesReturn', () => {
 
 describe('resolveAnnualLeaveBalance', () => {
   it('uses the Employee Card annual leave balance for annual applications', () => {
-    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32, employeeCardLeaveBalance: -2.68 }
+    const metrics = {
+      accruedDays: -1.44,
+      earnedLeaveDays: -2.68,
+      leaveBalance: 18.32,
+      employeeCardLeaveBalance: -2.68,
+    }
     assert.equal(resolveAnnualLeaveBalance(metrics, 0), 18.32)
   })
 
   it('falls back to ledger when employee card fields are absent', () => {
-    const metrics = { earnedLeaveDays: null, leaveBalance: null, employeeCardLeaveBalance: null }
+    const metrics = {
+      accruedDays: null,
+      earnedLeaveDays: null,
+      leaveBalance: null,
+      employeeCardLeaveBalance: null,
+    }
     assert.equal(resolveAnnualLeaveBalance(metrics, 12), 12)
   })
 
   it('keeps leave-type entitlement separate from the current balance', () => {
-    const metrics = { earnedLeaveDays: -1.44, leaveBalance: 18.32, employeeCardLeaveBalance: -2.68 }
+    const metrics = {
+      accruedDays: -1.44,
+      earnedLeaveDays: -2.68,
+      leaveBalance: 18.32,
+      employeeCardLeaveBalance: -2.68,
+    }
     assert.equal(resolveAnnualLeaveEntitlement(metrics, 16), 16)
   })
 })
 
+describe('resolveBcLeaveBalance', () => {
+  it('parses the complete annual leave breakdown returned by Business Central', () => {
+    const summary = parseBcLeaveSummary(
+      JSON.stringify({
+        currentLeaveBalance: 18.5,
+        allocatedDays: 24,
+        reimbursedDays: 0,
+        carryForwardBalanceForType: 3,
+        currentTotalLeaveTaken: 8.5,
+        carryForwardBalance: 3,
+        accruedDays: 2,
+        leaveAccruedToDate: 5,
+      }),
+    )
+    assert.equal(summary?.currentLeaveBalance, 18.5)
+    assert.equal(summary?.allocatedDays, 24)
+    assert.equal(summary?.carryForwardBalance, 3)
+    assert.equal(summary?.currentTotalLeaveTaken, 8.5)
+    assert.equal(summary?.leaveAccruedToDate, 5)
+  })
+
+  it('keeps the live BC annual-card result authoritative over accrued days', () => {
+    const summary = parseBcLeaveSummary(
+      JSON.stringify({
+        currentLeaveBalance: 0,
+        cardAnnualLeaveBalance: 0,
+        accruedDays: 4.25,
+        leaveAccruedToDate: 14.25,
+      }),
+    )
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: true,
+        leaveTypeDays: 30,
+        summary,
+        cardAnnualBalance: 30,
+        earnedLeaveDays: 4.25,
+        hasCurrentPeriodEntries: false,
+        currentPeriodNet: 0,
+        hasOpenEntries: false,
+        openNet: 0,
+        ledgerNetDays: 30,
+      }),
+      0,
+    )
+  })
+
+  it('uses the non-annual balance calculated by the paired BC app', () => {
+    const summary = parseBcLeaveSummary(
+      JSON.stringify({ currentLeaveBalance: 7, setupDays: 10 }),
+    )
+    assert.equal(
+      resolveBcLeaveBalance({
+        isAnnual: false,
+        leaveTypeDays: 10,
+        summary,
+        cardAnnualBalance: null,
+        hasCurrentPeriodEntries: false,
+        currentPeriodNet: 0,
+        hasOpenEntries: false,
+        openNet: 0,
+        ledgerNetDays: 0,
+      }),
+      7,
+    )
+  })
+})
+
+describe('six-field leave balance contract', () => {
+  it('keeps Total Available separate from the balance the employee may apply against', () => {
+    const summary = parseBcLeaveSummary(
+      JSON.stringify({
+        leaveEntitlement: 30,
+        carryForward: 5,
+        reimbursedDays: 1,
+        totalAvailableLeaveBalance: 32,
+        leaveAccruedToDate: 18,
+        currentTotalLeaveTaken: 4,
+        availableLeaveBalance: 14,
+        // A legacy alias with a different value must not override the new
+        // canonical Available Leave Balance.
+        currentLeaveBalance: 32,
+      }),
+    )
+    const fields = resolveLeaveBalanceBreakdown({
+      summary,
+      entitlement: 99,
+      carryForward: 99,
+      leaveAccruedToDate: 99,
+      totalLeaveTakenToDate: 99,
+      availableLeaveBalance: 99,
+    })
+    assert.deepEqual(fields, {
+      leaveEntitlement: 30,
+      carryForward: 5,
+      totalAvailableLeaveBalance: 32,
+      leaveAccruedToDate: 18,
+      totalLeaveTakenToDate: 4,
+      availableLeaveBalance: 14,
+    })
+    assert.equal(leaveApplicationExceedsAvailableBalance(15, fields.availableLeaveBalance), true)
+    assert.equal(leaveApplicationExceedsAvailableBalance(14, fields.availableLeaveBalance), false)
+  })
+
+  it('derives Total Available without using it as Available Leave Balance', () => {
+    const summary = parseBcLeaveSummary(
+      JSON.stringify({
+        allocatedDays: 24,
+        carryForwardBalanceForType: 3,
+        reimbursedDays: 2,
+        currentTotalLeaveTaken: 8,
+        currentLeaveBalance: 21,
+      }),
+    )
+    const fields = resolveLeaveBalanceBreakdown({
+      summary,
+      entitlement: 24,
+      carryForward: 3,
+      leaveAccruedToDate: null,
+      totalLeaveTakenToDate: 8,
+      availableLeaveBalance: 12,
+    })
+    assert.equal(fields.totalAvailableLeaveBalance, 21)
+    assert.equal(fields.availableLeaveBalance, 12)
+  })
+
+  it('ignores the old full-year current balance for annual applications', () => {
+    const legacySummary = parseBcLeaveSummary(
+      JSON.stringify({
+        currentLeaveBalance: 32,
+        allocatedDays: 30,
+        carryForwardBalanceForType: 6,
+        leaveAccruedToDate: 18,
+        currentTotalLeaveTaken: 4,
+      }),
+    )
+    assert.equal(
+      resolveAnnualAvailableLeaveBalance({ summary: legacySummary }),
+      18,
+    )
+    assert.equal(
+      resolveAnnualAvailableLeaveBalance({
+        summary: parseBcLeaveSummary(JSON.stringify({ currentLeaveBalance: 32 })),
+      }),
+      0,
+    )
+    assert.equal(leaveApplicationExceedsAvailableBalance(1, null), true)
+  })
+
+  it('preserves missing BC summary fields as null instead of inventing zeros', () => {
+    const summary = parseBcLeaveSummary('{}')
+    assert.equal(summary?.availableLeaveBalance, null)
+    assert.equal(summary?.totalAvailableLeaveBalance, null)
+    assert.equal(summary?.leaveAccruedToDate, null)
+  })
+})
+
+describe('purchase Requested By display name', () => {
+  it('uses the Employee Card name and never the employee number', () => {
+    assert.equal(
+      purchaseRequesterDisplayName(
+        { AssignedUserID: 'ABH-010', EmployeeNo: 'ABH-010' },
+        { No: 'ABH-010', FirstName: 'Zerihun', LastName: 'Reta' },
+      ),
+      'Zerihun Reta',
+    )
+  })
+
+  it('uses the authenticated session name for the request owner', () => {
+    assert.equal(
+      purchaseRequesterDisplayName(
+        { AssignedUserID: 'ABH-010' },
+        null,
+        { employeeNo: 'ABH-010', userID: 'ZERIHUN', displayName: 'Zerihun Reta' },
+      ),
+      'Zerihun Reta',
+    )
+  })
+
+  it('resolves a Store Requisition RequesterID to the Employee Card name', () => {
+    assert.equal(
+      purchaseRequesterDisplayName(
+        { RequesterID: 'ABH-010', EmployeeNo: 'ABH-010' },
+        { No: 'ABH-010', FirstName: 'Zerihun', LastName: 'Reta' },
+      ),
+      'Zerihun Reta',
+    )
+  })
+
+  it('rejects identifier-shaped values as a display name', () => {
+    assert.equal(
+      purchaseRequesterDisplayName(
+        { RequestedBy: 'ABH-010', AssignedUserID: 'ABH-010' },
+        null,
+      ),
+      '',
+    )
+  })
+})
+
 describe('resolveLeaveApprovalSteps', () => {
+  it('does not invent approval steps for an Open draft before Request Approval', async () => {
+    const steps = await resolveLeaveApprovalStepsAsync(
+      { ApplicationCode: 'ABH-LAP-000033', Status: 'Open', ApprovalStatus: '' },
+      [],
+      'ABH-LAP-000033',
+      { employeeNo: 'ABH-001', userID: 'REQUESTER' },
+    )
+    assert.deepEqual(steps, [])
+  })
+
   it('shows a pending placeholder when BC header is pending but entries are not ready yet', () => {
     const steps = resolveLeaveApprovalSteps(
       { ApplicationCode: 'LV00116', Status: 'Open', ApprovalStatus: 'Pending Approval' },
@@ -353,18 +975,72 @@ describe('parseLeaveDatesReturn', () => {
 })
 
 describe('computeLeaveDatesFallback', () => {
-  it('uses the same day for half-day leave and the next working day as return', () => {
+  it('uses the same day for half-day leave and the next calendar day as return', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
       endDate: '2026-07-17',
-      returnDate: '2026-07-20',
+      returnDate: '2026-07-18',
     })
   })
 
   it('spans full days for normal leave', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
       endDate: '2026-07-18',
-      returnDate: '2026-07-20',
+      returnDate: '2026-07-19',
     })
+  })
+})
+
+describe('leave production date validation', () => {
+  const now = new Date(2026, 7, 24, 12, 0, 0)
+
+  it('allows sick leave only for today or tomorrow', () => {
+    assert.equal(sickLeaveStartDateAllowed('2026-08-24', now), true)
+    assert.equal(sickLeaveStartDateAllowed('2026-08-25', now), true)
+    assert.equal(sickLeaveStartDateAllowed('2026-08-23', now), false)
+    assert.equal(sickLeaveStartDateAllowed('2026-08-26', now), false)
+  })
+
+  it('blocks exact duplicates and every inclusive date overlap', () => {
+    const rows = [
+      {
+        ApplicationCode: 'LV-00001',
+        StartDate: '2026-08-25',
+        EndDate: '2026-08-27',
+        Status: 'Pending Approval',
+      },
+    ]
+    assert.equal(
+      overlappingLeaveApplication(rows, '2026-08-25', '2026-08-27')?.applicationNo,
+      'LV-00001',
+    )
+    assert.equal(
+      overlappingLeaveApplication(rows, '2026-08-27', '2026-08-29')?.applicationNo,
+      'LV-00001',
+    )
+    assert.equal(overlappingLeaveApplication(rows, '2026-08-28', '2026-08-29'), null)
+    assert.equal(
+      overlappingLeaveApplication(rows, '2026-08-25', '2026-08-27', 'LV-00001'),
+      null,
+    )
+  })
+
+  it('ignores rejected and cancelled applications but keeps open drafts blocking', () => {
+    assert.equal(
+      overlappingLeaveApplication(
+        [{ ApplicationCode: 'LV-2', StartDate: '2026-08-24', EndDate: '2026-08-25', Status: 'Rejected' }],
+        '2026-08-24',
+        '2026-08-25',
+      ),
+      null,
+    )
+    assert.equal(
+      overlappingLeaveApplication(
+        [{ ApplicationCode: 'LV-3', StartDate: '2026-08-24', EndDate: '2026-08-25', Status: 'Open' }],
+        '2026-08-25',
+        '2026-08-25',
+      )?.applicationNo,
+      'LV-3',
+    )
   })
 })
 
@@ -378,6 +1054,25 @@ describe('isMedicalClaimType', () => {
 })
 
 describe('staffClaim saveLine params', () => {
+  it('recognizes ABH query 50036 global-dimension-2 department rows', () => {
+    assert.equal(
+      isRequestingDepartmentDimensionRow({
+        Code: 'FIN ADMIN',
+        Name: 'Finance and Administration',
+        Global_Dimension_No_: 2,
+      }),
+      true,
+    )
+    assert.equal(
+      isRequestingDepartmentDimensionRow({
+        Code: 'SECTOR',
+        Name: 'Sector',
+        Global_Dimension_No_: 1,
+      }),
+      false,
+    )
+  })
+
   it('maps long department names to dimension codes', () => {
     assert.equal(
       pickDimensionCodeFromRow(
@@ -388,12 +1083,34 @@ describe('staffClaim saveLine params', () => {
     )
   })
 
-  it('builds claim header SOAP params with formatted date and department', async () => {
+  it('builds claim header SOAP params with formatted date and department', async (t) => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          value: [
+            {
+              No: 'E001',
+              GlobalDimension2Code: 'TRR',
+              Code: 'TRR',
+              Name: 'Total Reward and Recognition',
+              Dimension_Code: 'DEPARTMENT',
+              Global_Dimension_No_: 2,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    t.after(() => {
+      globalThis.fetch = originalFetch
+    })
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveHeader)
+    const now = new Date()
+    const claimDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     const payload = (await spec!.params!.saveHeader!({
       req: {
-        body: { purpose: 'Travel refund', claimDate: '2026-07-04' },
+        body: { purpose: 'Travel refund', claimDate },
       },
       user: {
         employeeNo: 'E001',
@@ -404,15 +1121,292 @@ describe('staffClaim saveLine params', () => {
       no: '',
     } as never)) as Record<string, unknown>
     assert.equal(payload.claimDescription, 'Travel refund')
-    assert.equal(payload.claimDate, '2026-07-04')
+    assert.equal(payload.claimDate, claimDate)
     assert.equal(payload.staffNo, 'E001')
     assert.equal(payload.myUserID, 'BEZA')
   })
 
-  it('sends hospital category 0 for non-medical claim types', () => {
+  it('sends the logged-in BC user when creating a store requisition', async () => {
+    const spec = findModuleSpec('store-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    const payload = (await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          justification: 'Keyboard for finance',
+          dateRequired: '2026-08-10',
+          issuingStore: 'IT_STORE',
+          priority: 'high',
+          requestType: 'item',
+        },
+      },
+      user: {
+        employeeNo: 'ABH-114',
+        userID: 'HERMON_GETACHEW',
+      },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.myUserID, 'HERMON_GETACHEW')
+    assert.equal(payload.requestDescription, 'Keyboard for finance')
+    assert.equal(payload.justification, 'Keyboard for finance')
+    assert.equal(payload.requestDate, '2026-08-10')
+    assert.equal(payload.issuingStore, 'IT_STORE')
+    assert.equal(payload.priority, 2)
+    assert.equal(payload.storeRequisitionType, 0)
+  })
+
+  it('rejects an incomplete store requisition line before calling Business Central', async () => {
+    const spec = findModuleSpec('store-requisition')
+    assert.ok(spec?.params?.saveLine)
+    await assert.rejects(
+      async () =>
+        spec!.params!.saveLine!({
+          req: {
+            body: {
+              itemName: 'Laptop',
+              quantity: 1,
+              uom: 'PCS',
+            },
+          },
+          user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+          no: 'SREQ-TEST',
+        } as never),
+      /description, UOM, and a positive quantity are required/i,
+    )
+  })
+
+  it('rejects an incomplete purchase requisition header before calling Business Central', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    await assert.rejects(
+      async () =>
+        spec!.params!.saveHeader!({
+          req: { body: { justification: 'Office supplies' } },
+          user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+          no: '',
+        } as never),
+      /Budget Type must be Project or Non-Project/i,
+    )
+  })
+
+  it('uses the ABH Purchase priority ordinals and rejects silent defaults', () => {
+    assert.equal(purchasePriorityCode('normal'), 1)
+    assert.equal(purchasePriorityCode('critical'), 2)
+    assert.equal(purchasePriorityCode('urgent'), 3)
+    assert.throws(() => purchasePriorityCode(''), /must be Normal, Urgent, or Critical/i)
+    assert.throws(() => purchasePriorityCode('medium'), /must be Normal, Urgent, or Critical/i)
+  })
+
+  it('round-trips the Other purchase type through Other Requirements', () => {
+    assert.deepEqual(
+      parsePurchaseOtherRequirements('Purchase type: Laboratory calibration | Annual service'),
+      {
+        otherPurchaseType: 'Laboratory calibration',
+        otherRequirements: 'Annual service',
+      },
+    )
+    assert.deepEqual(parsePurchaseOtherRequirements('Keep dry'), {
+      otherPurchaseType: '',
+      otherRequirements: 'Keep dry',
+    })
+  })
+
+  it('matches a blank purchase code only when the master name is exact and unique', () => {
+    const rows = [
+      { No: 'ITEM-1', Description: 'Standard Keyboard' },
+      { No: 'ITEM-2', Description: 'Wireless Mouse' },
+    ]
+    assert.equal(uniqueExactMasterNoByName(rows, 'standard keyboard'), 'ITEM-1')
+    assert.equal(uniqueExactMasterNoByName(rows, 'Keyboard'), '')
+    assert.equal(
+      uniqueExactMasterNoByName(
+        [...rows, { No: 'ITEM-3', Description: 'STANDARD KEYBOARD' }],
+        'Standard Keyboard',
+      ),
+      '',
+    )
+  })
+
+  it('allows optional Scope/TOR and attachments for a local service purchase', async (t) => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      const code = url.includes('FIN') ? 'FIN' : 'IT'
+      return new Response(
+        JSON.stringify({
+          value: [{ Code: code, Name: code, Global_Dimension_No_: 2 }],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    t.after(() => {
+      globalThis.fetch = originalFetch
+    })
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    const payload = (await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          requestingDepartment: 'IT',
+          justification: 'Local network maintenance service',
+          dateNeeded: '2026-08-24',
+          budgetType: 'nonProject',
+          purchaseMode: 'local',
+          purchaseRequestType: 'service',
+          priority: 'normal',
+          scopeOfWork: '',
+          technicalRequirement: '',
+          currencyCode: 'USD',
+        },
+      },
+      user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.scopeOfWork, '')
+    assert.equal(payload.currencyCode, '')
+
+    const goodsPayload = (await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          requestingDepartment: 'IT',
+          justification: 'Local office equipment',
+          dateNeeded: '2026-08-24',
+          budgetType: 'nonProject',
+          purchaseMode: 'local',
+          purchaseRequestType: 'goods',
+          priority: 'critical',
+          technicalRequirement: '',
+        },
+      },
+      user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(goodsPayload.technicalRequirement, '')
+    assert.equal(goodsPayload.priority, 2)
+
+    await assert.rejects(
+      async () =>
+        await spec!.params!.saveHeader!({
+          req: {
+            body: {
+              requestingDepartment: 'IT',
+              justification: 'Special purchase',
+              dateNeeded: '2026-08-24',
+              budgetType: 'nonProject',
+              purchaseRequestType: 'other',
+              priority: 'normal',
+            },
+          },
+          user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+          no: '',
+        } as never),
+      /Describe the purchase type/i,
+    )
+
+    const otherPayload = (await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          requestingDepartment: 'IT',
+          justification: 'Special purchase',
+          dateNeeded: '2026-08-24',
+          budgetType: 'nonProject',
+          purchaseRequestType: 'other',
+          otherPurchaseType: 'Laboratory calibration',
+          otherRequirements: 'Annual service',
+          priority: 'normal',
+        },
+      },
+      user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(
+      otherPayload.otherRequirements,
+      'Purchase type: Laboratory calibration | Annual service',
+    )
+
+    await assert.rejects(
+      async () =>
+        await spec!.params!.saveHeader!({
+          req: {
+            body: {
+              requestingDepartment: 'FIN',
+              justification: 'Attempted department override',
+              dateNeeded: '2026-08-24',
+              budgetType: 'nonProject',
+              purchaseRequestType: 'goods',
+              priority: 'normal',
+            },
+          },
+          user: {
+            employeeNo: 'ABH-114',
+            userID: 'HERMON_GETACHEW',
+            department: 'IT',
+          },
+          no: '',
+        } as never),
+      /must match your Business Central Employee Card/i,
+    )
+  })
+
+  it('allows a manually named purchase item when it is not in the BC item list', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveLine)
+    const payload = (await spec!.params!.saveLine!({
+      req: {
+        body: {
+          itemNo: '',
+          itemName: 'Custom laboratory rack',
+          category: 'Other',
+          description: 'Rack for sample storage',
+          specification: 'Stainless steel, 100-slot',
+          quantity: 1,
+          unitOfMeasure: 'PCS',
+          requiredDate: '2026-08-24',
+          type: 'item',
+        },
+      },
+      user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+      no: 'PR-TEST',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.itemNo, '')
+    assert.equal(payload.itemName, 'Custom laboratory rack')
+  })
+
+  it('rejects a missing line type or invalid estimated price before calling BC', async () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec?.params?.saveLine)
+    const completeLine = {
+      itemName: 'Custom laboratory rack',
+      category: 'Other',
+      description: 'Rack for sample storage',
+      specification: 'Stainless steel, 100-slot',
+      quantity: 1,
+      unitOfMeasure: 'PCS',
+      requiredDate: '2026-08-24',
+    }
+    await assert.rejects(
+      async () =>
+        await spec!.params!.saveLine!({
+          req: { body: completeLine },
+          user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+          no: 'PR-TEST',
+        } as never),
+      /Line Type must be Item, Service, or Asset/i,
+    )
+    await assert.rejects(
+      async () =>
+        await spec!.params!.saveLine!({
+          req: { body: { ...completeLine, type: 'item', estimatedUnitPrice: -1 } },
+          user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+          no: 'PR-TEST',
+        } as never),
+      /Estimated Unit Price must be zero or a positive amount/i,
+    )
+  })
+
+  it('sends hospital category 0 for non-medical claim types', async () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
-    const payload = spec!.params!.saveLine!({
+    const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           claimType: 'ACC',
@@ -424,16 +1418,16 @@ describe('staffClaim saveLine params', () => {
         },
       },
       no: '1237',
-    } as never) as Record<string, unknown>
+    } as never)) as Record<string, unknown>
     assert.equal('hospitalCategory' in payload, true)
     assert.equal(payload.hospitalCategory, 0)
     assert.equal(payload.medicalAmount, 0)
   })
 
-  it('includes hospital category for medical claim types', () => {
+  it('includes hospital category for medical claim types', async () => {
     const spec = findModuleSpec('claim')
     assert.ok(spec?.params?.saveLine)
-    const payload = spec!.params!.saveLine!({
+    const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           claimType: 'MEDICAL',
@@ -446,9 +1440,56 @@ describe('staffClaim saveLine params', () => {
         },
       },
       no: '1237',
-    } as never) as Record<string, unknown>
+    } as never)) as Record<string, unknown>
     assert.equal(payload.hospitalCategory, 2)
     assert.equal(payload.medicalAmount, 100)
+    assert.equal(payload.patient, 1)
+    assert.equal(payload.relationship, 0)
+    assert.equal(payload.dependant, '')
+  })
+
+  it('never forwards dependant-only fields for a self medical claim', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveLine)
+    const payload = (await spec!.params!.saveLine!({
+      req: {
+        body: {
+          claimType: 'MEDICAL',
+          accountNo: '11',
+          patient: 'self',
+          relationship: 'Child',
+          dependant: 'STALE DEPENDANT',
+          expenditureDate: '2026-08-16',
+          expenditureDescription: 'Medical refund',
+        },
+      },
+      no: 'ABH-STC000034',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.patient, 1)
+    assert.equal(payload.relationship, 0)
+    assert.equal(payload.dependant, '')
+  })
+
+  it('forwards relationship and dependant only for a dependant medical claim', async () => {
+    const spec = findModuleSpec('claim')
+    assert.ok(spec?.params?.saveLine)
+    const payload = (await spec!.params!.saveLine!({
+      req: {
+        body: {
+          claimType: 'MEDICAL',
+          accountNo: '11',
+          patient: 'dependant',
+          relationship: 'Spouse',
+          dependant: 'ABH-010-KIN-1',
+          expenditureDate: '2026-08-16',
+          expenditureDescription: 'Medical refund',
+        },
+      },
+      no: 'ABH-STC000035',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.patient, 2)
+    assert.equal(payload.relationship, 1)
+    assert.equal(payload.dependant, 'ABH-010-KIN-1')
   })
 })
 
@@ -585,6 +1626,21 @@ describe('ESS request mutation contracts', () => {
 })
 
 describe('mapModuleLines', () => {
+  it('returns the saved medical category, refund, and coverage from BC claim lines', () => {
+    const [line] = mapModuleLines('staffClaim', {}, [{
+      LineNo: 1,
+      AdvanceType: 'MEDICAL',
+      HospitalCategory: 'Private',
+      MedicalAmount: 100,
+      AmountToRefund: 60,
+      Amount: 60,
+    }])
+    const medicalLine = line as Record<string, unknown>
+    assert.equal(medicalLine.hospitalCategory, '1')
+    assert.equal(medicalLine.amountToRefund, 60)
+    assert.equal(medicalLine.coveragePercent, 60)
+  })
+
   it('normalizes imprest fields and preserves the BC line number for actions', () => {
     const [line] = mapModuleLines('imprest', {}, [{
       Line_No: 10000,
@@ -605,6 +1661,7 @@ describe('mapModuleLines', () => {
       accountName: 'Travel',
       amount: 1200,
       noOfDays: 2,
+      dailyRate: 0,
     })
   })
 
@@ -618,6 +1675,28 @@ describe('mapModuleLines', () => {
     const passenger = line as Record<string, unknown>
     assert.equal(passenger.id, 'passenger-guid')
     assert.equal(passenger.externalPassName, 'Visitor')
+  })
+
+  it('keeps Purchase item name, description, specification, estimate, and remarks separate', () => {
+    const [line] = mapModuleLines('purchaseRequisition', {}, [{
+      LineNo: 10000,
+      Type: 'Item',
+      Description: 'Standard Keyboard',
+      PortalLineDescription: 'Keyboard for daily office work',
+      RequestSummary: 'USB, full-size, English layout',
+      PortalEstimatedUnitPrice: 1250,
+      PortalRemarks: 'Preferred black colour',
+      Quantity: 2,
+      LineAmount: 0,
+    }])
+    const purchaseLine = line as Record<string, unknown>
+    assert.equal(purchaseLine.itemName, 'Standard Keyboard')
+    assert.equal(purchaseLine.description, 'Keyboard for daily office work')
+    assert.equal(purchaseLine.specification, 'USB, full-size, English layout')
+    assert.equal(purchaseLine.estimatedUnitPrice, 1250)
+    assert.equal(purchaseLine.directUnitCost, 1250)
+    assert.equal(purchaseLine.remarks, 'Preferred black colour')
+    assert.equal(purchaseLine.amount, 2500)
   })
 })
 
@@ -683,6 +1762,119 @@ describe('mapRequest status', () => {
       mapRequest({ No: '1522', Status: 'Pending Approval' }, 'staffClaim').status,
       'Pending Approval',
     )
+  })
+
+  it('promotes staff claim to Pending Approval when BC approval entries exist', () => {
+    assert.equal(
+      resolveModuleRequestStatus(
+        { No: 'ABH-STC000015', Status: 'Pending' },
+        'staffClaim',
+        [{ DocumentNo: 'ABH-STC000015', Status: 'Open' }],
+      ),
+      'Pending Approval',
+    )
+  })
+
+  it('maps petty cash 1st Approval BC status to Pending Approval', () => {
+    assert.equal(
+      mapRequest({ No: 'ABH-PCP000008', Status: '1st Approval' }, 'pettyCash').status,
+      'Pending Approval',
+    )
+  })
+
+  it('prefers Total Net / Total Payment Amount over a zero Amount for finance lists', () => {
+    assert.equal(
+      mapRequest(
+        { No: 'ABH-PCP000020', Amount: 0, TotalNetAmount: 0, TotalPaymentAmount: 1250.5 },
+        'pettyCash',
+      ).amount,
+      1250.5,
+    )
+    assert.equal(
+      mapRequest(
+        { No: '1522', Amount: 0, TotalNetAmount: 840 },
+        'staffClaim',
+      ).amount,
+      840,
+    )
+    assert.equal(
+      mapRequest(
+        { No: 'IMP-001', TotalNetAmount: 3200 },
+        'imprest',
+      ).amount,
+      3200,
+    )
+  })
+
+  it('keeps a new petty cash header editable when the empty approval FlowField is Created', () => {
+    const row = {
+      No: 'ABH-PCP000011',
+      Status: 'Pending',
+      FinalApproverStatus: 'Created',
+    }
+    assert.equal(documentStatusFromBc(row, 'pettyCash'), 'Pending')
+    assert.equal(mapRequest(row, 'pettyCash').status, 'Draft')
+    assert.equal(resolveModuleRequestStatus(row, 'pettyCash', []), 'Draft')
+  })
+
+  it('promotes petty cash to Pending Approval when BC approval entries exist', () => {
+    assert.equal(
+      resolveModuleRequestStatus(
+        { No: 'ABH-PCP000008', Status: 'Pending' },
+        'pettyCash',
+        [{ DocumentNo: 'ABH-PCP000008', Status: 'Open' }],
+      ),
+      'Pending Approval',
+    )
+  })
+
+  it('promotes store requisition to Pending Approval when BC approval entries exist', () => {
+    assert.equal(
+      resolveModuleRequestStatus(
+        { No: 'ABH-SR000029', Status: 'Open' },
+        'storeRequisition',
+        [{ DocumentNo: 'ABH-SR000029', Status: 'Open' }],
+      ),
+      'Pending Approval',
+    )
+  })
+
+  it('lets a live resubmission entry override an older rejection', () => {
+    assert.equal(
+      resolveModuleRequestStatus(
+        { No: 'ABH-PQ000022', Status: 'Open' },
+        'purchaseRequisition',
+        [
+          { EntryNo: 10, Status: 'Rejected', Comment: 'Wrong quantity' },
+          { EntryNo: 11, Status: 'Open' },
+        ],
+      ),
+      'Pending Approval',
+    )
+  })
+
+  it('distinguishes a returned approval from a rejected approval', () => {
+    assert.equal(statusFromBc('Returned'), 'Returned')
+    assert.equal(statusFromBc('Released'), 'Approved')
+    assert.equal(
+      resolveModuleRequestStatus(
+        { No: 'ABH-PQ000022', Status: 'Open' },
+        'purchaseRequisition',
+        [{ EntryNo: 12, Status: 'Rejected', Comment: '[RETURNED] Add specification' }],
+      ),
+      'Returned',
+    )
+  })
+
+  it('promotes store requisition detail after successful approval submit', async () => {
+    const { promoteDetailAfterApprovalSubmit } = await import('./erpMappings.js')
+    const promoted = promoteDetailAfterApprovalSubmit('storeRequisition', {
+      id: 'storeRequisition-ABH-SR000029',
+      status: 'Open',
+      payload: { Status: 'Open', No: 'ABH-SR000029' },
+    })
+    assert.equal(promoted.status, 'Pending Approval')
+    assert.equal(promoted.payload?.Status, 'Pending Approval')
   })
 
   it('derives salary advance amount from percentage and basic salary when BC amount is zero', () => {
@@ -925,5 +2117,69 @@ describe('resolveEmployeeJobTitle', () => {
   it('does not treat long email local-parts as job codes', () => {
     assert.equal(inferEmployeeJobId({ EMail: 'tesfaye@abhpartners.com' }), '')
     assert.equal(inferEmployeeJobId({ EMail: 'itm@abhpartners.com' }), 'ITM')
+  })
+})
+
+describe('HR service request deletion', () => {
+  it('allows permanent deletion only after cancellation', () => {
+    assert.equal(hrServiceLetterCanBeDeleted('Cancelled'), true)
+    assert.equal(hrServiceLetterCanBeDeleted('Submitted'), false)
+    assert.equal(hrServiceLetterCanBeDeleted('In Progress'), false)
+    assert.equal(hrServiceLetterCanBeDeleted('Approved'), false)
+    assert.equal(hrServiceLetterCanBeDeleted('Rejected'), false)
+    assert.equal(hrServiceLetterCanBeDeleted('Ready for Collection'), false)
+    assert.equal(hrServiceLetterCanBeDeleted('Completed'), false)
+  })
+})
+
+describe('HR policy administration security', () => {
+  it('grants HR access only from an explicit override, HR department, or HR job title', () => {
+    const options = {
+      overrideEmployeeNos: ['ABH-999'],
+      departmentCodes: ['HR', 'HUMAN RESOURCES'],
+    }
+    assert.equal(employeeHasHrAccess({ employeeNo: 'ABH-999' }, options), true)
+    assert.equal(employeeHasHrAccess({ department: 'HR' }, options), true)
+    assert.equal(employeeHasHrAccess({ departmentName: 'Human Resources' }, options), true)
+    assert.equal(employeeHasHrAccess({ jobTitle: 'Human Resource Manager' }, options), true)
+    assert.equal(employeeHasHrAccess({ jobTitle: 'IT Manager', department: 'IT' }, options), false)
+    assert.equal(employeeHasHrAccess({ departmentName: 'Finance and Admin' }, options), false)
+  })
+
+  it('requires the backend HR role even when a client tries to expose admin controls', () => {
+    assert.equal(authUserCanManageHrPolicies({ roles: ['staff', 'hr'] }), true)
+    assert.equal(authUserCanManageHrPolicies({ HR: true, roles: ['staff'] }), true)
+    assert.equal(authUserCanManageHrPolicies({ roles: ['staff', 'hod'] }), false)
+  })
+
+  it('validates HR uploads before any Business Central mutation', () => {
+    const parsed = parseHrPolicyUpload({
+      title: 'Annual Leave Policy',
+      category: 'Policy Document',
+      published: true,
+      fileName: 'leave-policy.pdf',
+      contentBase64: Buffer.from('policy').toString('base64'),
+    })
+    assert.equal(parsed.title, 'Annual Leave Policy')
+    assert.equal(parsed.byteLength, 6)
+    assert.equal(parsed.published, true)
+    assert.throws(
+      () => parseHrPolicyUpload({ ...parsed, fileName: 'payload.exe' }),
+      /Only PDF, Word, Excel, and PowerPoint/i,
+    )
+    assert.throws(
+      () => parseHrPolicyUpload({ ...parsed, category: 'Uncontrolled' }),
+      /valid HR document category/i,
+    )
+  })
+})
+
+describe('HOD role resolution', () => {
+  it('uses the authoritative ABH Employee Card Is HOD field', () => {
+    assert.equal(employeeIsHod({ IsHOD: true }), true)
+    assert.equal(employeeIsHod({ Is_HOD: '1' }), true)
+    assert.equal(employeeIsHod({ 'Is HOD': 'Yes' }), true)
+    assert.equal(employeeIsHod({ IsHOD: false }), false)
+    assert.equal(employeeIsHod({ IsHOD: 'false' }), false)
   })
 })

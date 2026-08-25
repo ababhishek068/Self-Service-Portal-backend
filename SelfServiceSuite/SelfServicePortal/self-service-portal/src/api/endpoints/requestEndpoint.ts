@@ -68,6 +68,37 @@ export async function deleteRequestLine(id: string, lineId: string) {
   return authDelete<PortalRequest>(`/api/requests/${encodeURIComponent(id)}/lines/${encodeURIComponent(lineId)}`)
 }
 
+export async function getPurchaseProcurementProcess(id: string) {
+  requireAuthApiUrl()
+  return authGet<Record<string, unknown>>(`/api/requests/${encodeURIComponent(id)}/procurement-process`)
+}
+
+export async function updatePurchaseProcurementProcess(
+  id: string,
+  actionCode: string,
+  linkedDocumentNo = '',
+  actionComment = '',
+) {
+  requireAuthApiUrl()
+  return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(
+    `/api/requests/${encodeURIComponent(id)}/procurement-process`,
+    { actionCode, linkedDocumentNo, actionComment },
+  )
+}
+
+export async function getStoreRequisitionProcess(id: string) {
+  requireAuthApiUrl()
+  return authGet<Record<string, unknown>>(`/api/requests/${encodeURIComponent(id)}/store-process`)
+}
+
+export async function updateStoreRequisitionProcess(id: string, actionCode: string) {
+  requireAuthApiUrl()
+  return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(
+    `/api/requests/${encodeURIComponent(id)}/store-process`,
+    { actionCode },
+  )
+}
+
 export async function receiveStoreRequestLine(
   id: string,
   lineId: string,

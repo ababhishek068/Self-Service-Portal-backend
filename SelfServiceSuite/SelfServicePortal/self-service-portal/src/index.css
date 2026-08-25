@@ -2,23 +2,28 @@
 @plugin "tailwindcss-animate";
 
 :root {
-  --portal-navy: #003366;
-  --portal-navy-dark: #002d62;
-  --portal-navy-panel: #002a52;
-  --portal-orange: #e35205;
-  --portal-orange-hover: #c94704;
-  --portal-green: #2e7d32;
-  --portal-green-light: #4caf50;
-  --portal-blue-action: #1976d2;
-  --portal-content-bg: #eef2f7;
-  --portal-card-border: #b3cde0;
+  --portal-navy: #03949b;
+  --portal-navy-dark: #02747a;
+  --portal-navy-panel: #075f64;
+  --portal-blue: #35aeb4;
+  --portal-blue-action: #03949b;
+  --portal-green: #087f84;
+  --portal-green-light: #48aeb2;
+  --portal-gold: #c9a227;
+  --portal-orange: #c9a227;
+  --portal-orange-hover: #b08d1c;
+  --portal-content-bg: #f3f7f7;
+  --portal-card-border: #d5e1e2;
   --sidebar-width: 16rem;
-  --portal-glow-orange: rgba(227, 82, 5, 0.35);
-  --portal-glow-navy: rgba(0, 51, 102, 0.12);
+  --portal-glow-orange: rgba(3, 148, 155, 0.2);
+  --portal-glow-navy: rgba(3, 148, 155, 0.1);
+  --portal-text: #172b2d;
+  --portal-muted: #5f7375;
+  --portal-surface: #ffffff;
 
   font-family:
     "Segoe UI", Roboto, Helvetica, Arial, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  color: #1a1a1a;
+  color: var(--portal-text);
   background: var(--portal-content-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -142,13 +147,11 @@ textarea {
 @keyframes portal-page-enter {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.985);
-    filter: blur(6px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
+    transform: translateY(0);
   }
 }
 
@@ -199,10 +202,10 @@ textarea {
 @keyframes portal-nav-active-pulse {
   0%,
   100% {
-    box-shadow: inset 3px 0 0 #fff, 0 0 0 0 rgba(227, 82, 5, 0.4);
+    box-shadow: inset 3px 0 0 #fff, 0 0 0 0 rgba(47, 158, 92, 0.4);
   }
   50% {
-    box-shadow: inset 3px 0 0 #fff, 0 0 12px 0 rgba(227, 82, 5, 0.25);
+    box-shadow: inset 3px 0 0 #fff, 0 0 12px 0 rgba(47, 158, 92, 0.25);
   }
 }
 
@@ -288,20 +291,13 @@ body.portal-api-blocking #root {
   }
 }
 
-/* Main content: soft mesh + dot grid + depth */
+/* Main content: calm neutral canvas with restrained brand tint. */
 .portal-main-bg {
   position: relative;
   background-color: var(--portal-content-bg);
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(0, 51, 102, 0.04) 1px, transparent 0),
-    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(0, 51, 102, 0.07), transparent 50%),
-    radial-gradient(ellipse 60% 40% at 0% 100%, rgba(227, 82, 5, 0.05), transparent 45%),
-    linear-gradient(180deg, #f4f7fb 0%, var(--portal-content-bg) 100%);
-  background-size:
-    24px 24px,
-    auto,
-    auto,
-    auto;
+    radial-gradient(ellipse 70% 34% at 100% 0%, rgba(3, 148, 155, 0.065), transparent 58%),
+    linear-gradient(180deg, #f8fafa 0%, var(--portal-content-bg) 100%);
 }
 
 .portal-ambient {
@@ -311,9 +307,9 @@ body.portal-api-blocking #root {
 .portal-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(72px);
-  opacity: 0.35;
-  animation: portal-orb-drift 22s ease-in-out infinite;
+  filter: blur(92px);
+  opacity: 0.14;
+  animation: portal-orb-drift 30s ease-in-out infinite;
 }
 
 .portal-orb-navy {
@@ -321,16 +317,17 @@ body.portal-api-blocking #root {
   height: 280px;
   top: 8%;
   right: -4%;
-  background: rgba(0, 80, 160, 0.45);
+  background: rgba(3, 148, 155, 0.3);
   animation-delay: 0s;
 }
 
-.portal-orb-orange {
+.portal-orb-orange,
+.portal-orb-green {
   width: 220px;
   height: 220px;
   bottom: 12%;
   left: -2%;
-  background: rgba(227, 82, 5, 0.28);
+  background: rgba(3, 148, 155, 0.18);
   animation-delay: -7s;
   animation-duration: 26s;
 }
@@ -340,47 +337,38 @@ body.portal-api-blocking #root {
   height: 180px;
   top: 45%;
   left: 35%;
-  background: rgba(0, 51, 102, 0.2);
+  background: rgba(2, 116, 122, 0.16);
   animation-delay: -14s;
   animation-duration: 30s;
 }
 
 /* Sidebar depth */
 .portal-sidebar-bg {
-  background: linear-gradient(180deg, #004080 0%, var(--portal-navy) 18%, var(--portal-navy-dark) 100%);
+  background: linear-gradient(180deg, #087f84 0%, #067278 45%, #075b60 100%);
   box-shadow:
-    4px 0 28px rgba(0, 0, 0, 0.18),
+    3px 0 18px rgba(17, 54, 57, 0.14),
     inset -1px 0 0 rgba(255, 255, 255, 0.06);
 }
 
 .portal-sidebar-brand {
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, transparent 50%, rgba(227, 82, 5, 0.12) 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(3, 44, 47, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .portal-shimmer-bar {
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.12) 45%,
-    rgba(255, 255, 255, 0.22) 50%,
-    rgba(255, 255, 255, 0.12) 55%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: portal-shimmer 4s ease-in-out infinite;
+  animation: none;
 }
 
 /* Cards & surfaces */
 .portal-card {
   position: relative;
   overflow: hidden;
-  border-radius: 0.625rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--portal-card-border);
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: var(--portal-surface);
   box-shadow:
-    0 1px 2px var(--portal-glow-navy),
-    0 4px 14px rgba(0, 51, 102, 0.06);
+    0 1px 2px rgba(22, 52, 55, 0.04),
+    0 8px 24px rgba(22, 52, 55, 0.055);
   transition:
     transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1),
@@ -393,26 +381,22 @@ body.portal-api-blocking #root {
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--portal-navy), var(--portal-orange), var(--portal-navy));
-  background-size: 200% 100%;
+  height: 2px;
+  background: var(--portal-navy);
   opacity: 0;
-  transition: opacity 0.25s ease;
-  animation: portal-shimmer 3s linear infinite;
-  animation-play-state: paused;
+  transition: opacity 0.2s ease;
 }
 
 .portal-card:hover {
-  transform: translateY(-4px) scale(1.01);
-  border-color: #8fb8d9;
+  transform: translateY(-1px);
+  border-color: #b6d2d4;
   box-shadow:
-    0 12px 32px rgba(0, 51, 102, 0.14),
-    0 0 0 1px rgba(227, 82, 5, 0.1);
+    0 2px 4px rgba(22, 52, 55, 0.04),
+    0 12px 28px rgba(22, 52, 55, 0.08);
 }
 
 .portal-card:hover::before {
-  opacity: 1;
-  animation-play-state: running;
+  opacity: 0.85;
 }
 
 .portal-welcome {
@@ -434,7 +418,7 @@ body.portal-api-blocking #root {
   right: -20%;
   width: 50%;
   height: 200%;
-  background: linear-gradient(105deg, transparent, rgba(227, 82, 5, 0.06), transparent);
+  background: linear-gradient(105deg, transparent, rgba(58, 143, 212, 0.08), transparent);
   transform: rotate(12deg);
   animation: portal-shimmer 6s ease-in-out infinite;
   pointer-events: none;
@@ -467,11 +451,11 @@ body.portal-api-blocking #root {
 }
 
 .portal-quick-action--orange {
-  background: linear-gradient(135deg, #ff6b2b 0%, var(--portal-orange) 45%, var(--portal-orange-hover) 100%);
+  background: linear-gradient(135deg, #4aa3dc 0%, var(--portal-blue) 45%, var(--portal-navy) 100%);
 }
 
 .portal-quick-action--navy {
-  background: linear-gradient(135deg, #004d99 0%, var(--portal-navy) 50%, var(--portal-navy-dark) 100%);
+  background: linear-gradient(135deg, #04a8b0 0%, var(--portal-navy) 50%, var(--portal-navy-dark) 100%);
 }
 
 .portal-nav-active-bar::before {
@@ -497,8 +481,8 @@ body.portal-api-blocking #root {
 .portal-input:focus {
   border-color: var(--portal-navy);
   box-shadow:
-    0 0 0 3px rgba(0, 51, 102, 0.12),
-    0 0 0 1px var(--portal-orange);
+    0 0 0 3px rgba(10, 61, 107, 0.12),
+    0 0 0 1px var(--portal-green);
   transform: translateY(-1px);
 }
 
@@ -580,7 +564,7 @@ body.portal-api-blocking #root {
   background: linear-gradient(
     90deg,
     var(--portal-navy) 0%,
-    #0a6fd4 38%,
+    var(--portal-blue) 38%,
     var(--portal-orange) 72%,
     #ffb347 100%
   );
@@ -708,10 +692,9 @@ body.portal-api-blocking #root {
 
 .portal-panel {
   border-radius: 0.75rem;
-  border: 1px solid rgba(0, 51, 102, 0.1);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(0, 51, 102, 0.06);
+  border: 1px solid var(--portal-card-border);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 24px rgba(22, 52, 55, 0.055);
 }
 
 .portal-card-icon {
@@ -729,13 +712,13 @@ body.portal-api-blocking #root {
 }
 
 .portal-form-card {
-  border-radius: 0.625rem;
+  border-radius: 0.75rem;
   overflow: hidden;
   border: 1px solid var(--portal-card-border);
   background: #fff;
   box-shadow:
-    0 4px 6px var(--portal-glow-navy),
-    0 12px 32px rgba(0, 51, 102, 0.1);
+    0 1px 2px rgba(22, 52, 55, 0.04),
+    0 10px 28px rgba(22, 52, 55, 0.07);
   transition:
     transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
@@ -744,25 +727,30 @@ body.portal-api-blocking #root {
 /* Searchable selects render their result list outside the field. Leave the
    ABH request card open so the list is not clipped while the compact first
    step is displayed. The header keeps the card's rounded top corners. */
-.portal-form-card.portal-form-card--select-overflow {
+.portal-form-card.portal-form-card--select-overflow,
+.portal-form-card.portal-form-card-overflow,
+.portal-form-card.portal-leave-request-form {
   overflow: visible;
 }
 
-.portal-form-card--select-overflow > .portal-form-card-header {
+.portal-form-card--select-overflow > .portal-form-card-header,
+.portal-form-card-overflow > .portal-form-card-header,
+.portal-leave-request-form > .portal-form-card-header {
   border-radius: 0.625rem 0.625rem 0 0;
 }
 
 .portal-form-card:hover {
-  transform: translateY(-2px);
+  transform: none;
   box-shadow:
-    0 8px 16px var(--portal-glow-navy),
-    0 20px 40px rgba(0, 51, 102, 0.14);
+    0 1px 2px rgba(22, 52, 55, 0.04),
+    0 12px 30px rgba(22, 52, 55, 0.085);
 }
 
 .portal-form-card-header {
-  background: linear-gradient(135deg, var(--portal-navy) 0%, var(--portal-navy-dark) 55%, #001f3f 100%);
+  background: linear-gradient(120deg, var(--portal-navy-dark) 0%, var(--portal-navy) 68%, #18a2a8 100%);
   position: relative;
   overflow: hidden;
+  box-shadow: inset 0 -2px 0 rgba(3, 148, 155, 0.45);
 }
 
 .portal-form-card-header::after {
@@ -783,10 +771,7 @@ body.portal-api-blocking #root {
 .portal-page-title {
   position: relative;
   display: inline-block;
-  background: linear-gradient(135deg, var(--portal-navy) 0%, #0055aa 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #18383a;
 }
 
 .portal-page-title::after {
@@ -795,32 +780,25 @@ body.portal-api-blocking #root {
   left: 0;
   bottom: -4px;
   height: 3px;
-  width: 100%;
+  width: 3rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--portal-orange), var(--portal-navy));
+  background: var(--portal-navy);
   transform-origin: left;
   animation: portal-underline-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .portal-topbar {
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(12px) saturate(1.2);
-  -webkit-backdrop-filter: blur(12px) saturate(1.2);
-  box-shadow: 0 1px 0 rgba(0, 51, 102, 0.08);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 8px rgba(22, 52, 55, 0.06);
 }
 
 .portal-topbar-glow {
   height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--portal-orange) 20%,
-    var(--portal-navy) 50%,
-    var(--portal-orange) 80%,
-    transparent
-  );
-  opacity: 0.85;
-  animation: portal-glow-pulse 3s ease-in-out infinite;
+  background: var(--portal-navy);
+  opacity: 0.78;
+  animation: none;
 }
 
 .portal-footer {
@@ -830,7 +808,7 @@ body.portal-api-blocking #root {
 
 .portal-footer-accent {
   height: 3px;
-  background: linear-gradient(90deg, var(--portal-orange), #ff8c42, var(--portal-orange));
+  background: linear-gradient(90deg, var(--portal-green), var(--portal-gold), var(--portal-blue));
 }
 
 .portal-stagger > * {
@@ -884,10 +862,16 @@ body.portal-api-blocking #root {
 }
 
 .portal-login-bg {
-  background:
-    radial-gradient(ellipse 70% 50% at 50% -10%, rgba(0, 51, 102, 0.15), transparent),
-    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(227, 82, 5, 0.08), transparent),
-    var(--portal-content-bg);
+  background-color: #f3f7f8;
+  background-image:
+    radial-gradient(circle at 36% 38%, rgba(30, 147, 148, 0.2) 0%, rgba(30, 147, 148, 0.07) 26%, transparent 52%),
+    radial-gradient(circle at 64% 40%, rgba(177, 200, 54, 0.18) 0%, rgba(78, 123, 192, 0.1) 28%, transparent 54%),
+    radial-gradient(ellipse 90% 55% at 50% -8%, rgba(26, 35, 90, 0.08), transparent 58%),
+    radial-gradient(ellipse 70% 40% at 50% 108%, rgba(30, 147, 148, 0.08), transparent 55%);
+}
+
+.portal-login-logo {
+  filter: drop-shadow(0 10px 28px rgba(26, 31, 76, 0.1));
 }
 
 /* Auth split-screen layout */
@@ -898,10 +882,9 @@ body.portal-api-blocking #root {
 .portal-auth-brand {
   background: linear-gradient(
     155deg,
-    #001a33 0%,
-    var(--portal-navy-dark) 28%,
-    var(--portal-navy) 55%,
-    #003d7a 100%
+    var(--portal-navy-dark) 0%,
+    var(--portal-navy) 42%,
+    #04a8b0 100%
   );
   box-shadow: 4px 0 40px rgba(0, 0, 0, 0.12);
 }
@@ -925,13 +908,13 @@ body.portal-api-blocking #root {
   position: relative;
   border-radius: 0.5rem;
   overflow: hidden;
-  border: 1px solid #94a3b8;
-  box-shadow: 0 4px 16px rgba(0, 51, 102, 0.08);
+  border: 1px solid var(--portal-card-border);
+  box-shadow: 0 4px 16px rgba(22, 52, 55, 0.055);
   transition: box-shadow 0.3s ease;
 }
 
 .portal-table-wrap:hover {
-  box-shadow: 0 8px 28px rgba(0, 51, 102, 0.12);
+  box-shadow: 0 8px 24px rgba(22, 52, 55, 0.075);
 }
 
 /* Inner horizontally-scrollable area with momentum + scroll hint */
@@ -960,7 +943,7 @@ body.portal-api-blocking #root {
 }
 
 .animate-page-in {
-  animation: portal-page-enter 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: portal-page-enter 0.3s ease-out both;
 }
 
 .animate-page-in-subtle {
@@ -1115,8 +1098,8 @@ body.portal-api-blocking #root {
   background-image: linear-gradient(
     100deg,
     var(--portal-navy) 0%,
-    #0a5cad 30%,
-    var(--portal-orange) 60%,
+    var(--portal-blue) 38%,
+    var(--portal-green) 72%,
     var(--portal-navy) 100%
   );
   background-size: 220% 100%;
@@ -1131,7 +1114,7 @@ body.portal-api-blocking #root {
 .portal-btn-gradient:hover {
   background-position: 100% 50%;
   transform: translateY(-2px);
-  box-shadow: 0 8px 22px rgba(227, 82, 5, 0.32);
+  box-shadow: 0 8px 22px rgba(10, 61, 107, 0.35);
 }
 
 .portal-btn-gradient:active {

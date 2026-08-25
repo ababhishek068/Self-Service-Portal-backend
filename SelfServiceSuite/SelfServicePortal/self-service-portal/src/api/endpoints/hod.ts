@@ -9,6 +9,7 @@ export interface HodDepartmentStaffRow {
   department: string
   employmentDate: string
   status: string
+  leaveBalance: number | null
 }
 
 export interface HodStaffLeaveRow {

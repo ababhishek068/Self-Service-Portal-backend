@@ -1,0 +1,241 @@
+ABH BUSINESS CENTRAL PRODUCTION SETUP — APP 1.0.3.199
+====================================================
+
+This file contains configuration only. Do not invent users, approval limits,
+stores, projects, dimensions, leave types, or benefit balances. Select the
+actual ABH records already approved by Finance/HR management.
+
+1. PUBLISH THE PAIRED EXTENSION
+===============================
+
+Publish, sync, data-upgrade, and restart BC240 in that order. Confirm installed
+version 1.0.3.199 before starting the portal.
+
+2. APPROVAL USERS
+=================
+
+Business Central Search: Approval User Setup
+
+- Confirm every portal requester has a Business Central user mapping.
+- Set Approver ID to the actual ABH approver and maintain genuine limits.
+- Confirm each approver can open Approval Entries and act on assigned entries.
+- Do not give an administrator ownership of another user's approval entry.
+
+3. PURCHASE REQUISITION WORKFLOW
+================================
+
+Business Central Search: Workflows
+
+- Import Workflows\Purchase-Requisition-Approval-Workflow.xml.
+- Open PURCHASE-REQ-WF.
+- In the Create Approval Requests response, select the actual ABH approval
+  method/group for Department or Division Head followed by Finance/Admin.
+- Enable the workflow.
+- Test approve, reject, cancel, and final release using real test approvers.
+
+After final approval, authorized teams continue the same Purchase Request:
+- Operations/Store records the stock decision.
+- Procurement records LPR, RFQ, evaluation, PO, delivery, and corrections.
+- Finance/Admin records the required approvals, invoice, and payment.
+- Operations/Store records the GRN.
+- Auditor completes the post-payment review or returns it for correction.
+
+Do not create a separate Foreign Purchase Request menu. Currency is a field on
+the same Purchase Request. Assign portal/BC permissions only to the real role
+holders and test that ordinary requesters cannot update these process stages.
+
+Business Central master data used by the portal:
+- Departments / Global Dimension 2 values
+- Cost Center or Project codes
+- Locations, Items, Fixed Assets, Units of Measure, Currencies, Suppliers
+
+The portal requires Department, Cost Center/Project, Required Date, Purpose,
+and complete line details. Technical requirements and Scope of Work/TOR remain
+optional as shown in the approved form.
+
+Use different number-series prefixes for Purchase Requests and Store
+Requisitions (for example PR and SR). Do not allow the two document types to
+generate the same request number because their process history is keyed by the
+Business Central request number.
+
+4. STORE REQUISITION WORKFLOW
+=============================
+
+Business Central Search: Workflow User Groups
+
+Create/select the actual ABH group and sequence the approved roles:
+1 Supervisor, 2 Department Head, 3 Division Head, 4 Finance/Admin.
+
+For a requester who already occupies one of those roles, configure the workflow
+condition/group assigned to that requester so approval starts at the next role:
+- Supervisor requester: Department Head
+- Department Head requester: Division Head
+- Division Head requester: Finance/Admin
+
+Then Search: Workflows
+
+- Import Workflows\Store-Requisition-Approval-Workflow.xml.
+- Open STORE-REQ-WF and select the applicable actual workflow user group in the
+  Create Approval Requests response.
+- Enable and test each requester-role route; do not assume the skip without a
+  test Approval Entry showing the next intended approver.
+
+Business Central master data used by the portal:
+- Issuing Stores / Locations
+- Items, Fixed Assets, Units of Measure
+
+5. EMPLOYEE EXIT
+================
+
+Business Central Search: Portal Employee Transfer Setup
+
+- Immediate Supervisor User ID is the last-resort fallback. The requester's
+  Approval User Setup Approver ID and Employee Card Supervisor/HOD are used
+  first, so each employee follows the correct reporting line.
+- HR Approver User ID is an optional authoritative override. When populated,
+  Transfer and Resignation always use that actual ABH HR approver.
+- When HR Approver User ID is blank, the extension resolves one unambiguous,
+  active HR owner from the ABH HR department/HOD data. If there is no eligible
+  HR owner or more than one equally eligible owner, submission stops safely;
+  select the intended HR Approver User ID instead of guessing.
+
+Business Central Search: Employee Exit Requests
+
+- Transfer and Resignation: the assigned Supervisor approves/rejects first,
+  then the resolved HR approver completes the second decision.
+- Employee Exit Form: recorded directly for HR information, immediately marked
+  Completed, and does not create an approval request.
+- Do not mark Transfer or Resignation Completed before the real HR/offboarding
+  process is complete.
+
+Production route test:
+
+- Submit one Transfer and one Resignation for an employee with a real reporting
+  line. Confirm the first Approval Entry belongs to that employee's supervisor.
+- Approve as the supervisor and confirm the next Approval Entry belongs to the
+  configured/resolved HR user—not the requester or the same supervisor.
+- Submit an Employee Exit Form and confirm it is Completed with no Approval Entry.
+
+The CuPortalEmployeeExit SOAP codeunit is published automatically during
+extension install/upgrade. Search Web Services and confirm it is published if
+the Employee Exit page cannot connect.
+
+6. HOD FUNCTIONS
+================
+
+The portal grants HOD access from Business Central department ownership. For
+each real department head:
+
+- Confirm the employee has the correct Global Dimension 2 / Department code.
+- Confirm the employee is maintained as the Staff No. on the corresponding
+  DEPARTMENTS dimension value used by QyDimensionValues.
+- Sign out and sign in again after changing department ownership or employee
+  organisation data. Portal roles are rebuilt at login.
+- Test Department Staff and Staff on Leave with two departments. An HOD must
+  see only employees in their own department, and Staff on Leave must include
+  only leave that is active for the selected day.
+
+HOD_OVERRIDE_EMPNOS may be used only for a formally authorized HOD whose
+Business Central ownership data cannot yet be corrected. Do not enable
+HOD_GRANT_ALL_AUTHENTICATED in production.
+
+7. HR POLICIES & FORMS
+======================
+
+Business Central Search: Human Resources Setup
+
+- Configure HR Document Nos with the approved number series. Upload fails
+  safely when this number series is missing; do not bypass the setup.
+
+Business Central Search: Web Services
+
+- Publish page Hr Document Downloads as service name PgHrDownloads.
+- Publish query Document Attachments (object 50108) as QyDocumentAttachments.
+- Confirm the existing StaffPortal codeunit remains published as StaffPortal.
+
+The portal stores each uploaded file as a Business Central Document Attachment
+against table 51007 (Hr Document Downloads). PDF and Microsoft Office files up
+to 10 MB are accepted. Upload and permanent delete are authorized by the portal
+backend only for employees whose Business Central department is configured in
+HR_DEPARTMENT_CODES, whose job title is HR/Human Resources, or whose employee
+number is explicitly listed in HR_OVERRIDE_EMPNOS. Ordinary staff can list and
+download published documents only; unpublished HR drafts remain hidden.
+
+Production access test:
+
+- Sign in as an authorized HR employee and upload one unpublished draft. It
+  must be visible only to HR.
+- Publish a controlled test document and confirm an ordinary employee can
+  download it but sees no Upload or Delete control.
+- Verify a direct ordinary-staff POST or DELETE request returns HTTP 403.
+- Delete the controlled test document as HR and confirm both its header and
+  attachment are removed from Business Central.
+
+Use HR_OVERRIDE_EMPNOS only for approved exceptions. Keep the backend service
+credential private: frontend role visibility is not the security boundary.
+
+8. ATTACHMENTS
+==============
+
+- Staff Claim: at least one Document Attachment is mandatory before Request
+  Approval in both the portal and Business Central.
+- Sick/Medical leave: at least one Document Attachment is mandatory before
+  Request Approval in both the portal and Business Central.
+- The rule does not weaken any existing medical-benefit or leave validation.
+
+9. ATTENDANCE
+=============
+
+Policy enforced by the paired app/portal:
+- Normal arrival 08:30; arrival through 08:50 is within grace.
+- Normal departure 17:30; departure from 17:20 is within grace.
+- Open attendance sessions are closed at 19:00.
+- A portal warning appears after the configured weekly late threshold (default 3).
+
+The portal backend must run continuously and the Windows server local time/time
+zone must be correct. The packaged startup-task helper can keep it running.
+
+10. IMPREST SURRENDER
+====================
+
+Business Central Search: Workflows
+
+- Import Workflows\Imprest-Approval-Workflow.xml only if the tenant does not
+  already have the approved imprest/surrender workflow.
+- Confirm eligible issued imprests and the actual Finance approvers exist.
+- Test draft, lines, attachment, approval request, approval/rejection, and final
+  Business Central accounting/posting with a controlled test document.
+
+11. STAFF CLAIM MEDICAL BALANCES
+===============================
+
+Business Central Search: Employees > open the Employee Card.
+
+- Confirm Current HR Calender is the intended active employee calendar.
+- Medical Claim Balance - Self is the sum of PR Medical Ledger Entry amounts
+  for Medical Category SELF, the employee number, and that HR calendar.
+- Medical Claim Balance - Dependant is the corresponding DEPENDANT ledger sum.
+- Do not key or hard-code balances on Staff Claims. The Staff Claims card and
+  portal read these two live Employee Card FlowFields for the selected employee.
+- If a balance is wrong or zero, inspect the employee's Current HR Calender and
+  PR Medical Ledger Entries for SELF/DEPENDANT; correct approved setup/data only.
+
+12. PORTAL WEB SERVICES AND SECURITY
+====================================
+
+Business Central Search: Web Services
+
+- Confirm codeunit StaffPortal is published as StaffPortal.
+- Publish page Hr Document Downloads as PgHrDownloads and query Document
+  Attachments as QyDocumentAttachments for HR Policies & Forms.
+- Publish query QyPortalPurchaseLines with service name QyPortalPurchaseLines.
+- Confirm both endpoints answer using the portal backend service account before
+  allowing users into the portal.
+- Restrict SOAP/OData and the portal backend credential to the portal server;
+  do not expose these endpoints or credentials to ordinary requesters.
+- Give the service account only the existing portal objects and records needed
+  for Purchase/Store processing and item-journal posting. Do not use SUPER in
+  production. Actual Store, Procurement, Finance, and Auditor users must retain
+  only their approved Business Central role permissions.
+- Linked LPR, RFQ, PO, invoice, payment, GIN, and GRN numbers must refer to real
+  controlled documents. The Auditor verifies them before final completion.

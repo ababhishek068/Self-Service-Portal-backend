@@ -42,6 +42,8 @@ export interface AuthUser {
   userCategory: 'staff' | 'farmer'
   HOD: boolean
   CEO: boolean
+  HR?: boolean
+  userID?: string
   canApprove?: boolean
   mustChangePassword: boolean
 }
@@ -85,6 +87,7 @@ function toEmployee(user: AuthUser): Employee {
     isCEO: roles.includes('ceo') || Boolean(user.CEO),
     isHOD: roles.includes('hod') || Boolean(user.HOD),
     canApprove: Boolean(user.canApprove),
+    userID: user.userID ?? '',
   }
 }
 

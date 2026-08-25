@@ -34,10 +34,13 @@ export interface AssignedAsset {
 
 export interface EmployeeProfileDetails {
   jobTitle?: string
+  jobGrade?: string
   monthlySalaryBase?: number
   sector: string
   division: string
+  department?: string
   district: string
+  branch?: string
   maritalStatus: string
   employmentType: string
   gender: string

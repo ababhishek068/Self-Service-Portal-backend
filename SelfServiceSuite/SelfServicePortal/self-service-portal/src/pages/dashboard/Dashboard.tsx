@@ -7,11 +7,10 @@ import {
   CircleX,
   ClipboardCheck,
   ClipboardCopy,
-  Database,
   Home,
-  ReceiptText,
   ShoppingCart,
   Sparkles,
+  Store,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { getToken, resolveApiBaseUrl } from '@/api/client/authClient'
@@ -43,13 +42,14 @@ interface DashboardTile {
   requiresApproval?: boolean
 }
 
+/** KPI tiles aligned to ABH UAT modules currently published in the sidebar. */
 const tiles: DashboardTile[] = [
   {
     id: 'pendingApprovals',
     label: 'Pending Approval',
     href: '/approvals',
     icon: ClipboardCopy,
-    tone: 'from-rose-500 via-rose-500 to-rose-600',
+    tone: 'from-[var(--portal-navy)] via-[#04a8b0] to-[var(--portal-navy-dark)]',
     chip: 'bg-white/20',
     roles: approverRoles,
     requiresApproval: true,
@@ -59,7 +59,7 @@ const tiles: DashboardTile[] = [
     label: 'Approved Documents',
     href: '/approvals/approved',
     icon: ClipboardCheck,
-    tone: 'from-sky-500 via-sky-500 to-blue-600',
+    tone: 'from-[var(--portal-blue)] via-[#2b7fc4] to-[#1e6aa8]',
     chip: 'bg-white/20',
     roles: approverRoles,
     requiresApproval: true,
@@ -69,7 +69,7 @@ const tiles: DashboardTile[] = [
     label: 'Rejected Documents',
     href: '/approvals/rejected',
     icon: CircleX,
-    tone: 'from-emerald-500 via-emerald-500 to-emerald-600',
+    tone: 'from-slate-500 via-slate-600 to-slate-700',
     chip: 'bg-white/20',
     roles: approverRoles,
     requiresApproval: true,
@@ -79,7 +79,7 @@ const tiles: DashboardTile[] = [
     label: 'Leave Applications',
     href: '/hr/leave-request',
     icon: Home,
-    tone: 'from-amber-400 via-amber-500 to-amber-600',
+    tone: 'from-[var(--portal-gold)] via-[#b08d1c] to-[#8c7016]',
     chip: 'bg-white/20',
   },
   {
@@ -87,7 +87,7 @@ const tiles: DashboardTile[] = [
     label: 'Staff Claims',
     href: '/finance/staff-claim',
     icon: BadgeCheck,
-    tone: 'from-emerald-700 via-emerald-700 to-emerald-800',
+    tone: 'from-[var(--portal-green)] via-[#268a4f] to-[#1e6e3f]',
     chip: 'bg-white/20',
   },
   {
@@ -95,38 +95,38 @@ const tiles: DashboardTile[] = [
     label: 'Imprest Requisitions',
     href: '/finance/imprest',
     icon: Banknote,
-    tone: 'from-slate-500 via-slate-600 to-slate-700',
+    tone: 'from-[#3d5a73] via-[#2f4a61] to-[#243a4d]',
     chip: 'bg-white/20',
   },
   {
-    id: 'imprestSurrenders',
-    label: 'Imprest Surrenders',
-    href: '/finance/imprest-surrender',
-    icon: ReceiptText,
-    tone: 'from-rose-500 via-rose-500 to-rose-600',
+    id: 'pettyCash',
+    label: 'Petty Cash',
+    href: '/finance/petty-cash',
+    icon: Banknote,
+    tone: 'from-[#1a7a8c] via-[#156877] to-[#0f5461]',
     chip: 'bg-white/20',
   },
   {
     id: 'purchaseRequisitions',
-    label: 'Purchase Requisitions',
-    href: '/facility/purchase-requisition',
+    label: 'Local Purchase',
+    href: '/facility/local-purchase-request',
     icon: ShoppingCart,
-    tone: 'from-amber-700 via-amber-800 to-yellow-900',
+    tone: 'from-[#04a8b0] via-[var(--portal-navy)] to-[var(--portal-navy-dark)]',
     chip: 'bg-white/20',
   },
   {
     id: 'storeRequisitions',
     label: 'Store Requisitions',
     href: '/facility/store-requisition',
-    icon: Database,
-    tone: 'from-pink-500 via-pink-600 to-pink-700',
+    icon: Store,
+    tone: 'from-[var(--portal-navy)] via-[#027f85] to-[var(--portal-navy-dark)]',
     chip: 'bg-white/20',
   },
 ]
 
 export function Dashboard() {
   const { employee, isAuthenticated, bootstrapped } = useAuth()
-  const { has, canApprove, capabilitySummary, quickLinks } = usePermissions()
+  const { has, canApprove, primaryRoleLabel, capabilitySummary, quickLinks } = usePermissions()
   const apiBase = resolveApiBaseUrl()
   const canFetchSummary =
     bootstrapped && isAuthenticated && Boolean(apiBase) && Boolean(getToken())
@@ -136,12 +136,7 @@ export function Dashboard() {
     enabled: canFetchSummary,
   })
   const firstName = employee?.displayName?.split(' ')[0] ?? 'there'
-  const rawJobTitle = employee?.jobTitle?.trim() ?? ''
-  const profileSubtitle =
-    rawJobTitle.toLowerCase() === 'staff' ||
-    (!rawJobTitle.includes(' ') && /^[a-z0-9_-]{2,15}$/i.test(rawJobTitle))
-      ? ''
-      : rawJobTitle
+  const profileSubtitle = employee?.jobTitle?.trim() || primaryRoleLabel
   const data = summary.data ?? null
   const tileValues = (data ?? {}) as Record<string, number | undefined>
   const summaryError =
@@ -190,22 +185,24 @@ export function Dashboard() {
         <Skeleton className="h-48 w-full" />
       ) : summary.data ? (
         <div className="space-y-6">
-          <div className="animate-page-in-subtle relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--portal-navy)] via-[var(--portal-navy)] to-emerald-700 p-5 text-white shadow-lg sm:p-7">
-            <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-[var(--portal-orange)]/25 blur-2xl" />
+          <div className="animate-page-in-subtle relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--portal-navy)] via-[#04a8b0] to-[var(--portal-navy-dark)] p-5 text-white shadow-lg sm:p-7">
+            <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-[var(--portal-blue)]/30 blur-2xl" />
             <div className="pointer-events-none absolute -bottom-16 right-32 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
             <div className="relative flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 text-xs font-medium text-white/75 sm:text-sm">
-                  <Sparkles className="h-4 w-4 text-[var(--portal-orange)]" />
+                  <Sparkles className="h-4 w-4 text-[var(--portal-gold)]" />
                   Welcome back
                 </p>
                 <p className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
                   Hi {firstName}
-                  {profileSubtitle ? (
-                    <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold normal-case tracking-wide text-white backdrop-blur">
-                      {profileSubtitle}
-                    </span>
-                  ) : null}
+                  <span
+                    className={`rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white backdrop-blur ${
+                      employee?.jobTitle?.trim() ? 'normal-case' : 'uppercase'
+                    }`}
+                  >
+                    {profileSubtitle}
+                  </span>
                 </p>
                 <p className="mt-1 text-xs text-white/70 sm:text-sm">
                   Welcome to the {brand.product} — {new Date().getFullYear()} Summary
@@ -230,7 +227,7 @@ export function Dashboard() {
                     to={link.href}
                     className="group rounded-lg border border-slate-100 bg-slate-50 p-3 transition-colors hover:border-[var(--portal-navy)]/20 hover:bg-blue-50/50"
                   >
-                    <p className="text-sm font-semibold text-[var(--portal-navy)] group-hover:text-[var(--portal-orange)]">
+                    <p className="text-sm font-semibold text-[var(--portal-navy)] group-hover:text-[var(--portal-green)]">
                       {link.label}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-600">{link.description}</p>
@@ -243,10 +240,10 @@ export function Dashboard() {
           {canApprove && pendingCount > 0 ? (
             <Link
               to="/approvals"
-              className="group flex items-center justify-between gap-4 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+              className="group flex items-center justify-between gap-4 rounded-xl border border-[var(--portal-green)]/25 bg-gradient-to-r from-emerald-50 to-sky-50 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--portal-orange)]/15 text-[var(--portal-orange)]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--portal-green)]/15 text-[var(--portal-green)]">
                   <ClipboardCopy className="h-6 w-6" />
                 </div>
                 <div>
@@ -256,7 +253,7 @@ export function Dashboard() {
                   <p className="text-xs text-slate-600">Review and approve or reject pending requests for your team.</p>
                 </div>
               </div>
-              <ArrowRight className="h-5 w-5 shrink-0 text-[var(--portal-orange)] transition-transform duration-200 group-hover:translate-x-1" />
+              <ArrowRight className="h-5 w-5 shrink-0 text-[var(--portal-green)] transition-transform duration-200 group-hover:translate-x-1" />
             </Link>
           ) : null}
 
@@ -299,8 +296,8 @@ export function Dashboard() {
           </div>
 
           <div className="animate-page-in-subtle rounded-2xl border border-[var(--portal-navy)]/10 bg-white/80 px-5 py-4 text-center shadow-sm backdrop-blur" style={{ animationDelay: '180ms' }}>
-            <p className="text-sm font-semibold text-[var(--portal-navy)]">Powered by {brand.companyShort}</p>
-            <p className="mt-1 text-xs text-slate-500">Secure employee self-service connected to Business Central</p>
+            <p className="text-sm font-semibold text-[var(--portal-navy)]">Secure employee self-service connected to Business Central</p>
+            <p className="mt-1 text-xs text-slate-500">Powered by {brand.companyShort}</p>
           </div>
         </div>
       ) : null}

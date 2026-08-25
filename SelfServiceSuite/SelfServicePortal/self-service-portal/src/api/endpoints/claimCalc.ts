@@ -6,6 +6,8 @@ export interface MedicalClaimAmountResult {
   amount?: number
   AmountToRefund?: number
   amountToRefund?: number
+  CoveragePercent?: number
+  coveragePercent?: number
 }
 
 export async function validateHospitalCategory(payload: {

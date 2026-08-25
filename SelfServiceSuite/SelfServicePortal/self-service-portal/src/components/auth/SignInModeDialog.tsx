@@ -31,7 +31,7 @@ export function SignInModeDialog({ open, onClose, onSelect, disabled }: SignInMo
         className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-[var(--portal-navy)] to-[var(--portal-orange)] px-5 py-4 text-white">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-[var(--portal-navy)] to-[var(--portal-green)] px-5 py-4 text-white">
           <div>
             <h2 id="sign-in-mode-title" className="text-lg font-semibold">
               Choose sign-in method

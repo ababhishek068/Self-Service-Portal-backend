@@ -10,6 +10,8 @@ export interface SelectOption {
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   options: SelectOption[]
   placeholder?: string
+  /** Render the open menu in document flow when it must push later controls down. */
+  menuPosition?: 'overlay' | 'inline'
 }
 
 /**
@@ -21,7 +23,7 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
  * hidden select's value and dispatches a real change event.
  */
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, options, placeholder, id, disabled, ...props }, ref) => {
+  ({ className, options, placeholder, id, disabled, menuPosition = 'inline', ...props }, ref) => {
     const innerRef = React.useRef<HTMLSelectElement | null>(null)
     const listRef = React.useRef<HTMLDivElement | null>(null)
     const [open, setOpen] = React.useState(false)
@@ -67,7 +69,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
 
     return (
       <div
-        className={cn('relative', className)}
+        className={cn('relative w-full min-w-0', className)}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node)) close()
         }}
@@ -93,7 +95,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           ))}
         </select>
 
-        <div className="relative">
+        <div className="relative w-full min-w-0">
           <input
             id={id}
             type="text"
@@ -139,53 +141,58 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             }}
           />
           <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        </div>
 
-        {open && !disabled ? (
-          <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
-            {normalizedQuery === '' && options.length > 8 ? (
-              <div className="flex items-center gap-1.5 border-b border-slate-100 px-3 py-1.5 text-xs text-slate-400">
-                <Search className="h-3 w-3" />
-                Type to search {options.length} options
+          {open && !disabled ? (
+            <div
+              className={cn(
+                'left-0 right-0 z-50 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg',
+                menuPosition === 'inline' ? 'relative' : 'absolute top-full',
+              )}
+            >
+              {normalizedQuery === '' && options.length > 8 ? (
+                <div className="flex items-center gap-1.5 border-b border-slate-100 px-3 py-1.5 text-xs text-slate-400">
+                  <Search className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Type to search {options.length} options</span>
+                </div>
+              ) : null}
+              <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
+                {placeholder && !normalizedQuery ? (
+                  <button
+                    type="button"
+                    className="block w-full truncate px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-50"
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      commit('')
+                    }}
+                  >
+                    {placeholder}
+                  </button>
+                ) : null}
+                {filtered.map((option, index) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cn(
+                      'block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-100',
+                      index === highlight ? 'bg-slate-100' : '',
+                      option.value === current ? 'font-semibold text-[var(--portal-navy,#1e3a8a)]' : 'text-slate-900',
+                    )}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      commit(option.value)
+                    }}
+                    onMouseEnter={() => setHighlight(index)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+                {filtered.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
+                ) : null}
               </div>
-            ) : null}
-            <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
-              {placeholder && !normalizedQuery ? (
-                <button
-                  type="button"
-                  className="block w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-50"
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    commit('')
-                  }}
-                >
-                  {placeholder}
-                </button>
-              ) : null}
-              {filtered.map((option, index) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={cn(
-                    'block w-full px-3 py-2 text-left text-sm hover:bg-slate-100',
-                    index === highlight ? 'bg-slate-100' : '',
-                    option.value === current ? 'font-semibold text-[var(--portal-navy,#1e3a8a)]' : 'text-slate-900',
-                  )}
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    commit(option.value)
-                  }}
-                  onMouseEnter={() => setHighlight(index)}
-                >
-                  {option.label}
-                </button>
-              ))}
-              {filtered.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
-              ) : null}
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     )
   },

@@ -53,6 +53,8 @@ export interface FieldConfig {
   type: BasicFieldType
   placeholder?: string
   options?: SelectOption[]
+  /** Resolve select options from the current form values. */
+  optionsWhen?: (values: FieldValues) => SelectOption[]
   optionsByField?: {
     field: string
     options: Record<string, SelectOption[]>
@@ -61,10 +63,13 @@ export interface FieldConfig {
   readOnlyWhen?: (values: FieldValues) => boolean
   /** Hide the field unless this returns true (ESS conditional line fields). */
   visibleWhen?: (values: FieldValues) => boolean
+  disabledWhen?: (row: Record<string, unknown>) => boolean
   /** Business Central payload paths used to prefill the edit form. */
   valuePaths?: string[]
   /** Maps Business Central option captions back to the form's option values. */
   valueMap?: Record<string, string>
+  /** Span both columns in two-column forms. */
+  fullWidth?: boolean
 }
 
 export interface LineItemsConfig {
@@ -80,7 +85,16 @@ export type RequestFieldConfig = FieldConfig | LineItemsConfig
 export interface DetailFieldConfig {
   label: string
   paths: string[]
-  format?: 'text' | 'date' | 'currency' | 'status' | 'percentage' | 'returned'
+  format?:
+    | 'text'
+    | 'date'
+    | 'currency'
+    | 'status'
+    | 'percentage'
+    | 'returned'
+    | 'storePriority'
+    | 'purchasePriority'
+    | 'purchaseRequestType'
 }
 
 interface RequestFormPageProps {
@@ -168,6 +182,68 @@ function getPathValue(source: unknown, path: string) {
     if (Array.isArray(current)) return current[Number(part)]
     return (current as Record<string, unknown>)[part]
   }, source)
+}
+
+function setPathValue(target: FieldValues, path: string, value: unknown) {
+  const parts = path.split('.')
+  let current: FieldValues | unknown[] = target
+  for (const part of parts.slice(0, -1)) {
+    const key = Array.isArray(current) ? Number(part) : part
+    const next = current[key as keyof typeof current]
+    if (!next || typeof next !== 'object') {
+      const created: FieldValues = {}
+      ;(current as FieldValues)[key as string] = created
+      current = created
+    } else {
+      current = next as FieldValues | unknown[]
+    }
+  }
+  const finalPart = parts[parts.length - 1]!
+  if (Array.isArray(current)) current[Number(finalPart)] = value
+  else current[finalPart] = value
+}
+
+function normalizedSelectValue(value: unknown) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** Ensure BC relation fields submit lookup codes rather than cached captions. */
+export function normalizeAndValidateSelectValues(
+  fields: FieldConfig[],
+  values: FieldValues,
+  form: UseFormReturn<FieldValues>,
+) {
+  let valid = true
+  for (const field of fields) {
+    if (field.type !== 'select') continue
+    if (field.visibleWhen && !field.visibleWhen(values)) continue
+    const currentValue = getPathValue(values, field.name)
+    if (normalizedSelectValue(currentValue) === '') continue
+    const options = field.optionsWhen
+      ? field.optionsWhen(values)
+      : field.optionsByField
+        ? field.optionsByField.options[String(getPathValue(values, field.optionsByField.field) ?? '')] ?? []
+        : field.options ?? []
+    const normalizedCurrent = normalizedSelectValue(currentValue)
+    const valueMatch = options.find((option) => normalizedSelectValue(option.value) === normalizedCurrent)
+    if (valueMatch) {
+      form.clearErrors(field.name)
+      continue
+    }
+    const labelMatch = options.find((option) => normalizedSelectValue(option.label) === normalizedCurrent)
+    if (labelMatch) {
+      setPathValue(values, field.name, labelMatch.value)
+      form.setValue(field.name, labelMatch.value, { shouldDirty: true, shouldValidate: false })
+      form.clearErrors(field.name)
+      continue
+    }
+    form.setError(field.name, {
+      type: 'validate',
+      message: `Select ${field.label} again from the current Business Central list.`,
+    })
+    valid = false
+  }
+  return valid
 }
 
 function normalizedFieldName(value: string) {
@@ -384,10 +460,25 @@ export function RequestFormPage({
     const readOnly = field.readOnly || Boolean(field.readOnlyWhen?.(watchedValues))
 
     return (
-      <div key={field.name} className={field.type === 'checkbox' ? 'flex items-center gap-2' : 'space-y-1.5'}>
+      <div
+        key={field.name}
+        className={
+          field.type === 'checkbox'
+            ? 'flex items-center gap-2'
+            : field.type === 'textarea'
+              ? 'space-y-1.5 md:col-span-2'
+              : 'relative z-10 space-y-1.5'
+        }
+      >
         {field.type !== 'checkbox' ? <Label htmlFor={inputId}>{field.label}</Label> : null}
         {field.type === 'textarea' ? (
-          <Textarea id={inputId} placeholder={field.placeholder} readOnly={readOnly} {...form.register(field.name)} />
+          <Textarea
+            id={inputId}
+            placeholder={field.placeholder}
+            readOnly={readOnly}
+            rows={3}
+            {...form.register(field.name)}
+          />
         ) : null}
         {field.type === 'select' ? (
           <Select
@@ -395,6 +486,7 @@ export function RequestFormPage({
             placeholder={field.placeholder ?? 'Select'}
             options={options}
             disabled={readOnly}
+            menuPosition="inline"
             {...form.register(field.name)}
           />
         ) : null}
@@ -662,7 +754,7 @@ export function RequestFormPage({
   if (showForm && !listOnly) {
     return (
       <PageWrapper title={editingRequestId ? `Edit ${title}` : title} showPageHeading={false}>
-        <PortalFormCard title={editingRequestId ? `Edit ${title}` : title}>
+        <PortalFormCard title={editingRequestId ? `Edit ${title}` : title} allowOverflow>
           <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
             <div className="grid gap-3 sm:grid-cols-1 sm:gap-4 md:grid-cols-2">
               {fields.map((field) =>

@@ -86,7 +86,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 }`}
               >
                 <div
-                  className={`h-1.5 w-full bg-gradient-to-r ${danger ? 'from-red-500 to-rose-600' : 'from-[var(--portal-navy)] to-[var(--portal-orange)]'}`}
+                  className={`h-1.5 w-full bg-gradient-to-r ${danger ? 'from-red-500 to-rose-600' : 'from-[var(--portal-navy)] to-[var(--portal-green)]'}`}
                 />
                 <div className="p-5 sm:p-6">
                   <div className="flex items-start gap-3.5">

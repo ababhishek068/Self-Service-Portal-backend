@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { signInModeOptions, type SignInMode } from '@/config/signInModes'
 import { useAuth } from '@/hooks/useAuth'
-import { brand } from '@/config/brand'
+import { brand, brandCopyright } from '@/config/brand'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 const SIGN_IN_MODE_KEY = 'ssp.signInMode'
 
@@ -97,18 +98,20 @@ export function Login() {
   return (
     <main className="portal-login-bg portal-safe-pt portal-safe-pb portal-safe-px relative flex min-h-screen flex-col items-center justify-center overflow-x-hidden overflow-y-auto px-4 py-6 sm:p-4">
       <div className="portal-ambient pointer-events-none absolute inset-0" aria-hidden>
-        <span className="portal-orb portal-orb-navy opacity-50" />
-        <span className="portal-orb portal-orb-orange opacity-40" />
+        <span className="portal-orb portal-orb-navy opacity-45" />
+        <span className="portal-orb portal-orb-green opacity-35" />
       </div>
 
       <div className="relative z-10 flex w-full max-w-md flex-col items-center">
         <div className="animate-page-in-subtle mb-6 text-center sm:mb-8">
-          <div className="portal-logo-float mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-blue-700 via-[var(--portal-navy)] to-[var(--portal-orange)] text-xl font-bold text-white shadow-xl ring-4 ring-white/60 sm:mb-4 sm:h-16 sm:w-16 sm:text-2xl">
-            {brand.monogram}
+          <div className="portal-logo-float mx-auto mb-3 flex justify-center sm:mb-4">
+            <BrandLogo variant="login" />
           </div>
-          <h1 className="portal-page-title text-xl font-bold uppercase sm:text-2xl">{brand.company}</h1>
+          <h1 className="portal-page-title text-lg font-bold uppercase sm:text-xl">{brand.company}</h1>
           <p className="mt-1.5 text-base font-semibold tracking-wide text-[var(--portal-navy)] sm:mt-2 sm:text-lg">
-            {brand.product.toUpperCase()}
+            <span className="font-bold">{brand.productShort}</span>
+            <span className="mx-1.5 text-slate-400" aria-hidden>|</span>
+            <span>Employee Self-Service Portal</span>
           </p>
         </div>
 
@@ -157,7 +160,7 @@ export function Login() {
 
             <Button
               type="submit"
-              variant="accent"
+              variant="gradient"
               className="h-11 w-full rounded-full text-sm sm:text-base"
               disabled={submitting}
             >
@@ -184,7 +187,7 @@ export function Login() {
         </div>
 
         <p className="mt-5 text-center text-[11px] text-slate-500 sm:mt-6 sm:text-xs">
-          © {new Date().getFullYear()} {brand.company}. All rights reserved.
+          {brandCopyright()}
         </p>
       </div>
 

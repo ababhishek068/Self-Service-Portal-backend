@@ -35,6 +35,8 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     { value: 'pettyCashReplenishment', label: 'PV' },
     { value: 'pettyCash', label: 'PC' },
     { value: 'transferOrder', label: 'Order' },
+    { value: 'employeeExit', label: 'Exit' },
+    { value: 'hrServiceLetter', label: 'Letters' },
   ]
   const sourceRows = useMemo(() => approvals.data ?? [], [approvals.data])
   const rows = useMemo(() => {
@@ -88,7 +90,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     <PageWrapper title={title}>
       {type === 'pending' && !approvals.isLoading ? (
         <div className="mb-5 overflow-hidden rounded-2xl border border-blue-100 bg-white/90 shadow-[0_20px_60px_-35px_rgba(0,58,112,0.5)] backdrop-blur">
-          <div className="grid gap-4 bg-gradient-to-r from-[var(--portal-navy)] via-[#075b9a] to-[#0a7db5] p-5 text-white md:grid-cols-[1fr_auto] md:items-center">
+          <div className="grid gap-4 bg-gradient-to-r from-[var(--portal-navy)] via-[#04a8b0] to-[var(--portal-navy-dark)] p-5 text-white md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-100">
                 <FileCheck2 className="h-4 w-4" /> Approval workspace

@@ -1,5 +1,5 @@
 import type { ODataRecord } from './bcClient.js'
-import { EMPLOYEE_SALARY_BASE_FIELDS, employeeSalaryBaseFromRecord } from './employeeProfile.js'
+import { EMPLOYEE_SALARY_BASE_FIELDS, employeeSalaryBaseFromRecord, mapAbhEmployeeOrg } from './employeeProfile.js'
 
 export const requestServices = {
   imprest: 'QyImprestHeader',
@@ -55,6 +55,51 @@ function num(row: ODataRecord, keys: string[], fallback = 0) {
   const value = text(row, keys)
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+/** Prefer the first positive amount so a zero FlowField does not hide Total Payment Amount. */
+function resolveDocumentAmount(row: ODataRecord, keys: string[], fallback = 0) {
+  let firstFinite: number | null = null
+  for (const key of keys) {
+    const raw = row[key]
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue
+    const parsed = Number(String(raw).replaceAll(',', ''))
+    if (!Number.isFinite(parsed)) continue
+    if (firstFinite === null) firstFinite = parsed
+    if (parsed > 0) return parsed
+  }
+  return firstFinite ?? fallback
+}
+
+/** Prefer BC header FlowFields (Total Net / Total Payment) over a blank/zero Amount. */
+function amountKeysForModule(requestType: PortalModuleKey): string[] {
+  if (requestType === 'pettyCashReplenishment') {
+    return ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
+  }
+  if (requestType === 'pettyCash') {
+    return [
+      'TotalNetAmount',
+      'Total_Net_Amount',
+      'TotalPaymentAmount',
+      'Total_Payment_Amount',
+      'Amount',
+      'NetAmount',
+    ]
+  }
+  if (requestType === 'staffClaim' || requestType === 'imprest' || requestType === 'imprestSurrender') {
+    return [
+      'TotalNetAmount',
+      'Total_Net_Amount',
+      'TotalPaymentAmount',
+      'Total_Payment_Amount',
+      'NetAmount',
+      'Net_Amount',
+      'Amount',
+      'TotalAmount',
+      'PaidAmount',
+    ]
+  }
+  return ['Amount', 'TotalAmount', 'NetAmount', 'TotalNetAmount', 'Total_Net_Amount', 'Quantity']
 }
 
 function bool(row: ODataRecord, keys: string[], fallback = true) {
@@ -195,22 +240,63 @@ function stampSalaryAdvanceLineAmount(line: ODataRecord, amount: number) {
 export function statusFromBc(raw: string) {
   const status = raw.trim().toLowerCase()
   if (status === 'pending approval') return 'Pending Approval'
+  if (financeWorkflowStatus(status)) return 'Pending Approval'
   // Finance modules (claims, imprest, salary advance, etc.) use BC Status=Pending before approval is requested.
   if (status === 'pending') return 'Draft'
   if (status === 'open') return 'Open'
   if (status === 'draft') return 'Draft'
-  if (status.includes('approve')) return 'Approved'
+  if (status.includes('return')) return 'Returned'
   if (status.includes('reject')) return 'Rejected'
   if (status.includes('cancel')) return 'Cancelled'
   if (status.includes('post')) return 'Posted'
+  if (status === 'approved' || status === 'released' || status.endsWith(' approved')) return 'Approved'
   if (status.includes('pending')) return 'Pending Approval'
   return raw.trim() || 'Open'
 }
 
+/** BC finance headers use multi-step statuses (1st Approval, Checking, …) while in workflow. */
+function financeWorkflowStatus(status: string) {
+  return (
+    status === '1st approval' ||
+    status === '2nd approval' ||
+    status === 'checking' ||
+    status === 'votebook' ||
+    status === 'cheque printing'
+  )
+}
+
 /** ESS transfer orders use ApprovalStatus; leave uses the same when Status stays Open. */
+const FINANCE_STATUS_MODULES = new Set<PortalModuleKey>([
+  'staffClaim',
+  'pettyCash',
+  'imprest',
+  'imprestSurrender',
+  'salaryAdvance',
+])
+
 export function documentStatusFromBc(row: ODataRecord, requestType: PortalModuleKey) {
+  if (requestType === 'imprest' || requestType === 'imprestSurrender') {
+    const posted = row.Posted ?? row.posted
+    if (posted === true || ['true', 'yes', '1'].includes(String(posted ?? '').trim().toLowerCase())) {
+      return 'Posted'
+    }
+  }
   if (requestType === 'transferOrder' || requestType === 'leave') {
     return text(row, ['ApprovalStatus', 'Approval_Status', 'Status', 'DocumentStatus'])
+  }
+  if (FINANCE_STATUS_MODULES.has(requestType)) {
+    const finalApprover = text(row, ['FinalApproverStatus', 'Final_Approver_Status'])
+    if (finalApprover) {
+      const lower = finalApprover.toLowerCase()
+      // Final Approver Status is a FlowField over Approval Entry. With no
+      // approval entries BC returns the enum's zero value, "Created". That is
+      // still an editable finance draft, not a submitted request.
+      if (lower.includes('pending') || lower === 'open') return 'Pending Approval'
+      if (lower.includes('approve')) return 'Approved'
+      if (lower.includes('reject')) return 'Rejected'
+    }
+    const current = text(row, ['CurrentStatus', 'Current_Status'])
+    if (current) return current
   }
   return text(row, ['Status', 'DocumentStatus', 'ApprovalStatus'])
 }
@@ -225,15 +311,84 @@ const OPEN_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
   'gatePass',
 ])
 
+/** Finance headers often stay Status=Pending while QyApprovalEntry rows exist after Request Approval. */
+const FINANCE_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
+  'staffClaim',
+  'pettyCash',
+  'imprest',
+  'imprestSurrender',
+  'salaryAdvance',
+])
+
+function moduleUsesApprovalEntryPromotion(requestType: PortalModuleKey) {
+  return (
+    OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType) ||
+    FINANCE_APPROVAL_WORKFLOW_MODULES.has(requestType)
+  )
+}
+
+/** After a successful Request Approval SOAP call, promote Draft/Open detail responses. */
+export function promoteDetailAfterApprovalSubmit<T extends { status: string; payload?: ODataRecord }>(
+  requestType: PortalModuleKey,
+  detail: T,
+): T {
+  if (!moduleUsesApprovalEntryPromotion(requestType)) return detail
+  if (detail.status !== 'Draft' && detail.status !== 'Open') return detail
+  return {
+    ...detail,
+    status: 'Pending Approval',
+    ...(detail.payload ? { payload: { ...detail.payload, Status: 'Pending Approval' } } : {}),
+  }
+}
+
 function approvalEntryStatus(entry: ODataRecord) {
   return text(entry, ['Status']).trim().toLowerCase()
 }
 
 function hasActiveApprovalEntries(entries: ODataRecord[]) {
+  if (!entries.length) return false
   return entries.some((entry) => {
     const status = approvalEntryStatus(entry)
-    return status === 'open' || status === 'pending' || status === 'created' || status.includes('pending')
+    if (!status) return true
+    return (
+      status === 'open' ||
+      status === 'pending' ||
+      status === 'created' ||
+      status.includes('pending') ||
+      (!status.includes('approve') &&
+        !status.includes('reject') &&
+        !status.includes('return') &&
+        status !== 'canceled' &&
+        status !== 'cancelled')
+    )
   })
+}
+
+function approvalEntryIsReturned(entry: ODataRecord) {
+  const status = approvalEntryStatus(entry)
+  if (status.includes('return')) return true
+  const comment = text(entry, ['Comment', 'Comments', 'ApprovalComment']).trim()
+  return /^\[RETURNED\](?:\s|$)/i.test(comment)
+}
+
+function latestTerminalApprovalEntry(entries: ODataRecord[]) {
+  const terminal = entries.filter((entry) => {
+    const status = approvalEntryStatus(entry)
+    return status.includes('approve') || status.includes('reject') || status.includes('return')
+  })
+  return terminal.sort((left, right) => {
+    const leftNo = Number(text(left, ['EntryNo', 'Entry_No']))
+    const rightNo = Number(text(right, ['EntryNo', 'Entry_No']))
+    if (Number.isFinite(leftNo) && Number.isFinite(rightNo) && leftNo !== rightNo) {
+      return leftNo - rightNo
+    }
+    const leftDate = Date.parse(text(left, ['LastDateTimeModified', 'DateTimeSentforApproval']))
+    const rightDate = Date.parse(text(right, ['LastDateTimeModified', 'DateTimeSentforApproval']))
+    if (Number.isFinite(leftDate) && Number.isFinite(rightDate) && leftDate !== rightDate) {
+      return leftDate - rightDate
+    }
+    return entries.indexOf(left) - entries.indexOf(right)
+  }).at(-1)
 }
 
 /** True when BC shows the document has entered the approval workflow. */
@@ -261,25 +416,22 @@ export function resolveModuleRequestStatus(
   approvalEntries: ODataRecord[] = [],
 ) {
   const base = statusFromBc(documentStatusFromBc(row, requestType))
-  if (!OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType)) return base
 
-  if (approvalEntries.some((entry) => approvalEntryStatus(entry) === 'rejected') || base === 'Rejected') {
-    return 'Rejected'
+  if (!moduleUsesApprovalEntryPromotion(requestType)) return base
+
+  // A live entry belongs to the newest approval cycle and takes precedence over
+  // historical rejected/returned entries left behind by a previous submission.
+  if (hasActiveApprovalEntries(approvalEntries)) return 'Pending Approval'
+
+  const latestTerminal = latestTerminalApprovalEntry(approvalEntries)
+  if (latestTerminal) {
+    if (approvalEntryIsReturned(latestTerminal)) return 'Returned'
+    const latestStatus = approvalEntryStatus(latestTerminal)
+    if (latestStatus.includes('reject')) return 'Rejected'
+    if (latestStatus.includes('approve')) return 'Approved'
   }
-  if (
-    base === 'Approved' ||
-    (approvalEntries.length > 0 &&
-      approvalEntries.every((entry) => approvalEntryStatus(entry) === 'approved'))
-  ) {
-    return 'Approved'
-  }
-  if (
-    base === 'Pending Approval' ||
-    hasActiveApprovalEntries(approvalEntries) ||
-    documentSentForApproval(row)
-  ) {
-    return 'Pending Approval'
-  }
+  if (base === 'Returned' || base === 'Rejected' || base === 'Approved') return base
+  if (base === 'Pending Approval' || documentSentForApproval(row)) return 'Pending Approval'
   return base
 }
 
@@ -381,7 +533,8 @@ export function mapEmployee(row: ODataRecord) {
   const middleName = text(row, ['MiddleName', 'Middle_Name'])
   const lastName = text(row, ['LastName', 'Last_Name'])
   const displayName = text(row, ['FullName', 'Name', 'EmployeeName'], [firstName, middleName, lastName].filter(Boolean).join(' '))
-  const departmentCode = text(row, ['GlobalDimension1Code', 'DepartmentCode', 'Department_Code'])
+  const org = mapAbhEmployeeOrg(row)
+  const departmentCode = org.departmentCode
 
   return {
     id: employeeNo || crypto.randomUUID(),
@@ -389,9 +542,9 @@ export function mapEmployee(row: ODataRecord) {
     displayName,
     email: text(row, ['Email', 'CompanyEMail', 'CompanyEmail', 'E_Mail']),
     departmentCode,
-    departmentName: text(row, ['DepartmentName', 'Department_Name'], departmentCode),
-    branchCode: text(row, ['GlobalDimension2Code', 'BranchCode', 'Branch_Code'], 'HO'),
-    branchName: text(row, ['BranchName', 'Branch_Name'], 'Head Office'),
+    departmentName: org.departmentName || departmentCode,
+    branchCode: org.branchCode,
+    branchName: org.branchName,
     jobTitle: text(row, ['JobTitle', 'Job_Title']),
     jobGrade: text(row, ['JobGrade', 'Grade']),
     placeOfDuty: text(row, ['PlaceOfDuty', 'Place_of_Duty']),
@@ -421,11 +574,11 @@ export function mapItem(row: ODataRecord) {
 }
 
 export function mapDepartment(row: ODataRecord) {
-  const code = text(row, ['Code', 'GlobalDimension1Code'])
+  const code = text(row, ['Code', 'GlobalDimension2Code'])
   return {
     code,
     name: text(row, ['Name', 'DepartmentName'], code),
-    branchCode: text(row, ['BranchCode', 'GlobalDimension2Code'], 'HO'),
+    branchCode: text(row, ['BranchCode'], 'HO'),
     spendingLimit: num(row, ['SpendingLimit', 'BudgetAmount'], 0),
     isActive: true,
     raw: row,
@@ -464,9 +617,25 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
     title,
     status: statusFromBc(documentStatusFromBc(row, requestType)),
     makerEmployeeNo,
-    makerName: text(row, ['EmployeeName', 'StaffName', 'RequesterName'], makerEmployeeNo),
-    departmentCode: text(row, ['Department', 'DepartmentCode', 'GlobalDimension1Code', 'DistrictDepartmentCode']),
-    departmentName: text(row, ['DepartmentName', 'Department_Name', 'DistrictDepartmentName']),
+    makerName: text(
+      row,
+      ['RequestorName', 'RequesterName', 'RequestedByName', 'EmployeeName', 'StaffName'],
+      makerEmployeeNo,
+    ),
+    departmentCode: text(row, [
+      'ShortcutDimension2Code',
+      'Shortcut_Dimension_2_Code',
+      'GlobalDimension2Code',
+      'Department',
+      'DepartmentCode',
+    ]),
+    departmentName: text(row, [
+      'BudgetCenterName',
+      'Budget_Center_Name',
+      'DepartmentName',
+      'Department_Name',
+      'GlobalDimension2Name',
+    ]),
     responsibleCenter: text(row, ['ResponsibilityCenter', 'Responsibility_Center']),
     amount:
       requestType === 'salaryAdvance'
@@ -478,13 +647,7 @@ export function mapRequest(row: ODataRecord, requestType: PortalModuleKey) {
             },
             row,
           )
-        : num(
-            row,
-            requestType === 'pettyCashReplenishment'
-              ? ['Amount_2', 'Source_Amount', 'SourceAmount', 'Receiving_Amount', 'ReceivingAmount', 'Amount']
-              : ['Amount', 'TotalAmount', 'NetAmount', 'TotalNetAmount', 'Total_Net_Amount', 'Quantity'],
-            0,
-          ),
+        : resolveDocumentAmount(row, amountKeysForModule(requestType), 0),
     sourceDocument: {
       documentNo: requestNo,
       erpEntity: moduleLabels[requestType],

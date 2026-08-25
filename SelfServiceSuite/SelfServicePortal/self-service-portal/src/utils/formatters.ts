@@ -10,14 +10,20 @@ export const formatCurrency = (value: number) =>
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-ET', { maximumFractionDigits: 0 }).format(value)
 
+/** Business Central serializes an unset Date as 0001-01-01. Never show it as a real portal date. */
+export function isPlaceholderErpDate(value?: string | null) {
+  const normalized = String(value ?? '').trim()
+  return /^(?:0000|0001)-01-01(?:T|$)/.test(normalized)
+}
+
 export const formatDate = (value?: string) => {
-  if (!value) return '-'
+  if (!value || isPlaceholderErpDate(value)) return '-'
   const parsed = parseISO(value)
   return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'dd MMM yyyy')
 }
 
 export const formatDateTime = (value?: string) => {
-  if (!value) return '-'
+  if (!value || isPlaceholderErpDate(value)) return '-'
   const parsed = parseISO(value)
   return Number.isNaN(parsed.getTime()) ? value : format(parsed, 'dd MMM yyyy, HH:mm')
 }

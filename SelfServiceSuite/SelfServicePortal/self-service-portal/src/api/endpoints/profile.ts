@@ -3,9 +3,19 @@ import { requireAuthApiUrl } from '@/api/requireBackend'
 import type { EmployeeProfileDetails } from '@/data/employeeProfile'
 import type { Attachment } from '@/types/erp.types'
 
+export interface EmployeeMedicalBalances {
+  self: number
+  dependant: number
+}
+
 export async function getEmployeeProfileDetails(): Promise<EmployeeProfileDetails> {
   requireAuthApiUrl()
   return authGet<EmployeeProfileDetails>('/api/profile/details')
+}
+
+export async function getEmployeeMedicalBalances(): Promise<EmployeeMedicalBalances> {
+  requireAuthApiUrl()
+  return authGet<EmployeeMedicalBalances>('/api/profile/medical-balances')
 }
 
 export async function listEmployeeAttachments(): Promise<Attachment[]> {

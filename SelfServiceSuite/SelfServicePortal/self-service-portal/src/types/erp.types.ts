@@ -55,6 +55,8 @@ export interface Employee extends BusinessCentralEntity {
   isHOD?: boolean
   /** True when the employee can approve documents, including staff managers with direct reports. */
   canApprove?: boolean
+  /** Business Central User ID (matches Approval Entry ApproverID). */
+  userID?: string
 }
 
 export interface Attachment {
@@ -273,3 +275,5 @@ export type PortalModuleKey =
   | 'salaryAdvance'
   | 'training'
   | 'documentRequisition'
+  | 'employeeExit'
+  | 'hrServiceLetter'

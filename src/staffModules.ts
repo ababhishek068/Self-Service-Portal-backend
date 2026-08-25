@@ -3,14 +3,17 @@ import { z } from 'zod'
 import {
   callSoapMethod,
   fetchOData,
+  fetchODataFirstBase,
   odataString,
   type ODataRecord,
 } from './bcClient.js'
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
-import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance } from './employeeProfile.js'
-import { formatBcSoapDate } from './staff.js'
+import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap, resolveRequestingDepartmentCode } from './employeeProfile.js'
+import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
+import { documentSentForApproval, resolveModuleRequestStatus, type PortalModuleKey } from './erpMappings.js'
+import { sortNewestFirst } from './sortNewestFirst.js'
 import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
@@ -26,7 +29,7 @@ interface SoapResult {
 }
 
 const MAX_ATTACHMENT_BYTES = 10_000_000
-const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpeg', 'jpg', 'png'])
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpg', 'png'])
 
 type ParamBuilder = (input: { req: Request; user: AuthUser; no: string }) =>
   | Record<string, unknown>
@@ -66,6 +69,7 @@ export interface ModuleSpec {
   postListFilter?: (row: ODataRecord) => boolean
   /** OData service holding line rows (omit if module has no lines). */
   lineService?: string
+  lineFallbackServices?: string[]
   /** OData field linking lines to the header (e.g. `No`, `RequistionNo`, …). */
   lineHeaderField?: string
 
@@ -120,7 +124,13 @@ function soapActionOk(spec: ModuleSpec, result: SoapResult) {
     spec.decideMode === 'submitCancelOnSameMethod' ||
     spec.module === 'salary-advance' ||
     spec.module === 'fuel' ||
-    spec.module === 'maintenance'
+    spec.module === 'maintenance' ||
+    spec.module === 'store-requisition' ||
+    spec.module === 'purchase-requisition' ||
+    spec.module === 'claim' ||
+    spec.module === 'petty-cash' ||
+    spec.module === 'imprest' ||
+    spec.module === 'imprest-surrender'
   ) {
     return approvalOk(result)
   }
@@ -284,8 +294,119 @@ function storeLineTypeCode(value: unknown) {
   return numericCode(value, { item: 1, asset: 2 })
 }
 
+function storePriorityCode(value: unknown) {
+  return numericCode(value, { low: 0, normal: 1, high: 2, urgent: 3 })
+}
+
+/**
+ * Purchase requests use the latest ABH three-level scale. Keep this separate
+ * from Store Requisition's legacy Low/Normal/High/Urgent option mapping.
+ */
+export function purchasePriorityCode(value: unknown) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw)
+    if (numeric >= 0 && numeric <= 3) return numeric
+  }
+  const mapped: Record<string, number> = {
+    normal: 1,
+    critical: 2,
+    urgent: 3,
+    // Accept old saved drafts without making these legacy labels visible in
+    // the new form.
+    low: 0,
+    high: 2,
+  }
+  if (raw in mapped) return mapped[raw]!
+  throw Object.assign(new Error('Priority must be Normal, Urgent, or Critical.'), {
+    status: 422,
+    code: 'INVALID_PURCHASE_PRIORITY',
+  })
+}
+
+function storeHeaderRequestTypeCode(value: unknown) {
+  return numericCode(value, { item: 0, asset: 1, 'minor asset': 1 })
+}
+
 function purchaseLineTypeCode(value: unknown) {
-  return numericCode(value, { service: 1, item: 2, asset: 4 })
+  return numericCode(value, { service: 1, item: 2, asset: 4, goods: 2 })
+}
+
+/** Return a master number only when the supplied name has one unambiguous exact match. */
+export function uniqueExactMasterNoByName(rows: ODataRecord[], name: string) {
+  const wanted = name.trim().toLocaleLowerCase()
+  if (!wanted) return ''
+  const matchingNumbers = new Set(
+    rows
+      .filter((row) => fieldText(row, ['Description', 'Name']).trim().toLocaleLowerCase() === wanted)
+      .map((row) => fieldText(row, ['No', 'No_']).trim())
+      .filter(Boolean),
+  )
+  return matchingNumbers.size === 1 ? [...matchingNumbers][0]! : ''
+}
+
+async function resolvePurchaseMasterNoByName(typeCode: number, itemName: string) {
+  const service = typeCode === 2 ? 'QyItem' : typeCode === 4 ? 'QyFixedAssets' : ''
+  if (!service || !itemName.trim()) return ''
+  const rows = (await fetchOData(service, {
+    $select: 'No,Description',
+    $top: 1000,
+  }).catch(() => [])) as ODataRecord[] | null
+  return uniqueExactMasterNoByName(Array.isArray(rows) ? rows : [], itemName)
+}
+
+function purchaseRequestTypeCode(value: unknown) {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (/^\d+$/.test(raw)) {
+    const numeric = Number(raw)
+    if (numeric >= 0 && numeric <= 4) return numeric
+  }
+  const mapped: Record<string, number> = {
+    goods: 0,
+    service: 1,
+    services: 1,
+    asset: 2,
+    consultancy: 3,
+    other: 4,
+    item: 0,
+  }
+  if (raw in mapped) return mapped[raw]!
+  throw Object.assign(
+    new Error('Purchase Type must be Goods, Services, Consultancy, or Other.'),
+    { status: 422, code: 'INVALID_PURCHASE_TYPE' },
+  )
+}
+
+export function parsePurchaseOtherRequirements(value: unknown) {
+  const raw = String(value ?? '').trim()
+  const match = /^Purchase type:\s*([^|\r\n]+?)(?:\s*\|\s*([\s\S]*))?$/i.exec(raw)
+  return {
+    otherPurchaseType: match?.[1]?.trim() ?? '',
+    otherRequirements: match ? String(match[2] ?? '').trim() : raw,
+  }
+}
+
+function purchaseOtherRequirementsForSoap(
+  purchaseRequestType: string,
+  otherPurchaseTypeValue: unknown,
+  otherRequirementsValue: unknown,
+) {
+  const existing = parsePurchaseOtherRequirements(otherRequirementsValue)
+  if (purchaseRequestType !== 'other') return existing.otherRequirements.slice(0, 250)
+  const otherPurchaseType = String(otherPurchaseTypeValue ?? '').trim()
+  if (!otherPurchaseType) {
+    throw Object.assign(new Error('Describe the purchase type when Purchase Type is Other.'), {
+      status: 422,
+      code: 'OTHER_PURCHASE_TYPE_REQUIRED',
+    })
+  }
+  return [
+    `Purchase type: ${otherPurchaseType.slice(0, 100)}`,
+    existing.otherRequirements,
+  ]
+    .filter(Boolean)
+    .join(' | ')
+    .slice(0, 250)
 }
 
 function transportRequestTypeCode(value: unknown) {
@@ -293,7 +414,60 @@ function transportRequestTypeCode(value: unknown) {
 }
 
 export function hospitalCategoryCode(value: unknown) {
-  return numericCode(value, { government: 1, private: 2, online: 3 })
+  // BC OptionMembers on Staff Claim Lines: Government=0, Private=1, Outline=2.
+  const raw = String(value ?? '').trim().toLowerCase()
+  const byLabel: Record<string, number> = {
+    government: 0,
+    govt: 0,
+    private: 1,
+    'non-government': 1,
+    'non govt': 1,
+    outline: 2,
+    online: 2,
+  }
+  if (raw in byLabel) return byLabel[raw]!
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw)
+    if (n >= 0 && n <= 2) return n
+    // Legacy 1-based portal values (1=Govt, 2=Private, 3=Outline).
+    if (n === 1) return 0
+    if (n === 2) return 1
+    if (n === 3) return 2
+  }
+  return 0
+}
+
+async function lookupClaimTypeGlAccount(claimType: string) {
+  const code = claimTypeCode(claimType)
+  if (!code) return ''
+  try {
+    const rows = (await fetchOData('QyReceiptsPayments', {
+      $filter: `Code eq '${odataString(code)}' and Type eq 'Claim'`,
+      $top: 1,
+    })) as ODataRecord[] | null
+    const row = Array.isArray(rows) ? rows[0] : undefined
+    if (!row) return ''
+    for (const key of [
+      'GLAccount',
+      'GL_Account',
+      'G_L_Account',
+      'GLAccountNo',
+      'GL_Account_No',
+      'G_L_Account_No',
+      'AccountNo',
+      'Account_No',
+    ]) {
+      const value = String(row[key] ?? '').trim()
+      if (value) return value
+    }
+  } catch {
+    // BC lookup unavailable — frontend should have sent accountNo
+  }
+  return ''
+}
+
+export function isOtherClaimType(value: unknown) {
+  return claimTypeCode(value).toUpperCase() === 'OTHER'
 }
 
 export function passengerTypeCode(value: unknown) {
@@ -340,28 +514,80 @@ const imprest: ModuleSpec = {
     cancel: 'CancelImprestRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      docNo: no,
-      employeeNo: user.employeeNo,
-      dateRequired: req.body?.dateRequired ?? req.body?.startDate ?? '',
-      purpose: req.body?.purpose ?? '',
-      myUserId: user.userID,
-      travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
-      travelDate: req.body?.travelDate ?? req.body?.startDate ?? '',
-      returnDate: req.body?.returnDate ?? '',
-    }),
-    saveLine: ({ req, user, no }) => ({
-      action: req.body?.action ?? 'create',
-      docNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      destination: req.body?.destination ?? req.body?.description ?? '',
-      noOfDays: Number(req.body?.noOfDays ?? 0),
-      employeeNo: user.employeeNo,
-      advanceType: req.body?.advanceType ?? req.body?.expenseType ?? '',
-      dutyArea: req.body?.dutyArea ?? '',
-      amount: Number(req.body?.amount ?? 0),
-    }),
+    saveHeader: ({ req, user, no }) => {
+      const travelDate = formatBcSoapDate(
+        String(req.body?.travelDate ?? req.body?.startDate ?? ''),
+      )
+      let returnDate = formatBcSoapDate(String(req.body?.returnDate ?? ''))
+      if (travelDate && (!returnDate || returnDate <= travelDate)) {
+        const next = new Date(`${travelDate}T12:00:00`)
+        next.setDate(next.getDate() + 1)
+        returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+      }
+      return {
+        action: no ? 'edit' : 'create',
+        docNo: no,
+        employeeNo: user.employeeNo,
+        dateRequired: formatBcSoapDate(
+          String(req.body?.dateRequired ?? req.body?.startDate ?? ''),
+        ),
+        purpose: req.body?.purpose ?? '',
+        myUserId: user.userID,
+        travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
+        travelDate,
+        returnDate,
+      }
+    },
+    saveLine: async ({ req, user, no }) => {
+      const advanceType = String(req.body?.advanceType ?? req.body?.expenseType ?? '').trim()
+      const destination = String(req.body?.destination ?? req.body?.description ?? '').trim()
+      const noOfDays = Number(req.body?.noOfDays ?? 0)
+      let amount = Number(req.body?.amount ?? 0)
+
+      if (amount <= 0 && advanceType && destination && noOfDays > 0) {
+        try {
+          const result = await callSoapMethod('FetchImprestLineAmount', {
+            headerNo: no,
+            noOfDays,
+            advanceType,
+            destinationCode: destination,
+          })
+          amount = Number(result.returnValue ?? 0)
+        } catch {
+          // Fall through — BC will reject with a clearer message if still zero.
+        }
+      }
+
+      if (amount <= 0) {
+        throw Object.assign(
+          new Error(
+            'Amount is required. Select advance type, travel destination and days so ERP can calculate the daily rate — or enter amount manually.',
+          ),
+          { status: 422 },
+        )
+      }
+
+      const dailyRateInput = Number(req.body?.dailyRate ?? 0)
+      const dailyRate =
+        dailyRateInput > 0
+          ? dailyRateInput
+          : noOfDays > 0 && amount > 0
+            ? Math.round((amount / noOfDays) * 100) / 100
+            : 0
+
+      return {
+        action: req.body?.action ?? 'create',
+        docNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        destination,
+        noOfDays,
+        employeeNo: user.employeeNo,
+        advanceType,
+        dutyArea: req.body?.dutyArea ?? '',
+        amount,
+        dailyRate,
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -423,6 +649,7 @@ const imprestSurrender: ModuleSpec = {
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
+      tableID: 50884,
     }),
   },
 }
@@ -451,33 +678,84 @@ const staffClaim: ModuleSpec = {
   },
   params: {
     saveHeader: async ({ req, user, no }) => {
-      const dims = await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
+      await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
         department: user.department,
+        departmentName: user.departmentName,
         branchCode: user.branchCode,
       })
       const claimDescription = String(
         req.body?.purpose ?? req.body?.claimDescription ?? req.body?.description ?? '',
       ).trim()
+      const claimDateRaw = String(req.body?.claimDate ?? '')
+      if (!isErpWorkingDate(claimDateRaw)) {
+        throw Object.assign(new Error('Claim date must be the current working date'), { status: 400 })
+      }
+      const departmentCode = await resolveFinanceDepartmentCodeForSoap(user.employeeNo, {
+        department: user.department,
+        departmentName: user.departmentName,
+        branchCode: user.branchCode,
+      })
+      if (!departmentCode) {
+        throw Object.assign(
+          new Error(
+            'Your Business Central employee record has no department dimension. Ask HR to set Global Dimension 2 (department) on your employee card, then log out and sign in again.',
+          ),
+          { status: 422, code: 'EMPLOYEE_DEPARTMENT_MISSING' },
+        )
+      }
       const payload: Record<string, unknown> = {
         action: no ? 'edit' : 'create',
         reqNo: no,
         staffNo: user.employeeNo,
         claimDescription,
-        claimDate: formatBcSoapDate(String(req.body?.claimDate ?? '')),
+        claimDate: formatBcSoapDate(claimDateRaw),
         myUserID: user.userID,
+        department: departmentCode,
       }
-      if (dims.departmentCode) payload.department = dims.departmentCode
       return payload
     },
-    saveLine: ({ req, no }) => {
+    saveLine: async ({ req, no }) => {
       const claimType = claimTypeCode(req.body?.claimType)
       const medical = isMedicalClaimType(claimType)
+      const other = isOtherClaimType(claimType)
+      let accountNo = String(req.body?.accountNo ?? '').trim()
+      if (!accountNo) accountNo = await lookupClaimTypeGlAccount(claimType)
+      if (!accountNo) {
+        throw Object.assign(
+          new Error(
+            `No G/L account is mapped to claim type "${claimType}" in Business Central. Ask finance to set the G/L account on Receipts & Payment Types.`,
+          ),
+          { status: 422 },
+        )
+      }
+      const amount = other
+        ? Number(req.body?.amount ?? req.body?.amountToRefund ?? req.body?.grossAmount ?? 0)
+        : medical
+          ? Number(
+              req.body?.amountToRefund ??
+                req.body?.amount ??
+                req.body?.grossAmount ??
+                0,
+            )
+          : Number(req.body?.amount ?? req.body?.grossAmount ?? 0)
+      const patientRaw = String(req.body?.patient ?? '').trim().toLowerCase()
+      const relationshipRaw = String(req.body?.relationship ?? '').trim()
+      const dependantPatient =
+        medical &&
+        (patientRaw === 'dependant' || patientRaw === 'dependent' || patientRaw === '2')
+      const relationshipMap: Record<string, number> = {
+        spouse: 1,
+        child: 2,
+        father: 3,
+        mother: 4,
+        other: 5,
+      }
       const payload: Record<string, unknown> = {
         action: req.body?.action ?? 'create',
-        amount: Number(req.body?.amount ?? req.body?.grossAmount ?? 0),
+        amount,
         reqNo: no,
         claimType,
-        accountNo: req.body?.accountNo ?? '',
+        accountNo,
         medicalAmount: medical ? Number(req.body?.medicalAmount ?? 0) : 0,
         claimReceiptNo: req.body?.claimReceiptNo ?? '',
         expenditureDescription:
@@ -487,6 +765,34 @@ const staffClaim: ModuleSpec = {
         hospitalCategory: medical
           ? hospitalCategoryCode(req.body?.hospitalCategory)
           : 0,
+        patient: medical ? (dependantPatient ? 2 : 1) : 0,
+        relationship: dependantPatient
+          ? (relationshipMap[relationshipRaw.toLowerCase()] ?? (Number(relationshipRaw || 0) || 0))
+          : 0,
+        dependant: dependantPatient ? String(req.body?.dependant ?? '').trim() : '',
+      }
+      if (medical && payload.patient === 2 && payload.relationship === 2) {
+        const dob = String(req.body?.dependantDateOfBirth ?? '').trim()
+        if (dob) {
+          const born = new Date(dob)
+          if (!Number.isNaN(born.getTime())) {
+            const age =
+              new Date().getFullYear() -
+              born.getFullYear() -
+              (new Date().getMonth() < born.getMonth() ||
+              (new Date().getMonth() === born.getMonth() && new Date().getDate() < born.getDate())
+                ? 1
+                : 0)
+            if (age > 18) {
+              throw Object.assign(
+                new Error(
+                  `Child dependants above 18 years are not eligible for medical claims (age ${age}).`,
+                ),
+                { status: 422 },
+              )
+            }
+          }
+        }
       }
       return payload
     },
@@ -501,6 +807,7 @@ const staffClaim: ModuleSpec = {
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
+      tableID: 50885,
     }),
   },
 }
@@ -520,6 +827,7 @@ const pettyCash: ModuleSpec = {
   ownerSource: 'employeeNo',
   extraListFilter: `PaymentType eq 'Petty Cash'`,
   lineService: 'QyPaymentLine',
+  lineFallbackServices: ['QyPaymentLines', 'PaymentLines'],
   lineHeaderField: 'No',
   soap: {
     saveHeader: 'FnPettyCashHeader',
@@ -588,14 +896,16 @@ const interBankTransfer: ModuleSpec = {
       myUserId: user.userID,
       staffNo: user.employeeNo,
       myAction: no ? 'edit' : 'create',
-      sector: req.body?.sector ?? '',
+      // BC derives organisation dimensions from Staff No. Sending portal
+      // values here triggers "Branch when Department already selected".
+      sector: '',
       remarks: req.body?.remarks ?? '',
-      division: req.body?.division ?? '',
-      department: req.body?.department ?? '',
+      division: '',
+      department: '',
       dateCreated: req.body?.dateCreated ?? '',
       sourceAmount: Number(req.body?.sourceAmount ?? 0),
-      payingAccount: req.body?.payingAccount ?? '',
-      receivingAmount: Number(req.body?.receivingAmount ?? 0),
+      payingAccount: '',
+      receivingAmount: Number(req.body?.receivingAmount ?? req.body?.sourceAmount ?? 0),
       receivingAccount: req.body?.receivingAccount ?? '',
       interBankTransferNo: no,
     }),
@@ -614,6 +924,7 @@ const storeRequisition: ModuleSpec = {
   module: 'store-requisition',
   headerService: 'QyStoreRequisitionHeader',
   headerTableId: 50575,
+  supportsAttachments: true,
   ownerField: 'UserID',
   ownerSource: 'userID',
   lineService: 'QyStoreRequisitionLines',
@@ -626,25 +937,56 @@ const storeRequisition: ModuleSpec = {
     cancel: 'CancelStoreRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
+    saveHeader: ({ req, user, no }) => {
+      const justification = String(req.body?.justification ?? req.body?.purpose ?? '').trim()
+      const requiredDate = String(req.body?.dateRequired ?? req.body?.requestDate ?? '').trim()
+      if (!justification) {
+        throw Object.assign(new Error('Purpose / justification is required.'), { status: 422 })
+      }
+      if (!requiredDate) {
+        throw Object.assign(new Error('Required Date is required.'), { status: 422 })
+      }
+      return {
       myAction: no ? 'edit' : 'create',
       docNo: no,
       myUserID: user.userID,
-      requestDescription:
+      requestDescription: String(
         req.body?.description ??
-        req.body?.requestDescription ??
-        req.body?.justification ??
-        '',
-      requestDate: req.body?.dateRequired ?? req.body?.requestDate ?? '',
-      // Header-level Issuing Store (BC Store Requisition Header UP parity).
-      // AL 1.0.2.361+ declares the parameter, so it must always be present —
-      // omitting it makes BC fail with "Parameter ... is null!". Blank keeps
-      // the AL default (the parameter is only applied when non-empty).
+          req.body?.requestDescription ??
+          justification ??
+          '',
+      ).slice(0, 150),
+      requestDate: requiredDate,
       issuingStore: String(
         req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '',
       ).trim(),
-    }),
-    saveLine: async ({ req, no }) => {
+      justification: justification.slice(0, 250),
+      priority: storePriorityCode(req.body?.priority ?? 'normal'),
+      storeRequisitionType: storeHeaderRequestTypeCode(req.body?.requestType ?? 'item'),
+      }
+    },
+    saveLine: async ({ req, user, no }) => {
+      const itemNo = String(req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '')
+      const itemName = String(req.body?.itemName ?? '').trim()
+      const lineDescription = String(req.body?.lineDescription ?? req.body?.description ?? '').trim()
+      const unitOfMeasure = String(req.body?.uom ?? req.body?.unitOfMeasure ?? '').trim()
+      const quantity =
+        storeLineTypeCode(req.body?.type) === 1
+          ? Number(req.body?.quantity ?? 0)
+          : 0
+      if (!itemName || !lineDescription || !unitOfMeasure || Number(req.body?.quantity ?? 0) <= 0) {
+        throw Object.assign(
+          new Error('Item / asset name, description, UOM, and a positive quantity are required.'),
+          { status: 422 },
+        )
+      }
+      await assertNoDuplicateStoreLine(
+        user,
+        no,
+        itemNo,
+        quantity,
+        String(req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '').trim(),
+      )
       // ERP parity: BC's Store Requisition lines subform links lines to the
       // HEADER's Issuing Store — a line saved with a different store becomes
       // invisible on the BC page. Prefer the header's store for every line;
@@ -670,8 +1012,18 @@ const storeRequisition: ModuleSpec = {
         quantity:
           storeLineTypeCode(req.body?.type) === 1
             ? Number(req.body?.quantity ?? 0)
-            : 0,
+            : Number(req.body?.quantity ?? 1),
         location: headerStore || (req.body?.issuingStore ?? req.body?.location ?? ''),
+        description: itemName.slice(0, 70),
+        remarks: (() => {
+          const name = itemName
+          const extra = lineDescription
+          return extra && extra !== name ? extra.slice(0, 200) : ''
+        })(),
+        unitOfMeasure: unitOfMeasure.slice(0, 20),
+        preferredBrandModel: String(
+          req.body?.preferredBrandModel ?? req.body?.preferredBrand ?? req.body?.brandModel ?? '',
+        ).slice(0, 50),
       }
     },
     deleteLine: ({ req, no }) => ({
@@ -703,11 +1055,20 @@ const purchaseRequisition: ModuleSpec = {
   module: 'purchase-requisition',
   headerService: 'QyPurchaseHeader',
   headerTableId: 52121800,
+  supportsAttachments: true,
   ownerField: 'AssignedUserID',
   ownerSource: 'userID',
   extraListFilter: `DocApprovalType eq 'Requisition'`,
-  lineService: 'QyPurchaseLine',
-  lineHeaderField: 'Document_No_',
+  // Dedicated query is installed and published by the Felix AL package. The
+  // legacy QyPurchaseLine service was manually configured and can be absent or
+  // point at a different Purchase Line query, which made approvers see only the
+  // PR header with ETB 0 and no requested items.
+  lineService: 'QyPortalPurchaseLines',
+  // Existing HIJRA tenants can still have the original web-service name. The
+  // dedicated query is authoritative, but falling back keeps approval details
+  // populated during the AL upgrade/publish transition.
+  lineFallbackServices: ['QyPurchaseLine'],
+  lineHeaderField: 'DocumentNo',
   soap: {
     saveHeader: 'PurchaseRequisitionHeader',
     saveLine: 'PurchaseRequisitionLine',
@@ -716,50 +1077,186 @@ const purchaseRequisition: ModuleSpec = {
     cancel: 'CancelPurchaseRequisition',
   },
   params: {
-    saveHeader: ({ req, user, no }) => ({
-      action: no ? 'edit' : 'create',
-      reqNo: no,
-      postingDescription:
-        req.body?.description ??
-        req.body?.postingDescription ??
-        req.body?.reason ??
-        '',
-      pricesIncludingVAT: false,
-      myUserId: user.userID,
-      orderDate:
-        req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
-      // Requesting Department picked in the portal (BC dimension code, e.g.
-      // FACILTY/HC). Blank keeps the AL default of the employee's own
-      // department dimension. AL 1.0.2.361+ declares the parameter, so it
-      // must always be present — omitting it makes BC fail with
-      // "Parameter requestingDepartment ... is null!".
-      requestingDepartment: String(
+    saveHeader: async ({ req, user, no }) => {
+      const selected = String(
         req.body?.requestingDepartment ?? req.body?.departmentCode ?? '',
-      ).trim(),
-    }),
-    saveLine: ({ req, no }) => ({
-      action: req.body?.action ?? 'create',
-      reqNo: no,
-      lineNo: Number(req.body?.lineNo ?? 0),
-      itemNo: req.body?.itemNo ?? req.body?.itemCode ?? '',
-      quantity: Number(req.body?.quantity ?? 0),
-      location: req.body?.whereNeeded ?? req.body?.location ?? '',
-      type: purchaseLineTypeCode(req.body?.type),
-      procurementPlan: req.body?.procurementPlan ?? '',
-      reasonForRequest:
-        req.body?.reason ??
-        req.body?.reasonForRequest ??
-        req.body?.description ??
+      ).trim()
+      const profileDepartment = String(user.department || user.departmentName || '').trim()
+      const [requestingDepartment, employeeDepartment] = await Promise.all([
+        selected ? resolveRequestingDepartmentCode(selected) : Promise.resolve(''),
+        profileDepartment
+          ? resolveRequestingDepartmentCode(profileDepartment)
+          : Promise.resolve(''),
+      ])
+      const submittedDepartment =
+        requestingDepartment ||
+        (selected.length > 0 && selected.length <= 20 ? selected : '')
+      const authoritativeDepartment =
+        employeeDepartment ||
+        (profileDepartment.length > 0 && profileDepartment.length <= 20 ? profileDepartment : '')
+      if (
+        authoritativeDepartment &&
+        selected &&
+        (!submittedDepartment ||
+          submittedDepartment.trim().toUpperCase() !== authoritativeDepartment.trim().toUpperCase())
+      ) {
+        throw Object.assign(
+          new Error(
+            `Requesting Department must match your Business Central Employee Card (${authoritativeDepartment}).`,
+          ),
+          { status: 422, code: 'PROFILE_DEPARTMENT_MISMATCH' },
+        )
+      }
+      const departmentForSoap = authoritativeDepartment || submittedDepartment
+      if (selected && !departmentForSoap) {
+        throw Object.assign(
+          new Error(
+            `Department "${selected}" is not a valid Business Central department code. Pick a department from the list or ask finance to configure Departments / dimension values.`,
+          ),
+          { status: 422, code: 'INVALID_DEPARTMENT' },
+        )
+      }
+      const justification = String(
+        req.body?.justification ??
+          req.body?.description ??
+          req.body?.postingDescription ??
+          req.body?.reason ??
+          '',
+      ).trim()
+      const requiredDate = String(
+        req.body?.dateNeeded ?? req.body?.orderDate ?? req.body?.requestDate ?? '',
+      ).trim()
+      const projectCode = String(req.body?.projectCode ?? req.body?.costCenter ?? '').trim()
+      const budgetType = String(req.body?.budgetType ?? '').trim().toLowerCase()
+      const isProjectBudget = budgetType === 'project' || budgetType === '0'
+      const isNonProjectBudget = ['nonproject', 'non-project', 'non project', '1'].includes(
+        budgetType,
+      )
+      const purchaseRequestType = String(
+        req.body?.purchaseRequestType ?? req.body?.requestType ?? '',
+      ).trim().toLowerCase()
+      const priority = String(req.body?.priority ?? '').trim()
+      const scopeOfWork = String(req.body?.scopeOfWork ?? '').trim()
+      const technicalRequirement = String(req.body?.technicalRequirement ?? '').trim()
+      const submittedCurrency = String(req.body?.currencyCode ?? req.body?.currency ?? '')
+        .trim()
+        .replace(/^OTHER$/i, '')
+      const purchaseMode = String(
+        req.body?.purchaseMode ?? (submittedCurrency ? 'foreign' : 'local'),
+      ).trim().toLowerCase()
+      if (!isProjectBudget && !isNonProjectBudget) {
+        throw Object.assign(new Error('Budget Type must be Project or Non-Project.'), {
+          status: 422,
+          code: 'INVALID_BUDGET_TYPE',
+        })
+      }
+      const purchaseRequestTypeValue = purchaseRequestTypeCode(purchaseRequestType)
+      const priorityValue = purchasePriorityCode(priority)
+      const otherRequirements = purchaseOtherRequirementsForSoap(
+        purchaseRequestType,
+        req.body?.otherPurchaseType,
+        req.body?.otherRequirements,
+      )
+      if (!departmentForSoap || !justification || !requiredDate) {
+        throw Object.assign(
+          new Error('Department, Budget Type, Required Date, and Purpose / Justification are required.'),
+          { status: 422 },
+        )
+      }
+      if (isProjectBudget && !projectCode) {
+        throw Object.assign(new Error('Project Name / Project Code is required for a Project budget.'), {
+          status: 422,
+        })
+      }
+      if (!['local', 'foreign'].includes(purchaseMode)) {
+        throw Object.assign(new Error('Purchase mode must be Local or Foreign.'), {
+          status: 422,
+        })
+      }
+      if (purchaseMode === 'foreign' && !submittedCurrency) {
+        throw Object.assign(new Error('Currency is required for a foreign purchase request.'), {
+          status: 422,
+        })
+      }
+      return {
+        action: no ? 'edit' : 'create',
+        reqNo: no,
+        postingDescription: justification.slice(0, 100),
+        pricesIncludingVAT: false,
+        myUserId: user.userID,
+        orderDate: requiredDate,
+        requestingDepartment: departmentForSoap,
+        priority: priorityValue,
+        purchaseRequestType: purchaseRequestTypeValue,
+        projectCode: isProjectBudget ? projectCode.slice(0, 10) : '',
+        justification: justification.slice(0, 250),
+        currencyCode: purchaseMode === 'foreign' ? submittedCurrency : '',
+        technicalRequirement: technicalRequirement.slice(0, 250),
+        otherRequirements,
+        scopeOfWork: scopeOfWork.slice(0, 250),
+      }
+    },
+    saveLine: async ({ req, user, no }) => {
+      const quantity = Number(req.body?.quantity ?? 0)
+      const itemName = String(req.body?.itemName ?? '').trim()
+      const description = String(
+        req.body?.description ?? req.body?.reasonForRequest ?? req.body?.reason ?? '',
+      ).trim()
+      const specification = String(
         req.body?.specification ??
-        '',
-      // R4: free-text specification the requestor types for FA/Service/Item
-      // lines; AL writes it to Purchase Line "Description" (overriding the
-      // value auto-filled from Validate("No.")) when non-blank. AL 1.0.2.361+
-      // declares the parameter, so it must always be present.
-      specification: String(
-        req.body?.specification ?? req.body?.itemDescription ?? '',
-      ).trim(),
-    }),
+          req.body?.itemDescription ??
+          '',
+      ).trim()
+      const category = String(req.body?.category ?? '').trim()
+      const unitOfMeasure = String(req.body?.unitOfMeasure ?? req.body?.uom ?? '').trim()
+      const requiredDate = String(req.body?.requiredDate ?? req.body?.dateNeeded ?? '').trim()
+      const rawLineType = String(req.body?.type ?? '').trim()
+      const typeCode = purchaseLineTypeCode(rawLineType)
+      const estimatedUnitPrice = Number(req.body?.estimatedUnitPrice ?? 0)
+      if (!rawLineType || ![1, 2, 4].includes(typeCode)) {
+        throw Object.assign(new Error('Line Type must be Item, Service, or Asset.'), {
+          status: 422,
+          code: 'INVALID_PURCHASE_LINE_TYPE',
+        })
+      }
+      if (!Number.isFinite(estimatedUnitPrice) || estimatedUnitPrice < 0) {
+        throw Object.assign(new Error('Estimated Unit Price must be zero or a positive amount.'), {
+          status: 422,
+          code: 'INVALID_ESTIMATED_UNIT_PRICE',
+        })
+      }
+      let itemNo = String(req.body?.itemNo ?? req.body?.itemCode ?? req.body?.item ?? '').trim()
+      if (!itemNo && (typeCode === 2 || typeCode === 4)) {
+        itemNo = await resolvePurchaseMasterNoByName(typeCode, itemName)
+      }
+      if (!itemName || !description || !specification || !category || !unitOfMeasure || !requiredDate || quantity <= 0) {
+        throw Object.assign(
+          new Error('Item/service name, category, description, specification, quantity, UOM, and line Required Date are required.'),
+          { status: 422 },
+        )
+      }
+      await assertNoDuplicatePurchaseLine(user, no, itemNo, quantity)
+      return {
+        action: req.body?.action ?? 'create',
+        reqNo: no,
+        lineNo: Number(req.body?.lineNo ?? 0),
+        itemNo,
+        quantity,
+        location: req.body?.whereNeeded ?? req.body?.location ?? '',
+        type: typeCode,
+        procurementPlan: req.body?.procurementPlan ?? '',
+        reasonForRequest: description || specification,
+        specification,
+        itemName: itemName || description,
+        unitOfMeasure,
+        estimatedUnitPrice,
+        preferredBrandModel: String(req.body?.preferredBrandModel ?? '').trim().slice(0, 50),
+        suggestedSupplier: String(req.body?.suggestedSupplier ?? '').trim().slice(0, 100),
+        remarks: String(req.body?.remarks ?? '').trim().slice(0, 100),
+        category: category.slice(0, 50),
+        requiredDate,
+      }
+    },
     deleteLine: ({ req, no }) => ({
       requisitionNo: no,
       lineNo: req.params.lineNo,
@@ -902,10 +1399,31 @@ function isFuelRequestRow(row: ODataRecord) {
 const FUEL_MAINTENANCE_MODULES = new Set(['fuel', 'maintenance'])
 
 function portalOwnerFieldKeys(spec: ModuleSpec) {
-  return [...new Set([spec.ownerField, 'Requester_ID', 'EmployeeNo', 'Employee_No', 'PreparedBy'])]
+  return [
+    ...new Set([
+      spec.ownerField,
+      'AssignedUserID',
+      'Assigned_User_ID',
+      'AssignedUser',
+      'UserID',
+      'User_ID',
+      'RequesterID',
+      'Requester_ID',
+      'RequestedBy',
+      'Requested_By',
+      'EmployeeNo',
+      'Employee_No',
+      'PreparedBy',
+      'Prepared_By',
+    ]),
+  ]
 }
 
-function rowOwnedByUser(row: ODataRecord, spec: ModuleSpec, user: AuthUser) {
+export function portalModuleDocumentOwnedByUser(
+  row: ODataRecord,
+  spec: ModuleSpec,
+  user: AuthUser,
+) {
   const wanted = new Set(
     [ownerValue(spec, user), user.userID, user.employeeNo]
       .map((value) => String(value ?? '').trim().toUpperCase())
@@ -923,7 +1441,7 @@ async function fetchFuelMaintenanceRows(spec: ModuleSpec, user: AuthUser) {
   const fetched = await fetchOData(spec.headerService, {})
   let rows = Array.isArray(fetched) ? fetched : []
   if (!spec.unscopedList) {
-    rows = rows.filter((row) => rowOwnedByUser(row, spec, user))
+    rows = rows.filter((row) => portalModuleDocumentOwnedByUser(row, spec, user))
   }
   return spec.postListFilter ? rows.filter(spec.postListFilter) : rows
 }
@@ -1286,13 +1804,26 @@ const STUB_MODULES: Array<{ module: string; reason: string }> = [
 function buildModuleRouter(spec: ModuleSpec): Router {
   const router = Router({ mergeParams: true })
   const headerKey = spec.headerKey ?? 'No'
+  const ownerProtected =
+    spec.module === 'purchase-requisition' || spec.module === 'store-requisition'
+
+  const requireProtectedOwner = async (user: AuthUser, no: string) => {
+    if (!ownerProtected || !no) return
+    const row = await getPortalModuleDocument(spec, user, no, false)
+    if (!row || !portalModuleDocumentOwnedByUser(row, spec, user)) {
+      throw Object.assign(new Error(`${spec.module} request not found`), {
+        status: 404,
+        code: 'REQUEST_NOT_FOUND',
+      })
+    }
+  }
 
   router.get(
     '/',
     safe(async (req, res) => {
       const user = authUser(req)
       if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
-        res.json({ rows: await fetchFuelMaintenanceRows(spec, user) })
+        res.json({ rows: sortNewestFirst(await fetchFuelMaintenanceRows(spec, user)) })
         return
       }
       const currentOwner = ownerValue(spec, user)
@@ -1308,7 +1839,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       })
       let rows = Array.isArray(fetched) ? fetched : []
       if (spec.postListFilter) rows = rows.filter(spec.postListFilter)
-      res.json({ rows })
+      res.json({ rows: sortNewestFirst(rows) })
     }),
   )
 
@@ -1324,6 +1855,10 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       })) as ODataRecord[] | null
       const requisition = Array.isArray(headerRows) && headerRows.length > 0 ? headerRows[0]! : null
       if (!requisition) {
+        res.status(404).json({ message: `${spec.module} request not found` })
+        return
+      }
+      if (ownerProtected && !portalModuleDocumentOwnedByUser(requisition, spec, user)) {
         res.status(404).json({ message: `${spec.module} request not found` })
         return
       }
@@ -1353,6 +1888,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
     const handler = safe(async (req, res) => {
       const user = authUser(req)
       const no = String(req.params.no ?? '')
+      await requireProtectedOwner(user, no)
       const body = SCHEMAS.saveHeader.parse(req.body ?? {})
       // Pull through validated body for the param builder (re-attach reference).
       ;(req as Request).body = body
@@ -1383,6 +1919,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       safe(async (req, res) => {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
+        await requireProtectedOwner(user, no)
         const params = await spec.params!.saveLine!({ req, user, no })
         const result = await callSoapMethod(spec.soap.saveLine!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
@@ -1396,6 +1933,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       safe(async (req, res) => {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
+        await requireProtectedOwner(user, no)
         const params = await spec.params!.deleteLine!({ req, user, no })
         const result = await callSoapMethod(spec.soap.deleteLine!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
@@ -1409,6 +1947,8 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       safe(async (req, res) => {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
+        await requireProtectedOwner(user, no)
+        await assertRequiredPortalAttachment(spec, no)
         const params = await spec.params!.submit!({ req, user, no })
         const result = await callSoapMethod(spec.soap.submit!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
@@ -1422,6 +1962,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       safe(async (req, res) => {
         const user = authUser(req)
         const no = String(req.params.no ?? '')
+        await requireProtectedOwner(user, no)
         const params = await spec.params!.cancel!({ req, user, no })
         const result = await callSoapMethod(spec.soap.cancel!, params)
         res.json({ ok: ok(result), returnValue: result.returnValue })
@@ -1430,6 +1971,66 @@ function buildModuleRouter(spec: ModuleSpec): Router {
   }
 
   return router
+}
+
+async function listDocumentAttachmentsForTable(no: string, tableIds: number[]) {
+  const noFilter = `No eq '${odataString(no)}'`
+  const tableClause = tableIds.map((id) => `TableID eq ${id}`).join(' or ')
+  const tableClauseAlt = tableIds.map((id) => `Table_ID eq ${id}`).join(' or ')
+  let rows = (await fetchOData('QyDocumentAttachments', {
+    $filter: `${noFilter} and (${tableClause})`,
+  }).catch(() => null)) as ODataRecord[] | null
+  if (!Array.isArray(rows) || rows.length === 0) {
+    rows = (await fetchOData('QyDocumentAttachments', {
+      $filter: `${noFilter} and (${tableClauseAlt})`,
+    }).catch(() => null)) as ODataRecord[] | null
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const loose = (await fetchOData('QyDocumentAttachments', { $filter: noFilter }).catch(
+      () => null,
+    )) as ODataRecord[] | null
+    rows = Array.isArray(loose)
+      ? loose.filter((row) => {
+          const id = Number(row.TableID ?? row.Table_ID ?? 0)
+          return tableIds.includes(id)
+        })
+      : []
+  }
+  return Array.isArray(rows) ? rows : []
+}
+
+async function assertRequiredPortalAttachment(spec: ModuleSpec, no: string) {
+  // Latest ABH purchase decision: supporting documents, Scope/TOR, and service
+  // technical notes are helpful but optional. Claims and Store Requests retain
+  // their existing mandatory attachment rules.
+  if (spec.module === 'purchase-requisition') return
+
+  const tableIds =
+    spec.headerTableId === 52121800 ? [52121800, 38] : [spec.headerTableId]
+  const rows = await listDocumentAttachmentsForTable(no, tableIds)
+
+  if (spec.module === 'claim') {
+    if (rows.length === 0) {
+      throw Object.assign(
+        new Error('Attach at least one supporting document before requesting approval for a claim.'),
+        { status: 422, code: 'CLAIM_ATTACHMENT_REQUIRED' },
+      )
+    }
+    return
+  }
+
+  if (spec.module === 'store-requisition') {
+    if (rows.length === 0) {
+      throw Object.assign(
+        new Error(
+          'Attach at least one supporting document before requesting approval for store requisition.',
+        ),
+        { status: 422, code: 'STORE_ATTACHMENT_REQUIRED' },
+      )
+    }
+    return
+  }
+
 }
 
 function buildStubRouter(reason: string): Router {
@@ -1447,6 +2048,159 @@ function buildStubRouter(reason: string): Router {
 /* -------------------------------------------------------------------------- */
 /* Public entrypoint                                                          */
 /* -------------------------------------------------------------------------- */
+
+const DUPLICATE_REQUISITION_WINDOW_MS = 24 * 60 * 60 * 1000
+
+function fieldNumber(row: ODataRecord, keys: string[], fallback = 0) {
+  for (const key of keys) {
+    const raw = row[key]
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue
+    const n = Number(raw)
+    if (Number.isFinite(n)) return n
+  }
+  return fallback
+}
+
+function duplicateBlockingStatus(status: string) {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  return [
+    'open',
+    'draft',
+    'pending',
+    'pending approval',
+    'pendingapproval',
+  ].includes(normalized)
+}
+
+export function purchaseDuplicateBlockingStatus(status: string) {
+  return duplicateBlockingStatus(status)
+}
+
+export function storeDuplicateBlockingStatus(status: string) {
+  return duplicateBlockingStatus(status)
+}
+
+function headerIssuingStore(row: ODataRecord) {
+  return fieldText(row, ['IssuingStore', 'Issuing_Store']).trim().toUpperCase()
+}
+
+function headerActivityTimestamp(row: ODataRecord) {
+  const raw = fieldText(row, [
+    'SystemCreatedAt',
+    'SystemCreatedAt',
+    'OrderDate',
+    'Order_Date',
+    'Needed_By_Date',
+    'Requestdate',
+    'RequestDate',
+    'Date',
+  ])
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : Date.now()
+}
+
+function lineItemNo(row: ODataRecord) {
+  return fieldText(row, ['No', 'No_', 'ItemNo', 'Item_No', 'itemNo', 'item']).trim().toUpperCase()
+}
+
+export async function assertNoDuplicatePurchaseLine(
+  user: AuthUser,
+  currentDocNo: string,
+  itemNo: string,
+  quantity: number,
+) {
+  const normalizedItem = itemNo.trim().toUpperCase()
+  if (!normalizedItem || quantity <= 0) return
+  const spec = findModuleSpec('purchase-requisition')
+  if (!spec) return
+  let headers: ODataRecord[] = []
+  try {
+    headers = await listPortalModuleRows(spec, user)
+  } catch {
+    return
+  }
+  // Excel PR_07 joint remark: 24 hours.
+  const cutoff = Date.now() - DUPLICATE_REQUISITION_WINDOW_MS
+  const currentKey = currentDocNo.trim().toUpperCase()
+  for (const header of headers) {
+    const docNo = fieldText(header, ['No', 'No_', 'DocumentNo'])
+    if (docNo.trim().toUpperCase() === currentKey) continue
+    const status = resolveModuleRequestStatus(header, 'purchaseRequisition')
+    if (!purchaseDuplicateBlockingStatus(status)) continue
+    if (headerActivityTimestamp(header) < cutoff) continue
+    const lines = await listPortalModuleLines(spec, header, docNo)
+    const duplicateLine = lines.find((line) => {
+      const lineQty = fieldNumber(line, ['Quantity'])
+      return lineItemNo(line) === normalizedItem && Math.abs(lineQty - quantity) < 0.01
+    })
+    if (duplicateLine) {
+      throw Object.assign(
+        new Error(
+          `Duplicate request: item ${itemNo} (qty ${quantity}) is already on ${docNo} (${status}). Cancel that request or wait 24 hours.`,
+        ),
+        { status: 409, code: 'DUPLICATE_PURCHASE_REQUISITION' },
+      )
+    }
+  }
+}
+
+export async function assertNoDuplicateStoreLine(
+  user: AuthUser,
+  currentDocNo: string,
+  itemNo: string,
+  quantity: number,
+  issuingStore = '',
+) {
+  const normalizedItem = itemNo.trim().toUpperCase()
+  if (!normalizedItem) return
+  const spec = findModuleSpec('store-requisition')
+  if (!spec) return
+  let headers: ODataRecord[] = []
+  try {
+    headers = await listPortalModuleRows(spec, user)
+  } catch {
+    return
+  }
+  const currentKey = currentDocNo.trim().toUpperCase()
+  if (!issuingStore.trim() && currentKey) {
+    try {
+      const rows = (await fetchOData('QyStoreRequisitionHeader', {
+        $filter: `No eq '${odataString(currentDocNo)}'`,
+        $top: 1,
+      })) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows[0]) {
+        issuingStore = headerIssuingStore(rows[0])
+      }
+    } catch {
+      // keep blank — match any store
+    }
+  }
+  const storeFilter = issuingStore.trim().toUpperCase()
+  for (const header of headers) {
+    const docNo = fieldText(header, ['No', 'No_'])
+    if (docNo.trim().toUpperCase() === currentKey) continue
+    const status = resolveModuleRequestStatus(header, 'storeRequisition')
+    if (!storeDuplicateBlockingStatus(status)) continue
+    if (storeFilter && headerIssuingStore(header) && headerIssuingStore(header) !== storeFilter) {
+      continue
+    }
+    const lines = await listPortalModuleLines(spec, header, docNo)
+    const duplicateLine = lines.find((line) => {
+      const lineQty = fieldNumber(line, ['Quantity', 'QuantityRequested', 'Quantity_Requested'])
+      const sameItem = lineItemNo(line) === normalizedItem
+      const sameQty = quantity <= 0 || Math.abs(lineQty - quantity) < 0.01
+      return sameItem && sameQty
+    })
+    if (duplicateLine) {
+      throw Object.assign(
+        new Error(
+          `Duplicate request: item ${itemNo}${quantity > 0 ? ` (qty ${quantity})` : ''} is already on ${docNo} (${status}). Only rejected or cancelled requests allow the same item again.`,
+        ),
+        { status: 409, code: 'DUPLICATE_STORE_REQUISITION' },
+      )
+    }
+  }
+}
 
 export const MODULE_SPECS: ModuleSpec[] = [
   imprest,
@@ -1499,6 +2253,7 @@ const MODULE_APPROVAL_KEYS: Partial<Record<string, ApprovalTableKey>> = {
   'petty-cash': 'pettyCash',
   'inter-bank-transfer': 'pettyCashReplenishment',
   'store-requisition': 'storeRequisition',
+  'purchase-requisition': 'purchaseRequisition',
   fuel: 'fuel',
   'transfer-order': 'transferOrder',
   'salary-advance': 'salaryAdvance',
@@ -1524,9 +2279,14 @@ export function portalApprovalEntryFilter(spec: ModuleSpec, no: string) {
 /** Alternate BC field names used on some `QyApprovalEntry` pages. */
 function portalApprovalEntryDocumentFilters(no: string) {
   const escaped = odataString(no)
+  // Query 50070 "Approval Entries" exposes DocumentNo and DocumentNo2 only —
+  // there is no Document_No column, so that filter 400s on every lookup and
+  // burns a full BC round trip. DocumentNo2 matters: this deployment leaves
+  // "Document No." blank on some approval entries and carries the number in
+  // "Document No2" (report 50314 exists purely to backfill the blank ones).
   return [
     `DocumentNo eq '${escaped}'`,
-    `Document_No eq '${escaped}'`,
+    `DocumentNo2 eq '${escaped}'`,
   ]
 }
 
@@ -1554,11 +2314,28 @@ export function approvalDocumentNoCandidates(
   return [...new Set(values)]
 }
 
+/**
+ * Records the last approval-entry lookup failure so callers can tell "BC says
+ * there are no approvers" apart from "the approval query itself is broken".
+ * Swallowing both as [] is what makes a misconfigured BC and an unpublished
+ * QyApprovalEntry produce the identical, unactionable error.
+ */
+let lastApprovalLookupError: string | null = null
+
+export function lastApprovalEntryLookupError() {
+  return lastApprovalLookupError
+}
+
 async function queryApprovalEntries(filter: string) {
-  const rows = (await fetchOData('QyApprovalEntry', { $filter: filter }).catch(
-    () => null,
-  )) as ODataRecord[] | null
-  return Array.isArray(rows) ? rows : []
+  try {
+    const rows = (await fetchOData('QyApprovalEntry', { $filter: filter })) as
+      | ODataRecord[]
+      | null
+    return Array.isArray(rows) ? rows : []
+  } catch (error) {
+    lastApprovalLookupError = error instanceof Error ? error.message : String(error)
+    return [] as ODataRecord[]
+  }
 }
 
 function approvalEntryKey(row: ODataRecord) {
@@ -1619,9 +2396,13 @@ async function fetchApprovalEntriesByRecordId(spec: ModuleSpec, document: ODataR
   const isNumericRecordId =
     Number.isFinite(numericId) &&
     (String(numericId) === recordId.replace(/^0+/, '') || String(numericId) === recordId)
+  // Query 50070 publishes no "Record ID to Approve" column, so a RecordID filter
+  // can only 400. The guid'...' form is OData v3 syntax on top of that. Both
+  // shapes cost a full BC round trip each and never return a row; SystemId is
+  // the only identity column the query actually exposes.
   const idFilters = isNumericRecordId
-    ? [`RecordIDtoApprove eq ${numericId}`, `Record_ID_to_Approve eq ${numericId}`]
-    : [`RecordIDtoApprove eq guid'${odataString(recordId)}'`]
+    ? []
+    : [`SystemId eq ${odataString(recordId)}`]
 
   for (const idFilter of idFilters) {
     const scoped = tableFilter ? `${idFilter} and ${tableFilter}` : idFilter
@@ -1680,19 +2461,19 @@ function requestWithBody(body: Record<string, unknown>, params: Record<string, s
 export async function listPortalModuleRows(
   spec: ModuleSpec,
   user: AuthUser,
-  options: { gatePassSource?: GatePassSourceKey } = {},
+  options: { gatePassSource?: GatePassSourceKey; includeAll?: boolean } = {},
 ) {
   if (spec.module === 'salary-advance') {
-    return fetchSalaryAdvanceRows(spec, user)
+    return sortNewestFirst(await fetchSalaryAdvanceRows(spec, user))
   }
 
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
-    return fetchFuelMaintenanceRows(spec, user)
+    return sortNewestFirst(await fetchFuelMaintenanceRows(spec, user))
   }
   const filterParts =
     spec.module === 'gate-pass'
       ? gatePassListFilterParts(options.gatePassSource ?? 'storeIssue', user)
-      : spec.unscopedList
+      : spec.unscopedList || options.includeAll
         ? []
         : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
   if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
@@ -1700,7 +2481,8 @@ export async function listPortalModuleRows(
     ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
   })
   let rows = Array.isArray(fetched) ? fetched : []
-  return spec.postListFilter ? rows.filter(spec.postListFilter) : rows
+  if (spec.postListFilter) rows = rows.filter(spec.postListFilter)
+  return sortNewestFirst(rows)
 }
 
 export async function getPortalModuleDocument(
@@ -1734,7 +2516,11 @@ export async function getPortalModuleDocument(
       })) as ODataRecord[] | null
       const row = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
       if (!row) continue
-      if (enforceOwner && !spec.unscopedList && !rowOwnedByUser(row, spec, user)) return null
+      if (
+        enforceOwner &&
+        !spec.unscopedList &&
+        !portalModuleDocumentOwnedByUser(row, spec, user)
+      ) return null
       return row
     }
     return null
@@ -1753,8 +2539,39 @@ export async function getPortalModuleDocument(
   const rows = (await fetchOData(spec.headerService, {
     $filter: `${headerKey} eq '${odataString(no)}'${ownerFilter}`,
     $top: 1,
-  })) as ODataRecord[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  }).catch(() => null)) as ODataRecord[] | null
+  if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+
+  const headerServices =
+    spec.module === 'petty-cash'
+      ? [spec.headerService, 'Paymentsheader', 'QyPaymentHeader', 'PaymentsHeader']
+      : [spec.headerService]
+  const headerKeys =
+    spec.module === 'petty-cash' || spec.module === 'purchase-requisition'
+      ? [...new Set([headerKey, 'No', 'No_'])]
+      : [headerKey]
+  for (const service of headerServices) {
+    for (const key of headerKeys) {
+      const altRows = (await fetchODataFirstBase(service, {
+        $filter: `${key} eq '${odataString(no)}'${ownerFilter}`,
+        $top: 1,
+      }).catch(() => [])) as ODataRecord[]
+      if (Array.isArray(altRows) && altRows.length > 0) return altRows[0]!
+    }
+  }
+
+  // Purchase Header OData may expose No_ instead of No on older published queries.
+  if (spec.module === 'purchase-requisition' && headerKey === 'No') {
+    for (const altKey of ['No_', 'No']) {
+      if (altKey === headerKey) continue
+      const altRows = (await fetchOData(spec.headerService, {
+        $filter: `${altKey} eq '${odataString(no)}'${ownerFilter}`,
+        $top: 1,
+      }).catch(() => null)) as ODataRecord[] | null
+      if (Array.isArray(altRows) && altRows.length > 0) return altRows[0]!
+    }
+  }
+  return null
 }
 
 /** Read the document lines exactly as the ESS controllers do, including transport's two passenger pages. */
@@ -1795,10 +2612,41 @@ export async function listPortalModuleLines(
   const lineHeaderField = gatePassBinding?.lineHeaderField ?? spec.lineHeaderField
   const lineDocumentNo = gatePassBinding?.documentNo ?? no
   if (!lineService || !lineHeaderField) return []
-  const rows = await fetchOData(lineService, {
-    $filter: `${lineHeaderField} eq '${odataString(lineDocumentNo)}'`,
-  }).catch(() => [] as ODataRecord[])
-  return Array.isArray(rows) ? rows : []
+  // Hijra-parity: try primary + fallback line services (petty cash / purchase).
+  const services = [lineService, ...(spec.lineFallbackServices ?? [])]
+  const lineFilterKeys =
+    spec.module === 'purchase-requisition'
+      ? ['DocumentNo', 'Document_No_', 'Document_No']
+      : spec.module === 'petty-cash'
+        ? [lineHeaderField, 'DocumentNo', 'No', 'No_']
+        : [lineHeaderField]
+  let firstError: unknown = null
+  const documentType = fieldText(header, ['DocumentType', 'Document_Type', 'Document_Type_'])
+  for (const service of services) {
+    for (const filterKey of lineFilterKeys) {
+      const typedFilters =
+        spec.module === 'purchase-requisition' && documentType
+          ? [
+              `${filterKey} eq '${odataString(lineDocumentNo)}' and DocumentType eq '${odataString(documentType)}'`,
+              `${filterKey} eq '${odataString(lineDocumentNo)}'`,
+            ]
+          : [`${filterKey} eq '${odataString(lineDocumentNo)}'`]
+      for (const filter of typedFilters) {
+        try {
+          const rows = await fetchOData(service, { $filter: filter })
+          if (Array.isArray(rows) && rows.length > 0) return rows
+        } catch (error) {
+          firstError ??= error
+        }
+      }
+    }
+  }
+  if (firstError) {
+    console.warn(
+      `[portal-lines] ${spec.module} ${lineDocumentNo}: no published line service returned rows (${services.join(', ')})`,
+    )
+  }
+  return []
 }
 
 function lineHasContent(line: Record<string, unknown>) {
@@ -1932,6 +2780,10 @@ export async function createPortalModuleRequest(
     const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
     if (!contentBase64) continue
     const fileName = String(attachment.fileName ?? '')
+    const description = String(attachment.description ?? '').trim()
+    if (!description) {
+      throw Object.assign(new Error('Attachment description is required'), { status: 422 })
+    }
     const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
     if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
       throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
@@ -1946,7 +2798,7 @@ export async function createPortalModuleRequest(
     const uploadResult = await callSoapMethod('UploadDocumentAttachment', {
       docNo: no,
       docNo2: no,
-      description: String(attachment.description ?? attachment.fileName ?? 'Attachment').trim(),
+      description,
       tableID: spec.headerTableId,
       file: contentBase64,
       fileName: attachmentFileName(attachment),
@@ -2017,6 +2869,7 @@ export async function submitPortalModuleRequest(
   if (!header) {
     throw Object.assign(new Error(`Business Central document ${no} was not found`), { status: 404 })
   }
+  await assertRequiredPortalAttachment(spec, no)
   if (!canRequestApprovalForSpec(spec.module, header)) {
     throw Object.assign(new Error(requestApprovalBlockedMessage(spec.module, header)), {
       status: 422,
@@ -2077,6 +2930,42 @@ export async function submitPortalModuleRequest(
       throw Object.assign(new Error(`Business Central did not submit ${no}.${hint}`), { status: 502 })
     }
     throw Object.assign(new Error(`Business Central did not submit ${no}`), { status: 502 })
+  }
+
+  const portalModule = MODULE_APPROVAL_KEYS[spec.module]
+  if (portalModule) {
+    let verified = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const refreshed = await getPortalModuleDocument(spec, user, no, false)
+      if (!refreshed) break
+      const approvers = await fetchPortalApprovalEntries(spec, no, refreshed)
+      const resolved = resolveModuleRequestStatus(
+        refreshed,
+        portalModule as PortalModuleKey,
+        approvers,
+      )
+      if (
+        (resolved !== 'Open' && resolved !== 'Draft') ||
+        approvers.length > 0 ||
+        documentSentForApproval(refreshed)
+      ) {
+        verified = true
+        break
+      }
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
+    }
+    if (!verified) {
+      const facilityHint =
+        spec.module === 'store-requisition' || spec.module === 'purchase-requisition'
+          ? ' Enable the Business Central approval workflow for this document type and confirm approvers are assigned.'
+          : ' Confirm the approval workflow is enabled and approvers are configured.'
+      throw Object.assign(
+        new Error(`Business Central did not start approval for ${no}.${facilityHint}`),
+        { status: 502 },
+      )
+    }
   }
 }
 

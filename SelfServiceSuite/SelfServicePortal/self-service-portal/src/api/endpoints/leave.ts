@@ -1,4 +1,4 @@
-import { authGet, authHttp, authPost } from '@/api/client/authClient'
+import { authDelete, authGet, authHttp, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
 import type { PortalRequest } from '@/types/erp.types'
 
@@ -7,15 +7,113 @@ export interface LeaveType {
   description: string
   days: number
   isHourly: boolean
+  isAnnual: boolean
+  unlimitedDays: boolean
+  maximumApplicationDays: number | null
+  requiresMedicalAttachment?: boolean
+  requiresFamilyMember?: boolean
+  requiresDeliveryDate?: boolean
+  requiresWeddingAttachment?: boolean
 }
 
 export interface LeaveBalance {
   balance: number
   entitlement?: number
+  allocatedDays?: number | null
+  /** Remaining full-year entitlement after leave taken; informational only. */
+  totalAvailableLeaveBalance?: number | null
+  /** Lower of remaining full-year balance and accrued-to-date; application limit. */
+  availableLeaveBalance?: number | null
+  currentLeaveBalance?: number | null
   earnedLeaveDays?: number | null
-  applicationLimit?: number
+  carryForwardBalance?: number | null
+  totalLeaveTakenToDate?: number | null
+  leaveAccruedToDate?: number | null
+  balanceSource?:
+    | 'employeeCardAvailable'
+    | 'employeeCardAccruedLimit'
+    | 'unavailable'
+    | 'leaveLedger'
+    | 'leaveTypeSetup'
+  isAnnual?: boolean
+  unlimitedDays?: boolean
+  maximumApplicationDays?: number | null
+  applicationLimit?: number | null
   pendingCount: number
   isHourly: boolean
+}
+
+function finiteLeaveNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * The amount an employee may request. Annual leave deliberately prefers the
+ * final Available Leave Balance, never Total Available Leave Balance.
+ */
+export function resolveApplicableLeaveBalance(data: LeaveBalance) {
+  const explicit = finiteLeaveNumber(data.availableLeaveBalance)
+  if (explicit !== null) {
+    // Annual applications never authorize a negative balance; other types can
+    // show ledger negatives on Leave Statement (matches BC PDF).
+    return data.isAnnual ? Math.max(0, explicit) : explicit
+  }
+
+  if (data.isAnnual) {
+    const accrued = finiteLeaveNumber(data.leaveAccruedToDate ?? data.earnedLeaveDays)
+    const taken = finiteLeaveNumber(data.totalLeaveTakenToDate)
+    const entitlement = finiteLeaveNumber(data.entitlement ?? data.allocatedDays)
+    const carryForward = finiteLeaveNumber(data.carryForwardBalance)
+    const explicitTotal = finiteLeaveNumber(data.totalAvailableLeaveBalance)
+    const totalAvailable =
+      explicitTotal ??
+      (entitlement !== null && taken !== null
+        ? Math.max(0, entitlement + (carryForward ?? 0) - taken)
+        : null)
+    if (accrued !== null && totalAvailable !== null) {
+      return Math.max(0, Math.min(accrued, totalAvailable))
+    }
+    // Fail closed for annual leave. Older backends may expose Total Available
+    // through currentLeaveBalance/applicationLimit, which must never authorize an application.
+    return 0
+  }
+
+  const applicationLimit = finiteLeaveNumber(data.applicationLimit)
+  if (applicationLimit !== null) return applicationLimit
+  const current = finiteLeaveNumber(data.currentLeaveBalance ?? data.balance)
+  return current ?? 0
+}
+
+export interface AnnualLeaveFigures {
+  entitlement: number | null
+  carryForward: number | null
+  totalAvailable: number | null
+  accruedToDate: number | null
+  takenToDate: number | null
+  available: number
+}
+
+export function resolveAnnualLeaveFigures(data: LeaveBalance): AnnualLeaveFigures {
+  const entitlement = finiteLeaveNumber(data.entitlement ?? data.allocatedDays)
+  const carryForward = finiteLeaveNumber(data.carryForwardBalance)
+  const takenToDate = finiteLeaveNumber(data.totalLeaveTakenToDate)
+  const explicitTotal = finiteLeaveNumber(data.totalAvailableLeaveBalance)
+  const totalAvailable =
+    explicitTotal ??
+    (entitlement !== null && takenToDate !== null
+      ? Math.max(0, entitlement + (carryForward ?? 0) - takenToDate)
+      : null)
+
+  return {
+    entitlement,
+    carryForward,
+    totalAvailable,
+    accruedToDate: finiteLeaveNumber(data.leaveAccruedToDate ?? data.earnedLeaveDays),
+    takenToDate,
+    available: resolveApplicableLeaveBalance(data),
+  }
 }
 
 export async function getLeaveBalance(typeCode: string): Promise<LeaveBalance> {
@@ -26,13 +124,37 @@ export async function getLeaveBalance(typeCode: string): Promise<LeaveBalance> {
 export async function fetchLeaveTypes(): Promise<LeaveType[]> {
   requireAuthApiUrl()
   const { rows } = await authGet<{
-    rows: Array<{ Code: string; Description: string; Days: number; Hourly?: boolean }>
+    rows: Array<{
+      Code: string
+      Description: string
+      Days: number
+      Hourly?: boolean
+      Annual?: boolean
+      UnlimitedDays?: boolean
+      MaximumApplicationDays?: number | null
+      RequiresMedicalAttachment?: boolean
+      RequiresFamilyMember?: boolean
+      RequiresDeliveryDate?: boolean
+      RequiresWeddingAttachment?: boolean
+    }>
   }>('/api/leave/types')
   return rows.map((row) => ({
     code: row.Code,
     description: row.Description,
     days: row.Days,
     isHourly: Boolean(row.Hourly),
+    isAnnual: Boolean(row.Annual),
+    unlimitedDays: Boolean(row.UnlimitedDays),
+    maximumApplicationDays:
+      row.MaximumApplicationDays !== null &&
+      row.MaximumApplicationDays !== undefined &&
+      Number.isFinite(Number(row.MaximumApplicationDays))
+        ? Number(row.MaximumApplicationDays)
+        : null,
+    requiresMedicalAttachment: Boolean(row.RequiresMedicalAttachment),
+    requiresFamilyMember: Boolean(row.RequiresFamilyMember),
+    requiresDeliveryDate: Boolean(row.RequiresDeliveryDate),
+    requiresWeddingAttachment: Boolean(row.RequiresWeddingAttachment),
   }))
 }
 
@@ -103,6 +225,9 @@ export interface LeaveListRow {
   StartDate?: string
   EndDate?: string
   ReturnDate?: string
+  ExpectedReturnDate?: string
+  DeliveryDate?: string
+  FamilyMember?: string
   RelieverName?: string
   Status: string
 }
@@ -110,6 +235,15 @@ export interface LeaveListRow {
 export async function listLeaveRequests(): Promise<LeaveListRow[]> {
   requireAuthApiUrl()
   const { rows } = await authGet<{ rows: LeaveListRow[] }>('/api/leave')
+  return rows
+}
+
+export async function listLeaveRequestsSilently(): Promise<LeaveListRow[]> {
+  requireAuthApiUrl()
+  const { rows } = await authGet<{ rows: LeaveListRow[] }>(
+    '/api/leave',
+    { silent: true } as Parameters<typeof authGet>[1],
+  )
   return rows
 }
 
@@ -133,9 +267,35 @@ export interface SubmitLeaveInput {
   isHalfDayLeave: '0' | '1' | '2'
   reliever?: string
   reason: string
+  endDate?: string
+  returnDate?: string
+  /** Mourning Leave only — ERP "Family Member" option (e.g. "Father"). Drives BC's mourning-days calc. */
+  familyMember?: string
+  /** Maternity/prenatal leave — expected delivery date; BC derives start/end/return. */
+  deliveryDate?: string
   /** When false, leave stays Open so attachments can be uploaded before approval. */
   requestApproval?: boolean
 }
+
+/**
+ * ERP "Family Member" options for Mourning Leave (HR Leave Application field 56). The value must
+ * match the ERP option exactly; BC maps it to the Mourning Leave Setup number-of-days.
+ */
+export const LEAVE_FAMILY_MEMBER_OPTIONS = [
+  'Aunt',
+  'Brother',
+  'Child',
+  'Father',
+  'Father-in-law',
+  'Grand-Parents',
+  'Mother',
+  'Mother-in-Law',
+  'Sister',
+  'Step-Dad',
+  'Step-Mom',
+  'Inlaw',
+  'Uncle',
+] as const
 
 export interface SubmitLeaveResult {
   ok: boolean
@@ -150,9 +310,31 @@ export async function submitLeaveRequest(input: SubmitLeaveInput): Promise<Submi
   return authPost<SubmitLeaveResult>('/api/leave', input)
 }
 
-export async function cancelLeaveRequest(no: string): Promise<{ ok: boolean; message: string }> {
+export async function cancelLeaveRequest(no: string): Promise<{
+  ok: boolean
+  message: string
+  status?: string
+  confirmedInBc?: boolean
+  approvalSteps?: PortalRequest['approvalSteps']
+}> {
   requireAuthApiUrl()
-  return authPost<{ ok: boolean; message: string }>('/api/leave/cancel', { no })
+  return authPost<{
+    ok: boolean
+    message: string
+    status?: string
+    confirmedInBc?: boolean
+    approvalSteps?: PortalRequest['approvalSteps']
+  }>('/api/leave/cancel', { no })
+}
+
+export async function deleteLeaveRequest(no: string): Promise<{
+  ok: boolean
+  message: string
+}> {
+  requireAuthApiUrl()
+  return authDelete<{ ok: boolean; message: string }>(
+    `/api/leave/${encodeURIComponent(no)}`,
+  )
 }
 
 export interface LeaveApprovalDiagnostic {
@@ -247,6 +429,7 @@ export async function fetchLeaveApprovalRoute(): Promise<PortalRequest['approval
 export async function downloadLeaveStatement(
   leaveType: string,
   onProgress?: (progress: number) => void,
+  viewer?: Window | null,
 ): Promise<void> {
   requireAuthApiUrl()
   const response = await authHttp.get<Blob>('/api/leave/statement', {
@@ -259,11 +442,17 @@ export async function downloadLeaveStatement(
   })
   onProgress?.(100)
   const url = URL.createObjectURL(response.data)
+  // Show the statement right away: navigate the tab the caller reserved during the click
+  // (popup-safe), or fall back to opening a new one.
+  if (viewer && !viewer.closed) viewer.location.href = url
+  else window.open(url, '_blank', 'noopener')
+  // Still save a copy to the user's Downloads folder.
   const link = document.createElement('a')
   link.href = url
   link.download = `leave-statement-${leaveType}.pdf`
   document.body.appendChild(link)
   link.click()
   link.remove()
-  URL.revokeObjectURL(url)
+  // Revoke later so the opened viewer tab has time to load the blob.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

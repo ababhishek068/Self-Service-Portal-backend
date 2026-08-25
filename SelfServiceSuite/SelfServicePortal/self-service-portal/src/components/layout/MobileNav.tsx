@@ -8,6 +8,7 @@ import { useLayout } from '@/hooks/useLayout'
 import { handleUnderConstructionClick, useNavigation } from '@/hooks/useNavigation'
 import { cn } from '@/lib/utils'
 import { brand } from '@/config/brand'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 function mobileGroupActive(item: NavItem, pathname: string): boolean {
   if (item.path) return pathname === item.path || pathname.startsWith(`${item.path}/`)
@@ -48,7 +49,7 @@ function MobileNavGroup({
         <span className="flex-1">{item.label}</span>
         <ChevronDown className="chevron-rotate h-4 w-4 opacity-80" data-open={open ? 'true' : 'false'} />
       </button>
-      <div className="nav-submenu-grid bg-[var(--portal-navy-panel)]" data-open={open ? 'true' : 'false'}>
+      <div className="nav-submenu-grid bg-black/10" data-open={open ? 'true' : 'false'}>
         <div className="nav-submenu-inner pb-1">
           {item.children.map((child) =>
             child.children ? (
@@ -69,7 +70,7 @@ function MobileNavGroup({
                     'flex items-center gap-2 py-2.5 pr-4 text-sm text-white/95 transition-colors duration-200',
                     depth > 0 ? 'pl-16' : 'pl-12',
                     isActive && !child.underConstruction
-                      ? 'bg-gradient-to-r from-[var(--portal-orange)] to-[#f97316] font-medium shadow-[0_0_16px_var(--portal-glow-orange)]'
+                      ? 'bg-white/15 font-semibold shadow-[inset_3px_0_0_#fff]'
                       : 'active:bg-white/10',
                     child.underConstruction && 'opacity-75',
                   )
@@ -144,10 +145,12 @@ export function MobileNav() {
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="portal-sidebar-brand portal-shimmer-bar relative flex items-center justify-between gap-3 px-4 py-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-white/70">{brand.company}</p>
-            <p className="text-sm font-bold text-white">{brand.product}</p>
+        <div className="portal-sidebar-brand portal-shimmer-bar relative flex items-center justify-between gap-3 px-3 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-white px-2 py-1">
+            <BrandLogo variant="mobile" />
+            <p className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--portal-navy)] xs:block">
+              {brand.productShort}
+            </p>
           </div>
           <Button
             type="button"
@@ -162,7 +165,7 @@ export function MobileNav() {
         </div>
 
         <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-orange)] to-[#f97316] text-sm font-bold text-white shadow-md">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[var(--portal-navy)] to-[var(--portal-green)] text-sm font-bold text-white shadow-md">
             {displayName.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
@@ -189,7 +192,7 @@ export function MobileNav() {
                   cn(
                     'flex items-center gap-2.5 border-b border-white/5 px-4 py-3 text-[15px] text-white transition-colors duration-200',
                     isActive && !item.underConstruction
-                      ? 'bg-gradient-to-r from-[var(--portal-orange)] to-[#f97316] font-medium shadow-[0_0_16px_var(--portal-glow-orange)]'
+                      ? 'bg-white/15 font-semibold shadow-[inset_3px_0_0_#fff]'
                       : 'active:bg-white/10',
                     item.underConstruction && 'opacity-75',
                   )

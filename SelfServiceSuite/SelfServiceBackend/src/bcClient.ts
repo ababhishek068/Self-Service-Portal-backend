@@ -3,6 +3,28 @@ import { execFile } from 'node:child_process'
 import { completeBcCall, failBcCall, startBcCall } from './requestLogger.js'
 
 export type ODataRecord = Record<string, unknown>
+export type SoapEndpoint = {
+  url: string
+  namespace: string
+}
+
+/** Standard Microsoft Dynamics SOAP namespace for a published codeunit service. */
+export function codeunitSoapNamespace(serviceName: string) {
+  return `urn:microsoft-dynamics-schemas/codeunit/${serviceName.trim()}`
+}
+
+/** Replace only the published codeunit service at the end of a SOAP URL. */
+export function deriveCodeunitSoapUrl(baseUrl: string, serviceName: string) {
+  const url = new URL(baseUrl)
+  const pathParts = url.pathname.split('/').filter(Boolean)
+  if (pathParts.length === 0) {
+    url.pathname = `/${serviceName.trim()}`
+    return url.toString()
+  }
+  pathParts[pathParts.length - 1] = serviceName.trim()
+  url.pathname = `/${pathParts.join('/')}`
+  return url.toString()
+}
 
 function authHeaders(): Record<string, string> {
   if (config.BC_AUTH_MODE !== 'basic') return {}
@@ -82,6 +104,66 @@ function normalizeBaseUrl(value: string) {
   return value.endsWith('/') ? value : `${value}/`
 }
 
+function derivePageODataBaseFromSoapCodeunit(soapUrl: string) {
+  const trimmed = soapUrl.trim()
+  if (!trimmed) return ''
+  if (/\/Page\/?$/i.test(trimmed)) return normalizeBaseUrl(trimmed)
+  if (/\/Codeunit\//i.test(trimmed)) {
+    return normalizeBaseUrl(trimmed.replace(/Codeunit\/[^/]+\/?$/i, 'Page/'))
+  }
+  return ''
+}
+
+/** OData bases to probe — main OData V4 plus WS/Page endpoints. */
+export function configuredODataBases(): string[] {
+  const derivedPageBase = derivePageODataBaseFromSoapCodeunit(config.BC_SOAP_CODEUNIT_URL)
+  const bases = [
+    config.BC_ODATA_BASE_URL,
+    config.BC_SOAP_PAGE_BASE_URL,
+    config.BC_ODATA_PAGE_BASE_URL,
+    derivedPageBase,
+  ].filter((base): base is string => Boolean(base))
+  return [...new Set(bases.map((base) => normalizeBaseUrl(base)))]
+}
+
+/** Return the first non-empty row set found on any configured OData base. */
+export async function fetchODataFirstBase(
+  serviceName: string,
+  query: Record<string, unknown> = {},
+  timeoutMs: number = config.BC_REQUEST_TIMEOUT_MS,
+) {
+  for (const base of configuredODataBases()) {
+    const rows = (await fetchODataFromBase(base, serviceName, query, timeoutMs).catch(
+      () => null,
+    )) as ODataRecord[] | null
+    if (Array.isArray(rows) && rows.length > 0) return rows
+  }
+  return [] as ODataRecord[]
+}
+
+/** Merge rows from every configured OData base (deduped). */
+export async function fetchODataAllBases(
+  serviceName: string,
+  query: Record<string, unknown> = {},
+  timeoutMs: number = config.BC_REQUEST_TIMEOUT_MS,
+) {
+  const merged: ODataRecord[] = []
+  const seen = new Set<string>()
+  for (const base of configuredODataBases()) {
+    const rows = (await fetchODataFromBase(base, serviceName, query, timeoutMs).catch(
+      () => null,
+    )) as ODataRecord[] | null
+    if (!Array.isArray(rows)) continue
+    for (const row of rows) {
+      const key = JSON.stringify(row)
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(row)
+    }
+  }
+  return merged
+}
+
 function logTarget(value: URL | string) {
   const url = value instanceof URL ? value : new URL(value)
   return `${url.origin}${url.pathname}`
@@ -118,6 +200,7 @@ export async function fetchODataRaw(
   serviceName: string,
   query: Record<string, unknown> = {},
   baseUrl: string = config.BC_ODATA_BASE_URL,
+  timeoutMs: number = config.BC_REQUEST_TIMEOUT_MS,
 ) {
   const base = normalizeBaseUrl(baseUrl)
   const url = new URL(serviceName, base)
@@ -139,7 +222,7 @@ export async function fetchODataRaw(
         method: 'GET',
         url: url.toString(),
         headers: { Accept: 'application/json' },
-        timeoutMs: config.BC_REQUEST_TIMEOUT_MS,
+        timeoutMs,
       })
       statusCode = response.statusCode
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -164,7 +247,7 @@ export async function fetchODataRaw(
         Accept: 'application/json',
         ...authHeaders(),
       },
-      signal: AbortSignal.timeout(config.BC_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     })
 
     statusCode = response.status
@@ -200,8 +283,9 @@ export async function fetchODataFromBase(
   baseUrl: string,
   serviceName: string,
   query: Record<string, unknown> = {},
+  timeoutMs: number = config.BC_REQUEST_TIMEOUT_MS,
 ) {
-  const data = await fetchODataRaw(serviceName, query, baseUrl)
+  const data = await fetchODataRaw(serviceName, query, baseUrl, timeoutMs)
   if (data && typeof data === 'object' && Array.isArray(data.value)) return data.value as ODataRecord[]
   return data
 }
@@ -407,15 +491,28 @@ function escapeXml(value: unknown) {
     .replaceAll("'", '&apos;')
 }
 
-function soapEnvelope(methodName: string, params: Record<string, unknown>) {
+/** BC SOAP rejects omitted parameters as null. Always emit every key. */
+function soapEnvelope(
+  methodName: string,
+  params: Record<string, unknown>,
+  namespace = config.BC_SOAP_NAMESPACE,
+) {
   const body = Object.entries(params)
-    .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
+    .map(([key, value]) => {
+      const safe =
+        value === undefined || value === null
+          ? ''
+          : typeof value === 'boolean' || typeof value === 'number'
+            ? value
+            : String(value)
+      return `<${key}>${escapeXml(safe)}</${key}>`
+    })
     .join('')
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
-    <${methodName} xmlns="${config.BC_SOAP_NAMESPACE}">
+    <${methodName} xmlns="${namespace}">
       ${body}
     </${methodName}>
   </soap:Body>
@@ -458,7 +555,7 @@ function soapFaultError(status: number, xml: string) {
     : /Annual must be equal to 'Yes'/i.test(fault)
       ? 'Half-day leave is only allowed for annual leave. Choose Annual Leave or set half day to Normal.'
     : /Related table or record for attached file was not found/i.test(fault)
-      ? 'Business Central does not support attachments on this document type. Attach files only on imprest, staff claim, or petty cash requests.'
+      ? 'Business Central could not attach this file to the source document. Publish BC app 1.0.3.141 or later, then retry the upload.'
     : /length of the string is (\d+), but it must be less than or equal to (\d+)/i.test(fault)
       ? (() => {
           const match = fault.match(
@@ -466,8 +563,14 @@ function soapFaultError(status: number, xml: string) {
           )
           const max = match?.[2] ?? '20'
           const value = match?.[3]?.trim() ?? 'that value'
-          return `A value from your employee profile is too long for Business Central (${value}). Ask HR to shorten the department or dimension code to ${max} characters or less.`
+          return `A value from your employee profile is too long for Business Central (${value}). Ask HR to shorten the user ID, department, or dimension code to ${max} characters or less.`
         })()
+    : /No data found/i.test(fault)
+      ? 'No leave allocation was found in Business Central for this leave type. Ask HR to allocate the type on your employee record, then generate the statement again.'
+    : /Failed to generate PDF/i.test(fault)
+      ? 'Business Central could not create the PDF. Ask the administrator to check the leave statement report setup.'
+    : /Portal Reports File Path/i.test(fault)
+      ? 'Business Central is missing Portal Reports File Path. Ask the administrator to set it on General Setup.'
     : /Parameter hospitalCategory.*is null/i.test(fault)
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
@@ -483,19 +586,26 @@ function soapFaultError(status: number, xml: string) {
   })
 }
 
-export async function callSoapMethod(methodName: string, params: Record<string, unknown>) {
-  const body = soapEnvelope(methodName, params)
+export async function callSoapMethod(
+  methodName: string,
+  params: Record<string, unknown>,
+  endpoint: SoapEndpoint = {
+    url: config.BC_SOAP_CODEUNIT_URL,
+    namespace: config.BC_SOAP_NAMESPACE,
+  },
+) {
+  const body = soapEnvelope(methodName, params, endpoint.namespace)
   const headers = {
     Accept: 'text/xml',
     'Content-Type': 'text/xml; charset=utf-8',
-    SOAPAction: `${config.BC_SOAP_NAMESPACE}:${methodName}`,
+    SOAPAction: `${endpoint.namespace}:${methodName}`,
   }
 
   const call = startBcCall({
     protocol: 'SOAP',
     method: 'POST',
     operation: methodName,
-    target: logTarget(config.BC_SOAP_CODEUNIT_URL),
+    target: logTarget(endpoint.url),
     metadata: `paramKeys=${Object.keys(params).sort().join(',') || '-'}`,
   })
   let statusCode: number | undefined
@@ -504,7 +614,7 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
     if (config.BC_AUTH_MODE === 'ntlm') {
       const response = await requestWithCurlNtlm({
         method: 'POST',
-        url: config.BC_SOAP_CODEUNIT_URL,
+        url: endpoint.url,
         headers,
         body,
       })
@@ -519,7 +629,7 @@ export async function callSoapMethod(methodName: string, params: Record<string, 
       }
     }
 
-    const response = await fetch(config.BC_SOAP_CODEUNIT_URL, {
+    const response = await fetch(endpoint.url, {
       method: 'POST',
       headers: {
         ...headers,

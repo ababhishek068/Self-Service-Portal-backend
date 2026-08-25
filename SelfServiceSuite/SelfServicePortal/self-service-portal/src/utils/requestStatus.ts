@@ -1,6 +1,18 @@
-/** BC "Pending"/"Open" (pre-submission) and application DB "Draft" are editable in ESS. */
-export function isEditableRequestStatus(status: string | undefined) {
-  return status === 'Draft' || status === 'Open'
+/**
+ * BC "Pending"/"Open" and application DB "Draft" are editable. Asset Transfer
+ * and Training both start life at literal BC Status = "New" (see
+ * HRTrainingApplications.Table.al Status OptionMembers = New,"Pending
+ * Approval",Approved) — not "Open" like most other modules.
+ */
+export function isEditableRequestStatus(
+  status: string | undefined,
+  module?: string,
+) {
+  return (
+    status === 'Draft' ||
+    status === 'Open' ||
+    ((module === 'assetTransfer' || module === 'training') && status === 'New')
+  )
 }
 
 /** Submitted documents awaiting checker action — cancel only, no line/header edits. */
@@ -18,13 +30,13 @@ export function shouldShowApprovalHistory(status: string | undefined) {
 }
 
 /** Lines and attachments can be deleted only before approval submission. */
-export function canDeleteRequestItems(status: string | undefined) {
-  return isEditableRequestStatus(status)
+export function canDeleteRequestItems(status: string | undefined, module?: string) {
+  return isEditableRequestStatus(status, module)
 }
 
 /** Upload attachments only while the header is still editable (Draft/Open). Locked after approval submission. */
-export function canUploadRequestAttachments(status: string | undefined) {
-  return isEditableRequestStatus(status)
+export function canUploadRequestAttachments(status: string | undefined, module?: string) {
+  return isEditableRequestStatus(status, module)
 }
 
 /** Portal modules whose BC document types accept UploadDocumentAttachment (see staffModules). */
@@ -34,6 +46,13 @@ export const PORTAL_ATTACHMENT_MODULES = new Set([
   'staffClaim',
   'pettyCash',
   'pettyCashReplenishment',
+  'purchaseRequisition',
+  'storeRequisition',
+  'fuelRequest',
+  'maintenance',
+  'transport',
+  'transferOrder',
+  'gatePass',
 ])
 
 function bcDocumentStatus(
@@ -66,6 +85,7 @@ const OPEN_BC_STATUS_MODULES = new Set([
   'fuelRequest',
   'maintenance',
   'gatePass',
+  'assetTransfer',
   'leave',
 ])
 
@@ -97,7 +117,9 @@ export function canRequestApproval(
   if (!status || !module) return false
   if (module === 'gatePass' && !hasGatePassSourceNumber(payload)) return false
   if (module === 'transferOrder') return status === 'Open'
+  if (module === 'assetTransfer' || module === 'training') return status === 'New' || status === 'Open'
   if (PENDING_BC_STATUS_MODULES.has(module)) return status === 'Pending'
   if (OPEN_BC_STATUS_MODULES.has(module)) return status === 'Open'
   return false
 }
+

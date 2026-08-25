@@ -91,7 +91,7 @@ export function clearToken(): void {
 
 export const authHttp: AxiosInstance = axios.create({
   baseURL: env.AUTH_API_URL || '',
-  timeout: 20000,
+  timeout: 45000,
   headers: { Accept: 'application/json' },
 })
 
@@ -127,21 +127,58 @@ export class AuthApiError extends Error implements NormalizedAuthError {
   }
 }
 
+async function readApiErrorPayload(data: unknown): Promise<{ message?: string; code?: string } | undefined> {
+  if (data == null) return undefined
+  if (typeof data === 'string') {
+    const text = data.trim()
+    if (!text) return undefined
+    try {
+      return JSON.parse(text) as { message?: string; code?: string }
+    } catch {
+      return { message: text }
+    }
+  }
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    const text = (await data.text()).trim()
+    if (!text) return undefined
+    try {
+      return JSON.parse(text) as { message?: string; code?: string }
+    } catch {
+      return { message: text }
+    }
+  }
+  if (typeof data === 'object') {
+    const row = data as { message?: string; code?: string; error?: string }
+    const message = row.message || row.error
+    if (message || row.code) return { message, code: row.code }
+  }
+  return undefined
+}
+
+function friendlyHttpMessage(status?: number, fallback?: string) {
+  if (fallback && !/^Request failed with status code \d+$/i.test(fallback)) return fallback
+  if (status === 422) return 'Business Central could not complete this request. Check the details and try again.'
+  if (status === 404) return 'The requested record was not found.'
+  if (status === 401) return 'Your session expired. Sign in again.'
+  if (status === 403) return 'You do not have permission to do this.'
+  if (status === 502 || status === 503) return 'Business Central did not respond. Try again in a moment.'
+  return fallback || 'Request failed'
+}
+
 authHttp.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    const status = error.response?.status
-    const data = error.response?.data as { message?: string; code?: string } | undefined
-    // A rejected/expired token should not linger.
-    if (status === 401) clearToken()
-    return Promise.reject(
-      new AuthApiError({
-        message: data?.message ?? error.message ?? 'Request failed',
-        status,
-        code: data?.code,
-      }),
-    )
-  },
+  (error: AxiosError) =>
+    readApiErrorPayload(error.response?.data).then((payload) => {
+      const status = error.response?.status
+      if (status === 401) clearToken()
+      return Promise.reject(
+        new AuthApiError({
+          message: friendlyHttpMessage(status, payload?.message ?? error.message),
+          status,
+          code: payload?.code,
+        }),
+      )
+    }),
 )
 
 export async function authGet<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
@@ -151,6 +188,11 @@ export async function authGet<T>(url: string, config?: AxiosRequestConfig): Prom
 
 export async function authPost<T, B = unknown>(url: string, body?: B, config?: AxiosRequestConfig): Promise<T> {
   const response = await authHttp.post<T>(url, body, config)
+  return response.data
+}
+
+export async function authPatch<T, B = unknown>(url: string, body?: B, config?: AxiosRequestConfig): Promise<T> {
+  const response = await authHttp.patch<T>(url, body, config)
   return response.data
 }
 

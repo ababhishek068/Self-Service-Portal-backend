@@ -8,6 +8,14 @@ export async function fetchImprestLineAmount(payload: {
   destinationCode: string
 }) {
   requireAuthApiUrl()
-  const { amount } = await authPost<{ amount: number }>('/api/imprest/fetch-line-amount', payload)
-  return amount
+  const { amount, dailyRate, requiresManualRate } = await authPost<{
+    amount: number
+    dailyRate?: number
+    requiresManualRate?: boolean
+  }>('/api/imprest/fetch-line-amount', payload)
+  return {
+    amount,
+    dailyRate: dailyRate ?? (amount > 0 && payload.noOfDays > 0 ? amount / payload.noOfDays : 0),
+    requiresManualRate: Boolean(requiresManualRate),
+  }
 }

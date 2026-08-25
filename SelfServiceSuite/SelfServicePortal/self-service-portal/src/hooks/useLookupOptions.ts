@@ -9,6 +9,12 @@ export function useLookupOptions(catalog: string, fallback: LookupOption[] = [])
 
   return {
     ...query,
-    options: query.data?.length ? query.data : fallback,
+    // Use seed values when BC lookup fails or returns no rows (broken OData/filter).
+    options:
+      query.isLoading || !query.isFetched
+        ? []
+        : (query.data?.length ?? 0) > 0
+          ? (query.data ?? [])
+          : fallback,
   }
 }

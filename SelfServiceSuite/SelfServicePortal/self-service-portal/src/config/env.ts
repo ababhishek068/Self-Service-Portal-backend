@@ -25,7 +25,7 @@ export const env = {
   SCOPE: read('VITE_SCOPE', 'https://api.businesscentral.dynamics.com/.default'),
   ERP_COMPANY_ID: read('VITE_ERP_COMPANY_ID'),
 
-  APP_NAME: read('VITE_APP_NAME', 'Self Service Portal'),
+  APP_NAME: read('VITE_APP_NAME', 'Smart ESSP Enterprise Hub'),
   BLOCK_DUPLICATE_PENDING_LEAVE:
     read('VITE_BLOCK_DUPLICATE_PENDING_LEAVE', 'false').toLowerCase() === 'true',
 } as const

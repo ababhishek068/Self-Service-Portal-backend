@@ -118,6 +118,7 @@ interface RoleSource {
   role?: string | null
   HOD?: boolean
   CEO?: boolean
+  HR?: boolean
 }
 
 /**
@@ -140,6 +141,7 @@ export function deriveRoles(source: RoleSource): PortalRole[] {
   // Legacy flags as a fallback so existing backends keep working.
   if (source.HOD) collected.add('hod')
   if (source.CEO) collected.add('ceo')
+  if (source.HR) collected.add('hr')
 
   return allRoles.filter((role) => collected.has(role))
 }
