@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.0.3.295}"
-BUILD_STAMP="${2:-v143 — ${VERSION} (production Employee Exit approval routing; BC 1.0.3.199)}"
+VERSION="${1:-1.0.3.343}"
+BUILD_STAMP="${2:-v192 — ${VERSION} (BC leave approval SOAP parameter order)}"
 OUT_NAME="ABH-Portal-COMPLETE-${VERSION}"
 OUT_DIR="$ROOT/$OUT_NAME"
 DESKTOP_ZIP="${DESKTOP_ZIP:-$HOME/Desktop/${OUT_NAME}.zip}"
@@ -14,7 +14,7 @@ SUITE_BC="$ROOT/SelfServiceSuite/SelfServiceBackend"
 # were not copied at all — a package without them looks complete but leaves claim
 # and store-requisition approvals dead, because no workflow listens for the event.
 BC_ASSET_DIR="${BC_ASSET_DIR:-$ROOT/deploy/businesscentral}"
-BC_APP_NAME="Technology Associates EA Ltd_BC24_TA App_1.0.3.199.app"
+BC_APP_NAME="${BC_APP_NAME:-Technology Associates EA Ltd_BC24_TA App_1.0.3.273.app}"
 BC_APP="${BC_APP:-$BC_ASSET_DIR/$BC_APP_NAME}"
 BC_WORKFLOW_DIR="$BC_ASSET_DIR/Workflows"
 
@@ -24,9 +24,11 @@ echo "    Repo: $ROOT"
 echo "==> Sync backend source into suite layout"
 bash "$ROOT/SelfServiceSuite/SelfServicePortal/deploy/sync-backend-from-repo.sh"
 
-echo "==> Patch portal build stamp"
-perl -pi -e "s/export const PORTAL_API_BUILD = '.*'/export const PORTAL_API_BUILD = '${BUILD_STAMP//\//\\/}'/" \
-  "$ROOT/src/portalApi.ts"
+echo "==> Verify portal build stamp"
+if ! grep -Fq "export const PORTAL_API_BUILD = '$BUILD_STAMP'" "$ROOT/src/portalApi.ts"; then
+  echo "FATAL: src/portalApi.ts does not match requested build stamp: $BUILD_STAMP" >&2
+  exit 1
+fi
 bash "$ROOT/SelfServiceSuite/SelfServicePortal/deploy/sync-backend-from-repo.sh"
 
 echo "==> Compile backend + React UI"
@@ -66,6 +68,11 @@ cp "$OUT_DIR/deploy/windows/STOP-ABH-PORTAL.bat" "$OUT_DIR/STOP-ABH-PORTAL.bat"
 cp "$OUT_DIR/deploy/windows/VERIFY-SUITE.bat" "$OUT_DIR/VERIFY-SUITE.bat"
 cp "$OUT_DIR/deploy/windows/ABH-DIAGNOSE.bat" "$OUT_DIR/ABH-DIAGNOSE.bat"
 
+cat > "$OUT_DIR/INSTALL-AUTOSTART.ps1" <<'PSEOF'
+$ErrorActionPreference = 'Stop'
+& (Join-Path $PSScriptRoot 'deploy\windows\install-startup-task.ps1')
+PSEOF
+
 if [[ ! -f "$BC_APP" ]]; then
   echo "FATAL: Business Central app not found: $BC_APP"
   exit 1
@@ -83,10 +90,14 @@ cp "$AL_ROOT/src/src/tableextension/PurchaseHeaderExtension.TableExt.al" "$AL_SR
 cp "$AL_ROOT/src/src/tableextension/PurchaseLineExt.TableExt.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Query/PurchaseHeader2.Query.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Query/PurchaseLines2.Query.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Query/ApprovalEntries.Query.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Page/PurchaseRequisitionCard.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/staffPortal/query/QyPortalPurchaseLines.Query.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/PortalWorkflowApprovalAuth.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/NewChangeA/CustomApprovalsCodeunit.Codeunit.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/NewChangeA/PortalWorkflowSetupUpgrade.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/NewChangeA/PortalWorkflowSetupInstall.Codeunit.al" "$AL_SRC_DIR/"
 mkdir -p "$AL_SRC_DIR/ProcurementProcess"
 rsync -a "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/ProcurementProcess/" "$AL_SRC_DIR/ProcurementProcess/"
 cp "$AL_ROOT/src/src/staffPortal/query/HrEmployee.Query.al" "$AL_SRC_DIR/"
@@ -99,6 +110,9 @@ cp "$AL_ROOT/src/src/Page/StoreRequisitionHeaderUP.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplication.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveAppCard.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplicationCard.Page.al" "$AL_SRC_DIR/"
+mkdir -p "$AL_SRC_DIR/LeaveStatement/Layouts"
+cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/Payslip/Leavestatements.Report.al" "$AL_SRC_DIR/LeaveStatement/"
+cp "$AL_ROOT/Layouts/Leavestatements.rdl" "$AL_SRC_DIR/LeaveStatement/Layouts/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/Funds/StaffClaims.Page.al" "$AL_SRC_DIR/"
 mkdir -p "$AL_SRC_DIR/Payrollreports"
 cp "$AL_ROOT/src/Layouts/Payrollreports/IndividualPayslipsmst.Report.al" "$AL_SRC_DIR/Payrollreports/"
@@ -118,6 +132,8 @@ Publish this .app (or merge sources) on Windows BC, then restart.
 
 Key fixes:
 - Purchase and Store Requisition fields/lines follow the approved ABH templates
+- Portal approval decisions use Business Central's native workflow responses; hierarchy is never advanced in portal code
+- Rejection notes are entered separately from the request reason and remain visible to the requester
 - Purchase procurement continues through stock, LPR/RFQ, finance, delivery, GRN, and auditor completion
 - Portal and Business Central enforce role-appropriate procurement/store actions
 - Purchase/Store requests remain controlled by Business Central approval workflows
@@ -141,12 +157,14 @@ Key fixes:
 - Leave final approval remains restricted to the assigned approver through Business Central Approvals
 - Purchase Requested By stores and displays the Employee Card full name, with Employee No kept separately
 - Annual leave exposes the six Employee Card figures and validates applications only against Available Leave Balance
+- Annual leave statement PDFs use Available = (Carry Forward + Accrued Days) - Taken To-Date
+- Every rejected portal approval requires and preserves a requester-visible reason
 - Marriage Leave is hidden and rejected when the Employee Card is already marked Married
 - Sick Leave can start only today or tomorrow
 - Duplicate/overlapping leave dates are blocked in the portal backend and Business Central
 - Pending leave approval cancellation reopens a draft; only drafts can be permanently deleted
 - Approved leave applications cannot be cancelled or deleted
-- Leave Return Date is always exactly one calendar day after End Date
+- Leave End/Return dates respect the BC leave calendar, weekends, and holidays
 - Payslips use the ABH_PARTNERS display name, two-decimal ETB amounts, and the standard A4 payroll layout
 - Store Requisition omits Job Grade and District from the requester organisation summary
 - Cancelled HR service requests can be permanently deleted by their owner; all other statuses are protected
@@ -178,6 +196,10 @@ ABH SMART ESSP ENTERPRISE HUB — ${VERSION}
 
 5) Confirm: http://127.0.0.1:4000/api/portal-build
    Expected: ${BUILD_STAMP}
+
+6) To start the portal automatically after every Windows restart, open
+   Administrator PowerShell in this folder and run:
+   powershell -ExecutionPolicy Bypass -File .\INSTALL-AUTOSTART.ps1
 
 BUSINESS CENTRAL APP
 ====================
@@ -224,17 +246,19 @@ ABH REFERENCE AUDIT — SIMPLE RESULT
 - Item name, description, specification, estimate, and remarks are kept separately.
 - Requester organisation details come from the employee profile in Business Central.
 - Purchase and Store screens show the exact approved process flows.
-- Store requesters select one Item / Asset only; its Business Central name is filled internally.
-- Issuing Store is decided by Operations after approval, not entered by the requester.
+- Store requesters state the required item/asset in free text; inventory masters and stock balances are not exposed.
+- Operations/Store assigns the fulfillment location internally after approval.
 - Store, Procurement, Finance, and Auditor actions are role protected.
 - Requested By shows the employee name; Employee No remains a separate field.
 - Annual leave shows Leave Entitlement, Carry Forward, Total Available Leave Balance,
   Leave Accrued To-Date, Total Leave Taken To-Date, and Available Leave Balance.
 - Staff can apply only against Available Leave Balance, never Total Available Leave Balance.
+- Annual leave PDF Current Balance uses the same Available Leave Balance formula as the portal and Employee Card.
+- Every rejection requires a reason, which is shown in requester approval history.
 - Marriage Leave is not offered to employees whose Employee Card is already marked Married.
 - Sick Leave may start today or tomorrow only; duplicate and overlapping leave ranges are rejected.
 - Cancelling a pending leave approval reopens the draft, which can then be permanently deleted.
-- Approved leave is view-only, and Return Date is one calendar day after End Date.
+- Approved leave is view-only, and Return Date is the next configured working day.
 - Payslips display ABH_PARTNERS and use the standard A4 employee/pay-period/payroll format.
 - Store Requisition does not display or require Job Grade and District.
 - Cancelled HR service requests show Delete; pending, approved, and completed requests cannot be deleted.
@@ -256,6 +280,7 @@ REQUIRED=(
   "$OUT_DIR/START-ABH-PORTAL.bat"
   "$OUT_DIR/VERIFY-SUITE.bat"
   "$OUT_DIR/ABH-DIAGNOSE.bat"
+  "$OUT_DIR/INSTALL-AUTOSTART.ps1"
   "$OUT_DIR/AUDIT-NOTES.txt"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/dist/server.js"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/public/index.html"
@@ -267,7 +292,10 @@ REQUIRED=(
   "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
   "$OUT_DIR/BusinessCentral/Workflows/Staff-Medical-Claim-Approval-Workflow.xml"
   "$OUT_DIR/BusinessCentral/Workflows/Store-Requisition-Approval-Workflow.xml"
+  "$OUT_DIR/BusinessCentral/Workflows/Purchase-Requisition-Approval-Workflow.xml"
   "$AL_SRC_DIR/StaffPortalCodeunit.Codeunit.al"
+  "$AL_SRC_DIR/PortalWorkflowApprovalAuth.Codeunit.al"
+  "$AL_SRC_DIR/CustomApprovalsCodeunit.Codeunit.al"
   "$AL_SRC_DIR/PortalWorkflowSetupUpgrade.Codeunit.al"
   "$AL_SRC_DIR/StaffClaimLines.Table.al"
   "$AL_SRC_DIR/MedicalClaimManagement.Codeunit.al"

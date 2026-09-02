@@ -575,6 +575,18 @@ function soapFaultError(status: number, xml: string) {
       ? 'Business Central requires a hospital category value on claim lines. Retry after selecting claim type and amount.'
     : /Transport Requisition No/i.test(fault) && /already exists/i.test(fault)
       ? 'Business Central could not allocate a Transport Requisition number. Ask the BC administrator to repair the TR number-series configuration and remove the blank-number record.'
+    : /Project Name \/ Project Code is required when Budget Type is Project/i.test(fault)
+      ? 'Budget Type is Project, but Project Name / Code is missing. Click Edit on this purchase request, set Budget Type to Non-Project (or enter a project code), save, then request approval again.'
+    : /Project Name \/ Project Code is required for a Project budget/i.test(fault)
+      ? 'Budget Type is Project, but Project Name / Code is missing. Choose Non-Project, or enter a project code before saving.'
+    : /Method 'DeletePortalDraftDocument' is invalid/i.test(fault)
+      ? 'Draft delete needs Business Central app 1.0.3.217 or later. Publish Technology Associates EA Ltd_BC24_TA App_1.0.3.217.app, run Sync + Data Upgrade, restart BC240, then try Delete again.'
+    : /has no Supervisor set/i.test(fault)
+      ? (() => {
+          const match = fault.match(/Employee\s+(\S+)\s+has no Supervisor/i)
+          const who = match?.[1] ?? 'the requester'
+          return `Cannot send for approval: employee ${who} has no supervisor on the Employee Card. In Business Central, open Employee ${who} → set Supervisor No. → ensure that supervisor has User ID and User Setup. If you are not the requester, log in as the employee on this purchase request and try again.`
+        })()
       : fault
   const message = friendlyFault
     ? `Business Central rejected the request: ${friendlyFault}`

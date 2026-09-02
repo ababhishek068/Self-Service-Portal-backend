@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -318,6 +319,28 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
   })
 
   const stage = text(processQuery.data?.stageCode).toUpperCase()
+  const rawLinkOptions = useMemo(() => {
+    const rows = processQuery.data?.linkOptions
+    if (!Array.isArray(rows)) return [] as Array<{ no: string; label: string; preferred: boolean }>
+    const options: Array<{ no: string; label: string; preferred: boolean }> = []
+    for (const row of rows) {
+      const record = row as Record<string, unknown>
+      const no = text(record.no ?? record.No)
+      if (!no) continue
+      options.push({
+        no,
+        label: text(record.label ?? record.Label) || no,
+        preferred: Boolean(record.preferred ?? record.Preferred),
+      })
+    }
+    return options
+  }, [processQuery.data?.linkOptions])
+
+  useEffect(() => {
+    if (linkedDocumentNo.trim()) return
+    const preferred = rawLinkOptions.find((row) => row.preferred) ?? (rawLinkOptions.length === 1 ? rawLinkOptions[0] : null)
+    if (preferred?.no) setLinkedDocumentNo(preferred.no)
+  }, [rawLinkOptions, linkedDocumentNo, stage])
 
   if (!approved || !canViewProcess) return null
 
@@ -330,12 +353,15 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
   const poNo = linkedValue(links, 'poNo', 'purchaseOrderNo', 'PONo')
   const invoiceNo = linkedValue(links, 'invoiceNo', 'InvoiceNo')
   const grnNo = linkedValue(links, 'grnNo', 'GRNNo')
+  const rfqNo = linkedValue(links, 'rfqNo', 'RFQNo')
   const actions = processActions[stage] ?? []
   const allowedActions = actions.filter((action) => permissions[action.owner])
   const documentAction = allowedActions.find((action) => action.documentLabel)
   const hasReturnAction = allowedActions.some((action) => action.requiresComment)
   const showActionComment =
     hasReturnAction || stage.endsWith('_CORRECTION') || stage === 'AUDIT_RETURNED'
+  const selectOptions = rawLinkOptions.map((row) => ({ value: row.no, label: row.label }))
+  const showDocumentLookup = Boolean(documentAction && selectOptions.length > 0)
 
   const run = async (action: ProcessAction) => {
     const documentNo = linkedDocumentNo.trim()
@@ -381,6 +407,7 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
           {stock ? ` · Stock: ${stock}` : ''}
           {ginNo ? ` · GIN: ${ginNo}` : ''}
           {lprNo ? ` · LPR: ${lprNo}` : ''}
+          {rfqNo ? ` · RFQ: ${rfqNo}` : ''}
           {poNo ? ` · PO: ${poNo}` : ''}
           {invoiceNo ? ` · Invoice: ${invoiceNo}` : ''}
           {grnNo ? ` · GRN: ${grnNo}` : ''}
@@ -392,12 +419,36 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
           {documentAction ? (
             <div className="max-w-md space-y-1.5">
               <Label htmlFor={`purchase-process-document-${request.id}`}>{documentAction.documentLabel}</Label>
-              <Input
-                id={`purchase-process-document-${request.id}`}
-                value={linkedDocumentNo}
-                onChange={(event) => setLinkedDocumentNo(event.target.value)}
-                disabled={mutation.isPending}
-              />
+              {showDocumentLookup ? (
+                <>
+                  <Select
+                    id={`purchase-process-document-${request.id}`}
+                    options={selectOptions}
+                    placeholder={`Select ${documentAction.documentLabel}`}
+                    value={linkedDocumentNo}
+                    onChange={(event) => setLinkedDocumentNo(event.target.value)}
+                    disabled={mutation.isPending}
+                  />
+                  <p className="text-xs text-slate-600">
+                    Prefer quotes/orders linked to this purchase request. You can still type a number below if it is
+                    missing from the list.
+                  </p>
+                  <Input
+                    aria-label={`${documentAction.documentLabel} manual entry`}
+                    value={linkedDocumentNo}
+                    onChange={(event) => setLinkedDocumentNo(event.target.value)}
+                    placeholder="Or type document no."
+                    disabled={mutation.isPending}
+                  />
+                </>
+              ) : (
+                <Input
+                  id={`purchase-process-document-${request.id}`}
+                  value={linkedDocumentNo}
+                  onChange={(event) => setLinkedDocumentNo(event.target.value)}
+                  disabled={mutation.isPending}
+                />
+              )}
             </div>
           ) : null}
           {showActionComment ? (

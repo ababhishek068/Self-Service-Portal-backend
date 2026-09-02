@@ -6,6 +6,7 @@ import {
   Banknote,
   BarChart3,
   Building2,
+  CalendarDays,
   Car,
   CircleX,
   ClipboardCheck,
@@ -30,7 +31,6 @@ import {
   ShoppingCart,
   Store,
   Ticket,
-  UserMinus,
   UserRound,
   UsersRound,
   Wallet,
@@ -64,6 +64,7 @@ export const navigationMenu: NavItem[] = [
     children: [
       { label: 'Leave Requisition', path: '/hr/leave-request', icon: Home },
       { label: 'Leave Statement', path: '/hr/leave-statement', icon: ReceiptText },
+      { label: 'Leave Planner', path: '/hr/leave-planner', icon: CalendarDays },
       { label: 'Attendance', path: '/hr/attendance', icon: UsersRound },
       { label: 'Payslip', path: '/hr/payslip', icon: Wallet },
       { label: 'Performance', path: '/hr/performance', icon: BarChart3 },
@@ -75,9 +76,7 @@ export const navigationMenu: NavItem[] = [
         label: 'Request Letters',
         icon: FileText,
         children: [
-          { label: 'My Document Requests', path: '/hr/request-letters', icon: ClipboardList },
           { label: 'Guarantee Letter', path: '/hr/request-letters/guarantee', icon: ShieldCheck },
-          { label: 'External Company Letter', path: '/hr/request-letters/external-company', icon: Building2 },
           { label: 'Experience Letter', path: '/hr/request-letters/experience', icon: FileBadge },
           { label: 'Mortgage Letter', path: '/hr/request-letters/mortgage', icon: Home },
           { label: 'Embassy Letter', path: '/hr/request-letters/embassy', icon: Flag },
@@ -89,7 +88,6 @@ export const navigationMenu: NavItem[] = [
         children: [
           { label: 'My Exit Requests', path: '/hr/employee-exit', icon: ClipboardList },
           { label: 'Transfer Request', path: '/hr/employee-exit/transfer', icon: ArrowRightLeft },
-          { label: 'Resignation Application', path: '/hr/employee-exit/resignation', icon: UserMinus },
           { label: 'Employee Exit Form', path: '/hr/employee-exit/exit-interview', icon: ClipboardList },
         ],
       },
@@ -111,6 +109,27 @@ export const navigationMenu: NavItem[] = [
     label: 'Facilities',
     icon: Building2,
     children: [
+      {
+        label: 'Gate Pass',
+        icon: DoorOpen,
+        children: [
+          { label: 'Store Issue Gate Pass', path: '/facility/gate-pass/storeIssue', icon: Store },
+          { label: 'Transfer Order Gate Pass', path: '/facility/gate-pass/transferOrder', icon: PackageCheck },
+          { label: 'Asset Transfer Gate Pass', path: '/facility/gate-pass/assetTransfer', icon: PackageCheck },
+          {
+            label: 'Maintained Asset Gate Pass',
+            path: '/facility/gate-pass/maintenance',
+            icon: Wrench,
+            underConstruction: true,
+          },
+          {
+            label: 'Gate Pass Log',
+            path: '/reports/gate-pass-log',
+            icon: ClipboardList,
+            roles: ['hod', 'procurement', 'audit', 'ceo'],
+          },
+        ],
+      },
       {
         label: 'Purchase Request',
         icon: ShoppingCart,

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Building2, Cloud, Loader2, Users } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { SignInModeDialog } from '@/components/auth/SignInModeDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,8 +9,19 @@ import { signInModeOptions, type SignInMode } from '@/config/signInModes'
 import { useAuth } from '@/hooks/useAuth'
 import { brand, brandCopyright } from '@/config/brand'
 import { BrandLogo } from '@/components/brand/BrandLogo'
+import { cn } from '@/lib/utils'
 
-const SIGN_IN_MODE_KEY = 'ssp.signInMode'
+const modeIcons: Record<SignInMode, LucideIcon> = {
+  application: Building2,
+  ad: Users,
+  bc365: Cloud,
+}
+
+function signInButtonLabel(mode: SignInMode) {
+  if (mode === 'ad') return 'Sign in with AD User'
+  if (mode === 'bc365') return 'Sign in with BC365 User'
+  return 'Sign in with Application User'
+}
 
 export function Login() {
   const navigate = useNavigate()
@@ -19,15 +30,7 @@ export function Login() {
   const [staffNo, setStaffNo] = useState('')
   const [password, setPassword] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedMode, setSelectedMode] = useState<SignInMode>(() => {
-    try {
-      const stored = sessionStorage.getItem(SIGN_IN_MODE_KEY) as SignInMode | null
-      return stored && signInModeOptions.some((option) => option.id === stored) ? stored : 'application'
-    } catch {
-      return 'application'
-    }
-  })
+  const [selectedMode, setSelectedMode] = useState<SignInMode>('bc365')
 
   useEffect(() => {
     if (bootstrapped && isAuthenticated) {
@@ -35,23 +38,8 @@ export function Login() {
     }
   }, [bootstrapped, isAuthenticated, navigate])
 
-  useEffect(() => {
-    if (!dialogOpen) return
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) setDialogOpen(false)
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [dialogOpen, submitting])
-
   const runSignIn = async (mode: SignInMode) => {
     setSelectedMode(mode)
-    try {
-      sessionStorage.setItem(SIGN_IN_MODE_KEY, mode)
-    } catch {
-      /* ignore */
-    }
-    setDialogOpen(false)
     setLocalError(null)
 
     if (mode === 'ad') {
@@ -75,7 +63,7 @@ export function Login() {
       return
     }
 
-    setDialogOpen(true)
+    void runSignIn(selectedMode)
   }
 
   const displayError = localError ?? error
@@ -158,6 +146,47 @@ export function Login() {
               />
             </div>
 
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-[var(--portal-navy)]">Choose sign-in method</p>
+              <div className="space-y-2" role="radiogroup" aria-label="Choose sign-in method">
+                {signInModeOptions.map((option) => {
+                  const Icon = modeIcons[option.id]
+                  const active = selectedMode === option.id
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      disabled={submitting}
+                      onClick={() => setSelectedMode(option.id)}
+                      className={cn(
+                        'flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                        active
+                          ? 'border-[var(--portal-orange)] bg-orange-50/80 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                          active
+                            ? 'bg-[var(--portal-orange)]/15 text-[var(--portal-orange)]'
+                            : 'bg-[var(--portal-navy)]/10 text-[var(--portal-navy)]',
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-[var(--portal-navy)]">{option.label}</p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{option.description}</p>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <Button
               type="submit"
               variant="gradient"
@@ -170,13 +199,11 @@ export function Login() {
                   Signing in…
                 </>
               ) : (
-                'Sign in'
+                signInButtonLabel(selectedMode)
               )}
             </Button>
 
-            {selectedMode !== 'application' ? (
-              <p className="text-center text-[11px] text-slate-500">Last selected: {selectedLabel}</p>
-            ) : null}
+            <p className="text-center text-[11px] text-slate-500">Selected: {selectedLabel}</p>
 
             <p className="text-center text-sm text-slate-600">
               <Link to="/forgot-password" className="font-semibold text-[var(--portal-navy)] hover:underline">
@@ -190,13 +217,6 @@ export function Login() {
           {brandCopyright()}
         </p>
       </div>
-
-      <SignInModeDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        onSelect={(mode) => void runSignIn(mode)}
-        disabled={submitting}
-      />
     </main>
   )
 }

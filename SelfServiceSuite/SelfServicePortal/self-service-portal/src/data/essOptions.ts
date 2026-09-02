@@ -69,6 +69,7 @@ export const storePriorityOptions = [
 export const storeUomOptions = [
   'PCS',
   'EA',
+  'Each',
   'SET',
   'BOX',
   'KG',

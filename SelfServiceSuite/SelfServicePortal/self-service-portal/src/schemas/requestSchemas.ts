@@ -214,8 +214,11 @@ export const imprestSurrenderHeaderSchema = z.object({
   imprest: z.string().min(1, 'Select the imprest to surrender'),
 })
 
+/** Original document date from BC — read-only on edit; do not force ERP working date. */
+const documentDateField = dateField
+
 export const storeHeaderSchema = z.object({
-  requestDate: workingDateField,
+  requestDate: documentDateField,
   dateRequired: needByDateField,
   requestedBy: optionalText,
   division: optionalText,
@@ -285,7 +288,7 @@ export const transportPassengerLineSchema = z.object({
 
 export const purchaseHeaderSchema = z
   .object({
-    requestDate: workingDateField,
+    requestDate: documentDateField,
     requestedBy: optionalText,
     employeeNo: optionalText,
     division: optionalText,

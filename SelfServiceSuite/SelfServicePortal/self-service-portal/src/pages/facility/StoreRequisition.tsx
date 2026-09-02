@@ -1,5 +1,4 @@
 import { useSearchParams } from 'react-router-dom'
-import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { StoreOperationsPanel } from '@/components/facility/StoreOperationsPanel'
@@ -16,7 +15,6 @@ import {
   storeUomOptions,
 } from '@/data/essOptions'
 import { storeHeaderSchema, storeLineSchema } from '@/schemas/requestSchemas'
-import { useLookupOptions } from '@/hooks/useLookupOptions'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { isEmployeeIdentifier, requesterDisplayName } from '@/utils/requesterDisplayName'
@@ -50,35 +48,6 @@ function isAssetRequestPayload(payload: Record<string, unknown> | undefined) {
   return value === '1' || value === 'asset' || value === 'minor asset'
 }
 
-function lookupLabel(options: Array<{ value: string; label: string }>, value: string) {
-  const match = options.find((option) => option.value === value)
-  if (!match) return value
-  const parts = match.label.split(' - ')
-  return parts.length > 1 ? parts.slice(1).join(' - ') : match.label
-}
-
-function syncLineFromItemSelection(
-  values: FieldValues,
-  form: UseFormReturn<FieldValues>,
-  items: Array<{ value: string; label: string }>,
-  assets: Array<{ value: string; label: string }>,
-) {
-  const type = String(values.type ?? '1')
-  const options = type === '2' ? assets : items
-  const itemNo = String(values.itemNo ?? '').trim()
-  if (!options.length) return
-  if (itemNo && !options.some((option) => option.value === itemNo)) {
-    form.setValue('itemNo', '', { shouldValidate: false })
-    form.setValue('itemName', '', { shouldValidate: false })
-    return
-  }
-  if (!itemNo) return
-  const name = lookupLabel(options, itemNo)
-  if (name && name !== itemNo && String(values.itemName ?? '').trim() !== name) {
-    form.setValue('itemName', name, { shouldValidate: false })
-  }
-}
-
 const storeProcessBanner = (
   <ProcurementProcessBanner
     title={ABH_STORE_REQUISITION_PROCESS_TITLE}
@@ -95,8 +64,6 @@ export function StoreRequisition() {
     queryFn: getEmployeeProfileDetails,
     staleTime: 5 * 60 * 1000,
   })
-  const items = useLookupOptions('items')
-  const assets = useLookupOptions('assets')
   const employeeNo = String(employee?.employeeNo ?? '').trim()
   const rawDisplayName = String(employee?.displayName ?? '').trim()
   const requestedBy = isEmployeeIdentifier(rawDisplayName, employeeNo) ? '' : rawDisplayName
@@ -111,6 +78,7 @@ export function StoreRequisition() {
       headerLabel="New Store Requisition"
       processBanner={storeProcessBanner}
       showProcessBannerOnList={false}
+      detailActionsPlacement="bottom"
       module={module}
       queryKey={['facility', 'store-requisition']}
       listRequests={() => listModuleRequests(module)}
@@ -230,6 +198,7 @@ export function StoreRequisition() {
         { label: 'Required Date', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
         { label: 'Division', paths: ['payload.FunctionName', 'payload.GlobalDimension1Code', 'payload.Global_Dimension_1_Code'] },
         { label: 'Department', paths: ['payload.BudgetCenterName', 'payload.DepartmentName', 'payload.ShortcutDimension2Code', 'payload.Shortcut_Dimension_2_Code'] },
+        { label: 'Assigned Store', paths: ['payload.IssuingStore', 'payload.Issuing_Store', 'payload.issuingStore'] },
         { label: 'Request Type', paths: ['payload.StoreRequisitionType', 'payload.Store_Requisition_Type'] },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
@@ -254,12 +223,8 @@ export function StoreRequisition() {
         defaultValuesFromRequest: (request) => ({
           type: isAssetRequestPayload(request.payload) ? '2' : '1',
         }),
-        onValuesChange: (values, form) => {
-          syncLineFromItemSelection(values, form, items.options, assets.options)
-        },
         buildLinePayload: (values) => ({
           ...values,
-          location: '',
           item: values.itemNo,
           itemName: values.itemName,
           lineDescription: values.description,
@@ -276,20 +241,18 @@ export function StoreRequisition() {
             visibleWhen: () => false,
           },
           {
-            name: 'itemNo',
-            label: 'Item / Asset',
-            type: 'select',
-            placeholder: 'Select from Business Central',
-            valuePaths: ['itemNo', 'No'],
-            optionsByField: {
-              field: 'type',
-              options: {
-                '1': items.options,
-                '2': assets.options,
-              },
-            },
+            name: 'itemName',
+            label: 'Requested Item / Asset',
+            type: 'text',
+            placeholder: 'Enter what is required (stock availability is checked internally)',
+            valuePaths: ['itemName', 'ItemName', 'Description'],
           },
-          { name: 'description', label: 'Description', type: 'textarea', valuePaths: ['description', 'Remarks', 'remarks'] },
+          {
+            name: 'description',
+            label: 'Specification / Description',
+            type: 'textarea',
+            valuePaths: ['description', 'Remarks', 'remarks'],
+          },
           {
             name: 'uom',
             label: 'UOM',

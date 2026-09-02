@@ -13,8 +13,8 @@ $installedBcApp = Get-NAVAppInfo -ServerInstance $ServerInstance -Name 'BC24_TA 
     Sort-Object Version -Descending |
     Select-Object -First 1
 $installedBcApp | Format-Table Name, Version, Published, Installed, IsInstalled -AutoSize
-if (-not $installedBcApp -or $installedBcApp.Version -ne [version]'1.0.3.199') {
-    Write-Host "WARNING: Expected installed BC24_TA App 1.0.3.199." -ForegroundColor Yellow
+if (-not $installedBcApp -or $installedBcApp.Version -ne [version]'1.0.3.273') {
+    Write-Host "WARNING: Expected installed BC24_TA App 1.0.3.273." -ForegroundColor Yellow
 }
 
 Write-Host "`n=== BC24_TA App (all published — old versions are normal) ===" -ForegroundColor DarkGray
@@ -26,8 +26,8 @@ Write-Host "`n=== PORTAL API ===" -ForegroundColor Cyan
 try {
     $build = Invoke-RestMethod -Uri "$PortalUrl/api/portal-build" -TimeoutSec 10
     Write-Host "portalApiBuild: $($build.portalApiBuild)" -ForegroundColor Green
-    if ($build.portalApiBuild -notlike '*v143*1.0.3.295*') {
-        Write-Host "WARNING: Expected v143 / 1.0.3.295. Deploy ABH-Portal-COMPLETE-1.0.3.295.zip" -ForegroundColor Yellow
+    if ($build.portalApiBuild -notlike '*v192*1.0.3.343*') {
+        Write-Host "WARNING: Expected v192 / 1.0.3.343. Deploy ABH-Portal-COMPLETE-1.0.3.343.zip" -ForegroundColor Yellow
     }
 } catch {
     Write-Host "Portal not reachable at $PortalUrl — is node running?" -ForegroundColor Red

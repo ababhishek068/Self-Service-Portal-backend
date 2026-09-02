@@ -34,6 +34,32 @@ export function canDeleteRequestItems(status: string | undefined, module?: strin
   return isEditableRequestStatus(status, module)
 }
 
+/** Modules that support permanent document delete via DeletePortalDraftDocument / leave delete. */
+export const DOCUMENT_DELETE_MODULES = new Set([
+  'leave',
+  'imprest',
+  'imprestSurrender',
+  'staffClaim',
+  'pettyCash',
+  'pettyCashReplenishment',
+  'purchaseRequisition',
+  'storeRequisition',
+  'fuelRequest',
+  'maintenance',
+  'transport',
+  'transferOrder',
+  'training',
+  'salaryAdvance',
+  'gatePass',
+])
+
+/** Whole-document delete: Draft/Open/New, plus Cancelled/Rejected cleanup. */
+export function canDeleteDocumentDraft(status: string | undefined, module?: string) {
+  if (module && !DOCUMENT_DELETE_MODULES.has(module) && module !== 'leave') return false
+  if (isEditableRequestStatus(status, module)) return true
+  return status === 'Cancelled' || status === 'Rejected'
+}
+
 /** Upload attachments only while the header is still editable (Draft/Open). Locked after approval submission. */
 export function canUploadRequestAttachments(status: string | undefined, module?: string) {
   return isEditableRequestStatus(status, module)

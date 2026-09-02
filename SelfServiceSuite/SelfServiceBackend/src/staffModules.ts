@@ -78,6 +78,8 @@ export interface ModuleSpec {
     saveHeader?: string
     saveLine?: string
     deleteLine?: string
+    /** Permanently delete an Open/Pending/New draft header (DeletePortalDraftDocument). */
+    deleteDocument?: string
     submit?: string
     cancel?: string
   }
@@ -87,6 +89,7 @@ export interface ModuleSpec {
     saveHeader?: ParamBuilder
     saveLine?: ParamBuilder
     deleteLine?: ParamBuilder
+    deleteDocument?: ParamBuilder
     submit?: ParamBuilder
     cancel?: ParamBuilder
   }
@@ -105,6 +108,14 @@ const SCHEMAS = {
   saveHeader: z.object({}).passthrough(),
   saveLine: z.object({}).passthrough(),
   deleteLine: z.object({}).passthrough(),
+}
+
+function draftDeleteParams(moduleCode: string): ParamBuilder {
+  return ({ user, no }) => ({
+    employeeNo: user.employeeNo,
+    requisitionNo: no,
+    moduleCode,
+  })
 }
 
 function ok(result: SoapResult) {
@@ -510,10 +521,12 @@ const imprest: ModuleSpec = {
     saveHeader: 'ImprestRequisitionHeader',
     saveLine: 'ImprestRequisitionLine',
     deleteLine: 'DeleteImprestLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestImprestApproval',
     cancel: 'CancelImprestRequisition',
   },
   params: {
+    deleteDocument: draftDeleteParams('imprest'),
     saveHeader: ({ req, user, no }) => {
       const travelDate = formatBcSoapDate(
         String(req.body?.travelDate ?? req.body?.startDate ?? ''),
@@ -623,10 +636,12 @@ const imprestSurrender: ModuleSpec = {
   soap: {
     saveHeader: 'ImprestSurrenderHeader',
     saveLine: 'ImprestSurrenderLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestImprestSurrenderApproval',
     cancel: 'CancelImprestSurrender',
   },
   params: {
+    deleteDocument: draftDeleteParams('imprest-surrender'),
     saveHeader: ({ req, user, no }) => ({
       docNo: no,
       imprestIssueDocNo: req.body?.imprestIssueDocNo ?? req.body?.imprest ?? '',
@@ -673,10 +688,12 @@ const staffClaim: ModuleSpec = {
     saveHeader: 'ClaimRequisitionHeader',
     saveLine: 'ClaimRequisitionLine',
     deleteLine: 'DeleteClaimLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestClaimApproval',
     cancel: 'CancelClaimRequisition',
   },
   params: {
+    deleteDocument: draftDeleteParams('claim'),
     saveHeader: async ({ req, user, no }) => {
       await ensureEmployeeDepartmentCodeForFinance(user.employeeNo, {
         department: user.department,
@@ -833,10 +850,12 @@ const pettyCash: ModuleSpec = {
     saveHeader: 'FnPettyCashHeader',
     saveLine: 'FnPettyCashLine',
     deleteLine: 'FnPettyCashLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestPettyCashApproval',
     cancel: 'CancelPettyCashRequest',
   },
   params: {
+    deleteDocument: draftDeleteParams('petty-cash'),
     saveHeader: ({ req, user, no }) => ({
       myAction: no ? 'edit' : 'create',
       requiredDate:
@@ -888,10 +907,12 @@ const interBankTransfer: ModuleSpec = {
   ownerSource: 'employeeNo',
   soap: {
     saveHeader: 'FnSaveInterBankTransfer', // edit branch swapped at runtime
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestInterBankTransferApproval',
     cancel: 'CancelInterBankTransferRequest',
   },
   params: {
+    deleteDocument: draftDeleteParams('inter-bank-transfer'),
     saveHeader: ({ req, user, no }) => ({
       myUserId: user.userID,
       staffNo: user.employeeNo,
@@ -933,10 +954,12 @@ const storeRequisition: ModuleSpec = {
     saveHeader: 'StoreRequisitionHeader',
     saveLine: 'StoreRequisitionLine',
     deleteLine: 'DeleteStoreReqLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestStoreReqApproval',
     cancel: 'CancelStoreRequisition',
   },
   params: {
+    deleteDocument: draftDeleteParams('store-requisition'),
     saveHeader: ({ req, user, no }) => {
       const justification = String(req.body?.justification ?? req.body?.purpose ?? '').trim()
       const requiredDate = String(req.body?.dateRequired ?? req.body?.requestDate ?? '').trim()
@@ -957,16 +980,17 @@ const storeRequisition: ModuleSpec = {
           '',
       ).slice(0, 150),
       requestDate: requiredDate,
-      issuingStore: String(
-        req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '',
-      ).trim(),
+      // Store assignment is an internal fulfillment decision. Never accept a
+      // store/location selected or injected by the requester.
+      issuingStore: '',
       justification: justification.slice(0, 250),
       priority: storePriorityCode(req.body?.priority ?? 'normal'),
       storeRequisitionType: storeHeaderRequestTypeCode(req.body?.requestType ?? 'item'),
       }
     },
     saveLine: async ({ req, user, no }) => {
-      const itemNo = String(req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '')
+      // Requesters describe the need; Operations/Store maps it to a BC item.
+      const itemNo = ''
       const itemName = String(req.body?.itemName ?? '').trim()
       const lineDescription = String(req.body?.lineDescription ?? req.body?.description ?? '').trim()
       const unitOfMeasure = String(req.body?.uom ?? req.body?.unitOfMeasure ?? '').trim()
@@ -985,12 +1009,11 @@ const storeRequisition: ModuleSpec = {
         no,
         itemNo,
         quantity,
-        String(req.body?.issuingStore ?? req.body?.headerIssuingStore ?? '').trim(),
+        '',
       )
-      // ERP parity: BC's Store Requisition lines subform links lines to the
-      // HEADER's Issuing Store — a line saved with a different store becomes
-      // invisible on the BC page. Prefer the header's store for every line;
-      // fall back to the line's own value for pre-.361 headers without one.
+      // Use only an internally assigned store from the BC header. New requester
+      // drafts intentionally leave it blank; BC propagates the store to lines
+      // when Operations assigns the fulfillment location later.
       let headerStore = ''
       try {
         const rows = (await fetchOData('QyStoreRequisitionHeader', {
@@ -1001,19 +1024,20 @@ const storeRequisition: ModuleSpec = {
           headerStore = fieldText(rows[0], ['IssuingStore', 'Issuing_Store'])
         }
       } catch {
-        // keep the line-level value
+        // Keep the line unassigned until Operations selects the store in BC.
       }
       return {
         action: req.body?.action ?? 'create',
         reqNo: no,
         lineNo: Number(req.body?.lineNo ?? 0),
         type: storeLineTypeCode(req.body?.type),
-        itemNo: req.body?.item ?? req.body?.itemNo ?? req.body?.itemCode ?? '',
+        itemNo,
         quantity:
           storeLineTypeCode(req.body?.type) === 1
             ? Number(req.body?.quantity ?? 0)
             : Number(req.body?.quantity ?? 1),
-        location: headerStore || (req.body?.issuingStore ?? req.body?.location ?? ''),
+        // Use only a store already assigned internally on the BC header.
+        location: headerStore,
         description: itemName.slice(0, 70),
         remarks: (() => {
           const name = itemName
@@ -1073,10 +1097,12 @@ const purchaseRequisition: ModuleSpec = {
     saveHeader: 'PurchaseRequisitionHeader',
     saveLine: 'PurchaseRequisitionLine',
     deleteLine: 'DeletePurchaseReqLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestPurchaseReqApproval',
     cancel: 'CancelPurchaseRequisition',
   },
   params: {
+    deleteDocument: draftDeleteParams('purchase-requisition'),
     saveHeader: async ({ req, user, no }) => {
       const selected = String(
         req.body?.requestingDepartment ?? req.body?.departmentCode ?? '',
@@ -1094,7 +1120,10 @@ const purchaseRequisition: ModuleSpec = {
       const authoritativeDepartment =
         employeeDepartment ||
         (profileDepartment.length > 0 && profileDepartment.length <= 20 ? profileDepartment : '')
+      // Only enforce profile department on create. Store/procurement users often
+      // edit purchase requests created for another employee (e.g. store → PQ).
       if (
+        !no &&
         authoritativeDepartment &&
         selected &&
         (!submittedDepartment ||
@@ -1102,12 +1131,14 @@ const purchaseRequisition: ModuleSpec = {
       ) {
         throw Object.assign(
           new Error(
-            `Requesting Department must match your Business Central Employee Card (${authoritativeDepartment}).`,
+            `Department must match your employee profile (${authoritativeDepartment}). If your card shows a different department, ask HR to update Business Central, then try again.`,
           ),
           { status: 422, code: 'PROFILE_DEPARTMENT_MISMATCH' },
         )
       }
-      const departmentForSoap = authoritativeDepartment || submittedDepartment
+      const departmentForSoap = no
+        ? submittedDepartment || authoritativeDepartment
+        : authoritativeDepartment || submittedDepartment
       if (selected && !departmentForSoap) {
         throw Object.assign(
           new Error(
@@ -1164,9 +1195,12 @@ const purchaseRequisition: ModuleSpec = {
         )
       }
       if (isProjectBudget && !projectCode) {
-        throw Object.assign(new Error('Project Name / Project Code is required for a Project budget.'), {
-          status: 422,
-        })
+        throw Object.assign(
+          new Error(
+            'Budget Type is Project, but Project Name / Code is missing. Choose Non-Project, or enter a project code before saving.',
+          ),
+          { status: 422, code: 'PURCHASE_PROJECT_CODE_REQUIRED' },
+        )
       }
       if (!['local', 'foreign'].includes(purchaseMode)) {
         throw Object.assign(new Error('Purchase mode must be Local or Foreign.'), {
@@ -1241,8 +1275,9 @@ const purchaseRequisition: ModuleSpec = {
         reqNo: no,
         lineNo: Number(req.body?.lineNo ?? 0),
         itemNo,
+        // Keep SOAP element order identical to PurchaseRequisitionLine AL params.
+        location: String(req.body?.whereNeeded ?? req.body?.location ?? ''),
         quantity,
-        location: req.body?.whereNeeded ?? req.body?.location ?? '',
         type: typeCode,
         procurementPlan: req.body?.procurementPlan ?? '',
         reasonForRequest: description || specification,
@@ -1261,11 +1296,26 @@ const purchaseRequisition: ModuleSpec = {
       requisitionNo: no,
       lineNo: req.params.lineNo,
     }),
-    submit: ({ user, no }) => ({
-      reqNo: no,
-      employeeNo: user.employeeNo,
-      tableID: 52121800,
-    }),
+    submit: async ({ user, no }) => {
+      let employeeNo = user.employeeNo
+      try {
+        const rows = (await fetchOData('QyPurchaseHeader', {
+          $filter: `No eq '${odataString(no)}'`,
+          $top: 1,
+        })) as ODataRecord[] | null
+        if (Array.isArray(rows) && rows[0]) {
+          const documentEmployee = fieldText(rows[0], ['EmployeeNo', 'Employee_No'])
+          if (documentEmployee) employeeNo = documentEmployee
+        }
+      } catch {
+        // keep logged-in employee when OData is unavailable
+      }
+      return {
+        reqNo: no,
+        employeeNo,
+        tableID: 52121800,
+      }
+    },
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,
@@ -1293,10 +1343,12 @@ const transport: ModuleSpec = {
     saveHeader: 'TransportRequisition',
     saveLine: 'TransportRequisitionPassenger',
     deleteLine: 'TransportRequisitionPassenger',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestTransportReqApproval',
     cancel: 'CancelTransportRequisition',
   },
   params: {
+    deleteDocument: draftDeleteParams('transport'),
     saveHeader: ({ req, user, no }) => ({
       action: no ? 'edit' : 'create',
       reqNo: no,
@@ -1419,6 +1471,35 @@ function portalOwnerFieldKeys(spec: ModuleSpec) {
   ]
 }
 
+function purchaseRowText(row: ODataRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key]
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim()
+    }
+  }
+  return ''
+}
+
+/** Store stock-unavailable path: LPR created from a store requisition for another employee. */
+export function isStoreOriginatedPurchaseRow(row: ODataRecord) {
+  const combined = [
+    purchaseRowText(row, ['Justification', 'Purpose', 'RequestDescription', 'Request_Description']),
+    purchaseRowText(row, ['PostingDescription', 'Posting_Description', 'Description']),
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return /store requisition|lpr from store/i.test(combined)
+}
+
+export function storeOriginatedPurchaseVisible(
+  row: ODataRecord,
+  spec: ModuleSpec,
+  canViewStoreProcess: boolean,
+) {
+  return spec.module === 'purchase-requisition' && canViewStoreProcess && isStoreOriginatedPurchaseRow(row)
+}
+
 export function portalModuleDocumentOwnedByUser(
   row: ODataRecord,
   spec: ModuleSpec,
@@ -1482,6 +1563,7 @@ function fuelMaintenanceSaveHeader(
 
 const fuelMaintenanceSoap = {
   saveHeader: 'FnFuelRequisitionHeader',
+  deleteDocument: 'DeletePortalDraftDocument',
   submit: 'FnFuelRequisitionApprovalAction',
   cancel: 'FnFuelRequisitionApprovalAction',
 } as const
@@ -1496,6 +1578,7 @@ const fuelRequest: ModuleSpec = {
   postListFilter: isFuelRequestRow,
   soap: fuelMaintenanceSoap,
   params: {
+    deleteDocument: draftDeleteParams('fuel'),
     saveHeader: (ctx) => fuelMaintenanceSaveHeader('fuel', ctx),
     submit: ({ no }: { no: string }) => ({ docNo: no, action: 'request' }),
     cancel: ({ no }: { no: string }) => ({ docNo: no, action: 'cancel' }),
@@ -1512,6 +1595,7 @@ const maintenance: ModuleSpec = {
   postListFilter: isMaintenanceRequestRow,
   soap: fuelMaintenanceSoap,
   params: {
+    deleteDocument: draftDeleteParams('maintenance'),
     saveHeader: (ctx) => fuelMaintenanceSaveHeader('maintenance', ctx),
     submit: ({ no }: { no: string }) => ({ docNo: no, action: 'request' }),
     cancel: ({ no }: { no: string }) => ({ docNo: no, action: 'cancel' }),
@@ -1537,11 +1621,13 @@ const transferOrder: ModuleSpec = {
     saveHeader: 'TransferOrderHeader',
     saveLine: 'TransferOrderLine',
     deleteLine: 'DeleteTransferLine',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'TransferOrderApproval',
     cancel: 'TransferOrderApproval',
   },
   decideMode: 'submitCancelOnSameMethod',
   params: {
+    deleteDocument: draftDeleteParams('transfer-order'),
     saveHeader: ({ req, user, no }) => ({
       action: no ? 'edit' : 'create',
       fromCode: req.body?.from ?? req.body?.fromCode ?? '',
@@ -1630,10 +1716,12 @@ const training: ModuleSpec = {
   headerKey: 'ApplicationNo',
   soap: {
     saveHeader: 'FnTrainingRequest',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'TrainingApproval',
     cancel: 'TrainingApproval',
   },
   params: {
+    deleteDocument: draftDeleteParams('training'),
     saveHeader: ({ req, user, no }) => ({
       myAction: no ? 'edit' : 'create',
       docNo: no,
@@ -1684,10 +1772,12 @@ const salaryAdvance: ModuleSpec = {
   lineHeaderField: 'No',
   soap: {
     saveHeader: 'FnSalaryAdvanceHeader',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'FnSalaryAdvanceApprovalAction',
     cancel: 'FnSalaryAdvanceApprovalAction',
   },
   params: {
+    deleteDocument: draftDeleteParams('salary-advance'),
     saveHeader: async ({ req, user, no }) => {
       const fromBody = String(
         req.body?.customerNo ?? req.body?.accountNo ?? req.body?.accountNumber ?? '',
@@ -1737,10 +1827,12 @@ const gatePass: ModuleSpec = {
   lineHeaderField: 'RequistionNo',
   soap: {
     saveHeader: 'GatePassHeader',
+    deleteDocument: 'DeletePortalDraftDocument',
     submit: 'RequestGatePassApproval',
     cancel: 'CancelGatePassApproval',
   },
   params: {
+    deleteDocument: draftDeleteParams('gate-pass'),
     saveHeader: ({ req, user }) => {
       const source = gatePassSourceFromQuery(
         req.body?.gatePassSource ?? req.body?.source ?? req.body?.linkTo ?? req.body?.Linkto,
@@ -2855,6 +2947,41 @@ export async function cancelPortalModuleRequest(
   }
 }
 
+export async function deletePortalModuleDocument(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+) {
+  if (!spec.soap.deleteDocument || !spec.params?.deleteDocument) {
+    throw Object.assign(
+      new Error(`${spec.module} draft delete is not supported`),
+      { status: 501, code: 'DELETE_NOT_SUPPORTED' },
+    )
+  }
+  const header = await getPortalModuleDocument(spec, user, no, false)
+  if (!header) {
+    throw Object.assign(new Error(`Business Central document ${no} was not found`), {
+      status: 404,
+    })
+  }
+  const params = await spec.params.deleteDocument({
+    req: requestWithBody({}),
+    user,
+    no,
+  })
+  const result = await callSoapMethod(spec.soap.deleteDocument, params)
+  if (!ok(result) && !approvalOk(result)) {
+    throw Object.assign(
+      new Error(
+        typeof result.returnValue === 'string' && result.returnValue
+          ? String(result.returnValue)
+          : `Business Central did not delete draft ${no}`,
+      ),
+      { status: 422, code: 'DOCUMENT_DELETE_FAILED' },
+    )
+  }
+}
+
 export async function submitPortalModuleRequest(
   spec: ModuleSpec,
   user: AuthUser,
@@ -2885,6 +3012,20 @@ export async function submitPortalModuleRequest(
           'Complete the paying account, receiving account, and source amount before requesting approval.',
         ),
         { status: 422 },
+      )
+    }
+  }
+  if (spec.module === 'purchase-requisition') {
+    const budgetType = fieldText(header, ['BudgetType', 'Budget_Type', 'budgetType'])
+    const projectCode = fieldText(header, ['ProjectCode', 'Project_Code', 'projectCode'])
+    const isProjectBudget =
+      budgetType === '0' || budgetType.toLowerCase() === 'project'
+    if (isProjectBudget && !projectCode) {
+      throw Object.assign(
+        new Error(
+          'Cannot send for approval: Budget Type is Project but Project Name / Code is missing. Click Edit, set Budget Type to Non-Project (or enter a project code), save, then try Request Approval again.',
+        ),
+        { status: 422, code: 'PURCHASE_PROJECT_CODE_REQUIRED' },
       )
     }
   }

@@ -1,4 +1,4 @@
-ABH BUSINESS CENTRAL PRODUCTION SETUP — APP 1.0.3.199
+ABH BUSINESS CENTRAL PRODUCTION SETUP — APP 1.0.3.273
 ====================================================
 
 This file contains configuration only. Do not invent users, approval limits,
@@ -9,7 +9,7 @@ actual ABH records already approved by Finance/HR management.
 ===============================
 
 Publish, sync, data-upgrade, and restart BC240 in that order. Confirm installed
-version 1.0.3.199 before starting the portal.
+version 1.0.3.273 before starting the portal.
 
 2. APPROVAL USERS
 =================
@@ -18,6 +18,8 @@ Business Central Search: Approval User Setup
 
 - Confirm every portal requester has a Business Central user mapping.
 - Set Approver ID to the actual ABH approver and maintain genuine limits.
+- Purchase submission validates this setup and stops with an actionable error;
+  it does not auto-fill Approver ID from the Employee Card.
 - Confirm each approver can open Approval Entries and act on assigned entries.
 - Do not give an administrator ownership of another user's approval entry.
 
@@ -31,6 +33,8 @@ Business Central Search: Workflows
 - In the Create Approval Requests response, select the actual ABH approval
   method/group for Department or Division Head followed by Finance/Admin.
 - Enable the workflow.
+- Portal Purchase approve/reject calls Business Central Approvals Mgmt. for the
+  verified Purchase Header approval entry; do not replace it with status updates.
 - Test approve, reject, cancel, and final release using real test approvers.
 
 After final approval, authorized teams continue the same Purchase Request:
@@ -40,9 +44,10 @@ After final approval, authorized teams continue the same Purchase Request:
 - Operations/Store records the GRN.
 - Auditor completes the post-payment review or returns it for correction.
 
-Do not create a separate Foreign Purchase Request menu. Currency is a field on
-the same Purchase Request. Assign portal/BC permissions only to the real role
-holders and test that ordinary requesters cannot update these process stages.
+Do not create a separate Foreign Purchase Request menu. The requester-facing
+Purchase Request has no Currency or Other Currency field. Assign portal/BC
+permissions only to the real role holders and test that ordinary requesters
+cannot update these process stages.
 
 Business Central master data used by the portal:
 - Departments / Global Dimension 2 values
@@ -74,9 +79,13 @@ condition/group assigned to that requester so approval starts at the next role:
 
 Then Search: Workflows
 
+- Disable the incomplete/broken Store workflow before replacing it.
 - Import Workflows\Store-Requisition-Approval-Workflow.xml.
 - Open STORE-REQ-WF and select the applicable actual workflow user group in the
   Create Approval Requests response.
+- Do not type "Create an approval request for the Store Requisition" manually.
+  App 1.0.3.273 registers Store against BC's native Create Approval Requests
+  response; select that native response from the lookup.
 - Enable and test each requester-role route; do not assume the skip without a
   test Approval Entry showing the next intended approver.
 

@@ -29,6 +29,7 @@ import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
 import {
   cancelModuleRequest,
+  deleteModuleRequest,
   getModuleRequest,
   submitModuleRequest,
   updateRequestHeader,
@@ -36,6 +37,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import {
+  canDeleteDocumentDraft,
   canDeleteRequestItems,
   canRequestApproval,
   canUploadRequestAttachments,
@@ -381,6 +383,29 @@ export function RequestFormPage({
     }
   }
 
+  const handleDeleteDraft = async (id: string, requestNo: string) => {
+    if (!moduleConfig) return
+    const yes = await confirm({
+      title: 'Permanently delete draft',
+      message: `Delete draft ${requestNo}? This cannot be undone.`,
+      confirmLabel: 'Delete draft',
+      cancelLabel: 'Keep',
+      tone: 'danger',
+    })
+    if (!yes) return
+    setActionId(`delete:${id}`)
+    try {
+      await deleteModuleRequest(moduleConfig, id)
+      setSelectedId(null)
+      await refreshLists()
+      toast.success('Draft permanently deleted')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed', 'Action failed')
+    } finally {
+      setActionId(null)
+    }
+  }
+
   const handleSubmitDraft = async (id: string) => {
     if (!moduleConfig) return
     const yes = await confirm({
@@ -569,6 +594,22 @@ export function RequestFormPage({
                     Cancel
                   </Button>
                 ) : null}
+                {canDeleteDocumentDraft(row.status, moduleConfig.module) ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                    disabled={actionId === `delete:${row.id}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleDeleteDraft(row.id, row.requestNo)
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </Button>
+                ) : null}
               </div>
             ),
           } satisfies DataTableColumn<PortalRequest>,
@@ -650,6 +691,17 @@ export function RequestFormPage({
                       onClick={() => void handleCancel(selected.id)}
                     >
                       Cancel
+                    </Button>
+                  ) : null}
+                  {canDeleteDocumentDraft(selected.status, moduleConfig.module) ? (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={actionId === `delete:${selected.id}`}
+                      onClick={() => void handleDeleteDraft(selected.id, selected.requestNo)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Draft
                     </Button>
                   ) : null}
                 </div>

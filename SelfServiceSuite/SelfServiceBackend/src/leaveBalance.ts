@@ -64,7 +64,8 @@ export function discoverAnnualLeaveBalance(row: ODataRecord | null | undefined) 
 /** Read the BC employee-card annual leave balance, never the generic LeaveBalance (-31). */
 export function employeeAnnualLeaveBalance(row: ODataRecord | null | undefined) {
   const explicit = fieldNumber(row, ANNUAL_LEAVE_BALANCE_KEYS)
-  if (explicit !== null && explicit > 0) return explicit
+  // Include 0 — HOD Department Staff must show 0 days, not "—".
+  if (explicit !== null) return explicit
 
   const discovered = discoverAnnualLeaveBalance(row)
   if (discovered !== null) return discovered
@@ -240,10 +241,10 @@ function roundedLeaveValue(value: number) {
 /**
  * Present the six leave figures requested by ABH without mixing their meanings.
  *
- * `totalAvailableLeaveBalance` is the remaining full-year entitlement after
- * leave taken. It is informational, not an application limit.
- * `availableLeaveBalance` is the lower of that total and the Employee Card's
- * accrued-to-date figure, and is the only value used to validate a request.
+ * `totalAvailableLeaveBalance` is the gross full-year entitlement plus carry
+ * forward. It is informational, not an application limit.
+ * `availableLeaveBalance` is Leave Accrued To-Date minus Total Leave Taken
+ * To-Date (never negative), and is the only value used to validate a request.
  */
 export function resolveLeaveBalanceBreakdown(input: {
   summary: BcLeaveSummary | null
@@ -264,28 +265,47 @@ export function resolveLeaveBalanceBreakdown(input: {
       0,
   )
   const reimbursements = summary?.reimbursedDays ?? 0
+  // Some legacy Employee Card fields expose taken leave as a negative ledger
+  // amount. The employee-facing metric is always a positive quantity to deduct.
   const totalLeaveTakenToDate = roundedLeaveValue(
-    summary?.totalLeaveTakenToDate ??
-      summary?.currentTotalLeaveTaken ??
-      input.totalLeaveTakenToDate,
+    Math.abs(
+      summary?.totalLeaveTakenToDate ??
+        summary?.currentTotalLeaveTaken ??
+        input.totalLeaveTakenToDate,
+    ),
   )
+  // Annual Leave balance = Entitlement + Carry Forward (gross).
   const totalAvailableLeaveBalance = roundedLeaveValue(
     summary?.totalAvailableLeaveBalance ??
-      Math.max(0, leaveEntitlement + carryForward + reimbursements - totalLeaveTakenToDate),
+      Math.max(0, leaveEntitlement + carryForward + reimbursements),
   )
-  const availableLeaveBalance = roundedLeaveValue(
-    summary?.availableLeaveBalance ??
-      input.availableLeaveBalance,
-  )
+  // Period Accrued Days only (not the already-combined Leave Accrued To-Date).
+  const periodAccruedDays =
+    summary?.accruedDays !== null && summary?.accruedDays !== undefined
+      ? roundedLeaveValue(summary.accruedDays)
+      : null
+  // Leave Accrued To-Date = Carry Forward + Accrued Days.
   const leaveAccruedToDate =
-    summary?.leaveAccruedToDate ?? input.leaveAccruedToDate
+    periodAccruedDays !== null
+      ? roundedLeaveValue(Math.max(0, carryForward + periodAccruedDays))
+      : summary?.leaveAccruedToDate !== null && summary?.leaveAccruedToDate !== undefined
+        ? roundedLeaveValue(summary.leaveAccruedToDate)
+        : input.leaveAccruedToDate === null || input.leaveAccruedToDate === undefined
+          ? null
+          : roundedLeaveValue(input.leaveAccruedToDate)
+  // Available / remain = Leave Accrued To-Date − Taken.
+  const availableLeaveBalance =
+    leaveAccruedToDate !== null
+      ? roundedLeaveValue(Math.max(0, leaveAccruedToDate - totalLeaveTakenToDate))
+      : roundedLeaveValue(
+          summary?.availableLeaveBalance ?? input.availableLeaveBalance,
+        )
 
   return {
     leaveEntitlement,
     carryForward,
     totalAvailableLeaveBalance,
-    leaveAccruedToDate:
-      leaveAccruedToDate === null ? null : roundedLeaveValue(leaveAccruedToDate),
+    leaveAccruedToDate,
     totalLeaveTakenToDate,
     availableLeaveBalance,
   }
@@ -301,9 +321,11 @@ export function leaveApplicationExceedsAvailableBalance(
 }
 
 /**
- * Annual leave may only use what has accrued so far. Older BC builds exposed
- * `currentLeaveBalance` as the full-year entitlement balance; that value is
- * intentionally ignored here because it can include leave not yet accrued.
+ * Annual leave remain / Available Leave Balance:
+ *   Leave Accrued To-Date = Carry Forward + Accrued Days
+ *   Available = Leave Accrued To-Date − Total Leave Taken To-Date
+ * Prefer period Accrued Days from BC; do not treat combined Leave Accrued To-Date
+ * as Accrued Days (that double-counts carry forward).
  */
 export function resolveAnnualAvailableLeaveBalance(input: {
   summary: BcLeaveSummary | null
@@ -312,44 +334,52 @@ export function resolveAnnualAvailableLeaveBalance(input: {
   leaveAccruedToDate?: number | null
   totalLeaveTakenToDate?: number | null
 }) {
-  const explicit = input.summary?.availableLeaveBalance
-  if (explicit !== null && explicit !== undefined && Number.isFinite(explicit)) {
-    return roundedLeaveValue(Math.max(0, explicit))
-  }
   const summary = input.summary
-  const accrued = summary?.leaveAccruedToDate ?? input.leaveAccruedToDate ?? null
-  const taken =
+  const carryForward = roundedLeaveValue(
+    summary?.carryForward ??
+      summary?.carryForwardBalanceForType ??
+      summary?.carryForwardBalance ??
+      input.carryForward ??
+      0,
+  )
+  const periodAccrued =
+    summary?.accruedDays !== null && summary?.accruedDays !== undefined
+      ? summary.accruedDays
+      : null
+  const leaveAccruedToDate =
+    periodAccrued !== null && Number.isFinite(periodAccrued)
+      ? roundedLeaveValue(Math.max(0, carryForward + periodAccrued))
+      : summary?.leaveAccruedToDate ?? input.leaveAccruedToDate ?? null
+  const rawTaken =
     summary?.totalLeaveTakenToDate ??
     summary?.currentTotalLeaveTaken ??
     input.totalLeaveTakenToDate ??
     null
-  const entitlement =
-    summary?.leaveEntitlement ?? summary?.allocatedDays ?? input.leaveEntitlement ?? null
-  const carryForward =
-    summary?.carryForward ??
-    summary?.carryForwardBalanceForType ??
-    input.carryForward ??
-    null
-  const totalAvailable =
-    summary?.totalAvailableLeaveBalance ??
-    (entitlement === null || carryForward === null || taken === null
-      ? null
-      : entitlement + carryForward + (summary?.reimbursedDays ?? 0) - taken)
+  const taken = rawTaken === null ? null : Math.abs(rawTaken)
+
   if (
-    accrued === null ||
-    totalAvailable === null ||
-    !Number.isFinite(accrued) ||
-    !Number.isFinite(totalAvailable)
+    leaveAccruedToDate !== null &&
+    taken !== null &&
+    Number.isFinite(leaveAccruedToDate) &&
+    Number.isFinite(taken)
   ) {
-    return 0
+    return roundedLeaveValue(Math.max(0, leaveAccruedToDate - taken))
   }
-  return roundedLeaveValue(Math.max(0, Math.min(totalAvailable, accrued)))
+
+  const explicit = summary?.availableLeaveBalance
+  if (explicit !== null && explicit !== undefined && Number.isFinite(explicit)) {
+    return roundedLeaveValue(Math.max(0, explicit))
+  }
+
+  // Accrued To-Date on its own is not an application balance. Without the
+  // employee's Taken To-Date (or BC's explicit Available value), fail closed
+  // so a partial/stale BC response can never grant extra annual leave.
+  return 0
 }
 
 /**
  * Balance shown to the employee:
- * - Annual: explicit Available Leave Balance, or the lower of accrued-to-date
- *   and the remaining full-year entitlement
+ * - Annual: Leave Accrued To-Date minus Total Leave Taken To-Date
  * - Other types: HR Leave Types Days or Maximum Application Days when Unlimited Days
  */
 export function resolveBcLeaveBalance(input: {

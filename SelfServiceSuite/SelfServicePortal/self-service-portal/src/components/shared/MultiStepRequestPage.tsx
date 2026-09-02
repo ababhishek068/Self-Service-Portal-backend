@@ -34,6 +34,7 @@ import {
   addRequestLine,
   cancelModuleRequest,
   createModuleRequest,
+  deleteModuleRequest,
   deleteRequestLine,
   getModuleRequest,
   postStoreRequestReceipt,
@@ -46,7 +47,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
-import { canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, shouldShowApprovalHistory } from '@/utils/requestStatus'
+import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
@@ -170,6 +171,8 @@ export interface MultiStepRequestConfig {
     run: (requestId: string) => Promise<unknown>
     successMessage?: string
   }>
+  /** Keep the default top action bar or place it after all detail sections. */
+  detailActionsPlacement?: 'top' | 'bottom'
 }
 
 function pathValue(source: unknown, path: string) {
@@ -275,18 +278,43 @@ function normalizedFieldName(value: string) {
   return value.replace(/[^a-z0-9]/gi, '').toLowerCase()
 }
 
+function normalizeEditFieldValue(field: FieldConfig, value: unknown) {
+  if (value === undefined || value === null) return value
+  if (field.type === 'date') {
+    const raw = String(value).trim()
+    if (!raw || raw.startsWith('0001-01-01')) return ''
+    return raw.slice(0, 10)
+  }
+  if (field.type === 'select' || field.type === 'text' || field.type === 'textarea') {
+    const raw = String(value).trim()
+    return raw
+  }
+  return value
+}
+
 function initialFieldValue(source: Record<string, unknown>, field: FieldConfig, fallback: unknown) {
   const mapped = (value: unknown) => {
-    const key = String(value ?? '').trim().toLowerCase()
-    return field.valueMap?.[key] ?? value
+    const normalized = normalizeEditFieldValue(field, value)
+    if (normalized === '' || normalized === undefined || normalized === null) return normalized
+    const key = String(normalized ?? '').trim().toLowerCase()
+    return field.valueMap?.[key] ?? normalized
   }
   for (const path of field.valuePaths ?? [field.name]) {
     const value = pathValue(source, path)
-    if (value !== undefined && value !== null) return mapped(value)
+    if (value === undefined || value === null) continue
+    const mappedValue = mapped(value)
+    // Skip blank / unset so later valuePaths (and fallbacks) can still match.
+    if (mappedValue === '' || mappedValue === undefined || mappedValue === null) continue
+    if (field.type === 'date' && String(mappedValue).startsWith('0001-01-01')) continue
+    return mappedValue
   }
   const target = normalizedFieldName(field.name)
   const key = Object.keys(source).find((candidate) => normalizedFieldName(candidate) === target)
-  return key ? mapped(source[key]) : fallback
+  if (key) {
+    const mappedValue = mapped(source[key])
+    if (mappedValue !== '' && mappedValue !== undefined && mappedValue !== null) return mappedValue
+  }
+  return fallback
 }
 
 function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedValues: FieldValues = {}) {
@@ -327,10 +355,20 @@ function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedVal
           <Select
             id={inputId}
             placeholder={field.placeholder ?? 'Select'}
-            options={options}
+            options={
+              (() => {
+                const current = String(pathValue(watchedValues, field.name) ?? form.getValues(name) ?? '')
+                if (!current || options.some((option) => option.value === current)) return options
+                return [{ label: current, value: current }, ...options]
+              })()
+            }
             disabled={readOnly}
             className="w-full"
             {...form.register(name)}
+            value={String(pathValue(watchedValues, field.name) ?? form.getValues(name) ?? '')}
+            onChange={(event) => {
+              form.setValue(name, event.target.value, { shouldDirty: true, shouldValidate: true })
+            }}
           />
         ) : null}
         {['text', 'number', 'date'].includes(field.type) ? (
@@ -547,14 +585,29 @@ function AddLineForm({
     void onValuesChange(watchedValues, form, requestId)
   }, [watchedValues, form, onValuesChange, requestId])
   const mutation = useMutation({
-    mutationFn: (values: FieldValues) => {
+    mutationFn: async (values: FieldValues) => {
       const payload = line.buildLinePayload ? line.buildLinePayload(values) : values
-      return initialLine
-        ? updateRequestLine(requestId, String(initialLine.lineNo ?? initialLine.id), payload)
-        : addRequestLine(requestId, payload)
+      if (!initialLine) {
+        return addRequestLine(requestId, { ...payload, action: 'create', lineNo: 0 })
+      }
+      const lineId = String(initialLine.lineNo ?? initialLine.id ?? '')
+      try {
+        return await updateRequestLine(requestId, lineId, {
+          ...payload,
+          action: 'edit',
+          lineNo: Number(initialLine.lineNo ?? initialLine.id ?? 0),
+        })
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        // Stale edit form after Delete — recreate the line instead of failing.
+        if (/no longer editable|does not exist|was not found/i.test(message)) {
+          return addRequestLine(requestId, { ...payload, action: 'create', lineNo: 0 })
+        }
+        throw error
+      }
     },
     onSuccess: () => {
-      toast.success(initialLine ? 'Line updated' : 'Line added')
+      toast.success(initialLine ? 'Line saved' : 'Line added')
       form.reset(line.defaultValues)
       onCancel?.()
       onChanged()
@@ -842,6 +895,19 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const selectedLines = Array.isArray(selected?.payload?.lines)
     ? (selected!.payload!.lines as Record<string, unknown>[])
     : []
+  useEffect(() => {
+    if (!editingLine) return
+    const editingId = String(editingLine.lineNo ?? editingLine.id ?? '')
+    if (!editingId) return
+    const stillThere = selectedLines.some(
+      (row) => String(row.lineNo ?? row.id ?? '') === editingId,
+    )
+    if (!stillThere) {
+      // Line was deleted (or list refreshed empty) — close stale edit form.
+      setEditingLine(null)
+      setShowLineForm(false)
+    }
+  }, [editingLine, selectedLines])
   const storeHasIssued = storeRequisitionHasIssuedLines(selectedLines)
   const canReceiveStoreLines =
     config.module.module === 'storeRequisition' &&
@@ -950,15 +1016,36 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
     return (
       <PageWrapper title={`${config.title} Details`} showPageHeading={false}>
         <PortalFormCard title={`${config.title} Details`}>
-          <div className="space-y-6">
+          <div
+            className={cn(
+              'space-y-6',
+              config.detailActionsPlacement === 'bottom' && 'flex flex-col gap-6 space-y-0',
+            )}
+          >
             {config.processBanner}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
-              <Button type="button" variant="outline" onClick={() => { setSelectedId(null); setEditingLine(null); setShowLineForm(false); setEditingHeader(false); setMode('list') }}>
+            <div
+              className={cn(
+                'flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4',
+                config.detailActionsPlacement === 'bottom' && 'contents',
+              )}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(config.detailActionsPlacement === 'bottom' && 'self-start')}
+                onClick={() => { setSelectedId(null); setEditingLine(null); setShowLineForm(false); setEditingHeader(false); setMode('list') }}
+              >
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Button>
               {selected ? (
-                <div className="flex flex-wrap gap-2">
+                <div
+                  className={cn(
+                    'flex flex-wrap gap-2',
+                    config.detailActionsPlacement === 'bottom' &&
+                      'order-last justify-end border-t border-slate-200 pt-4',
+                  )}
+                >
                   {editable ? (
                     <Button
                       type="button"
@@ -1039,6 +1126,37 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       }
                     >
                       Cancel
+                    </Button>
+                  ) : null}
+                  {canDeleteDocumentDraft(selected.status, config.module.module) ? (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={actionId === `delete:${selected.id}`}
+                      onClick={() =>
+                        void confirm({
+                          title: 'Permanently delete draft',
+                          message: `Delete draft ${selected.requestNo}? This cannot be undone.`,
+                          confirmLabel: 'Delete draft',
+                          cancelLabel: 'Keep',
+                          tone: 'danger',
+                        }).then((yes) => {
+                          if (!yes) return
+                          void runAction(
+                            `delete:${selected.id}`,
+                            async () => {
+                              await deleteModuleRequest(config.module, selected.id)
+                              setSelectedId(null)
+                              setMode('list')
+                            },
+                            'Delete failed',
+                            'Draft permanently deleted',
+                          )
+                        })
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Draft
                     </Button>
                   ) : null}
                   {canReceiveStoreLines ? (
@@ -1168,6 +1286,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       <div className="mb-4">
                         {showLineForm || editingLine ? (
                           <AddLineForm
+                            key={editingLine ? `edit-${String(editingLine.lineNo ?? editingLine.id)}` : 'add-line'}
                             line={config.line}
                             requestId={selected.id}
                             request={selected}
@@ -1271,7 +1390,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                                           Edit
                                         </Button>
                                       ) : null}
-                                      <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={actionId === String(row.id)} onClick={() => void runAction(String(row.id), () => deleteRequestLine(selected.id, String(row.id ?? row.lineNo)), 'Delete failed', 'Line deleted')}>
+                                      <Button type="button" variant="ghost" size="sm" className="text-red-600" disabled={actionId === String(row.id)} onClick={() => void runAction(String(row.id), async () => {
+                                        await deleteRequestLine(selected.id, String(row.id ?? row.lineNo))
+                                        setEditingLine(null)
+                                        setShowLineForm(false)
+                                      }, 'Delete failed', 'Line deleted')}>
                                         <Trash2 className="h-4 w-4" />
                                         Delete
                                       </Button>
@@ -1391,6 +1514,36 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               }
             >
               Cancel
+            </Button>
+          ) : null}
+          {canDeleteDocumentDraft(row.status, config.module.module) ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-red-700 hover:bg-red-50 hover:text-red-800"
+              disabled={actionId === `delete:${row.id}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                void confirm({
+                  title: 'Permanently delete draft',
+                  message: `Delete draft ${row.requestNo}? This cannot be undone.`,
+                  confirmLabel: 'Delete draft',
+                  cancelLabel: 'Keep',
+                  tone: 'danger',
+                }).then((yes) => {
+                  if (!yes) return
+                  void runAction(
+                    `delete:${row.id}`,
+                    () => deleteModuleRequest(config.module, row.id),
+                    'Delete failed',
+                    'Draft permanently deleted',
+                  )
+                })
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
             </Button>
           ) : null}
         </div>

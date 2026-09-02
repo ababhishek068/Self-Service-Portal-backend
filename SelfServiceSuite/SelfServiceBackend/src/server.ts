@@ -293,7 +293,16 @@ app.post('/api/erp/approvals/document', async (req, res, next) => {
       })
       .parse(req.body)
 
-    const data = await callSoapMethod('DocumentApproval', body)
+    const comments = body.comments.trim()
+    if (!body.isApprove && comments.length < 3) {
+      res.status(422).json({
+        message: 'A rejection reason of at least 3 characters is required.',
+        code: 'APPROVAL_REASON_REQUIRED',
+      })
+      return
+    }
+
+    const data = await callSoapMethod('DocumentApproval', { ...body, comments })
     res.json(data)
   } catch (error) {
     next(error)

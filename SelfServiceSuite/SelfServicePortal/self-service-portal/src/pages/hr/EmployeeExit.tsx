@@ -51,10 +51,14 @@ function detailLabel(requestType: EmployeeExitRequestType, key: string) {
 
 function displayRequestStatus(request: EmployeeExitRequest) {
   if (
-    request.status === 'Pending Approval'
-    && ['transfer', 'resignation'].includes(request.requestType)
+    ['transfer', 'resignation'].includes(request.requestType)
   ) {
-    return 'Pending Supervisor Approval'
+    if (request.status === 'Pending HR Approval' || Boolean(request.supervisorDecisionBy && request.status === 'Pending Approval')) {
+      return 'Pending HR Approval'
+    }
+    if (request.status === 'Pending Approval') {
+      return 'Pending Supervisor Approval'
+    }
   }
   return request.status
 }
@@ -105,7 +109,9 @@ function WorkflowProgress({ request }: { request: EmployeeExitRequest }) {
   // Transfer / Resignation: two approval stages — immediate supervisor first, then HR.
   const rejectedAtSupervisor = request.status === 'Rejected' && request.rejectedAtStage === 'Immediate Supervisor'
   const rejectedAtHr = request.status === 'Rejected' && request.rejectedAtStage === 'HR'
-  const supervisorDone = ['Pending HR Approval', 'Approved', 'Completed'].includes(request.status)
+  const supervisorDone =
+    ['Pending HR Approval', 'Approved', 'Completed'].includes(request.status)
+    || Boolean(request.supervisorDecisionBy)
     || rejectedAtSupervisor
     || rejectedAtHr
   const hrDone = ['Approved', 'Completed'].includes(request.status) || rejectedAtHr
@@ -130,7 +136,7 @@ function WorkflowProgress({ request }: { request: EmployeeExitRequest }) {
         : hrDone
           ? `${rejectedAtHr ? 'Rejected' : 'Approved'} by ${request.hrDecisionBy || request.hrApproverUserId || 'HR'}`
           : supervisorDone
-            ? `Awaiting ${request.hrApproverUserId || 'HR'}`
+            ? `Awaiting ${request.hrApproverUserId || 'HR (set in Portal Employee Transfer Setup)'}`
             : 'Starts after supervisor approval',
     },
   ]

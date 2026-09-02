@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { RoleRoute } from '@/components/shared/RoleRoute'
 import {
   erpConnectorRoles,
@@ -34,6 +34,7 @@ import { PettyCash } from '@/pages/finance/PettyCash'
 import { StaffClaim } from '@/pages/finance/StaffClaim'
 import { Attendance } from '@/pages/hr/Attendance'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
+import { LeavePlanner } from '@/pages/hr/LeavePlanner'
 import { LeaveStatement } from '@/pages/hr/LeaveStatement'
 import { EmployeeExit } from '@/pages/hr/EmployeeExit'
 import { HrServiceRequestLetters } from '@/pages/hr/HrServiceRequestLetters'
@@ -43,8 +44,20 @@ import { GatePassLog } from '@/pages/reports/GatePassLog'
 import { LeaveBalanceReport } from '@/pages/reports/LeaveBalanceReport'
 import { StoreUsageReport } from '@/pages/reports/StoreUsageReport'
 import { ApiNetworkCheck } from '@/pages/dev/ApiNetworkCheck'
+import { GatePass } from '@/pages/facility/GatePass'
+import type { GatePassSource } from '@/api/endpoints/gatePass'
 import { ComingSoon } from '@/pages/shared/ComingSoon'
 import { IctHelpdesk } from '@/pages/ict/IctHelpdesk'
+
+const gatePassSources: GatePassSource[] = ['storeIssue', 'transferOrder', 'assetTransfer']
+
+function GatePassRoute() {
+  const { source = 'storeIssue' } = useParams()
+  const resolved = gatePassSources.includes(source as GatePassSource)
+    ? (source as GatePassSource)
+    : 'storeIssue'
+  return <GatePass source={resolved} />
+}
 
 function ProtectedLayout() {
   const { isAuthenticated, bootstrapped } = useAuth()
@@ -117,11 +130,21 @@ export default function App() {
         <Route path="facility/transfer-order" element={<ComingSoon title="Transfer Orders" />} />
         <Route path="facility/work-tickets" element={<ComingSoon title="Work Tickets" />} />
         <Route path="facility/maintenance-request" element={<ComingSoon title="Maintenance Request" />} />
-        <Route path="facility/gate-pass" element={<ComingSoon title="Gate Pass" />} />
-        <Route path="facility/gate-pass/:source" element={<ComingSoon title="Gate Pass" />} />
+        <Route path="facility/gate-pass" element={<Navigate to="/facility/gate-pass/storeIssue" replace />} />
+        <Route
+          path="facility/gate-pass/maintenance"
+          element={
+            <ComingSoon
+              title="Maintained Asset Gate Pass"
+              description="Maintained asset gate passes will be enabled in a later release."
+            />
+          }
+        />
+        <Route path="facility/gate-pass/:source" element={<GatePassRoute />} />
         <Route path="facility/vehicle-transfer" element={<ComingSoon title="Asset / Vehicle / Tool Transfer" />} />
         <Route path="hr/leave-request" element={<LeaveRequest />} />
         <Route path="hr/leave-statement" element={<LeaveStatement />} />
+        <Route path="hr/leave-planner" element={<LeavePlanner />} />
         <Route path="hr/attendance" element={<Attendance />} />
         <Route path="hr/performance" element={<ComingSoon title="Performance" />} />
         <Route path="hr/training-request" element={<ComingSoon title="Training Request" />} />

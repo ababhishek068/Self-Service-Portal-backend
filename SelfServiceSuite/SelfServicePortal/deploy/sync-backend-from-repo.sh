@@ -13,7 +13,10 @@ echo "==> Syncing backend source: $REPO_ROOT -> $BC"
 for item in src package.json package-lock.json tsconfig.json; do
   if [[ -e "$REPO_ROOT/$item" ]]; then
     if [[ -d "$REPO_ROOT/$item" ]]; then
-      rsync -a --delete "$REPO_ROOT/$item/" "$BC/$item/"
+      # Preserve local diagnostics/backups that may exist in the suite tree;
+      # release synchronization updates canonical files but must not delete
+      # unrelated working-tree material.
+      rsync -a "$REPO_ROOT/$item/" "$BC/$item/"
     else
       cp "$REPO_ROOT/$item" "$BC/$item"
     fi

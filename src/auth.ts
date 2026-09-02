@@ -191,6 +191,7 @@ function employeeFieldText(record: Record<string, unknown>, keys: string[], fall
 import {
   configuredJobTitleByEmployeeNo,
   employeeAccountNoFromRecord,
+  enrichEmployeeRoleFlagsFromSoap,
   fetchEmployeeCustomerAccountNo,
   fetchEmployeeRecordFast,
   fetchEmployeeSalaryBase,
@@ -439,18 +440,40 @@ export function employeeResetTokenMatches(employee: BcEmployee, resetToken: stri
 
 async function fetchEmployee(staffNo: string): Promise<BcEmployee | null> {
   const fast = await fetchEmployeeRecordFast(staffNo)
-  if (fast) return fast as BcEmployee
+  if (fast) {
+    return (await enrichEmployeeRoleFlagsFromSoap(staffNo, fast)) as BcEmployee
+  }
   const rows = (await fetchOData('QyHREmployee', {
     $filter: `No eq '${odataString(staffNo)}'`,
     $top: 1,
   }).catch(() => null)) as BcEmployee[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  if (!row) return null
+  return (await enrichEmployeeRoleFlagsFromSoap(staffNo, row as Record<string, unknown>)) as BcEmployee
+}
+
+export function selectUserSetupForEmployee(
+  rows: BcUserSetup[],
+  staffNo: string,
+  configuredIds: ReadonlyMap<string, string> = config.BC_BC_USER_ID_BY_EMPNO,
+): BcUserSetup | null {
+  if (!rows.length) return null
+  const configuredId = configuredIds.get(staffNo.trim().toUpperCase())?.trim()
+  if (!configuredId) return rows[0] ?? null
+
+  // The explicit mapping is authoritative, but it must also exist in BC User
+  // Setup. Never silently fall back to another employee's approval identity.
+  return (
+    rows.find(
+      (row) => String(row.UserID ?? '').trim().toUpperCase() === configuredId.toUpperCase(),
+    ) ?? null
+  )
 }
 
 async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
   const query = {
     $filter: `EmployeeNo eq '${odataString(staffNo)}'`,
-    $top: 1,
+    $top: 50,
   }
   const rows = (await fetchODataFromBase(
     config.BC_ODATA_BASE_URL,
@@ -458,12 +481,14 @@ async function fetchUserSetup(staffNo: string): Promise<BcUserSetup | null> {
     query,
     config.BC_LOGIN_PROBE_TIMEOUT_MS,
   ).catch(() => null)) as BcUserSetup[] | null
-  return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null
+  return Array.isArray(rows) ? selectUserSetupForEmployee(rows, staffNo) : null
 }
 
 async function isHeadOfDepartment(employeeNo: string, userID: string) {
   if (config.HOD_GRANT_ALL_AUTHENTICATED) return true
-  if (config.HOD_OVERRIDE_EMPNOS.includes(employeeNo)) return true
+  if (config.HOD_OVERRIDE_EMPNOS.map((no) => no.toUpperCase()).includes(employeeNo.toUpperCase())) {
+    return true
+  }
   const dimensionCodes = ['DEPARTMENT', 'DEPARTMENTS']
   const filters = dimensionCodes.flatMap((dimensionCode) => [
     `Staff_No eq '${odataString(employeeNo)}' and Dimension_Code eq '${dimensionCode}'`,
@@ -488,7 +513,7 @@ async function isHeadOfDepartment(employeeNo: string, userID: string) {
 }
 
 export function employeeIsHod(record: Record<string, unknown>) {
-  const value = record.IsHOD ?? record.Is_HOD ?? record['Is HOD']
+  const value = record.IsHOD ?? record.Is_HOD ?? record['Is HOD'] ?? record.isHOD
   if (typeof value === 'boolean') return value
   if (typeof value === 'number') return value !== 0
   return ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase())
@@ -557,16 +582,19 @@ async function buildAuthUser(
   const employeeHodField =
     employee.IsHOD ??
     (employee as Record<string, unknown>).Is_HOD ??
-    (employee as Record<string, unknown>)['Is HOD']
+    (employee as Record<string, unknown>)['Is HOD'] ??
+    (employee as Record<string, unknown>).isHOD
   let isHOD =
     config.HOD_GRANT_ALL_AUTHENTICATED ||
-    config.HOD_OVERRIDE_EMPNOS.includes(employeeNo) ||
+    config.HOD_OVERRIDE_EMPNOS.map((no) => no.toUpperCase()).includes(employeeNo.toUpperCase()) ||
     employeeIsHod(employee as Record<string, unknown>)
   let hasEntries = false
   ;[isHOD, hasEntries] = await Promise.all([
     isHOD
       ? Promise.resolve(true)
-      : employeeHodField !== undefined
+      : // Only skip the dimension lookup when the Employee Card clearly says "not HOD".
+        // Missing OData IsHOD must still fall through (ABH cards often omit the field).
+        employeeHodField !== undefined && employeeIsHod(employee as Record<string, unknown>) === false
         ? Promise.resolve(false)
         : isHeadOfDepartment(employeeNo, userID),
     hasApprovalEntries(userID),
@@ -604,11 +632,16 @@ async function buildAuthUser(
     departmentName: org.departmentName,
     jobTitle,
   })
-  const ictOfficerFlag = Boolean(
-    (employee as Record<string, unknown>).ICTOfficer ??
+  const ictOfficerFlag = (() => {
+    const value =
+      (employee as Record<string, unknown>).ICTOfficer ??
       (employee as Record<string, unknown>).ICT_Officer ??
-      (employee as Record<string, unknown>)['ICT Officer'],
-  )
+      (employee as Record<string, unknown>)['ICT Officer']
+    if (value === undefined || value === null || String(value).trim() === '') return false
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') return value !== 0
+    return ['true', 'yes', '1'].includes(String(value).trim().toLowerCase())
+  })()
   // Desk admins only: ICT Officer flag, explicit override, or ICT/IT Manager titles.
   // Do NOT match bare "IT" (e.g. "Media and IT Expert" must stay staff).
   const isICT =

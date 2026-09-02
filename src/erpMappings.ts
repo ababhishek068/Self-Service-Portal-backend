@@ -486,18 +486,41 @@ function leaveHeaderSignalsPending(row: ODataRecord) {
 /**
  * Resolve leave status strictly from Business Central data (header fields +
  * approval entries). BC is the single source of truth — nothing is stored locally.
+ *
+ * Approval-entry outcomes win over stale header flags: after a manager rejects,
+ * DateTimeSentforApproval / Sent_for_approval often remain set, which must NOT
+ * keep the list stuck on "Pending Approval".
  */
 export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
-  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
-  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
-    return 'Pending Approval'
+  const entryStatuses = approvalEntries.map((entry) =>
+    statusFromBc(text(entry, ['Status'], '')),
+  )
+
+  // 1) Any rejected approval step is terminal.
+  if (entryStatuses.some((status) => status === 'Rejected')) return 'Rejected'
+
+  // 2) Still waiting on an open/pending approval step.
+  if (approvalEntries.some(leaveApprovalEntryIsActive)) return 'Pending Approval'
+
+  // 3) Workflow finished with approvals (canceled later steps are fine).
+  if (
+    entryStatuses.length > 0 &&
+    entryStatuses.every((status) => status === 'Approved' || status === 'Cancelled') &&
+    entryStatuses.some((status) => status === 'Approved')
+  ) {
+    return 'Approved'
   }
 
-  if (leaveSentForApproval(row)) return 'Pending Approval'
-
-  if (leaveSentForApprovalFlag(row)) return 'Pending Approval'
-
-  if (approvalEntries.some(leaveApprovalEntryIsActive)) {
+  // 4) Header ApprovalStatus / Status.
+  const approvalStatus = text(row, ['ApprovalStatus', 'Approval_Status']).trim().toLowerCase()
+  if (approvalStatus.includes('reject')) return 'Rejected'
+  if (
+    approvalStatus === 'approved' ||
+    (approvalStatus.includes('approve') && !approvalStatus.includes('pending'))
+  ) {
+    return 'Approved'
+  }
+  if (approvalStatus === 'pending approval' || approvalStatus === 'pending') {
     return 'Pending Approval'
   }
 
@@ -505,19 +528,20 @@ export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecor
   if (mapped === 'Approved' || mapped === 'Rejected' || mapped === 'Cancelled') {
     return mapped
   }
+
+  // 5) Sent-for-approval flag only matters when there is no terminal/active outcome.
+  //    Cancel-only entries (employee cancelled pending approval) reopen as draft/open.
+  if (leaveSentForApproval(row) || leaveSentForApprovalFlag(row)) {
+    if (entryStatuses.length > 0 && entryStatuses.every((status) => status === 'Cancelled')) {
+      return mapped === 'Open' || mapped === 'Draft' ? mapped : 'Cancelled'
+    }
+    return 'Pending Approval'
+  }
+
   if (mapped !== 'Open' && mapped !== 'Draft') return mapped
 
   // Only promote Open/Draft → Pending below; terminal states already returned.
   if (leaveHeaderSignalsPending(row)) return 'Pending Approval'
-
-  if (
-    approvalEntries.some((entry) => {
-      const stepStatus = statusFromBc(text(entry, ['Status'], 'Open'))
-      return ['Pending Approval', 'Submitted', 'Approved', 'Rejected'].includes(stepStatus)
-    })
-  ) {
-    return 'Pending Approval'
-  }
 
   return mapped
 }

@@ -48,11 +48,21 @@ function syncLinePricing(
   values: FieldValues,
   form: UseFormReturn<FieldValues>,
 ) {
-  const qty = Number(values.quantity ?? 0)
-  const unit = Number(values.estimatedUnitPrice ?? 0)
-  const total = Number.isFinite(qty * unit) ? qty * unit : 0
-  if (Number(values.estimatedTotalPrice ?? 0) !== total) {
-    form.setValue('estimatedTotalPrice', total, { shouldValidate: false })
+  const parseAmount = (raw: unknown) => {
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0
+    const cleaned = String(raw ?? '')
+      .replace(/,/g, '')
+      .replace(/[^\d.-]/g, '')
+      .trim()
+    if (!cleaned) return 0
+    const parsed = Number(cleaned)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  const qty = parseAmount(values.quantity)
+  const unit = parseAmount(values.estimatedUnitPrice)
+  const total = Math.round(qty * unit * 100) / 100
+  if (parseAmount(values.estimatedTotalPrice) !== total) {
+    form.setValue('estimatedTotalPrice', total, { shouldValidate: false, shouldDirty: true })
   }
 }
 
@@ -202,6 +212,8 @@ export function PurchaseRequisition() {
           options: purchaseBudgetTypeOptions,
           valuePaths: ['BudgetType', 'Budget_Type'],
           valueMap: {
+            '0': 'project',
+            '1': 'nonProject',
             project: 'project',
             'non-project': 'nonProject',
             nonproject: 'nonProject',
@@ -394,43 +406,43 @@ export function PurchaseRequisition() {
             label: 'Category',
             type: 'select',
             options: purchaseCategoryOptions,
-            valuePaths: ['category', 'RequestCategory', 'requestCategory'],
+            valuePaths: ['category', 'PortalCategory', 'Portal_Category', 'RequestCategory', 'Request_Category', 'requestCategory', 'ItemCategoryCode'],
           },
           {
             name: 'itemName',
             label: 'Item / Service Name',
             type: 'text',
-            placeholder: 'Example: Laptop, audit service, office chair',
-            valuePaths: ['itemName'],
+            placeholder: 'Example: Laptop, audit service, office chair — free text is allowed',
+            valuePaths: ['itemName', 'Description', 'description'],
           },
-          { name: 'description', label: 'Description', type: 'textarea' },
-          { name: 'specification', label: 'Specification', type: 'textarea' },
+          { name: 'description', label: 'Description', type: 'textarea', valuePaths: ['description', 'PortalLineDescription', 'reasonForRequest'] },
+          { name: 'specification', label: 'Specification', type: 'textarea', valuePaths: ['specification', 'RequestSummary', 'reasonForRequest'] },
           {
             name: 'uom',
             label: 'UOM',
             type: 'select',
             options: storeUomOptions,
-            valuePaths: ['uom', 'unitOfMeasure', 'UnitOfMeasureCode', 'Unit_of_Measure_Code'],
+            valuePaths: ['uom', 'unitOfMeasure', 'UnitOfMeasureCode', 'Unit_of_Measure_Code', 'UnitOfMeasure'],
           },
           { name: 'quantity', label: 'Quantity', type: 'number' },
           {
             name: 'estimatedUnitPrice',
             label: 'Estimated Unit Price (optional)',
             type: 'number',
-            valuePaths: ['directUnitCost', 'estimatedUnitPrice'],
+            valuePaths: ['estimatedUnitPrice', 'directUnitCost', 'PortalEstimatedUnitPrice', 'DirectUnitCost'],
           },
           {
             name: 'estimatedTotalPrice',
             label: 'Estimated Total Price (optional, auto)',
             type: 'number',
             readOnly: true,
-            valuePaths: ['amount', 'estimatedTotalPrice'],
+            valuePaths: ['estimatedTotalPrice', 'amount', 'LineAmount'],
           },
           {
             name: 'preferredBrandModel',
             label: 'Preferred Brand / Model (optional)',
             type: 'text',
-            valuePaths: ['preferredBrandModel', 'PreferredBrandModel', 'RFQRemarks'],
+            valuePaths: ['preferredBrandModel', 'PreferredBrandModel', 'Preferred_Brand_Model', 'RFQRemarks'],
           },
           {
             name: 'requiredDate',
@@ -442,13 +454,13 @@ export function PurchaseRequisition() {
             name: 'suggestedSupplier',
             label: 'Suggested Supplier (optional)',
             type: 'text',
-            valuePaths: ['suggestedSupplier', 'SuggestedSupplier'],
+            valuePaths: ['suggestedSupplier', 'SuggestedSupplier', 'Suggested_Supplier'],
           },
           {
             name: 'remarks',
             label: 'Remarks (optional)',
             type: 'text',
-            valuePaths: ['remarks', 'ExtendedDescription', 'extendedDescription'],
+            valuePaths: ['remarks', 'PortalRemarks', 'Portal_Remarks', 'ExtendedDescription', 'extendedDescription'],
           },
         ],
         columns: [
@@ -474,7 +486,10 @@ export function PurchaseRequisition() {
           {
             key: 'specification',
             header: 'Specification',
-            visibleWhen: (lines) => lines.some((line) => hasText(line.specification ?? line.reasonForRequest)),
+            format: (value, line) => {
+              const text = String(value ?? line?.reasonForRequest ?? '').trim()
+              return text || '—'
+            },
           },
           {
             key: 'unitOfMeasure',
@@ -500,12 +515,12 @@ export function PurchaseRequisition() {
           {
             key: 'preferredBrandModel',
             header: 'Brand / Model',
-            visibleWhen: (lines) => lines.some((line) => hasText(line.preferredBrandModel)),
+            format: (value) => String(value ?? '').trim() || '—',
           },
           {
             key: 'suggestedSupplier',
             header: 'Supplier',
-            visibleWhen: (lines) => lines.some((line) => hasText(line.suggestedSupplier)),
+            format: (value) => String(value ?? '').trim() || '—',
           },
           {
             key: 'requiredDate',
@@ -515,7 +530,7 @@ export function PurchaseRequisition() {
           {
             key: 'remarks',
             header: 'Remarks',
-            visibleWhen: (lines) => lines.some((line) => hasText(line.remarks)),
+            format: (value) => String(value ?? '').trim() || '—',
           },
         ],
         emptyText: '*** No Purchase Lines Found ***',

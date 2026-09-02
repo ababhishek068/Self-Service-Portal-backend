@@ -5,7 +5,6 @@ import { Eye, Trash2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
-import { FileUpload, type FileUploadItemState } from '@/components/shared/FileUpload'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -35,7 +34,6 @@ import {
   resolveApplicableLeaveBalance,
   requestLeaveApproval,
   submitLeaveRequest,
-  uploadLeaveDocumentAttachment,
   LEAVE_FAMILY_MEMBER_OPTIONS,
   type LeaveListRow,
   type LeaveType,
@@ -46,7 +44,6 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import type { ApprovalStep, PortalRequest } from '@/types/erp.types'
 import { env } from '@/config/env'
-import type { Attachment } from '@/types/erp.types'
 import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
 
 const DASH = '—'
@@ -181,43 +178,6 @@ function resolveCreatedLeaveDocumentNo(result: {
   return ''
 }
 
-async function uploadLeaveAttachments(
-  documentNo: string,
-  files: Attachment[],
-  onFileState?: (fileId: string, state: FileUploadItemState) => void,
-) {
-  let lastError: Error | null = null
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 900 * attempt))
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 800))
-      }
-      for (const file of files) {
-        if (!file.contentBase64) {
-          throw new Error(`${file.fileName} could not be read. Please re-select the file.`)
-        }
-        onFileState?.(file.id, 'uploading')
-        await uploadLeaveDocumentAttachment(documentNo, {
-          fileName: file.fileName,
-          fileType: file.fileType,
-          size: file.size,
-          contentBase64: file.contentBase64,
-          description: file.description || 'Leave Attachment',
-        })
-        onFileState?.(file.id, 'success')
-      }
-      return
-    } catch (err: unknown) {
-      lastError = err instanceof Error ? err : new Error('Attachment upload failed.')
-      for (const file of files) {
-        onFileState?.(file.id, 'error')
-      }
-    }
-  }
-  throw lastError ?? new Error('Attachment upload failed.')
-}
 
 async function syncLeaveStatusFromBc(
   requestNo: string,
@@ -231,7 +191,7 @@ async function syncLeaveStatusFromBc(
     await new Promise((resolve) => setTimeout(resolve, 4000))
     try {
       const detail = await fetchLeaveRequestDetail(requestNo, { silent: true })
-      if (['Pending Approval', 'Approved'].includes(detail.status)) {
+      if (['Pending Approval', 'Approved', 'Rejected', 'Cancelled'].includes(detail.status)) {
         queryClient.setQueryData(['hr', 'leave-detail', requestId], detail)
         queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
           (rows ?? []).map((row) =>
@@ -291,8 +251,6 @@ export function LeaveRequest() {
   })
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [pendingScrollToDetail, setPendingScrollToDetail] = useState(false)
-  const [creationAttachments, setCreationAttachments] = useState<Attachment[]>([])
-  const [creationAttachmentStates, setCreationAttachmentStates] = useState<Record<string, FileUploadItemState>>({})
   const [detailAction, setDetailAction] = useState<string | null>(null)
   const detailQuery = useQuery({
     queryKey: ['hr', 'leave-detail', selectedRequestId],
@@ -321,7 +279,7 @@ export function LeaveRequest() {
   const [types, setTypes] = useState<LeaveType[]>([])
   const [relievers, setRelievers] = useState<Array<{ value: string; label: string }>>([])
   const [submittingForm, setSubmittingForm] = useState(false)
-  const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating' | 'uploading' | 'approval'>('idle')
+  const [submitPhase, setSubmitPhase] = useState<'idle' | 'creating'>('idle')
   const availableTypes = types
   const leaveTypeNameByCode = useMemo(
     () => new Map(
@@ -572,8 +530,6 @@ export function LeaveRequest() {
     setFamilyMember('')
     setDeliveryDate('')
     setReason('')
-    setCreationAttachments([])
-    setCreationAttachmentStates({})
   }
 
   const resetForm = () => {
@@ -707,18 +663,6 @@ export function LeaveRequest() {
       setError('Sick leave can only start today or tomorrow.')
       return
     }
-    if (requiresMedicalAttachment && creationAttachments.length === 0) {
-      setError('A supporting attachment is required for sick leave.')
-      return
-    }
-    if (requiresWeddingAttachment && creationAttachments.length === 0) {
-      setError('A wedding certificate attachment is required for wedding leave.')
-      return
-    }
-    if (creationAttachments.some((file) => file.size > 10_000_000)) {
-      setError('Leave attachments cannot exceed 10 MB each.')
-      return
-    }
     if (!isMaternityLeave && !unlimitedDays && balance !== null && submittedDays > balance) {
       setError(`Insufficient leave balance. Available: ${formatDays(balance)} day(s).`)
       return
@@ -736,23 +680,21 @@ export function LeaveRequest() {
     const confirmed = await confirm({
       title: 'Create leave application',
       message:
-        creationAttachments.length > 0
-          ? 'Create this leave application and upload the selected file(s)? You can then request approval below.'
+        requiresMedicalAttachment || requiresWeddingAttachment
+          ? 'Create this leave as a draft? After it is created, upload the required attachment below, then click Request Approval.'
           : 'Create this leave application as a draft? You can then request approval below.',
       confirmLabel: 'Create application',
     })
     if (!confirmed) return
     setSubmittingForm(true)
     setSubmitPhase('creating')
-    setCreationAttachmentStates({})
-    const hasAttachments = creationAttachments.length > 0
     const progressId = progress.show({
       title: 'Creating leave application…',
       message: 'Saving your request — please wait.',
       blocking: true,
     })
     try {
-      // Step 1 — always create the draft first. Approval is a separate, explicit step.
+      // Always create the draft first. Attachment + approval checks happen later.
       const result = await submitLeaveRequest({
         leaveType,
         appliedDays: isMaternityLeave ? 1 : submittedDays,
@@ -771,7 +713,6 @@ export function LeaveRequest() {
         const createdRequestId = documentNo
           ? `leave-${documentNo}`
           : resolveCreatedLeaveRequestId(result)
-        let attachmentError = ''
         const finalStatus = result.request?.status ?? 'Open'
         const createdListRow: LeaveListRow | null = documentNo
           ? {
@@ -787,31 +728,10 @@ export function LeaveRequest() {
             }
           : null
 
-        // The SOAP response is already authoritative that the Open draft exists. Show it
-        // immediately instead of waiting for the separate BC OData service to catch up.
         if (createdListRow) {
           queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
             upsertCreatedLeaveListRow(rows, createdListRow),
           )
-        }
-
-        // Step 2 — upload selected attachments onto the freshly created draft (BC needs the document no first).
-        if (hasAttachments) {
-          try {
-            if (!documentNo) {
-              throw new Error('The document number was not returned. Refresh the list and open the latest application.')
-            }
-            setSubmitPhase('uploading')
-            progress.update(progressId, {
-              title: 'Uploading attachments…',
-              message: 'Sending your files — please wait.',
-            })
-            await uploadLeaveAttachments(documentNo, creationAttachments, (fileId, state) => {
-              setCreationAttachmentStates((current) => ({ ...current, [fileId]: state }))
-            })
-          } catch (err: unknown) {
-            attachmentError = err instanceof Error ? err.message : 'Attachment upload failed.'
-          }
         }
 
         await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
@@ -845,37 +765,27 @@ export function LeaveRequest() {
             queryClient.setQueryData(['hr', 'leave-detail', createdRequestId], {
               ...detail,
               status: finalStatus,
-              // This call explicitly creates a draft (requestApproval=false). Do not let
-              // historical BC Approval Entry rows from a reused document number make the
-              // brand-new draft appear approved before the employee requests approval.
               approvalSteps:
                 finalStatus === 'Open' || finalStatus === 'Draft' ? [] : detail.approvalSteps,
             })
           }
-          // Draft is saved — clear the form so it can't be resubmitted, and move the user to
-          // the created application where Request Approval is the obvious next step.
           clearLeaveInputs()
           setPendingScrollToDetail(true)
         }
 
         setSuccess(
-          attachmentError
-            ? 'Leave application created, but the attachment could not be uploaded. Open it below, retry the upload, then click Request Approval.'
-            : documentNo
-              ? hasAttachments
-                ? 'Leave application created and attachment uploaded. Review it below, then click Request Approval.'
-                : 'Leave application created as a draft. Review it below, then click Request Approval.'
-              : result.message,
+          documentNo
+            ? requiresMedicalAttachment || requiresWeddingAttachment
+              ? 'Leave draft created. Upload the required attachment below, then click Request Approval.'
+              : 'Leave application created as a draft. Review it below, then click Request Approval.'
+            : result.message,
         )
         setError(null)
         toast.success(
-          attachmentError
-            ? 'Leave created, but attachment upload failed.'
-            : documentNo
-              ? 'Leave application created. Click Request Approval below.'
-              : result.message ?? 'Leave application processed.',
+          documentNo
+            ? 'Leave application created. Continue below.'
+            : result.message ?? 'Leave application processed.',
         )
-        if (attachmentError) toast.error(attachmentError, 'Attachment not uploaded')
       } else {
         setError(result.message ?? 'Submission failed.')
         toast.error(result.message ?? 'Submission failed.', 'Leave not submitted')
@@ -975,6 +885,37 @@ export function LeaveRequest() {
       )
       return
     }
+
+    const leaveTypeText = [
+      payloadValue(selected.payload ?? {}, [
+        'LeaveType',
+        'Leave_Type',
+        'LeaveTypeCode',
+        'Leave_Type_Code',
+      ]),
+      payloadValue(selected.payload ?? {}, [
+        'LeaveTypeDescription',
+        'Leave_Type_Description',
+        'Description',
+      ]),
+    ]
+      .filter((value) => value && value !== DASH)
+      .join(' ')
+    const needsMedicalAttachment = /sick|medical|illness|hospital/i.test(leaveTypeText)
+    const needsWeddingAttachment = /wedding|marriage/i.test(leaveTypeText)
+    if (
+      (needsMedicalAttachment || needsWeddingAttachment) &&
+      (selected.attachments?.length ?? 0) === 0
+    ) {
+      toast.error(
+        needsMedicalAttachment
+          ? 'Upload a supporting medical attachment before requesting approval for sick leave.'
+          : 'Upload a wedding / marriage certificate before requesting approval for marriage leave.',
+        'Attachment required',
+      )
+      return
+    }
+
     const confirmed = await confirm({
       title: 'Request leave approval',
       message: `Send leave application ${selected.requestNo} for approval?`,
@@ -1097,6 +1038,19 @@ export function LeaveRequest() {
   const selected = detailQuery.data
   const selectedEffectiveStatus = effectiveLeaveStatus(selected)
   const selectedPayload = selected?.payload ?? {}
+
+  // Keep the list badge in sync with detail (e.g. Rejected while header still says Pending).
+  useEffect(() => {
+    if (!selected?.requestNo || !selectedEffectiveStatus) return
+    queryClient.setQueryData<LeaveListRow[]>(['hr', 'leave-list'], (rows) =>
+      (rows ?? []).map((row) =>
+        row.ApplicationCode === selected.requestNo && row.Status !== selectedEffectiveStatus
+          ? { ...row, Status: selectedEffectiveStatus }
+          : row,
+      ),
+    )
+  }, [queryClient, selected?.requestNo, selectedEffectiveStatus])
+
   const detailApprovalSteps = useMemo(() => {
     if (!selected) return []
     // An Open/Draft application has not entered the approval workflow.  Do not
@@ -1390,42 +1344,20 @@ export function LeaveRequest() {
                 />
               </div>
 
-              <div className="space-y-3 rounded-xl border-l-4 border-orange-500 bg-orange-50 p-4 text-sm text-orange-900">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+              {(requiresMedicalAttachment || requiresWeddingAttachment) ? (
+                <div className="space-y-2 rounded-xl border-l-4 border-orange-500 bg-orange-50 p-4 text-sm text-orange-900">
                   <p className="font-bold">
-                    Leave Attachments
-                    {requiresMedicalAttachment || requiresWeddingAttachment ? ' (Required)' : ' (Optional)'}
+                    {requiresMedicalAttachment
+                      ? 'Sick leave attachment'
+                      : 'Marriage leave attachment'}
                   </p>
-                  {creationAttachments.length > 0 ? (
-                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-orange-700">
-                      {creationAttachments.length} file{creationAttachments.length === 1 ? '' : 's'} selected
-                    </span>
-                  ) : null}
+                  <p className="text-xs text-orange-800/90">
+                    Create the draft first. Then upload the required
+                    {requiresMedicalAttachment ? ' medical supporting document' : ' wedding / marriage certificate'}
+                    {' '}on the application below, and click <strong>Request Approval</strong>. Attachment checks run only at that step.
+                  </p>
                 </div>
-                <p className="text-xs text-orange-800/90">
-                  {creationAttachments.length > 0
-                    ? 'Selected files are listed below. They upload to Business Central right after the draft is created. You then click Request Approval below.'
-                    : 'Choose your files first — they appear here immediately, then upload automatically once the draft is created.'}
-                </p>
-                <FileUpload
-                  files={creationAttachments}
-                  onChange={(files) => {
-                    setCreationAttachments(files)
-                    setCreationAttachmentStates({})
-                  }}
-                  hideHeader
-                  hideEmptyState
-                  compactWhenHasFiles
-                  fileStates={creationAttachmentStates}
-                  emptyHint="No files selected yet. Choose PDF, DOC, DOCX, JPG, or PNG up to 10 MB each."
-                />
-                {submitPhase === 'uploading' ? (
-                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-                    Uploading selected file(s) to the leave draft…
-                  </p>
-                ) : null}
-                <p className="text-xs text-orange-800/90">Maximum 10 MB per file for leave attachments.</p>
-              </div>
+              ) : null}
 
               <div className="flex justify-center pt-2">
                 <Button
@@ -1434,13 +1366,9 @@ export function LeaveRequest() {
                   className="min-w-[180px] rounded-full"
                   disabled={submittingForm || !canSubmit}
                 >
-                  {submitPhase === 'creating'
+                  {submitPhase === 'creating' || submittingForm
                     ? 'Creating draft…'
-                    : submitPhase === 'uploading'
-                      ? 'Uploading attachments…'
-                      : submittingForm
-                        ? 'Saving…'
-                        : 'Create Leave Application'}
+                    : 'Create Leave Application'}
                 </Button>
               </div>
             </div>
@@ -1612,6 +1540,39 @@ export function LeaveRequest() {
                     <ApprovalTimeline steps={detailApprovalSteps} />
                   </section>
                 ) : null}
+
+                {(() => {
+                  const leaveTypeText = [
+                    payloadValue(selectedPayload, [
+                      'LeaveType',
+                      'Leave_Type',
+                      'LeaveTypeCode',
+                      'Leave_Type_Code',
+                    ]),
+                    payloadValue(selectedPayload, [
+                      'LeaveTypeDescription',
+                      'Leave_Type_Description',
+                      'Description',
+                    ]),
+                  ]
+                    .filter((value) => value && value !== DASH)
+                    .join(' ')
+                  if (/sick|medical|illness|hospital/i.test(leaveTypeText)) {
+                    return (
+                      <p className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+                        Sick leave: upload a supporting document here, then click Request Approval. Attachment is checked only when you request approval.
+                      </p>
+                    )
+                  }
+                  if (/wedding|marriage/i.test(leaveTypeText)) {
+                    return (
+                      <p className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+                        Marriage leave: upload the wedding / marriage certificate here, then click Request Approval. Attachment is checked only when you request approval.
+                      </p>
+                    )
+                  }
+                  return null
+                })()}
 
                 <RequestAttachments
                   requestId={selected.id}

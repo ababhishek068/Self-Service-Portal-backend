@@ -19,6 +19,7 @@ export type BadgeStatus =
   | 'Open'
   | 'Synced'
   | 'Error'
+  | 'Waiting'
 
 export interface BusinessCentralEntity {
   id: string
@@ -75,7 +76,7 @@ export interface ApprovalStep {
   actorEmployeeNo: string
   actorName: string
   role: 'Maker' | 'Checker' | 'Finance' | 'Facility' | 'HR' | 'System'
-  status: RequestStatus | 'Submitted'
+  status: RequestStatus | 'Submitted' | 'Waiting'
   timestamp: string
   note?: string
   sequenceNo?: number

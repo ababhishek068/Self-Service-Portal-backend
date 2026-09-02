@@ -17,6 +17,8 @@ import {
   passengerTypeCode,
   parsePurchaseOtherRequirements,
   portalModuleDocumentOwnedByUser,
+  isStoreOriginatedPurchaseRow,
+  storeOriginatedPurchaseVisible,
   purchasePriorityCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
@@ -25,9 +27,13 @@ import {
 import { soapFaultMessage } from './bcClient.js'
 import {
   normalizeSequentialApprovalStatuses,
+  mergeApprovalComments,
+  newestApprovalStepsPerSlot,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
+  selectApprovalWorkflowEntries,
 } from './leaveApprovalSteps.js'
+import { selectUserSetupForEmployee } from './auth.js'
 import {
   isHalfDaySelection,
   halfDayOptionValue,
@@ -49,6 +55,7 @@ import {
   overlappingLeaveApplication,
   parseEmployeeProfileReturn,
   sickLeaveStartDateAllowed,
+  leaveApprovalSoapParams,
 } from './staff.js'
 import {
   approvalIdentityIdsFromUserSetupRows,
@@ -76,6 +83,18 @@ import {
   validateEmployeeExitDetails,
 } from './employeeExit.js'
 import { hrServiceLetterCanBeDeleted } from './hrServiceLetters.js'
+
+describe('Leave approval SOAP contract', () => {
+  it('emits RequestLeaveApproval parameters in the positional order required by BC', () => {
+    const params = leaveApprovalSoapParams('ABH-010', 'LV-00004')
+    assert.deepEqual(Object.keys(params), ['employeeNo', 'requisitionNo', 'tableID'])
+    assert.deepEqual(params, {
+      employeeNo: 'ABH-010',
+      requisitionNo: 'LV-00004',
+      tableID: 50532,
+    })
+  })
+})
 
 import {
   cachedPasswordResetTokenMatches,
@@ -185,7 +204,7 @@ describe('purchase stock decision authorization', () => {
     )
     assert.throws(
       () => assertPurchaseProcessActionAllowed(finance, 'PROCUREMENT_APPROVAL', 'PROCUREMENT_RETURNED'),
-      /reason is required/i,
+      /reason.*required/i,
     )
     assert.throws(
       () => assertPurchaseProcessActionAllowed(finance, 'PO_APPROVAL', 'PAYMENT_APPROVED'),
@@ -231,6 +250,20 @@ describe('request ownership isolation', () => {
       false,
     )
   })
+
+  it('keeps store-originated purchase requests visible to store officers after reassignment', () => {
+    const spec = findModuleSpec('purchase-requisition')
+    assert.ok(spec)
+    const row = {
+      Justification: 'Stock not available in CLEANING for store requisition ABH-SR000067.',
+      Assigned_User_ID: 'ZERIHUN_USER',
+      EmployeeNo: 'ABH-010',
+      Status: 'Pending Approval',
+    }
+    assert.equal(isStoreOriginatedPurchaseRow(row), true)
+    assert.equal(storeOriginatedPurchaseVisible(row, spec!, true), true)
+    assert.equal(storeOriginatedPurchaseVisible(row, spec!, false), false)
+  })
 })
 
 describe('approval decision validation', () => {
@@ -240,14 +273,38 @@ describe('approval decision validation', () => {
   })
 
   it('requires reasons for rejection/return and marks returned SOAP comments', () => {
-    assert.throws(() => parseApprovalDecision('Rejected', ''), /reason is required/i)
-    assert.throws(() => parseApprovalDecision('Returned', '   '), /reason is required/i)
+    assert.throws(() => parseApprovalDecision('Rejected', ''), /reason.*required/i)
+    assert.throws(() => parseApprovalDecision('Returned', '   '), /reason.*required/i)
+    assert.throws(() => parseApprovalDecision('Rejected', 'No'), /at least 3 characters/i)
     assert.deepEqual(parseApprovalDecision('Returned', 'Correct quantity'), {
       decision: 'Returned',
       comment: 'Correct quantity',
       soapComment: '[RETURNED] Correct quantity',
     })
     assert.equal(parseApprovalDecision('Approved', '').decision, 'Approved')
+  })
+})
+
+describe('approval rejection comments', () => {
+  it('joins the rejecting comment to the correct approval step for requester history', () => {
+    const enriched = mergeApprovalComments(
+      [
+        { DocumentNo: 'LV-00001', ApproverID: 'APPROVER-A', Status: 'Approved', SequenceNo: 1 },
+        { DocumentNo: 'LV-00001', ApproverID: 'APPROVER-B', Status: 'Rejected', SequenceNo: 2 },
+      ],
+      [
+        {
+          DocumentNo: 'LV-00001',
+          UserID: 'APPROVER-B',
+          SequenceNo: 2,
+          Comment: 'Medical certificate is missing',
+          DateandTime: '2026-08-26T16:44:00Z',
+        },
+      ],
+    )
+    const steps = mapApprovalSteps(enriched)
+    assert.equal(steps[1]?.note, 'Medical certificate is missing')
+    assert.equal(steps[1]?.timestamp, '2026-08-26T16:44:00Z')
   })
 })
 
@@ -412,6 +469,316 @@ describe('approval identity isolation', () => {
   it('does not grant approval access merely because the user has an approver', () => {
     assert.equal(authUserCanApprove(false, false, false), false)
     assert.equal(authUserCanApprove(false, false, true), true)
+  })
+
+  it('uses the configured BC identity instead of the first duplicate User Setup row', () => {
+    const selected = selectUserSetupForEmployee(
+      [
+        { UserID: 'TESFAYE_ABEBE', EmployeeNo: 'ABH-114' },
+        { UserID: 'HERMON_GETACHEW', EmployeeNo: 'ABH-114' },
+      ],
+      'ABH-114',
+      new Map([['ABH-114', 'HERMON_GETACHEW']]),
+    )
+    assert.equal(selected?.UserID, 'HERMON_GETACHEW')
+  })
+
+  it('fails closed when the configured BC identity is absent from User Setup', () => {
+    const selected = selectUserSetupForEmployee(
+      [{ UserID: 'TESFAYE_ABEBE', EmployeeNo: 'ABH-114' }],
+      'ABH-114',
+      new Map([['ABH-114', 'HERMON_GETACHEW']]),
+    )
+    assert.equal(selected, null)
+  })
+})
+
+describe('approval workflow instance isolation', () => {
+  it('does not merge an August workflow with a September workflow using the same document number', () => {
+    const oldWorkflow = '11111111-1111-1111-1111-111111111111'
+    const currentWorkflow = '22222222-2222-2222-2222-222222222222'
+    const rows = [
+      {
+        EntryNo: 10,
+        DocumentNo: 'LV-00002',
+        WorkflowStepInstanceID: oldWorkflow,
+        ApproverID: 'HERMON_GETACHEW',
+        Status: 'Rejected',
+      },
+      {
+        EntryNo: 11,
+        DocumentNo: 'LV-00002',
+        WorkflowStepInstanceID: oldWorkflow,
+        ApproverID: 'TESFAYE_ABEBE',
+        Status: 'Canceled',
+      },
+      {
+        EntryNo: 90,
+        DocumentNo: 'LV-00002',
+        WorkflowStepInstanceID: currentWorkflow,
+        ApproverID: 'HERMON_GETACHEW',
+        Status: 'Rejected',
+      },
+      {
+        EntryNo: 91,
+        DocumentNo: 'LV-00002',
+        WorkflowStepInstanceID: currentWorkflow,
+        ApproverID: 'TESFAYE_ABEBE',
+        Status: 'Canceled',
+      },
+    ]
+
+    const selected = selectApprovalWorkflowEntries(rows)
+    assert.deepEqual(
+      selected.map((row) => row.EntryNo),
+      [90, 91],
+    )
+  })
+
+  it('uses the latest consecutive approval-entry cohort during a rolling BC upgrade', () => {
+    const selected = selectApprovalWorkflowEntries([
+      { EntryNo: 10, DocumentNo: 'LV-00002', Status: 'Rejected' },
+      { EntryNo: 11, DocumentNo: 'LV-00002', Status: 'Canceled' },
+      { EntryNo: 90, DocumentNo: 'LV-00002', Status: 'Rejected' },
+      { EntryNo: 91, DocumentNo: 'LV-00002', Status: 'Canceled' },
+    ])
+    assert.deepEqual(
+      selected.map((row) => row.EntryNo),
+      [90, 91],
+    )
+  })
+
+  it('uses the newest sent-time cohort when legacy endpoints omit workflow identity', () => {
+    const selected = selectApprovalWorkflowEntries([
+      {
+        EntryNo: 10,
+        DocumentNo: 'LV-00002',
+        Status: 'Canceled',
+        DateTimeSentforApproval: '2026-08-24T09:44:00Z',
+      },
+      {
+        EntryNo: 11,
+        DocumentNo: 'LV-00002',
+        Status: 'Canceled',
+        DateTimeSentforApproval: '2026-08-24T09:44:00Z',
+      },
+      {
+        EntryNo: 12,
+        DocumentNo: 'LV-00002',
+        Status: 'Open',
+        DateTimeSentforApproval: '2026-09-02T16:20:00Z',
+      },
+      {
+        EntryNo: 13,
+        DocumentNo: 'LV-00002',
+        Status: 'Created',
+        DateTimeSentforApproval: '2026-09-02T16:20:00Z',
+      },
+    ])
+    assert.deepEqual(
+      selected.map((row) => row.EntryNo),
+      [12, 13],
+    )
+  })
+
+  it('uses the newest modified-time cohort when a legacy query omits sent time too', () => {
+    const selected = selectApprovalWorkflowEntries([
+      {
+        EntryNo: 40,
+        DocumentNo: 'LV-00003',
+        Status: 'Rejected',
+        LastDateTimeModified: '2026-08-24T09:44:00Z',
+      },
+      {
+        EntryNo: 41,
+        DocumentNo: 'LV-00003',
+        Status: 'Canceled',
+        LastDateTimeModified: '2026-09-01T11:13:00Z',
+      },
+      {
+        EntryNo: 42,
+        DocumentNo: 'LV-00003',
+        Status: 'Canceled',
+        LastDateTimeModified: '2026-09-02T20:54:00Z',
+      },
+      {
+        EntryNo: 43,
+        DocumentNo: 'LV-00003',
+        Status: 'Rejected',
+        LastDateTimeModified: '2026-09-02T20:54:00Z',
+      },
+    ])
+    assert.deepEqual(
+      selected.map((row) => row.EntryNo),
+      [42, 43],
+    )
+  })
+
+  it('splits repeated approver slots even when every legacy timestamp is identical', () => {
+    const sameTimestamp = '2026-09-02T20:54:00Z'
+    const selected = selectApprovalWorkflowEntries([
+      {
+        EntryNo: 40,
+        DocumentNo: 'LV-00003',
+        ApproverID: 'HERMON_GETACHEW',
+        SequenceNo: 1,
+        Status: 'Rejected',
+        LastDateTimeModified: sameTimestamp,
+      },
+      {
+        EntryNo: 41,
+        DocumentNo: 'LV-00003',
+        ApproverID: 'TESFAYE_ABEBE',
+        SequenceNo: 2,
+        Status: 'Canceled',
+        LastDateTimeModified: sameTimestamp,
+      },
+      {
+        EntryNo: 42,
+        DocumentNo: 'LV-00003',
+        ApproverID: 'HERMON_GETACHEW',
+        SequenceNo: 1,
+        Status: 'Canceled',
+        LastDateTimeModified: sameTimestamp,
+      },
+      {
+        EntryNo: 43,
+        DocumentNo: 'LV-00003',
+        ApproverID: 'TESFAYE_ABEBE',
+        SequenceNo: 2,
+        Status: 'Rejected',
+        LastDateTimeModified: sameTimestamp,
+      },
+    ])
+    assert.deepEqual(
+      selected.map((row) => row.EntryNo),
+      [42, 43],
+    )
+  })
+
+  it('renders only the newest timestamp for each repeated sequence and approver', () => {
+    const selected = newestApprovalStepsPerSlot(
+      mapApprovalSteps([
+        {
+          ApproverID: 'HERMON_GETACHEW',
+          ApproverName: 'Hermon Getachew Tolla',
+          SequenceNo: 1,
+          Status: 'Canceled',
+          LastDateTimeModified: '2026-09-02T20:54:00Z',
+        },
+        {
+          ApproverID: 'HERMON_GETACHEW',
+          ApproverName: 'Hermon Getachew Tolla',
+          SequenceNo: 1,
+          Status: 'Rejected',
+          LastDateTimeModified: '2026-08-24T09:44:00Z',
+        },
+        {
+          ApproverID: 'TESFAYE_ABEBE',
+          ApproverName: 'Tesfaye Abebe Tegegn',
+          SequenceNo: 2,
+          Status: 'Canceled',
+          LastDateTimeModified: '2026-09-01T11:13:00Z',
+        },
+        {
+          ApproverID: 'TESFAYE_ABEBE',
+          ApproverName: 'Tesfaye Abebe Tegegn',
+          SequenceNo: 2,
+          Status: 'Rejected',
+          LastDateTimeModified: '2026-09-02T20:54:00Z',
+        },
+      ]),
+    )
+    assert.deepEqual(
+      selected.map((step) => [step.sequenceNo, step.actorEmployeeNo, step.status]),
+      [
+        [1, 'HERMON_GETACHEW', 'Canceled'],
+        [2, 'TESFAYE_ABEBE', 'Rejected'],
+      ],
+    )
+  })
+
+  it('preserves different parallel approvers at the same sequence', () => {
+    const selected = newestApprovalStepsPerSlot(
+      mapApprovalSteps([
+        { ApproverID: 'APPROVER_A', SequenceNo: 1, Status: 'Open' },
+        { ApproverID: 'APPROVER_B', SequenceNo: 1, Status: 'Open' },
+      ]),
+    )
+    assert.equal(selected.length, 2)
+  })
+
+  it('deduplicates the enriched async detail path used by the Leave page', async () => {
+    const selected = await resolveLeaveApprovalStepsAsync(
+      { Status: 'Rejected' },
+      [
+        {
+          ApproverID: 'HERMON_GETACHEW',
+          ApproverName: 'Hermon Getachew Tolla',
+          SequenceNo: 1,
+          Status: 'Canceled',
+          LastDateTimeModified: '2026-09-02T20:54:00Z',
+        },
+        {
+          ApproverID: 'HERMON_GETACHEW',
+          ApproverName: 'Hermon Getachew Tolla',
+          SequenceNo: 1,
+          Status: 'Rejected',
+          LastDateTimeModified: '2026-08-24T09:44:00Z',
+        },
+        {
+          ApproverID: 'TESFAYE_ABEBE',
+          ApproverName: 'Tesfaye Abebe Tegegn',
+          SequenceNo: 2,
+          Status: 'Canceled',
+          LastDateTimeModified: '2026-09-01T11:13:00Z',
+        },
+        {
+          ApproverID: 'TESFAYE_ABEBE',
+          ApproverName: 'Tesfaye Abebe Tegegn',
+          SequenceNo: 2,
+          Status: 'Rejected',
+          LastDateTimeModified: '2026-09-02T20:54:00Z',
+        },
+      ],
+      'LV-00003',
+    )
+    assert.deepEqual(
+      selected.map((step) => [step.sequenceNo, step.actorEmployeeNo, step.status]),
+      [
+        [1, 'HERMON_GETACHEW', 'Canceled'],
+        [2, 'TESFAYE_ABEBE', 'Rejected'],
+      ],
+    )
+  })
+
+  it('attaches a rejection comment only from the same workflow instance', () => {
+    const merged = mergeApprovalComments(
+      [
+        {
+          EntryNo: 90,
+          DocumentNo: 'LV-00002',
+          ApproverID: 'HERMON_GETACHEW',
+          Status: 'Rejected',
+          WorkflowStepInstanceID: '22222222-2222-2222-2222-222222222222',
+        },
+      ],
+      [
+        {
+          DocumentNo: 'LV-00002',
+          UserID: 'HERMON_GETACHEW',
+          Comment: 'Test-1',
+          WorkflowStepInstanceID: '11111111-1111-1111-1111-111111111111',
+        },
+        {
+          DocumentNo: 'LV-00002',
+          UserID: 'HERMON_GETACHEW',
+          Comment: 'not required',
+          WorkflowStepInstanceID: '22222222-2222-2222-2222-222222222222',
+        },
+      ],
+    )
+    assert.equal(merged[0]?.Comment, 'not required')
   })
 })
 
@@ -825,8 +1192,94 @@ describe('six-field leave balance contract', () => {
       totalLeaveTakenToDate: 8,
       availableLeaveBalance: 12,
     })
-    assert.equal(fields.totalAvailableLeaveBalance, 21)
+    // Entitlement + Carry + Reimbursements (gross annual balance before taken).
+    assert.equal(fields.totalAvailableLeaveBalance, 29)
     assert.equal(fields.availableLeaveBalance, 12)
+  })
+
+  it('computes Accrued To-Date as Carry + Accrued Days, Available as Accrued To-Date − Taken', () => {
+    assert.equal(
+      resolveAnnualAvailableLeaveBalance({
+        summary: parseBcLeaveSummary(
+          JSON.stringify({
+            carryForward: 27,
+            accruedDays: 2.94,
+            leaveAccruedToDate: 29.94,
+            currentTotalLeaveTaken: 8,
+            availableLeaveBalance: 21.94,
+            totalAvailableLeaveBalance: 48,
+          }),
+        ),
+      }),
+      21.94,
+    )
+    assert.equal(
+      resolveLeaveBalanceBreakdown({
+        summary: parseBcLeaveSummary(
+          JSON.stringify({
+            leaveEntitlement: 21,
+            carryForward: 27,
+            accruedDays: 2.94,
+            currentTotalLeaveTaken: 8,
+            totalAvailableLeaveBalance: 48,
+            leaveAccruedToDate: 29.94,
+            availableLeaveBalance: 21.94,
+          }),
+        ),
+        entitlement: 21,
+        carryForward: 27,
+        leaveAccruedToDate: null,
+        totalLeaveTakenToDate: 8,
+        availableLeaveBalance: 0,
+      }).leaveAccruedToDate,
+      29.94,
+    )
+    assert.equal(
+      resolveAnnualAvailableLeaveBalance({
+        summary: parseBcLeaveSummary(
+          JSON.stringify({ carryForward: 27, accruedDays: 2.94, currentTotalLeaveTaken: -8 }),
+        ),
+      }),
+      21.94,
+    )
+    assert.equal(
+      resolveLeaveBalanceBreakdown({
+        summary: parseBcLeaveSummary(
+          JSON.stringify({
+            leaveEntitlement: 21,
+            carryForward: 27,
+            accruedDays: 2.94,
+            currentTotalLeaveTaken: 8,
+            totalAvailableLeaveBalance: 48,
+          }),
+        ),
+        entitlement: 21,
+        carryForward: 27,
+        leaveAccruedToDate: null,
+        totalLeaveTakenToDate: 8,
+        availableLeaveBalance: 0,
+      }).availableLeaveBalance,
+      21.94,
+    )
+    assert.equal(
+      resolveLeaveBalanceBreakdown({
+        summary: parseBcLeaveSummary(
+          JSON.stringify({
+            leaveEntitlement: 21,
+            carryForward: 27,
+            accruedDays: 2.94,
+            currentTotalLeaveTaken: 8,
+            totalAvailableLeaveBalance: 48,
+          }),
+        ),
+        entitlement: 21,
+        carryForward: 27,
+        leaveAccruedToDate: null,
+        totalLeaveTakenToDate: 8,
+        availableLeaveBalance: 0,
+      }).totalAvailableLeaveBalance,
+      48,
+    )
   })
 
   it('ignores the old full-year current balance for annual applications', () => {
@@ -835,13 +1288,14 @@ describe('six-field leave balance contract', () => {
         currentLeaveBalance: 32,
         allocatedDays: 30,
         carryForwardBalanceForType: 6,
-        leaveAccruedToDate: 18,
+        accruedDays: 18,
+        leaveAccruedToDate: 24,
         currentTotalLeaveTaken: 4,
       }),
     )
     assert.equal(
       resolveAnnualAvailableLeaveBalance({ summary: legacySummary }),
-      18,
+      20,
     )
     assert.equal(
       resolveAnnualAvailableLeaveBalance({
@@ -975,17 +1429,17 @@ describe('parseLeaveDatesReturn', () => {
 })
 
 describe('computeLeaveDatesFallback', () => {
-  it('uses the same day for half-day leave and the next calendar day as return', () => {
+  it('uses the same day for half-day leave and the next working day as return', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
       endDate: '2026-07-17',
-      returnDate: '2026-07-18',
+      returnDate: '2026-07-20',
     })
   })
 
-  it('spans full days for normal leave', () => {
+  it('does not consume a weekend for normal leave', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
-      endDate: '2026-07-18',
-      returnDate: '2026-07-19',
+      endDate: '2026-07-20',
+      returnDate: '2026-07-21',
     })
   })
 })
@@ -1126,7 +1580,34 @@ describe('staffClaim saveLine params', () => {
     assert.equal(payload.myUserID, 'BEZA')
   })
 
-  it('sends the logged-in BC user when creating a store requisition', async () => {
+  it('sends the logged-in BC user and leaves store assignment to Operations', async () => {
+    const spec = findModuleSpec('store-requisition')
+    assert.ok(spec?.params?.saveHeader)
+    const payload = (await spec!.params!.saveHeader!({
+      req: {
+        body: {
+          justification: 'Keyboard for finance',
+          dateRequired: '2026-08-10',
+          priority: 'high',
+          requestType: 'item',
+        },
+      },
+      user: {
+        employeeNo: 'ABH-114',
+        userID: 'HERMON_GETACHEW',
+      },
+      no: '',
+    } as never)) as Record<string, unknown>
+    assert.equal(payload.myUserID, 'HERMON_GETACHEW')
+    assert.equal(payload.requestDescription, 'Keyboard for finance')
+    assert.equal(payload.justification, 'Keyboard for finance')
+    assert.equal(payload.requestDate, '2026-08-10')
+    assert.equal(payload.issuingStore, '')
+    assert.equal(payload.priority, 2)
+    assert.equal(payload.storeRequisitionType, 0)
+  })
+
+  it('ignores an Issuing Store injected by a requester', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveHeader)
     const payload = (await spec!.params!.saveHeader!({
@@ -1145,13 +1626,7 @@ describe('staffClaim saveLine params', () => {
       },
       no: '',
     } as never)) as Record<string, unknown>
-    assert.equal(payload.myUserID, 'HERMON_GETACHEW')
-    assert.equal(payload.requestDescription, 'Keyboard for finance')
-    assert.equal(payload.justification, 'Keyboard for finance')
-    assert.equal(payload.requestDate, '2026-08-10')
-    assert.equal(payload.issuingStore, 'IT_STORE')
-    assert.equal(payload.priority, 2)
-    assert.equal(payload.storeRequisitionType, 0)
+    assert.equal(payload.issuingStore, '')
   })
 
   it('rejects an incomplete store requisition line before calling Business Central', async () => {
@@ -1172,6 +1647,30 @@ describe('staffClaim saveLine params', () => {
         } as never),
       /description, UOM, and a positive quantity are required/i,
     )
+  })
+
+  it('creates a store requisition line from the stated business need without a BC item lookup', async () => {
+    const spec = findModuleSpec('store-requisition')
+    assert.ok(spec?.params?.saveLine)
+    const payload = (await spec!.params!.saveLine!({
+      req: {
+        body: {
+          type: '1',
+          itemNo: 'ITEM-001',
+          itemName: 'Heavy-duty archive boxes',
+          description: 'A4 document storage with lids',
+          quantity: 12,
+          uom: 'PCS',
+        },
+      },
+      user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
+      no: 'SREQ-TEST',
+    } as never)) as Record<string, unknown>
+
+    assert.equal(payload.itemNo, '')
+    assert.equal(payload.description, 'Heavy-duty archive boxes')
+    assert.equal(payload.remarks, 'A4 document storage with lids')
+    assert.equal(payload.quantity, 12)
   })
 
   it('rejects an incomplete purchase requisition header before calling Business Central', async () => {
@@ -1343,7 +1842,7 @@ describe('staffClaim saveLine params', () => {
           },
           no: '',
         } as never),
-      /must match your Business Central Employee Card/i,
+      /must match your employee profile/i,
     )
   })
 
@@ -1528,7 +2027,7 @@ describe('mapApprovalSteps', () => {
     assert.equal(steps[0]?.status, 'Pending Approval')
   })
 
-  it('does not show a later step as approved while an earlier step is still pending', () => {
+  it('shows a later step as waiting while an earlier step is still pending', () => {
     const steps = normalizeSequentialApprovalStatuses(
       mapApprovalSteps([
         { EntryNo: 10, ApproverID: 'FIRST', ApproverName: 'Muhammed abdi', Status: 'Pending Approval', SequenceNo: 1 },
@@ -1536,7 +2035,17 @@ describe('mapApprovalSteps', () => {
       ]),
     )
     assert.equal(steps[0]?.status, 'Pending Approval')
-    assert.equal(steps[1]?.status, 'Pending Approval')
+    assert.equal(steps[1]?.status, 'Waiting')
+  })
+
+  it('maps BC Created entries to a non-actionable waiting step', () => {
+    const steps = normalizeSequentialApprovalStatuses(
+      mapApprovalSteps([
+        { EntryNo: 10, ApproverID: 'FIRST', Status: 'Open', SequenceNo: 1 },
+        { EntryNo: 20, ApproverID: 'SECOND', Status: 'Created', SequenceNo: 2 },
+      ]),
+    )
+    assert.deepEqual(steps.map((step) => step.status), ['Pending Approval', 'Waiting'])
   })
 })
 
@@ -1925,6 +2434,25 @@ describe('leave status is driven only by Business Central', () => {
     )
   })
 
+  it('shows Rejected when an approval step was rejected (even if Sent_for_approval is still set)', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        {
+          ApplicationCode: 'LV-00002',
+          Status: 'Open',
+          ApprovalStatus: '',
+          Sent_for_approval: true,
+          DateTimeSentforApproval: '2026-08-26T12:00:00Z',
+        },
+        [
+          { Status: 'Rejected', DocumentNo: 'LV-00002' },
+          { Status: 'Canceled', DocumentNo: 'LV-00002' },
+        ],
+      ),
+      'Rejected',
+    )
+  })
+
   it('leaveIsPendingInBc reflects only Business Central data', () => {
     assert.equal(leaveIsPendingInBc({ Status: 'Open', ApprovalStatus: '' }, []), false)
     assert.equal(
@@ -2181,5 +2709,16 @@ describe('HOD role resolution', () => {
     assert.equal(employeeIsHod({ 'Is HOD': 'Yes' }), true)
     assert.equal(employeeIsHod({ IsHOD: false }), false)
     assert.equal(employeeIsHod({ IsHOD: 'false' }), false)
+  })
+
+  it('merges OData employee probes so Is HOD is not dropped by a faster incomplete service', async () => {
+    const { mergeEmployeeODataRecords } = await import('./employeeProfile.js')
+    const merged = mergeEmployeeODataRecords([
+      { No: 'ABH-114', FirstName: 'Hermon', JobTitle: 'IT Manger' },
+      { No: 'ABH-114', IsHOD: true, ICTOfficer: true },
+    ])
+    assert.equal(merged?.IsHOD, true)
+    assert.equal(merged?.ICTOfficer, true)
+    assert.equal(merged?.FirstName, 'Hermon')
   })
 })

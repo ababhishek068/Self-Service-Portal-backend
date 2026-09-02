@@ -1055,8 +1055,90 @@ async function jobODataServices() {
   return [...services]
 }
 
-const FAST_EMPLOYEE_SERVICES = ['QyHREmployee', 'QyPREmployee', 'Employee_Card', 'EmployeeCard']
+const FAST_EMPLOYEE_SERVICES = [
+  'QyHREmployee',
+  'HrEmployee',
+  'QyHrEmployee',
+  'QyPREmployee',
+  'Employee_Card',
+  'EmployeeCard',
+]
 const PAGE_EMPLOYEE_SERVICES = ['Employee_Card', 'EmployeeCard', 'QyHREmployeeCard', 'HREmployeeCard']
+
+const EMPLOYEE_HOD_FLAG_KEYS = ['IsHOD', 'Is_HOD', 'Is HOD', 'isHOD'] as const
+const EMPLOYEE_ICT_FLAG_KEYS = ['ICTOfficer', 'ICT_Officer', 'ICT Officer'] as const
+
+function roleFlagTruthy(value: unknown) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  return ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase())
+}
+
+function recordHasRoleFlagKey(record: ODataRecord, keys: readonly string[]) {
+  return keys.some((key) => record[key] !== undefined && record[key] !== null && String(record[key]).trim() !== '')
+}
+
+/** Merge OData employee rows; keep identity fields and OR role flags (Is HOD / ICT Officer). */
+export function mergeEmployeeODataRecords(records: ODataRecord[]): ODataRecord | null {
+  const found = records.filter((row) => row && typeof row === 'object')
+  if (found.length === 0) return null
+  const merged: ODataRecord = {}
+  for (const row of found) {
+    for (const [key, value] of Object.entries(row)) {
+      if (value === undefined || value === null) continue
+      if (String(value).trim() === '' && merged[key] !== undefined) continue
+      merged[key] = value
+    }
+  }
+  if (found.some((row) => roleFlagTruthy(row.IsHOD ?? row.Is_HOD ?? row['Is HOD'] ?? row.isHOD))) {
+    merged.IsHOD = true
+  }
+  if (
+    found.some((row) =>
+      roleFlagTruthy(row.ICTOfficer ?? row.ICT_Officer ?? row['ICT Officer']),
+    )
+  ) {
+    merged.ICTOfficer = true
+  }
+  return merged
+}
+
+function parseEmployeeProfileRoleFlags(raw: string) {
+  const text = String(raw ?? '')
+  const pick = (name: string) => {
+    const match = text.match(new RegExp(`(?:^|#)${name}=([^#]*)`, 'i'))
+    return match?.[1]?.trim() ?? ''
+  }
+  return {
+    isHod: roleFlagTruthy(pick('IsHOD') || pick('Is_HOD') || pick('Is HOD')),
+    ictOfficer: roleFlagTruthy(pick('ICTOfficer') || pick('ICT_Officer') || pick('ICT Officer')),
+    hasHodKey: /(?:^|#)IsHOD=/i.test(text) || /(?:^|#)Is_HOD=/i.test(text),
+    hasIctKey: /(?:^|#)ICTOfficer=/i.test(text) || /(?:^|#)ICT_Officer=/i.test(text),
+  }
+}
+
+/** When OData omits card flags, read Is HOD / ICT Officer from StaffPortal SOAP profile. */
+export async function enrichEmployeeRoleFlagsFromSoap(
+  employeeNo: string,
+  record: ODataRecord,
+): Promise<ODataRecord> {
+  const trimmed = employeeNo.trim()
+  if (!trimmed) return record
+  const hasHod = recordHasRoleFlagKey(record, EMPLOYEE_HOD_FLAG_KEYS)
+  const hasIct = recordHasRoleFlagKey(record, EMPLOYEE_ICT_FLAG_KEYS)
+  if (hasHod && hasIct) return record
+
+  try {
+    const profile = await callSoapMethod('FnGetEmployeeProfile', { employeeNo: trimmed })
+    const flags = parseEmployeeProfileRoleFlags(String(profile.returnValue ?? ''))
+    const next: ODataRecord = { ...record }
+    if (!hasHod && flags.hasHodKey) next.IsHOD = flags.isHod
+    if (!hasIct && flags.hasIctKey) next.ICTOfficer = flags.ictOfficer
+    return next
+  } catch {
+    return record
+  }
+}
 
 function salaryProbeServices() {
   return [
@@ -1221,7 +1303,7 @@ export async function probeEmployeeSalarySources(
   }
 }
 
-/** Single fast lookup for login/auth — parallel probes, short per-URL timeout. */
+/** Single fast lookup for login/auth — parallel probes, merge rows so Is HOD / ICT Officer are not dropped. */
 export async function fetchEmployeeRecordFast(employeeNo: string): Promise<ODataRecord | null> {
   const trimmed = employeeNo.trim()
   if (!trimmed) return null
@@ -1251,7 +1333,7 @@ export async function fetchEmployeeRecordFast(employeeNo: string): Promise<OData
   )
 
   const results = await Promise.all(probes)
-  return results.find((row): row is ODataRecord => Boolean(row)) ?? null
+  return mergeEmployeeODataRecords(results.filter((row): row is ODataRecord => Boolean(row)))
 }
 
 async function enrichEmployeeRecordFromPageBases(employeeNo: string, merged: ODataRecord) {

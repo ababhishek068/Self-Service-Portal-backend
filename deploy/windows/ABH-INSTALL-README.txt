@@ -1,8 +1,9 @@
-ABH SELF SERVICE PORTAL — INSTALL v1.0.3.295 / API v143
+ABH SELF SERVICE PORTAL — INSTALL v1.0.3.343 / API v192
 ======================================================
 
 This is the paired ABH UAT release. It includes Business Central app
-1.0.3.199, audited Purchase and Store Requisitions, production Employee Exit
+1.0.3.273, workflow-driven ERP approvals and requester-visible rejection notes,
+requester-visible mandatory rejection reasons, audited Purchase and Store Requisitions, production Employee Exit
 Supervisor/HR routing, Imprest Surrender, mandatory claim/sick-leave
 attachments, attendance grace
 rules and 7:00 PM auto sign-out, live HOD department functions, HR-only policy
@@ -13,24 +14,26 @@ PORTAL INSTALL
 ==============
 
 1) Keep the old portal folder as a rollback copy.
-2) Extract ABH-Portal-COMPLETE-1.0.3.295.zip to C:\TA\
+2) Extract ABH-Portal-COMPLETE-1.0.3.343.zip to C:\TA\
 3) Copy the working .env into:
    SelfServiceSuite\SelfServiceBackend\.env
 4) Run VERIFY-SUITE.bat. It must say ALL CHECKS PASSED.
 5) Run START-ABH-PORTAL.bat.
 6) Open http://146.161.102.7:4000/api/portal-build
-   Expected: v143 — 1.0.3.295 (production Employee Exit approval routing; BC 1.0.3.199)
+   Expected: v192 — 1.0.3.343 (BC leave approval SOAP parameter order)
 7) Log in and press Ctrl+Shift+R once to clear the old browser bundle.
+8) In Administrator PowerShell, run INSTALL-AUTOSTART.ps1 once to start the
+   portal automatically after every Windows server restart.
 
 BUSINESS CENTRAL APP
 ====================
 
 1) Open the extracted BusinessCentral folder.
-2) Copy "Technology Associates EA Ltd_BC24_TA App_1.0.3.199.app" to
+2) Copy "Technology Associates EA Ltd_BC24_TA App_1.0.3.273.app" to
    C:\TA\publish\ on the Business Central server.
 3) Run ABH-PUBLISH-BC.ps1 as Administrator in the Business Central
    Administration Shell.
-4) Confirm BC24_TA App 1.0.3.199 is installed. The StaffPortal codeunit
+4) Confirm BC24_TA App 1.0.3.273 is installed. The StaffPortal codeunit
    includes the HR policy create/delete operations; its existing SOAP endpoint
    remains the same, so no web-service refresh is required.
    CuPortalEmployeeExit is published automatically by app install/upgrade.
@@ -57,6 +60,15 @@ NEW FLOW TESTS
 7) Sign in as HR, upload an unpublished HR policy draft, then publish a test
    policy. Ordinary staff must see/download only the published document and
    must never see Upload or Delete. Delete the test policy as HR.
+8) Reject one request at each approval step. A reason of at least three
+   characters must be required and displayed to the requester in Approval History.
+9) For ABH-010 Annual Leave, confirm Accrued To-Date = Carry Forward + Accrued
+   Days and Available = Accrued To-Date - Taken To-Date on the Employee Card,
+   portal, and generated leave-statement PDF.
+10) Start a 2-day Annual Leave on a Friday. When Saturday/Sunday are excluded
+    on the BC Leave Type, End Date must be Monday and Return Date Tuesday.
+11) Submit, cancel, and resubmit one leave request. The requester timeline must
+    show only the newest run: Step 1 Pending and later steps Waiting.
 
 LEAVE STATUS / DIRECT EDIT TEST
 ===============================

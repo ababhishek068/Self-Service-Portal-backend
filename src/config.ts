@@ -44,6 +44,22 @@ const jobTitleByEmpNoMap = z
     return map
   })
 
+const userIdByEmpNoMap = z
+  .string()
+  .optional()
+  .default('')
+  .transform((value) => {
+    const map = new Map<string, string>()
+    for (const part of value.split(',')) {
+      const separator = part.indexOf(':')
+      if (separator <= 0) continue
+      const employeeNo = part.slice(0, separator).trim().toUpperCase()
+      const userId = part.slice(separator + 1).trim()
+      if (employeeNo && userId) map.set(employeeNo, userId)
+    }
+    return map
+  })
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
@@ -111,19 +127,11 @@ const envSchema = z.object({
     .default('false')
     .transform((value) => value.toLowerCase() === 'true'),
 
+  /** Escape hatch only — prefer Employee Card "Is HOD" via OData/SOAP. Keep empty in normal use. */
   HOD_OVERRIDE_EMPNOS: csvList,
   CEO_OVERRIDE_EMPNOS: csvList,
-  /** Explicit ICT Helpdesk desk admins when HR "ICT Officer" is not exposed via OData. */
-  ICT_OVERRIDE_EMPNOS: z
-    .string()
-    .optional()
-    .default('ABH-114')
-    .transform((value) =>
-      value
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
+  /** Escape hatch only — prefer Employee Card "ICT Officer" via OData/SOAP. Keep empty in normal use. */
+  ICT_OVERRIDE_EMPNOS: csvList,
   /** Explicit HR portal administrators when the employee department/title is not usable. */
   HR_OVERRIDE_EMPNOS: csvList,
   /** BC department codes/names that grant HR policy administration. */
@@ -144,6 +152,8 @@ const envSchema = z.object({
   BC_JOB_TITLE_BY_CODE: jobTitleMap,
   /** Fallback job titles by employee number when BC/job-code lookup fails, e.g. ABH-029:Finance and Admin Director */
   BC_JOB_TITLE_BY_EMPNO: jobTitleByEmpNoMap,
+  /** Exact BC User Setup identity by employee number. Used to fail closed when BC has duplicate rows. */
+  BC_BC_USER_ID_BY_EMPNO: userIdByEmpNoMap,
   /** Probe BC $metadata to discover extra OData pages (slow — off by default). */
   BC_DISCOVER_ODATA_SERVICES: z
     .string()

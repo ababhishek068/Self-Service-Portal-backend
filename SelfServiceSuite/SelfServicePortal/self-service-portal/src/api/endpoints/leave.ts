@@ -20,9 +20,9 @@ export interface LeaveBalance {
   balance: number
   entitlement?: number
   allocatedDays?: number | null
-  /** Remaining full-year entitlement after leave taken; informational only. */
+  /** Gross full-year entitlement plus carry forward; informational only. */
   totalAvailableLeaveBalance?: number | null
-  /** Lower of remaining full-year balance and accrued-to-date; application limit. */
+  /** Accrued To-Date minus Taken To-Date; the only annual application limit. */
   availableLeaveBalance?: number | null
   currentLeaveBalance?: number | null
   earnedLeaveDays?: number | null
@@ -50,35 +50,27 @@ function finiteLeaveNumber(value: unknown) {
 }
 
 /**
- * The amount an employee may request. Annual leave deliberately prefers the
- * final Available Leave Balance, never Total Available Leave Balance.
+ * Annual remain balance (what the employee may request):
+ * Leave Accrued To-Date − Taken, where Accrued To-Date is already
+ * Carry Forward + Accrued Days from the balance API.
  */
 export function resolveApplicableLeaveBalance(data: LeaveBalance) {
-  const explicit = finiteLeaveNumber(data.availableLeaveBalance)
-  if (explicit !== null) {
-    // Annual applications never authorize a negative balance; other types can
-    // show ledger negatives on Leave Statement (matches BC PDF).
-    return data.isAnnual ? Math.max(0, explicit) : explicit
-  }
-
   if (data.isAnnual) {
-    const accrued = finiteLeaveNumber(data.leaveAccruedToDate ?? data.earnedLeaveDays)
-    const taken = finiteLeaveNumber(data.totalLeaveTakenToDate)
-    const entitlement = finiteLeaveNumber(data.entitlement ?? data.allocatedDays)
-    const carryForward = finiteLeaveNumber(data.carryForwardBalance)
-    const explicitTotal = finiteLeaveNumber(data.totalAvailableLeaveBalance)
-    const totalAvailable =
-      explicitTotal ??
-      (entitlement !== null && taken !== null
-        ? Math.max(0, entitlement + (carryForward ?? 0) - taken)
-        : null)
-    if (accrued !== null && totalAvailable !== null) {
-      return Math.max(0, Math.min(accrued, totalAvailable))
+    const accruedToDate = finiteLeaveNumber(data.leaveAccruedToDate ?? data.earnedLeaveDays)
+    const rawTaken = finiteLeaveNumber(data.totalLeaveTakenToDate)
+    const taken = rawTaken === null ? null : Math.abs(rawTaken)
+    if (accruedToDate !== null && taken !== null) {
+      return Math.max(0, Math.round((accruedToDate - taken) * 100) / 100)
     }
-    // Fail closed for annual leave. Older backends may expose Total Available
-    // through currentLeaveBalance/applicationLimit, which must never authorize an application.
+    const explicit = finiteLeaveNumber(data.availableLeaveBalance)
+    if (explicit !== null) return Math.max(0, explicit)
+    // Fail closed for annual leave when Taken To-Date and an explicit Available
+    // value are both missing. Accrued To-Date alone is never an application limit.
     return 0
   }
+
+  const explicit = finiteLeaveNumber(data.availableLeaveBalance)
+  if (explicit !== null) return explicit
 
   const applicationLimit = finiteLeaveNumber(data.applicationLimit)
   if (applicationLimit !== null) return applicationLimit
@@ -98,12 +90,13 @@ export interface AnnualLeaveFigures {
 export function resolveAnnualLeaveFigures(data: LeaveBalance): AnnualLeaveFigures {
   const entitlement = finiteLeaveNumber(data.entitlement ?? data.allocatedDays)
   const carryForward = finiteLeaveNumber(data.carryForwardBalance)
-  const takenToDate = finiteLeaveNumber(data.totalLeaveTakenToDate)
+  const rawTakenToDate = finiteLeaveNumber(data.totalLeaveTakenToDate)
+  const takenToDate = rawTakenToDate === null ? null : Math.abs(rawTakenToDate)
   const explicitTotal = finiteLeaveNumber(data.totalAvailableLeaveBalance)
   const totalAvailable =
     explicitTotal ??
-    (entitlement !== null && takenToDate !== null
-      ? Math.max(0, entitlement + (carryForward ?? 0) - takenToDate)
+    (entitlement !== null
+      ? Math.max(0, entitlement + (carryForward ?? 0))
       : null)
 
   return {

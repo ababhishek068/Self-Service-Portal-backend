@@ -159,7 +159,7 @@ function preferredLineKeys(requestType: string | undefined, lines: Record<string
   if (requestType === 'purchaseRequisition') {
     const preferred = [
       'type',
-      'itemNo',
+      'itemName',
       'description',
       'specification',
       'category',
@@ -169,9 +169,23 @@ function preferredLineKeys(requestType: string | undefined, lines: Record<string
       'amount',
       'preferredBrandModel',
       'suggestedSupplier',
+      'remarks',
       'requiredDate',
     ]
-    const present = preferred.filter((key) => lines.some((line) => !isBlankLineValue(line[key])))
+    const alwaysShow = new Set([
+      'type',
+      'itemName',
+      'description',
+      'specification',
+      'quantity',
+      'unitOfMeasure',
+      'preferredBrandModel',
+      'suggestedSupplier',
+      'remarks',
+    ])
+    const present = preferred.filter(
+      (key) => alwaysShow.has(key) || lines.some((line) => !isBlankLineValue(line[key])),
+    )
     if (present.length) return present
   }
   if (requestType === 'storeRequisition') {
@@ -258,11 +272,18 @@ export function ApprovalDetail() {
       : extractApplicationReason(request.payload, request.title)
     : ''
   const queueType = searchParams.get('queue')
-  const displayStatus = queueType === 'approved'
-    ? 'Approved'
-    : queueType === 'rejected'
+  // Prefer the document outcome from BC. Do not force "Approved" from the queue
+  // query when a later step rejected the same document.
+  const displayStatus =
+    request?.status === 'Rejected'
       ? 'Rejected'
-      : request?.status
+      : request?.status === 'Approved'
+        ? 'Approved'
+        : queueType === 'approved'
+          ? 'Approved'
+          : queueType === 'rejected'
+            ? 'Rejected'
+            : request?.status
   const isReadOnly =
     displayStatus === 'Approved' ||
     displayStatus === 'Rejected' ||
@@ -292,10 +313,11 @@ export function ApprovalDetail() {
   const headerFacts = request ? approvalHeaderFacts(request.requestType, payload) : []
 
   useEffect(() => {
-    if (request && applicationReason) {
-      setComment(applicationReason)
-    }
-  }, [request?.id, applicationReason])
+    // The requester's application reason is source-document context, not an
+    // approver decision note. Starting blank prevents a rejection from being
+    // recorded with the requester's own reason instead of a new explanation.
+    setComment('')
+  }, [request?.id])
 
   if (!id) return <Navigate to="/approvals" replace />
 
@@ -408,6 +430,14 @@ export function ApprovalDetail() {
                 </div>
               ) : null}
 
+              {displayStatus === 'Rejected' &&
+              (request.approvalSteps ?? []).some((step) => step.status === 'Approved') ? (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                  This document was <strong>Rejected</strong> after one or more earlier approvals. Check the
+                  Maker/checker timeline for the rejecting step and comment.
+                </div>
+              ) : null}
+
               {queueType && displayStatus !== request.status ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   The approval entry is <strong>{displayStatus}</strong>; the current Business Central source document is <strong>{request.status}</strong>.
@@ -503,7 +533,7 @@ export function ApprovalDetail() {
                           ? 'Enter HR remarks (shown to the employee)'
                           : request.requestType === 'employeeExit'
                             ? 'Add a note. A reason is required to reject.'
-                            : 'Add approval note (pre-filled from application reason)'
+                            : 'Add an approval note. A new reason is required to reject.'
                       }
                     />
                     {request.requestType === 'hrServiceLetter' ? (
@@ -515,7 +545,11 @@ export function ApprovalDetail() {
                         Transfer and resignation go to the Immediate Supervisor first, then HR. Exit forms do not
                         appear here.
                       </p>
-                    ) : null}
+                    ) : (
+                      <p className="mt-2 text-xs text-slate-500">
+                        A rejection reason is required and will be visible to the requester in Approval History.
+                      </p>
+                    )}
                   </div>
 
                   {!canApprove ? (
@@ -574,7 +608,7 @@ export function ApprovalDetail() {
             setDecision(null)
             return
           }
-          const note = comment.trim() || applicationReason
+          const note = comment.trim()
           if (request?.requestType === 'hrServiceLetter' && note.length < 3) {
             toast.error('Enter HR remarks of at least 3 characters before recording the decision.')
             setDecision(null)

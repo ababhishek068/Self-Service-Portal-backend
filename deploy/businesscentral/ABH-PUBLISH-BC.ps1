@@ -2,10 +2,10 @@
 # Copy the .app to C:\TA\publish first so Desktop\Erp file lock does not block publish.
 param(
     [string]$ServerInstance = 'BC240',
-    [string]$AppPath = 'C:\TA\publish\Technology Associates EA Ltd_BC24_TA App_1.0.3.199.app',
+    [string]$AppPath = 'C:\TA\publish\Technology Associates EA Ltd_BC24_TA App_1.0.3.273.app',
     [string]$Publisher = 'Technology Associates EA Ltd',
     [string]$Name = 'BC24_TA App',
-    [string]$Version = '1.0.3.199'
+    [string]$Version = '1.0.3.273'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -19,6 +19,7 @@ const variants: Record<string, 'green' | 'red' | 'yellow' | 'gray' | 'blue' | 'o
   Open: 'blue',
   Submitted: 'gray',
   Created: 'gray',
+  Waiting: 'gray',
   New: 'red',
 }
 

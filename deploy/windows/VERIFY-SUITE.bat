@@ -19,9 +19,6 @@ call :check "%BACKEND%\package.json" "package.json"
 call :check "%BACKEND%\node_modules\express\package.json" "node_modules\express"
 call :check "%ROOT%deploy\windows\host.env.abh-uat-ip.example" ".env template"
 call :check "%BACKEND%\deploy\windows\host.env.abh-uat-ip.example" "backend .env template"
-call :check "%ROOT%BusinessCentral\Technology Associates EA Ltd_BC24_TA App_1.0.3.199.app" "BC app 1.0.3.199"
-call :check "%ROOT%BusinessCentral\ABH-PUBLISH-BC.ps1" "BC publish helper"
-
 if exist "%BACKEND%\.env" (
   echo [OK]   .env present
 ) else (
@@ -32,7 +29,7 @@ echo.
 if "%FAIL%"=="0" (
   echo ALL CHECKS PASSED — run START-ABH-PORTAL.bat
 ) else (
-  echo SUITE INCOMPLETE — re-extract the full zip to e.g. C:\TA\ABH-Portal-COMPLETE-1.0.3.295\
+  echo SUITE INCOMPLETE — re-extract the full zip to e.g. C:\TA\ABH-Portal-COMPLETE-1.0.3.343\
   echo Do NOT copy only the .bat files; the SelfServiceSuite folder is required.
 )
 echo.

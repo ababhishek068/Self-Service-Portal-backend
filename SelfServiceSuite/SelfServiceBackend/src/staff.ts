@@ -217,6 +217,19 @@ function soapApprovalOk(value: unknown) {
   return ['true', '1', 'yes', 'y'].includes(normalized)
 }
 
+/**
+ * BC SOAP codeunit parameters are positional even though the XML elements are
+ * named. Keep this insertion order identical to CuStaffPortal.RequestLeaveApproval:
+ * employeeNo, requisitionNo, tableID.
+ */
+export function leaveApprovalSoapParams(employeeNo: string, requisitionNo: string) {
+  return {
+    employeeNo,
+    requisitionNo,
+    tableID: 50532,
+  }
+}
+
 /** Map BC SOAP `<return_value>` strings into a JS boolean. */
 function soapTruthy(value: string | null | undefined) {
   if (!value) return false
@@ -312,6 +325,41 @@ async function assertSickLeaveAttachment(no: string, leave: ODataRecord | string
       { status: 422, code: 'SICK_LEAVE_ATTACHMENT_REQUIRED' },
     )
   }
+}
+
+function isMarriageLeaveValue(value: unknown) {
+  return /\b(wedding|marriage)\b/i.test(String(value ?? '').replaceAll('_', ' '))
+}
+
+function isMarriageLeaveRow(row: ODataRecord | null | undefined) {
+  if (!row) return false
+  return [
+    fieldText(row, ['LeaveType', 'Leave_Type', 'LeaveTypeCode', 'Leave_Type_Code']),
+    fieldText(row, ['LeaveTypeDescription', 'Leave_Type_Description', 'Description']),
+  ].some(isMarriageLeaveValue)
+}
+
+async function assertMarriageLeaveAttachment(no: string, leave: ODataRecord | string) {
+  const marriage =
+    typeof leave === 'string' ? isMarriageLeaveValue(leave) : isMarriageLeaveRow(leave)
+  if (!marriage) return
+  const attachments = (await fetchOData('QyDocumentAttachments', {
+    $filter: `No eq '${odataString(no)}' and TableID eq 50532`,
+    $top: 1,
+  })) as ODataRecord[] | null
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    throw Object.assign(
+      new Error(
+        'A wedding / marriage certificate attachment is required before requesting approval for marriage leave.',
+      ),
+      { status: 422, code: 'MARRIAGE_LEAVE_ATTACHMENT_REQUIRED' },
+    )
+  }
+}
+
+async function assertLeaveApprovalAttachments(no: string, leave: ODataRecord | string) {
+  await assertSickLeaveAttachment(no, leave)
+  await assertMarriageLeaveAttachment(no, leave)
 }
 
 function fieldNumber(row: ODataRecord | null | undefined, keys: string[]) {
@@ -1136,11 +1184,10 @@ async function cancelLeaveApplicationInBc(
   if (leaveIsOpenInBc(row)) {
     for (const candidate of docCandidates) {
       try {
-        const approval = await callSoapMethod('RequestLeaveApproval', {
-          requisitionNo: candidate,
-          employeeNo: user.employeeNo,
-          tableID: 50532,
-        })
+        const approval = await callSoapMethod(
+          'RequestLeaveApproval',
+          leaveApprovalSoapParams(user.employeeNo, candidate),
+        )
         if (!soapCancelOk(approval.returnValue)) continue
         if (await tryCancelLeaveSoap(user, candidate, row, { cancelOnly: true })) {
           return
@@ -1389,7 +1436,12 @@ function nextWorkingDayIso(iso: string) {
   return cursor
 }
 
-/** Local calendar fallback when BC GetLeaveDates returns nothing. */
+/**
+ * Safe local fallback when BC GetLeaveDates is temporarily unavailable.
+ * ABH leave starts on a working day and ordinary leave does not consume
+ * Saturday/Sunday. Business Central remains authoritative for configured
+ * holidays and leave types that explicitly include non-working days.
+ */
 export function computeLeaveDatesFallback(startDate: string, noOfDays: number, halfDay: string) {
   const start = formatBcSoapDate(startDate)
   if (!start) return { endDate: '', returnDate: '' }
@@ -1398,15 +1450,19 @@ export function computeLeaveDatesFallback(startDate: string, noOfDays: number, h
   if (half === 1 || half === 2 || noOfDays <= 0.5) {
     return {
       endDate: start,
-      returnDate: addCalendarDays(start, 1),
+      returnDate: nextWorkingDayIso(start),
     }
   }
 
-  const calendarSpan = Math.max(1, Math.ceil(noOfDays))
-  const endDate = addCalendarDays(start, calendarSpan - 1)
+  let remaining = Math.max(1, Math.ceil(noOfDays)) - 1
+  let endDate = start
+  while (remaining > 0) {
+    endDate = nextWorkingDayIso(endDate)
+    remaining -= 1
+  }
   return {
     endDate,
-    returnDate: addCalendarDays(endDate, 1),
+    returnDate: nextWorkingDayIso(endDate),
   }
 }
 
@@ -1460,14 +1516,9 @@ async function resolveLeaveDatesFromBc(
           formatBcSoapDate(parsed.returnDate) ||
           parsed.returnDate ||
           addCalendarDays(end, 1)
-        if (end === productionDates.endDate && ret === productionDates.returnDate) {
-          return { endDate: end, returnDate: ret, source: 'bc' as const }
-        }
-        // ABH production rule: End is the final calendar leave day and Return
-        // is exactly the following calendar day. Older BC date routines have
-        // returned the same End/Return date or extended a two-day request to
-        // four days, so correct those responses before they reach the form.
-        return { ...productionDates, source: 'portal-corrected' as const }
+        // BC owns leave-type weekend/holiday policy. Do not replace its working-
+        // day result with a portal calendar-day calculation.
+        return { endDate: end, returnDate: ret, source: 'bc' as const }
       }
     } catch {
       // Try the next BC parameter strategy.
@@ -1812,12 +1863,21 @@ export function buildStaffRouter() {
             ? body.isApprove
             : String(body.isApprove ?? '').toLowerCase() === 'true'
 
+      const decisionComment = (body.comment || body.comments || '').trim()
+      if (!isApprove && decisionComment.length < 3) {
+        res.status(422).json({
+          message: 'A rejection reason of at least 3 characters is required.',
+          code: 'APPROVAL_REASON_REQUIRED',
+        })
+        return
+      }
+
       const result = await callSoapMethod('DocumentApproval', {
         entryNo: body.entryNo,
         docNo: body.docNo,
         userID: user.userID,
         isApprove,
-        comments: body.comment || body.comments || '',
+        comments: decisionComment,
       })
 
       const ok = soapTruthy(result.returnValue)
@@ -2583,12 +2643,9 @@ export function buildStaffRouter() {
       const formattedEndDate = formatBcSoapDate(
         calculatedDates.endDate || body.endDate || (deliveryDate ? deliveryDate : ''),
       )
-      // Return Date is a production invariant: it is exactly one calendar day
-      // after End Date. Never persist the legacy BC response where both dates
-      // are the same.
-      const formattedReturnDate = formattedEndDate
-        ? addCalendarDays(formattedEndDate, 1)
-        : ''
+      const formattedReturnDate = formatBcSoapDate(
+        calculatedDates.returnDate || body.returnDate,
+      )
       if (!deliveryDate && (!formattedStartDate || !formattedEndDate || !formattedReturnDate)) {
         res.status(422).json({
           ok: false,
@@ -2637,12 +2694,11 @@ export function buildStaffRouter() {
 
       let status = 'Open'
       if (documentNo && action === 'create' && body.requestApproval !== false) {
-        await assertSickLeaveAttachment(documentNo, body.leaveType)
-        const approvalResult = await callSoapMethod('RequestLeaveApproval', {
-          requisitionNo: documentNo,
-          employeeNo: user.employeeNo,
-          tableID: 50532,
-        })
+        await assertLeaveApprovalAttachments(documentNo, body.leaveType)
+        const approvalResult = await callSoapMethod(
+          'RequestLeaveApproval',
+          leaveApprovalSoapParams(user.employeeNo, documentNo),
+        )
         if (soapApprovalOk(approvalResult.returnValue)) {
           const wait = await waitForLeavePendingInBc(user, documentNo)
           if (wait.confirmed) {
@@ -2816,24 +2872,19 @@ async function tryRequestLeaveApproval(
 ) {
   let lastMessage = ''
   for (const candidate of candidates) {
-    const paramSets: Record<string, unknown>[] = [
-      { requisitionNo: candidate, employeeNo: user.employeeNo, tableID: 50532 },
-      { requisitionNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID, tableID: 50532 },
-      { requisitionNo: candidate, employeeNo: user.employeeNo },
-      { leaveNo: candidate, employeeNo: user.employeeNo, myUserID: user.userID, tableID: 50532 },
-    ]
-    for (const params of paramSets) {
-      try {
-        const result = await callSoapMethod('RequestLeaveApproval', params)
-        const raw = String(result.returnValue ?? '').trim()
-        if (soapApprovalOk(result.returnValue)) {
-          return { ok: true as const, candidate, returnValue: raw }
-        }
-        if (raw) lastMessage = raw
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        if (message) lastMessage = message
+    try {
+      const result = await callSoapMethod(
+        'RequestLeaveApproval',
+        leaveApprovalSoapParams(user.employeeNo, candidate),
+      )
+      const raw = String(result.returnValue ?? '').trim()
+      if (soapApprovalOk(result.returnValue)) {
+        return { ok: true as const, candidate, returnValue: raw }
       }
+      if (raw) lastMessage = raw
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message) lastMessage = message
     }
   }
   return {
@@ -2925,7 +2976,7 @@ async function waitForLeavePendingInBc(
         return
       }
 
-      await assertSickLeaveAttachment(body.no, row)
+      await assertLeaveApprovalAttachments(body.no, row)
 
       const candidates = expandLeaveCancelDocumentNos(body.no, row)
       const soap = await tryRequestLeaveApproval(user, candidates)

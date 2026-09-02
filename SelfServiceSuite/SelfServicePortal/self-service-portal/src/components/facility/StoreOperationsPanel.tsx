@@ -13,6 +13,20 @@ function text(value: unknown) {
   return String(value ?? '').trim()
 }
 
+type StoreStockLineCheck = {
+  itemNo?: string
+  itemName?: string
+  requested?: number
+  available?: number
+  sufficient?: boolean
+}
+
+type StoreStockCheck = {
+  issuingStore?: string
+  allAvailable?: boolean
+  lines?: StoreStockLineCheck[]
+}
+
 function isAssetRequest(request: PortalRequest) {
   const payload = request.payload ?? {}
   const value = text(
@@ -21,6 +35,12 @@ function isAssetRequest(request: PortalRequest) {
       payload.requestType,
   ).toLowerCase()
   return value === '1' || value === 'asset' || value === 'minor asset'
+}
+
+function stockCheckFromProcess(data: Record<string, unknown> | undefined): StoreStockCheck | null {
+  const raw = data?.stockCheck
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  return raw as StoreStockCheck
 }
 
 export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
@@ -70,8 +90,11 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const stock = text(processQuery.data?.stockDecision)
   const lprNo = text((processQuery.data?.links as Record<string, unknown> | undefined)?.lprNo)
   const ginNo = text((processQuery.data?.links as Record<string, unknown> | undefined)?.ginNo)
+  const stockCheck = stockCheckFromProcess(processQuery.data)
   const atStockCheck = stage === 'STOCK_CHECK'
   const atProcurement = stage === 'PROCUREMENT_REQUEST'
+  const stockReady = stockCheck?.allAvailable === true
+  const stockBlocked = stockCheck?.allAvailable === false
 
   const run = async (actionCode: string, title: string, message: string) => {
     const yes = await confirm({ title, message, confirmLabel: title })
@@ -105,12 +128,53 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           {lprNo ? ` · Purchase Request: ${lprNo}` : ''}
         </p>
       )}
+      {atStockCheck && stockCheck?.lines?.length ? (
+        <div className="mt-3 overflow-x-auto rounded-md border border-teal-100 bg-white/70">
+          <table className="min-w-full text-xs">
+            <thead className="bg-teal-50 text-left text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Item</th>
+                <th className="px-3 py-2 font-medium">Requested</th>
+                <th className="px-3 py-2 font-medium">
+                  Available at {stockCheck.issuingStore || 'issuing store'}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockCheck.lines.map((line) => {
+                const sufficient = line.sufficient === true
+                return (
+                  <tr key={`${line.itemNo}-${line.itemName}`} className="border-t border-teal-50">
+                    <td className="px-3 py-2">{line.itemName || line.itemNo || '—'}</td>
+                    <td className="px-3 py-2">{line.requested ?? '—'}</td>
+                    <td className={`px-3 py-2 font-medium ${sufficient ? 'text-teal-800' : 'text-red-700'}`}>
+                      {line.available ?? 0}
+                      {!sufficient ? ' · insufficient' : ''}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {atStockCheck && stockBlocked ? (
+        <p className="mt-2 text-xs font-medium text-red-700">
+          Stock is not available at {stockCheck?.issuingStore || 'the issuing store'}. Use Purchase Request — do not
+          issue GIN until stock is received into that location.
+        </p>
+      ) : null}
       {atStockCheck && canManageStock && !processQuery.isError ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             variant="gradient"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || stockBlocked}
+            title={
+              stockBlocked
+                ? 'Stock is not available at the issuing store for one or more items.'
+                : undefined
+            }
             onClick={() =>
               void run(
                 'STOCK_AVAILABLE',
@@ -123,7 +187,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant={stockBlocked ? 'gradient' : 'outline'}
             disabled={mutation.isPending}
             onClick={() =>
               void run(
@@ -136,6 +200,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             Stock not available — Purchase Request
           </Button>
         </div>
+      ) : null}
+      {atStockCheck && stockReady ? (
+        <p className="mt-2 text-xs text-teal-800">All requested quantities are available at the issuing store.</p>
       ) : null}
       {atStockCheck && !canManageStock ? (
         <p className="mt-2 text-xs text-slate-600">Waiting for Operations/Store to record the stock decision.</p>

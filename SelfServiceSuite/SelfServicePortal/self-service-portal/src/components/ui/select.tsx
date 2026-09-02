@@ -30,27 +30,73 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     const [query, setQuery] = React.useState('')
     const [current, setCurrent] = React.useState<string>(String(props.value ?? props.defaultValue ?? ''))
     const [highlight, setHighlight] = React.useState(0)
+    const controlledValue = props.value
 
     const setRefs = (element: HTMLSelectElement | null) => {
       innerRef.current = element
       if (typeof ref === 'function') ref(element)
       else if (ref) (ref as React.MutableRefObject<HTMLSelectElement | null>).current = element
+      // react-hook-form sets .value via ref after mount — sync visible label immediately.
+      if (element) {
+        const next = String(
+          controlledValue ?? props.defaultValue ?? element.value ?? '',
+        )
+        if (next && element.value !== next) {
+          const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+          setter?.call(element, next)
+        }
+        setCurrent(String(element.value ?? next))
+      }
     }
 
-    // Keep the displayed value in sync with the hidden select — covers
-    // react-hook-form writing values through the ref (no event fired).
+    // Controlled mode: parent (edit form) passes value from form state.
     React.useEffect(() => {
-      const value = innerRef.current?.value
-      if (value !== undefined && value !== current) setCurrent(value)
-    })
+      if (controlledValue === undefined) return
+      const next = String(controlledValue ?? '')
+      setCurrent(next)
+      const element = innerRef.current
+      if (element && element.value !== next) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+        setter?.call(element, next)
+      }
+    }, [controlledValue])
+
+    // Uncontrolled / RHF register: keep visible label in sync with the hidden select.
+    React.useLayoutEffect(() => {
+      if (controlledValue !== undefined) return
+      const sync = () => {
+        const value = String(innerRef.current?.value ?? props.defaultValue ?? '')
+        setCurrent((prev) => (prev === value ? prev : value))
+      }
+      sync()
+      const raf = requestAnimationFrame(sync)
+      const t = window.setTimeout(sync, 0)
+      return () => {
+        cancelAnimationFrame(raf)
+        window.clearTimeout(t)
+      }
+    }, [controlledValue, props.defaultValue, options])
 
     const commit = (value: string) => {
       const element = innerRef.current
       if (!element) return
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
       setter?.call(element, value)
-      element.dispatchEvent(new Event('change', { bubbles: true }))
       setCurrent(value)
+      // Native dispatchEvent alone is unreliable with React 18 + RHF — call onChange too.
+      props.onChange?.({
+        target: element,
+        currentTarget: element,
+        type: 'change',
+        bubbles: true,
+        preventDefault() {},
+        stopPropagation() {},
+        isPropagationStopped: () => false,
+        nativeEvent: new Event('change'),
+        isDefaultPrevented: () => false,
+        persist() {},
+      } as unknown as React.ChangeEvent<HTMLSelectElement>)
+      element.dispatchEvent(new Event('change', { bubbles: true }))
       setOpen(false)
       setQuery('')
     }
@@ -59,7 +105,10 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     const filtered = normalizedQuery
       ? options.filter((option) => `${option.label} ${option.value}`.toLowerCase().includes(normalizedQuery))
       : options
-    const selectedLabel = options.find((option) => option.value === current)?.label ?? ''
+    const selectedLabel =
+      options.find((option) => option.value === current)?.label ??
+      options.find((option) => option.value.toLowerCase() === current.toLowerCase())?.label ??
+      (current ? current : '')
 
     const close = () => {
       setOpen(false)
