@@ -1,4 +1,4 @@
-ABH SELF SERVICE PORTAL — INSTALL v1.0.3.343 / API v192
+ABH SELF SERVICE PORTAL — INSTALL v1.0.3.344 / API v193
 ======================================================
 
 This is the paired ABH UAT release. It includes Business Central app
@@ -14,13 +14,13 @@ PORTAL INSTALL
 ==============
 
 1) Keep the old portal folder as a rollback copy.
-2) Extract ABH-Portal-COMPLETE-1.0.3.343.zip to C:\TA\
+2) Extract ABH-Portal-COMPLETE-1.0.3.344.zip to C:\TA\
 3) Copy the working .env into:
    SelfServiceSuite\SelfServiceBackend\.env
 4) Run VERIFY-SUITE.bat. It must say ALL CHECKS PASSED.
 5) Run START-ABH-PORTAL.bat.
 6) Open http://146.161.102.7:4000/api/portal-build
-   Expected: v192 — 1.0.3.343 (BC leave approval SOAP parameter order)
+   Expected: v193 — 1.0.3.344 (Leave approval notifications through BC)
 7) Log in and press Ctrl+Shift+R once to clear the old browser bundle.
 8) In Administrator PowerShell, run INSTALL-AUTOSTART.ps1 once to start the
    portal automatically after every Windows server restart.

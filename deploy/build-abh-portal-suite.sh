@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.0.3.343}"
-BUILD_STAMP="${2:-v192 — ${VERSION} (BC leave approval SOAP parameter order)}"
+VERSION="${1:-1.0.3.344}"
+BUILD_STAMP="${2:-v193 — ${VERSION} (Leave approval notifications through BC)}"
 OUT_NAME="ABH-Portal-COMPLETE-${VERSION}"
 OUT_DIR="$ROOT/$OUT_NAME"
 DESKTOP_ZIP="${DESKTOP_ZIP:-$HOME/Desktop/${OUT_NAME}.zip}"

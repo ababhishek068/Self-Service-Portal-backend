@@ -335,6 +335,39 @@ export function parseApprovalDecision(
   }
 }
 
+export function approvalDecisionSoapRequest(
+  module: string,
+  input: {
+    entryNo: string | number
+    docNo: string
+    userID: string
+    isApprove: boolean
+    comments: string
+  },
+) {
+  if (module === 'leave') {
+    return {
+      method: 'LeaveDocumentApproval' as const,
+      params: {
+        entryNo: input.entryNo,
+        docNo: input.docNo,
+        userID: input.userID,
+        isApprove: input.isApprove,
+        comments: input.comments,
+        // The reliever is already stored on the Leave Application header. A
+        // blank value tells BC to keep it while still running leave-specific
+        // requester, next-approver, rejection, and final-approval emails.
+        leaveReliever: '',
+      },
+    }
+  }
+
+  return {
+    method: 'DocumentApproval' as const,
+    params: input,
+  }
+}
+
 function medicalClaimCoveragePercent(
   medicalAmount: number,
   amountToRefund: number,
@@ -392,7 +425,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v192 — 1.0.3.343 (BC leave approval SOAP parameter order)'
+export const PORTAL_API_BUILD = 'v193 — 1.0.3.344 (Leave approval notifications through BC)'
 
 interface LookupSpec {
   service: string
@@ -4470,7 +4503,7 @@ export function buildPortalApiRouter() {
         return
       }
 
-      const { requestId, no, entryRows } = await resolveApprovalReference(rawId, authUser)
+      const { requestId, module, no, entryRows } = await resolveApprovalReference(rawId, authUser)
       // resolveApprovalReference already limits rows to identities belonging to
       // this authenticated employee. Pick the newest exact Open entry instead
       // of letting OData `$top=1` select an arbitrary historical workflow run.
@@ -4482,13 +4515,14 @@ export function buildPortalApiRouter() {
       // Approve/reject as the User Setup identity BC recorded on the entry. The
       // entry was fetched only after that User ID was tied to this employee.
       const entryApproverId = text(entry, ['ApproverID']) || authUser.userID
-      const result = await callSoapMethod('DocumentApproval', {
+      const decisionRequest = approvalDecisionSoapRequest(module, {
         entryNo: text(entry, ['EntryNo', 'Entry_No']),
         docNo: no,
         userID: entryApproverId,
         isApprove: decision === 'Approved',
         comments: soapComment,
       })
+      const result = await callSoapMethod(decisionRequest.method, decisionRequest.params)
       if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
         throw portalError(`Business Central did not mark ${no} as ${decision.toLowerCase()}`, 502)
       }

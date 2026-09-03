@@ -69,6 +69,7 @@ import {
   mapModuleLines,
   parseEmployeeMedicalBalancesReturn,
   parseApprovalDecision,
+  approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
   weeklyLateAttendanceSummary,
@@ -270,6 +271,37 @@ describe('approval decision validation', () => {
   it('rejects missing/unknown decisions instead of silently approving', () => {
     assert.throws(() => parseApprovalDecision('', ''), /must be Approved/i)
     assert.throws(() => parseApprovalDecision('maybe', ''), /must be Approved/i)
+  })
+
+  it('routes Leave decisions through the notification-aware BC method', () => {
+    const request = approvalDecisionSoapRequest('leave', {
+      entryNo: 401,
+      docNo: 'LV-00004',
+      userID: 'HERMON_GETACHEW',
+      isApprove: false,
+      comments: 'Insufficient leave balance',
+    })
+    assert.equal(request.method, 'LeaveDocumentApproval')
+    assert.deepEqual(Object.keys(request.params), [
+      'entryNo',
+      'docNo',
+      'userID',
+      'isApprove',
+      'comments',
+      'leaveReliever',
+    ])
+    assert.equal('leaveReliever' in request.params ? request.params.leaveReliever : undefined, '')
+  })
+
+  it('keeps non-Leave decisions on the generic BC method', () => {
+    const request = approvalDecisionSoapRequest('purchaseRequisition', {
+      entryNo: 402,
+      docNo: 'PR-00004',
+      userID: 'HERMON_GETACHEW',
+      isApprove: true,
+      comments: '',
+    })
+    assert.equal(request.method, 'DocumentApproval')
   })
 
   it('requires reasons for rejection/return and marks returned SOAP comments', () => {
