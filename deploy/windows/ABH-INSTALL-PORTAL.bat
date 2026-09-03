@@ -1,9 +1,9 @@
 @echo off
-title ABH Portal Install Helper v1.0.3.344
+title ABH Portal Install Helper v1.0.3.345
 cd /d "%~dp0"
 
 echo.
-echo === ABH Portal v1.0.3.344 ===
+echo === ABH Portal v1.0.3.345 ===
 echo.
 
 if not exist "SelfServiceSuite\SelfServiceBackend\.env" (
@@ -21,7 +21,7 @@ taskkill /IM node.exe /F 2>nul
 
 cd SelfServiceSuite\SelfServiceBackend
 echo Starting portal on port 4000...
-echo Check: http://146.161.102.7:4000/api/portal-build  (must show v193 / 1.0.3.344)
+echo Check: http://146.161.102.7:4000/api/portal-build  (must show v194 / 1.0.3.345)
 echo.
 node dist\server.js
 pause

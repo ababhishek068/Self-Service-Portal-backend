@@ -29,7 +29,7 @@ echo.
 if "%FAIL%"=="0" (
   echo ALL CHECKS PASSED — run START-ABH-PORTAL.bat
 ) else (
-  echo SUITE INCOMPLETE — re-extract the full zip to e.g. C:\TA\ABH-Portal-COMPLETE-1.0.3.344\
+  echo SUITE INCOMPLETE — re-extract the full zip to e.g. C:\TA\ABH-Portal-COMPLETE-1.0.3.345\
   echo Do NOT copy only the .bat files; the SelfServiceSuite folder is required.
 )
 echo.

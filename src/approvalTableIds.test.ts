@@ -56,6 +56,8 @@ import {
   parseEmployeeProfileReturn,
   sickLeaveStartDateAllowed,
   leaveApprovalSoapParams,
+  leaveApprovalSubmissionAccepted,
+  leaveApprovalSubmissionCandidates,
 } from './staff.js'
 import {
   approvalIdentityIdsFromUserSetupRows,
@@ -94,6 +96,20 @@ describe('Leave approval SOAP contract', () => {
       requisitionNo: 'LV-00004',
       tableID: 50532,
     })
+  })
+
+  it('treats a confirmed BC workflow as success after a late SOAP failure', () => {
+    assert.equal(leaveApprovalSubmissionAccepted(false, true), true)
+    assert.equal(leaveApprovalSubmissionAccepted(true, false), true)
+    assert.equal(leaveApprovalSubmissionAccepted(false, false), false)
+  })
+
+  it('submits only exact BC leave document numbers without numeric aliases', () => {
+    assert.deepEqual(leaveApprovalSubmissionCandidates('LV-00007', 'LV-00007'), ['LV-00007'])
+    assert.deepEqual(leaveApprovalSubmissionCandidates('LV-00007', 'ABH-LAP-00007'), [
+      'ABH-LAP-00007',
+      'LV-00007',
+    ])
   })
 })
 

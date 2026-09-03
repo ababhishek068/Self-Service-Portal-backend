@@ -230,6 +230,20 @@ export function leaveApprovalSoapParams(employeeNo: string, requisitionNo: strin
   }
 }
 
+/**
+ * A SOAP response can fail after BC has already committed the workflow entry
+ * (for example while queueing notification email). The committed BC state is
+ * authoritative, so a confirmed Pending Approval postcondition is success.
+ */
+export function leaveApprovalSubmissionAccepted(soapSucceeded: boolean, pendingConfirmedInBc: boolean) {
+  return soapSucceeded || pendingConfirmedInBc
+}
+
+/** Approval submission uses only the exact document numbers exposed by BC. */
+export function leaveApprovalSubmissionCandidates(requestedNo: string, storedNo: string) {
+  return [...new Set([storedNo.trim(), requestedNo.trim()].filter(Boolean))]
+}
+
 /** Map BC SOAP `<return_value>` strings into a JS boolean. */
 function soapTruthy(value: string | null | undefined) {
   if (!value) return false
@@ -2978,14 +2992,22 @@ async function waitForLeavePendingInBc(
 
       await assertLeaveApprovalAttachments(body.no, row)
 
-      const candidates = expandLeaveCancelDocumentNos(body.no, row)
+      const candidates = leaveApprovalSubmissionCandidates(
+        body.no,
+        fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], body.no),
+      )
       const soap = await tryRequestLeaveApproval(user, candidates)
-      if (!soap.ok) {
+      // BC can commit the approval before a late SOAP fault/timeout is returned
+      // (most commonly while notification email is being queued). Always read
+      // the postcondition before reporting failure to the requester.
+      const wait = await waitForLeavePendingInBc(user, body.no, row)
+      if (!leaveApprovalSubmissionAccepted(soap.ok, wait.confirmed)) {
         res.status(422).json({ ok: false, message: soap.message })
         return
       }
-
-      const wait = await waitForLeavePendingInBc(user, body.no, row)
+      const soapTrace = soap.ok
+        ? soap.returnValue
+        : `SOAP response failed after BC confirmed Pending Approval: ${soap.message}`
 
       // Ground-truth snapshot for this explicit action (low volume — one per
       // click). Reveals whether BC actually created an approval entry.
@@ -2993,7 +3015,7 @@ async function waitForLeavePendingInBc(
         user,
         body.no,
         wait.row ?? row,
-        soap.returnValue,
+        soapTrace,
       )
       logDiagnostic(
         `[leave-approval] no=${logSafe(body.no)} user=${logSafe(user.userID)} soap=${logSafe(diagnostic.soapReturnValue)} confirmed=${wait.confirmed} byDoc=${diagnostic.byDoc} senderAll=${diagnostic.senderAll} senderMatch=${diagnostic.senderMatches} hdrStatus=${logSafe(diagnostic.headerStatus)}`,
