@@ -74,6 +74,10 @@ import {
   approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
+  storeLineNeedsBcMapping,
+  storePrepHints,
+  storeIssueStageCode,
+  portalUserIsStoreManager,
   weeklyLateAttendanceSummary,
   authUserCanManageHrPolicies,
   parseHrPolicyUpload,
@@ -134,6 +138,8 @@ import {
   pickDimensionCodeFromRow,
 } from './employeeProfile.js'
 import {
+  applyUnpostedApprovedLeave,
+  approvedLeaveDaysNotPosted,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
   resolveAnnualAvailableLeaveBalance,
@@ -243,6 +249,26 @@ describe('purchase stock decision authorization', () => {
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
+    assert.equal(storeLineNeedsBcMapping(''), true)
+    assert.equal(storeLineNeedsBcMapping('PORTAL-12'), true)
+    assert.equal(storeLineNeedsBcMapping('ITEM-100'), false)
+    assert.deepEqual(storePrepHints('', [{ needsBcMapping: true }]), [
+      'Set Issuing Store on the Store Requisition header.',
+      'Replace each PORTAL-* line with a real Item No.',
+      'Confirm on-hand quantity at that location.',
+    ])
+    assert.deepEqual(storePrepHints('MAIN', [{ needsBcMapping: false }]), [])
+    assert.equal(storeIssueStageCode('Prepared by Store'), 'PREPARED')
+    assert.equal(storeIssueStageCode('In Transit'), 'TRANSIT')
+    assert.equal(storeIssueStageCode(''), '')
+    assert.equal(
+      portalUserIsStoreManager({ roles: [], jobTitle: 'Store Manager', department: '', departmentName: '' }),
+      true,
+    )
+    assert.equal(
+      portalUserIsStoreManager({ roles: ['store'], jobTitle: 'Storekeeper', department: 'IT', departmentName: 'IT' }),
+      false,
+    )
   })
 })
 
@@ -1186,6 +1212,34 @@ describe('resolveBcLeaveBalance', () => {
   })
 })
 
+describe('approved leave that is not yet posted', () => {
+  it('adds the approved days to taken and reduces available once', () => {
+    const shown = applyUnpostedApprovedLeave(
+      {
+        leaveEntitlement: 21,
+        carryForward: 27,
+        totalAvailableLeaveBalance: 48,
+        leaveAccruedToDate: 31.89,
+        totalLeaveTakenToDate: 10,
+        availableLeaveBalance: 21.89,
+      },
+      approvedLeaveDaysNotPosted([{ Status: 'Approved', DaysApplied: 1, Posted: false }]),
+    )
+    assert.equal(shown.totalLeaveTakenToDate, 11)
+    assert.equal(shown.availableLeaveBalance, 20.89)
+  })
+
+  it('does not count a leave that is already posted', () => {
+    assert.equal(
+      approvedLeaveDaysNotPosted([
+        { Status: 'Posted', DaysApplied: 1, Posted: true },
+        { Status: 'Approved', DaysApplied: 2, Posted: false },
+      ]),
+      2,
+    )
+  })
+})
+
 describe('six-field leave balance contract', () => {
   it('keeps Total Available separate from the balance the employee may apply against', () => {
     const summary = parseBcLeaveSummary(
@@ -1685,7 +1739,6 @@ describe('staffClaim saveLine params', () => {
         spec!.params!.saveLine!({
           req: {
             body: {
-              itemName: 'Laptop',
               quantity: 1,
               uom: 'PCS',
             },
@@ -1693,21 +1746,20 @@ describe('staffClaim saveLine params', () => {
           user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
           no: 'SREQ-TEST',
         } as never),
-      /description, UOM, and a positive quantity are required/i,
+      /Describe the item or asset you need and enter a positive quantity/i,
     )
   })
 
-  it('creates a store requisition line from the stated business need without a BC item lookup', async () => {
+  it('saves a typed store request without a catalog item code and without issuing stock', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveLine)
     const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           type: '1',
-          itemNo: 'ITEM-001',
-          itemName: 'Heavy-duty archive boxes',
-          description: 'A4 document storage with lids',
-          quantity: 12,
+          itemName: 'All in one Desktop',
+          lineDescription: 'With keyboard',
+          quantity: 1,
           uom: 'PCS',
         },
       },
@@ -1716,9 +1768,10 @@ describe('staffClaim saveLine params', () => {
     } as never)) as Record<string, unknown>
 
     assert.equal(payload.itemNo, '')
-    assert.equal(payload.description, 'Heavy-duty archive boxes')
-    assert.equal(payload.remarks, 'A4 document storage with lids')
-    assert.equal(payload.quantity, 12)
+    assert.equal(payload.description, 'All in one Desktop')
+    assert.equal(payload.remarks, 'With keyboard')
+    assert.equal(payload.quantity, 1)
+    assert.equal(payload.location, '')
   })
 
   it('rejects an incomplete purchase requisition header before calling Business Central', async () => {
@@ -2479,6 +2532,16 @@ describe('leave status is driven only by Business Central', () => {
     assert.equal(
       resolveLeaveStatus({ ApplicationCode: 'LV00302', Status: 'Approved', ApprovalStatus: '' }),
       'Approved',
+    )
+  })
+
+  it('shows Posted after the leave is written to the ledger, even when approval entries stay Approved', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV-00001', Status: 'Posted', ApprovalStatus: 'Approved', Posted: true },
+        [{ Status: 'Approved', DocumentNo: 'LV-00001' }],
+      ),
+      'Posted',
     )
   })
 

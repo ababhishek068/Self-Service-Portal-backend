@@ -302,6 +302,13 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
   const queryClient = useQueryClient()
   const [linkedDocumentNo, setLinkedDocumentNo] = useState('')
   const [actionComment, setActionComment] = useState('')
+  const actorIds = [employee?.employeeNo, employee?.userID]
+    .map((value) => text(value).toUpperCase())
+    .filter(Boolean)
+  const ownsRequest = actorIds.includes(text(request.makerEmployeeNo).toUpperCase())
+  const pending = status.includes('pending')
+  const draft = ['open', 'draft', 'returned'].includes(status)
+  const sspStage = approved ? 'complete' : pending ? 'approval' : 'request'
   const processQuery = useQuery({
     queryKey: ['procurement-process', request.id],
     queryFn: () => getPurchaseProcurementProcess(request.id),
@@ -342,7 +349,40 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
     if (preferred?.no) setLinkedDocumentNo(preferred.no)
   }, [rawLinkOptions, linkedDocumentNo, stage])
 
-  if (!approved || !canViewProcess) return null
+  if (!approved && !ownsRequest) return null
+  if (!approved && ownsRequest) {
+    return (
+      <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
+        <p className="font-semibold text-[var(--portal-navy)]">Portal steps</p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5">
+          <li className={sspStage === 'request' ? 'font-semibold' : ''}>
+            Staff initiates the Purchase Request.
+          </li>
+          <li className={sspStage === 'approval' ? 'font-semibold' : ''}>
+            Department Head or Division Head reviews and approves it.
+          </li>
+          <li>Finance & Administration reviews and approves it.</li>
+        </ol>
+        <p className="mt-2 text-xs text-slate-600">
+          {draft
+            ? 'Submit this request to start the approval. RFQ, purchase order, invoice, payment, GRN, and GIN continue in Business Central after Finance & Administration approves.'
+            : 'This request is with the Department Head, Division Head, or Finance & Administration. After that approval, Operations continues with the RFQ in Business Central.'}
+        </p>
+      </section>
+    )
+  }
+  if (!canViewProcess) {
+    return (
+      <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
+        <p className="font-semibold text-[var(--portal-navy)]">Portal steps complete</p>
+        <p className="mt-2">
+          Department / Division and Finance & Administration have approved this purchase request.
+          Operations continues in Business Central: RFQ, supplier selection, purchase order, invoice,
+          payment, goods receipt (GRN), and GIN when the goods are issued internally.
+        </p>
+      </section>
+    )
+  }
 
   const label = text(processQuery.data?.stageLabel) || 'Loading process…'
   const owner = text(processQuery.data?.ownerRole)

@@ -320,6 +320,18 @@ export async function cancelLeaveRequest(no: string): Promise<{
   }>('/api/leave/cancel', { no })
 }
 
+export async function postLeaveRequest(no: string): Promise<{
+  ok: boolean
+  message: string
+  status?: string
+}> {
+  requireAuthApiUrl()
+  return authPost<{ ok: boolean; message: string; status?: string }>(
+    `/api/leave/${encodeURIComponent(no)}/post`,
+    {},
+  )
+}
+
 export async function deleteLeaveRequest(no: string): Promise<{
   ok: boolean
   message: string

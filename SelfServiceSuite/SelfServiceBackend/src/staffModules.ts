@@ -2092,10 +2092,9 @@ async function listDocumentAttachmentsForTable(no: string, tableIds: number[]) {
 }
 
 async function assertRequiredPortalAttachment(spec: ModuleSpec, no: string) {
-  // Latest ABH purchase decision: supporting documents, Scope/TOR, and service
-  // technical notes are helpful but optional. Claims and Store Requests retain
-  // their existing mandatory attachment rules.
-  if (spec.module === 'purchase-requisition') return
+  // Purchase and store requisitions treat a specification as optional.
+  // Claims still require a supporting document before approval.
+  if (spec.module === 'purchase-requisition' || spec.module === 'store-requisition') return
 
   const tableIds =
     spec.headerTableId === 52121800 ? [52121800, 38] : [spec.headerTableId]
@@ -2106,18 +2105,6 @@ async function assertRequiredPortalAttachment(spec: ModuleSpec, no: string) {
       throw Object.assign(
         new Error('Attach at least one supporting document before requesting approval for a claim.'),
         { status: 422, code: 'CLAIM_ATTACHMENT_REQUIRED' },
-      )
-    }
-    return
-  }
-
-  if (spec.module === 'store-requisition') {
-    if (rows.length === 0) {
-      throw Object.assign(
-        new Error(
-          'Attach at least one supporting document before requesting approval for store requisition.',
-        ),
-        { status: 422, code: 'STORE_ATTACHMENT_REQUIRED' },
       )
     }
     return

@@ -19,7 +19,7 @@ export const brand = {
   /** Shorter product label for sidebar / mobile nav. */
   productShort: 'Smart ESSP',
   logoSrc: '/brand/abh-logo.png',
-  logoAlt: 'ABH Partners — Smart ESSP Enterprise Hub',
+  logoAlt: 'ABH Partners',
 } as const
 
 export function brandCopyright(year = new Date().getFullYear()) {

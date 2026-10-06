@@ -1,0 +1,123 @@
+﻿diff --git a/src/src/Query/StoreRequisitionsHeader.Query.al b/src/src/Query/StoreRequisitionsHeader.Query.al
+index 9e748cd..c8f6738 100644
+--- a/src/src/Query/StoreRequisitionsHeader.Query.al
++++ b/src/src/Query/StoreRequisitionsHeader.Query.al
+@@ -51,6 +51,13 @@ query 50084 "Store Requisitions Header"
+             column("TestField"; "Test Field") { }
+             column(TotalAmount; TotalAmount) { }
+             column(UserID; "User ID") { }
++            column(StoreCode; "Store Code") { }
++            column(StoreName; "Store Name") { }
++            column(IssueStage; "Issue Stage") { }
++            column(StoreIssueNo; "Store Issue No") { }
++            column(PreparedBy; "Prepared By") { }
++            column(AcceptedBy; "Accepted By") { }
++            column(ReceivedBy; "Received By") { }
+         }
+     }
+ 
+diff --git a/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al b/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+index 6a1ab36..0c5eb39 100644
+--- a/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
++++ b/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+@@ -5300,6 +5300,100 @@
+         exit(IctMgt.ListIctOfficers());
+     end;
+ 
++    procedure PreparePortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.FillQuantityToIssue(StoreHeader);
++        StoreHeader.Get(requestNo);
++        StoreMgmt.PrepareIssueForManager(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Prepared By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Prepared By"));
++        StoreHeader.Modify(true);
++        exit(Format(StoreHeader."Issue Stage"));
++    end;
++
++    procedure AcceptPortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.AcceptIssueAsManager(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Accepted By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Accepted By"));
++        StoreHeader.Modify(true);
++        exit(StoreHeader."Store Issue No");
++    end;
++
++    procedure ConfirmPortalStoreReceipt(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.ConfirmReceipt(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Received By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Received By"));
++        StoreHeader.Modify(true);
++        exit(Format(StoreHeader."Issue Stage"));
++    end;
++
++    procedure PreparePortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.FillQuantityToIssue(StoreHeader);
++        StoreHeader.Get(requestNo);
++        StoreMgmt.PrepareIssueForManager(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Prepared By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Prepared By"));
++        StoreHeader.Modify(true);
++        exit(Format(StoreHeader."Issue Stage"));
++    end;
++
++    procedure AcceptPortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.AcceptIssueAsManager(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Accepted By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Accepted By"));
++        StoreHeader.Modify(true);
++        exit(StoreHeader."Store Issue No");
++    end;
++
++    procedure ConfirmPortalStoreReceipt(requestNo: Code[20]; actorUserID: Code[50]) return_value: Text
++    var
++        StoreHeader: Record "Store Requistion Header";
++        StoreMgmt: Codeunit "Store Mgmt";
++    begin
++        if not StoreHeader.Get(requestNo) then
++            Error('Store requisition %1 was not found.', requestNo);
++        StoreMgmt.ConfirmReceipt(StoreHeader);
++        StoreHeader.Get(requestNo);
++        if actorUserID <> '' then
++            StoreHeader."Received By" := CopyStr(actorUserID, 1, MaxStrLen(StoreHeader."Received By"));
++        StoreHeader.Modify(true);
++        exit(Format(StoreHeader."Issue Stage"));
++    end;
++
+     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
+     var
+         portalReturn: Date;

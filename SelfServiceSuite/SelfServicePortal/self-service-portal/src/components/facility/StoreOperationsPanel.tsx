@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/useAuth'
 import {
+  downloadStoreBorrowingForm,
   getStoreRequisitionProcess,
   updateStoreRequisitionProcess,
 } from '@/api/endpoints/requestEndpoint'
@@ -19,12 +21,69 @@ type StoreStockLineCheck = {
   requested?: number
   available?: number
   sufficient?: boolean
+  needsBcMapping?: boolean
 }
 
 type StoreStockCheck = {
   issuingStore?: string
   allAvailable?: boolean
+  needsBcPrep?: boolean
+  prepHints?: string[]
   lines?: StoreStockLineCheck[]
+}
+
+const DEFAULT_PREP_HINTS = [
+  'Set Issuing Store on the Store Requisition header.',
+  'Replace each PORTAL-* line with a real Item No.',
+  'Confirm on-hand quantity at that location.',
+]
+
+function realBcItemNo(itemNo: string | undefined) {
+  const code = String(itemNo ?? '').trim()
+  return Boolean(code) && !/^PORTAL-/i.test(code)
+}
+
+function issueStage(request: PortalRequest) {
+  const raw = text(
+    request.payload?.IssueStage ?? request.payload?.Issue_Stage ?? '',
+  ).toLowerCase()
+  if (!raw || raw === '0') return ''
+  if (raw.includes('prepared') || raw === '1') return 'PREPARED'
+  if (raw.includes('accepted') || raw === '2') return 'ACCEPTED'
+  if (raw.includes('transit') || raw === '3') return 'TRANSIT'
+  if (raw.includes('received') || raw === '4') return 'RECEIVED'
+  return ''
+}
+
+function receiptStorageKey(requestNo: string) {
+  return `ssp.storeReceipt.${requestNo}`
+}
+
+function linesHaveBeenIssued(request: PortalRequest) {
+  const lines = request.payload?.lines
+  return Array.isArray(lines) && lines.some((line) => Number((line as { quantityIssued?: unknown }).quantityIssued ?? 0) > 0)
+}
+
+function issueStageLabel(stage: string) {
+  switch (stage) {
+    case 'PREPARED':
+      return 'Prepared by store — waiting for the store manager'
+    case 'ACCEPTED':
+      return 'Store manager accepted the offered item — waiting for the requester'
+    case 'TRANSIT':
+      return 'In transit — waiting for the requester to confirm receipt'
+    case 'RECEIVED':
+      return 'Received by the requester'
+    default:
+      return 'Approved — storekeeper can submit the issue'
+  }
+}
+
+function userIsStoreManager(employee: ReturnType<typeof useAuth>['employee']) {
+  const assignment = [employee?.jobTitle, employee?.departmentName, employee?.departmentCode, ...(employee?.roles ?? [])]
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .join(' ')
+  return /\bstore\s*manager\b|\bstores\s*manager\b|\bmain\s*store\b|\bstoremanager\b/.test(assignment)
 }
 
 function isAssetRequest(request: PortalRequest) {
@@ -54,6 +113,30 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const canManageStock =
     (employee?.roles ?? []).some((role) => ['operations', 'store'].includes(String(role).toLowerCase())) ||
     /\b(operations?|ops|store|storekeeper)\b/.test(assignment)
+  const storeManager = userIsStoreManager(employee)
+  const issued = linesHaveBeenIssued(request)
+  const storedReceipt =
+    typeof window !== 'undefined' && window.localStorage.getItem(receiptStorageKey(request.requestNo)) === 'received'
+  const [receiptConfirmed, setReceiptConfirmed] = useState(storedReceipt)
+  const stageHandOff = receiptConfirmed
+    ? 'RECEIVED'
+    : issueStage(request) || (issued ? 'TRANSIT' : '')
+  const actorIds = [employee?.employeeNo, employee?.userID]
+    .map((value) => text(value).toUpperCase())
+    .filter(Boolean)
+  const ownerIds = [
+    request.makerEmployeeNo,
+    request.payload?.EmployeeNo,
+    request.payload?.Employee_No,
+    request.payload?.UserID,
+    request.payload?.User_ID,
+    request.payload?.RequesterID,
+    request.payload?.Requester_ID,
+  ]
+    .map((value) => text(value).toUpperCase())
+    .filter(Boolean)
+  const ownsRequest =
+    ownerIds.length === 0 || ownerIds.some((owner) => actorIds.includes(owner))
   const canViewProcess =
     canManageStock ||
     Boolean(employee?.roles?.includes('procurement')) ||
@@ -68,12 +151,17 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   })
   const mutation = useMutation({
     mutationFn: (actionCode: string) => updateStoreRequisitionProcess(request.id, actionCode),
-    onSuccess: async () => {
+    onSuccess: async (data) => {
+      queryClient.setQueryData(['facility', 'store-requisition', 'detail', request.id], data.request)
       await queryClient.invalidateQueries({ queryKey: ['store-process', request.id] })
-      await queryClient.invalidateQueries({ queryKey: ['facility', 'store-requisition'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['facility', 'store-requisition'],
+        exact: true,
+      })
     },
   })
 
+  const requesterHandoff = approved && (ownsRequest || !canViewProcess)
   if (!approved) return null
   if (assetRequest) {
     return (
@@ -82,7 +170,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       </section>
     )
   }
-  if (!canViewProcess) return null
+  if (!canViewProcess && !requesterHandoff) return null
 
   const stage = text(processQuery.data?.stageCode).toUpperCase()
   const label = text(processQuery.data?.stageLabel) || 'Loading process…'
@@ -94,17 +182,31 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const atStockCheck = stage === 'STOCK_CHECK'
   const atProcurement = stage === 'PROCUREMENT_REQUEST'
   const stockReady = stockCheck?.allAvailable === true
-  const stockBlocked = stockCheck?.allAvailable === false
+  const needsBcPrep = stockCheck?.needsBcPrep === true
+  const stockBlocked = stockCheck?.allAvailable === false && !needsBcPrep
+  const prepHints = stockCheck?.prepHints?.length ? stockCheck.prepHints : DEFAULT_PREP_HINTS
 
   const run = async (actionCode: string, title: string, message: string) => {
     const yes = await confirm({ title, message, confirmLabel: title })
     if (!yes) return
     try {
       await mutation.mutateAsync(actionCode)
+      if (actionCode === 'CONFIRM_RECEIPT') {
+        window.localStorage.setItem(receiptStorageKey(request.requestNo), 'received')
+        setReceiptConfirmed(true)
+      }
       toast.success(
-        actionCode === 'STOCK_AVAILABLE'
-          ? 'GIN issued from this store requisition.'
-          : 'Linked Purchase Request created from this store requisition.',
+        actionCode === 'PREPARE_ISSUE'
+          ? 'Submitted to the store manager. Stock has not moved yet.'
+          : actionCode === 'ACCEPT_ISSUE'
+            ? 'Store manager accepted the issue. Goods are in transit.'
+            : actionCode === 'ACCEPT_ITEM'
+              ? 'Item accepted. The goods issue voucher is created and the request is in transit.'
+              : actionCode === 'DECLINE_ITEM'
+                ? 'Item declined. The storekeeper can offer another item.'
+                : actionCode === 'CONFIRM_RECEIPT'
+                  ? 'Receipt confirmed.'
+                  : 'Linked Purchase Request created from this store requisition.',
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', title)
@@ -114,20 +216,86 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   return (
     <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
       <p className="font-semibold text-[var(--portal-navy)]">Store status</p>
-      <p className="mt-1 text-slate-600">Operations/Store records stock availability after final approval.</p>
+      <p className="mt-1 text-slate-600">
+        Download the Item Borrowing Form, then confirm receipt.
+      </p>
+      {requesterHandoff && !receiptConfirmed ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void downloadStoreBorrowingForm(request.id, request.requestNo)
+                .then(() => {
+                  toast.success('Item Borrowing Form downloaded.')
+                })
+                .catch((error: unknown) => {
+                  toast.error(error instanceof Error ? error.message : 'Could not download the Item Borrowing Form')
+                })
+            }}
+          >
+            Item Borrowing Form
+          </Button>
+          <Button
+            type="button"
+            variant="gradient"
+            disabled={mutation.isPending}
+            onClick={() =>
+              void run(
+                'CONFIRM_RECEIPT',
+                'Confirm Receipt',
+                'Confirm that you have received this store request.',
+              )
+            }
+          >
+            Confirm Receipt
+          </Button>
+        </div>
+      ) : null}
+      {requesterHandoff && receiptConfirmed ? (
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void downloadStoreBorrowingForm(request.id, request.requestNo).catch((error: unknown) => {
+                toast.error(error instanceof Error ? error.message : 'Could not download the Item Borrowing Form')
+              })
+            }}
+          >
+            Item Borrowing Form
+          </Button>
+        </div>
+      ) : null}
+      <p className="mt-2">
+        Issue: <strong>{issueStageLabel(stageHandOff)}</strong>
+        {text(request.payload?.StoreName ?? request.payload?.StoreCode)
+          ? ` · Store: ${text(request.payload?.StoreName ?? request.payload?.StoreCode)}`
+          : ''}
+      </p>
       {processQuery.isError ? (
         <p className="mt-2 text-red-700">
           {processQuery.error instanceof Error ? processQuery.error.message : 'Could not load store process stage.'}
         </p>
-      ) : (
+      ) : canViewProcess ? (
         <p className="mt-2">
           Stage: <strong>{label}</strong>
           {owner ? ` · Owner: ${owner}` : ''}
           {stock ? ` · Stock: ${stock}` : ''}
-          {ginNo ? ` · GIN: ${ginNo}` : ''}
+          {ginNo ? ` · GIV: ${ginNo}` : ''}
           {lprNo ? ` · Purchase Request: ${lprNo}` : ''}
         </p>
-      )}
+      ) : null}
+      {atStockCheck && needsBcPrep ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <p className="font-semibold">Business Central prep required before GIV</p>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {prepHints.map((hint) => (
+              <li key={hint}>{hint}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {atStockCheck && stockCheck?.lines?.length ? (
         <div className="mt-3 overflow-x-auto rounded-md border border-teal-100 bg-white/70">
           <table className="min-w-full text-xs">
@@ -143,13 +311,23 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             <tbody>
               {stockCheck.lines.map((line) => {
                 const sufficient = line.sufficient === true
+                const needsMapping = line.needsBcMapping === true || !realBcItemNo(line.itemNo)
                 return (
                   <tr key={`${line.itemNo}-${line.itemName}`} className="border-t border-teal-50">
-                    <td className="px-3 py-2">{line.itemName || line.itemNo || '—'}</td>
+                    <td className="px-3 py-2">
+                      {line.itemName || line.itemNo || '—'}
+                      {needsMapping ? (
+                        <span className="ml-1 font-medium text-amber-800">(map in BC)</span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2">{line.requested ?? '—'}</td>
-                    <td className={`px-3 py-2 font-medium ${sufficient ? 'text-teal-800' : 'text-red-700'}`}>
-                      {line.available ?? 0}
-                      {!sufficient ? ' · insufficient' : ''}
+                    <td
+                      className={`px-3 py-2 font-medium ${
+                        needsMapping ? 'text-amber-800' : sufficient ? 'text-teal-800' : 'text-red-700'
+                      }`}
+                    >
+                      {needsMapping ? '—' : (line.available ?? 0)}
+                      {!needsMapping && !sufficient ? ' · insufficient' : ''}
                     </td>
                   </tr>
                 )
@@ -161,34 +339,41 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       {atStockCheck && stockBlocked ? (
         <p className="mt-2 text-xs font-medium text-red-700">
           Stock is not available at {stockCheck?.issuingStore || 'the issuing store'}. Use Purchase Request — do not
-          issue GIN until stock is received into that location.
+          issue GIV until a posted GRV receives stock into that location.
         </p>
       ) : null}
-      {atStockCheck && canManageStock && !processQuery.isError ? (
+      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             variant="gradient"
-            disabled={mutation.isPending || stockBlocked}
+            disabled={mutation.isPending || stockBlocked || needsBcPrep}
             title={
-              stockBlocked
-                ? 'Stock is not available at the issuing store for one or more items.'
-                : undefined
+              needsBcPrep
+                ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
+                : stockBlocked
+                  ? 'Stock is not available at the issuing store for one or more items.'
+                  : undefined
             }
             onClick={() =>
               void run(
-                'STOCK_AVAILABLE',
-                'Issue GIN',
-                'Confirm these items are available in the issuing store and issue them by GIN.',
+                'PREPARE_ISSUE',
+                'Submit to Store Manager',
+                'Fill the remaining quantity and hand this issue to the store manager. Stock does not move yet.',
               )
             }
           >
-            Stock available — GIN &amp; Issue
+            Submit to Store Manager
           </Button>
           <Button
             type="button"
             variant={stockBlocked ? 'gradient' : 'outline'}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || needsBcPrep}
+            title={
+              needsBcPrep
+                ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
+                : undefined
+            }
             onClick={() =>
               void run(
                 'STOCK_UNAVAILABLE',
@@ -201,6 +386,27 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </Button>
         </div>
       ) : null}
+      {stageHandOff === 'PREPARED' && storeManager ? (
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="gradient"
+            disabled={mutation.isPending}
+            onClick={() =>
+              void run(
+                'ACCEPT_ISSUE',
+                'Accept and Issue',
+                'Accept the item the storekeeper offered. The requester then accepts or declines the borrowing form.',
+              )
+            }
+          >
+            Accept and Issue
+          </Button>
+        </div>
+      ) : null}
+      {stageHandOff === 'PREPARED' && !storeManager ? (
+        <p className="mt-2 text-xs text-slate-600">Waiting for the store manager to accept and issue.</p>
+      ) : null}
       {atStockCheck && stockReady ? (
         <p className="mt-2 text-xs text-teal-800">All requested quantities are available at the issuing store.</p>
       ) : null}
@@ -209,11 +415,13 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
       {atProcurement ? (
         <p className="mt-2 text-xs text-slate-600">
-          Procurement is continuing in Business Central{lprNo ? ` (${lprNo})` : ''}.
+          Purchase is continuing in the portal / Business Central{lprNo ? ` (${lprNo})` : ''}. After the
+          GRV is posted into the issuing store, reopen this requisition — stage returns to stock check
+          for GIV.
         </p>
       ) : null}
       {stage === 'COMPLETED' ? (
-        <p className="mt-2 text-teal-800">Stock updated and requisition closed.</p>
+        <p className="mt-2 text-teal-800">GIV posted — inventory reduced and requisition closed.</p>
       ) : null}
     </section>
   )

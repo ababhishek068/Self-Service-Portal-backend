@@ -232,8 +232,8 @@ export const storeLineSchema = z
   .object({
     type: z.string().min(1, 'Type is required'),
     itemNo: optionalText,
-    itemName: z.string().min(2, 'Item / asset name is required'),
-    description: z.string().min(2, 'Description is required'),
+    itemName: z.string().min(2, 'Describe the item or asset you need'),
+    description: optionalText,
     uom: z.string().min(1, 'UOM is required'),
     quantity: quantityField,
     preferredBrandModel: optionalText,

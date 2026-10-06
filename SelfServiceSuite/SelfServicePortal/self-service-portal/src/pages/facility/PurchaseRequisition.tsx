@@ -21,6 +21,8 @@ import { formatCurrency } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { isEmployeeIdentifier, requesterDisplayName } from '@/utils/requesterDisplayName'
 import {
+  ABH_PURCHASE_REQUEST_PROCESS_FLOWS,
+  ABH_PURCHASE_REQUEST_PROCESS_NOTE,
   ABH_PURCHASE_REQUEST_PROCESS_TITLE,
   purchaseRequisitionProcess,
 } from '@/data/procurementProcessFlows'
@@ -70,6 +72,8 @@ const purchaseProcessBanner = (
   <ProcurementProcessBanner
     title={ABH_PURCHASE_REQUEST_PROCESS_TITLE}
     steps={purchaseRequisitionProcess}
+    note={ABH_PURCHASE_REQUEST_PROCESS_NOTE}
+    flows={[...ABH_PURCHASE_REQUEST_PROCESS_FLOWS]}
   />
 )
 
@@ -95,7 +99,7 @@ export function PurchaseRequisition() {
       title={title}
       headerLabel={`New ${title}`}
       processBanner={purchaseProcessBanner}
-      showProcessBannerOnList={false}
+      showProcessBannerOnList
       module={module}
       queryKey={['facility', 'purchase-requisition']}
       listRequests={() => listModuleRequests(module)}

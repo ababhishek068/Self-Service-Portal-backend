@@ -75,6 +75,7 @@ export function StoreRequisition() {
   return (
     <MultiStepRequestPage
       title="Store Requisition"
+      description="Describe what you need and the quantity, then submit for approval. You do not pick from the store catalog. The store maps a real item before anything is issued."
       headerLabel="New Store Requisition"
       processBanner={storeProcessBanner}
       showProcessBannerOnList={false}
@@ -89,7 +90,7 @@ export function StoreRequisition() {
         cell: (row) => row.amount > 0 ? formatCurrency(row.amount) : 'Not costed',
       }}
       attachmentCategoryOptions={storeAttachmentCategories}
-      attachmentCategoryHint="Supporting documents are optional. Add a specification, drawing, or reference when useful, and describe each uploaded file."
+      attachmentCategoryHint="An extra specification is optional. Attach it when the item needs a drawing, photo, or note, and describe the file."
       detailSupplement={({ request }) => <StoreOperationsPanel request={request} />}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={storeHeaderSchema}
@@ -198,7 +199,9 @@ export function StoreRequisition() {
         { label: 'Required Date', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
         { label: 'Division', paths: ['payload.FunctionName', 'payload.GlobalDimension1Code', 'payload.Global_Dimension_1_Code'] },
         { label: 'Department', paths: ['payload.BudgetCenterName', 'payload.DepartmentName', 'payload.ShortcutDimension2Code', 'payload.Shortcut_Dimension_2_Code'] },
-        { label: 'Assigned Store', paths: ['payload.IssuingStore', 'payload.Issuing_Store', 'payload.issuingStore'] },
+        { label: 'Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
+        { label: 'Issue Stage', paths: ['payload.IssueStage', 'payload.Issue_Stage'] },
+        { label: 'Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
         { label: 'Request Type', paths: ['payload.StoreRequisitionType', 'payload.Store_Requisition_Type'] },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
@@ -223,15 +226,19 @@ export function StoreRequisition() {
         defaultValuesFromRequest: (request) => ({
           type: isAssetRequestPayload(request.payload) ? '2' : '1',
         }),
-        buildLinePayload: (values) => ({
-          ...values,
-          item: values.itemNo,
-          itemName: values.itemName,
-          lineDescription: values.description,
-          uom: values.uom,
-          preferredBrandModel: values.preferredBrandModel,
-          quantity: values.type === '2' ? Number(values.quantity ?? 1) : values.quantity,
-        }),
+        buildLinePayload: (values) => {
+          const itemName = String(values.itemName ?? '').trim()
+          return {
+            ...values,
+            item: '',
+            itemNo: '',
+            itemName,
+            lineDescription: values.description,
+            uom: values.uom || 'PCS',
+            preferredBrandModel: values.preferredBrandModel,
+            quantity: Number(values.quantity ?? 0),
+          }
+        },
         fields: [
           {
             name: 'type',
@@ -242,16 +249,17 @@ export function StoreRequisition() {
           },
           {
             name: 'itemName',
-            label: 'Requested Item / Asset',
+            label: 'What do you need?',
             type: 'text',
-            placeholder: 'Enter what is required (stock availability is checked internally)',
+            placeholder: 'Type the item or asset, for example All in one Desktop',
             valuePaths: ['itemName', 'ItemName', 'Description'],
           },
           {
             name: 'description',
-            label: 'Specification / Description',
+            label: 'Additional specification (optional)',
             type: 'textarea',
-            valuePaths: ['description', 'Remarks', 'remarks'],
+            placeholder: 'Add extra detail if needed. Attach a file only when a spec document is required.',
+            valuePaths: ['remarks', 'Remarks', 'lineDescription'],
           },
           {
             name: 'uom',
@@ -274,7 +282,7 @@ export function StoreRequisition() {
             header: 'Type',
             format: (value) => (String(value) === '2' || String(value).toLowerCase() === 'asset' ? 'Asset' : 'Item'),
           },
-          { key: 'itemName', header: 'Item / Asset' },
+          { key: 'itemName', header: 'Requested item' },
           {
             key: 'description',
             header: 'Description',

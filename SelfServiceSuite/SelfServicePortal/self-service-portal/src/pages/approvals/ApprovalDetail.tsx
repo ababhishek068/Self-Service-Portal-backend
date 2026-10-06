@@ -191,8 +191,8 @@ function preferredLineKeys(requestType: string | undefined, lines: Record<string
   if (requestType === 'storeRequisition') {
     const preferred = [
       'type',
-      'itemNo',
       'description',
+      'itemName',
       'preferredBrandModel',
       'unitOfMeasure',
       'quantity',

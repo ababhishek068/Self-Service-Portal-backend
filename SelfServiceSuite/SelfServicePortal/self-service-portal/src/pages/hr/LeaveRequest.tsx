@@ -24,6 +24,7 @@ import {
   fetchRelievers,
   cancelLeaveRequest,
   deleteLeaveRequest,
+  postLeaveRequest,
   fetchLeaveRequestDetail,
   fetchLeaveApprovalRoute,
   getLeaveBalance,
@@ -135,6 +136,7 @@ function normalizeLeaveTypeCode(value: unknown) {
  */
 function effectiveLeaveStatus(request: PortalRequest | undefined): string {
   if (!request) return ''
+  if (request.status === 'Posted') return 'Posted'
   if (['Approved', 'Rejected', 'Cancelled'].includes(request.status)) return request.status
 
   const approvalStatuses = request.approvalSteps.map((step) => step.status)
@@ -252,6 +254,7 @@ export function LeaveRequest() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [pendingScrollToDetail, setPendingScrollToDetail] = useState(false)
   const [detailAction, setDetailAction] = useState<string | null>(null)
+  const [postingLeaveNo, setPostingLeaveNo] = useState<string | null>(null)
   const detailQuery = useQuery({
     queryKey: ['hr', 'leave-detail', selectedRequestId],
     queryFn: async (): Promise<PortalRequest> => {
@@ -577,6 +580,29 @@ export function LeaveRequest() {
     }
   }
 
+  const postApprovedLeave = async (requestNo: string) => {
+    setPostingLeaveNo(requestNo)
+    const progressId = progress.show({
+      title: 'Posting leave…',
+      message: 'Writing the approved leave to the balance.',
+      blocking: true,
+    })
+    try {
+      const result = await postLeaveRequest(requestNo)
+      if (!result.ok) throw new Error(result.message || 'Leave posting failed')
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-list'] })
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-balance'] })
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-detail'] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      toast.success(result.message || 'Leave posted. The balance has been reduced.')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Leave posting failed', 'Post failed')
+    } finally {
+      progress.hide(progressId)
+      setPostingLeaveNo(null)
+    }
+  }
+
   const leaveColumns: DataTableColumn<LeaveListRow>[] = [
     { id: 'code', header: 'Application No.', cell: (row) => row.ApplicationCode },
     {
@@ -595,7 +621,29 @@ export function LeaveRequest() {
       cell: (row) =>
         formatPayloadDate(row.ReturnDate || row.ExpectedReturnDate || ''),
     },
-    { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.Status} /> },
+    {
+      id: 'status',
+      header: 'Status',
+      cell: (row) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={row.Status} />
+          {row.Status === 'Approved' ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={postingLeaveNo === row.ApplicationCode}
+              onClick={(event) => {
+                event.stopPropagation()
+                void postApprovedLeave(row.ApplicationCode)
+              }}
+            >
+              Post
+            </Button>
+          ) : null}
+        </div>
+      ),
+    },
     {
       id: 'actions',
       header: 'Actions',
@@ -1427,7 +1475,20 @@ export function LeaveRequest() {
                     <p className="text-xs text-slate-500">Application No.</p>
                     <p className="font-semibold text-slate-900">{selected.requestNo}</p>
                   </div>
-                  <StatusBadge status={selectedEffectiveStatus} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={selectedEffectiveStatus} />
+                    {selectedEffectiveStatus === 'Approved' && selected.requestNo ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={postingLeaveNo === selected.requestNo}
+                        onClick={() => void postApprovedLeave(selected.requestNo)}
+                      >
+                        Post
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

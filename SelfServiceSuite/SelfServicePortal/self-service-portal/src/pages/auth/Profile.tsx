@@ -227,12 +227,19 @@ export function Profile() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <InfoField label="Employee No." value={employee?.employeeNo} icon={IdCard} />
                 <InfoField label="Full Name" value={fullName} icon={Users} />
+                <InfoField label="ID Number" value={profile.idNumber} icon={IdCard} />
                 <InfoField label="Phone No." value={employee?.phoneNumber || profile.phoneNumber} icon={Phone} />
-                <InfoField label="Email" value={employee?.email} icon={Mail} />
+                <InfoField label="Work Phone" value={profile.workPhoneNumber} icon={Phone} />
+                <InfoField label="Email" value={profile.email || employee?.email} icon={Mail} />
+                <InfoField label="Date of Birth" value={formatDate(profile.dateOfBirth)} icon={CalendarDays} />
                 <InfoField label="Gender" value={employee?.gender || profile.gender} icon={Users} />
                 <InfoField label="Marital Status" value={profile.maritalStatus} icon={Users} />
-                <InfoField label="Job Title" value={employee?.jobTitle} icon={Briefcase} />
-                <InfoField label="Job Grade" value={employee?.jobGrade} icon={Briefcase} />
+                <InfoField label="Nationality" value={profile.nationality} icon={Users} />
+                <InfoField label="Postal Address" value={profile.postalAddress} icon={MapPin} />
+                <InfoField label="Job Title" value={profile.jobTitle || employee?.jobTitle} icon={Briefcase} />
+                <InfoField label="Job ID" value={profile.jobId} icon={Briefcase} />
+                <InfoField label="Job Grade" value={profile.jobGrade || employee?.jobGrade} icon={Briefcase} />
+                <InfoField label="Employment Status" value={profile.status} icon={Briefcase} />
                 <InfoField label="Department" value={profile.department || employee?.departmentName} icon={Building2} />
                 <InfoField label="Sector" value={profile.sector} icon={Building2} />
                 <InfoField label="Division" value={profile.division} icon={Building2} />
@@ -240,7 +247,9 @@ export function Profile() {
                 <InfoField label="Branch" value={profile.branch || employee?.branchName} icon={MapPin} />
                 <InfoField label="Place of Duty" value={employee?.placeOfDuty} icon={MapPin} />
                 <InfoField label="Employment Type" value={profile.employmentType} icon={Briefcase} />
-                <InfoField label="Responsible Center" value={employee?.responsibleCenter} icon={Building2} />
+                <InfoField label="Responsible Center" value={profile.responsibilityCenter || employee?.responsibleCenter} icon={Building2} />
+                <InfoField label="Employee Account No." value={profile.employeeAccountNo} icon={IdCard} />
+                <InfoField label="Annual Leave Balance" value={profile.annualLeaveBalance} icon={CalendarDays} />
               </div>
             </section>
           ) : null}
@@ -251,8 +260,10 @@ export function Profile() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <InfoField label="Date of Join" value={formatDate(profile.dateOfJoin)} icon={CalendarDays} />
                 <InfoField label="Probation End Date" value={formatDate(profile.probationEndDate)} icon={CalendarDays} />
+                <InfoField label="On Probation" value={profile.onProbation} icon={CalendarDays} />
                 <InfoField label="Contract Start Date" value={formatDate(profile.contractStartDate)} icon={CalendarDays} />
                 <InfoField label="Contract End Date" value={formatDate(profile.contractEndDate)} icon={CalendarDays} />
+                <InfoField label="Contract Duration" value={profile.contractDuration} icon={CalendarDays} />
                 <InfoField label="Employment Type" value={profile.employmentType} icon={Briefcase} />
               </div>
             </section>

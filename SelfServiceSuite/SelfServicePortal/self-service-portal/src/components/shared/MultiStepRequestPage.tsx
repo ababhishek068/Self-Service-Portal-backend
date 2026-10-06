@@ -909,10 +909,10 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
     }
   }, [editingLine, selectedLines])
   const storeHasIssued = storeRequisitionHasIssuedLines(selectedLines)
-  const canReceiveStoreLines =
-    config.module.module === 'storeRequisition' &&
-    (storeApprovalDone || selected?.status === 'Posted') &&
-    storeHasIssued
+  // Requester receive is not part of the ABH store workflow. Inventory moves when
+  // Operations posts the GIV in Business Central.
+  const storeGivRecorded = config.module.module === 'storeRequisition' && storeHasIssued
+  const canReceiveStoreLines = false && storeApprovalDone && storeHasIssued
 
   const beginReceiveLine = (line: Record<string, unknown>) => {
     setReceiveLine(line)
@@ -958,22 +958,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
     setReceiveLine(null)
     setReceiveQuantity('')
     setReceiveReason('')
-  }
-
-  const postStoreReceipt = async () => {
-    if (!selected) return
-    const yes = await confirm({
-      title: 'Receive items',
-      message: 'Are you sure you would like to receive items?',
-      confirmLabel: 'Yes',
-    })
-    if (!yes) return
-    await runAction(
-      `post-${selected.id}`,
-      () => postStoreRequestReceipt(selected.id),
-      'Post failed',
-      'Store requisition posted to receive',
-    )
   }
 
   // Detail view
@@ -1159,15 +1143,10 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       Delete Draft
                     </Button>
                   ) : null}
-                  {canReceiveStoreLines ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={actionId === `post-${selected.id}`}
-                      onClick={() => void postStoreReceipt()}
-                    >
-                      Post to receive
-                    </Button>
+                  {storeGivRecorded ? (
+                    <span className="self-center text-xs text-teal-800">
+                      Issued by the store. Confirm receipt, then print the Item Borrowing Form.
+                    </span>
                   ) : null}
                   {(config.extraDetailActions ?? [])
                     .filter((action) => !action.visibleWhen || action.visibleWhen(selected))
@@ -1309,13 +1288,12 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                         )}
                       </div>
                     ) : null}
-                    {canReceiveStoreLines ? (
-                      <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                        <p className="font-semibold">Receipt confirmation</p>
-                        <p className="mt-1 text-blue-800">
-                          Store has issued items. Click <strong>Receive Items</strong> on each line to confirm
-                          quantity (partial receipts need a reason), or use <strong>Post to receive</strong> to
-                          confirm all outstanding issued quantities at once.
+                    {storeGivRecorded ? (
+                      <div className="mb-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+                        <p className="font-semibold">Issued by store (GIV)</p>
+                        <p className="mt-1 text-teal-800">
+                          Operations has issued stock against this requisition. Inventory was reduced when the
+                          GIV posted in Business Central. A separate portal receive step is not used.
                         </p>
                       </div>
                     ) : null}

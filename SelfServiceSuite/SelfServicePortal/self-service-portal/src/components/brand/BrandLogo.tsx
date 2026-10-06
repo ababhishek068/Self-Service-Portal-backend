@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 type BrandLogoVariant = 'login' | 'auth' | 'topbar' | 'sidebar' | 'mobile'
 
 const variantClass: Record<BrandLogoVariant, string> = {
-  login: 'portal-login-logo h-auto w-[min(72%,9.75rem)] sm:w-[10.5rem]',
+  login: 'portal-login-logo h-auto w-[min(78%,12.5rem)] sm:w-[13.5rem]',
   auth: 'portal-login-logo h-auto w-[min(70%,8.5rem)]',
   topbar: 'h-8 w-auto max-w-[6.5rem] sm:h-9 sm:max-w-[7.5rem]',
   sidebar: 'mx-auto h-12 w-auto max-h-12 max-w-[6.75rem]',

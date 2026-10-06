@@ -173,6 +173,39 @@ codeunit 50049 "Staff Portal Codeunit"
         return_value := true;
     end;
 
+    procedure PostApprovedPortalLeave(employeeNo: Code[100]; applicationCode: Code[50]) return_value: Boolean
+    var
+        LeaveApp: Record "HR Leave Application";
+    begin
+        return_value := false;
+        LeaveApp.Reset();
+        LeaveApp.SetRange("Application Code", applicationCode);
+        if employeeNo <> '' then
+            LeaveApp.SetRange("Employee No.", employeeNo);
+        if not LeaveApp.FindFirst() then
+            Error('Leave application %1 was not found.', applicationCode);
+        if LeaveApp.Posted or (LeaveApp.Status = LeaveApp.Status::Posted) then begin
+            return_value := true;
+            exit;
+        end;
+        if LeaveApp.Status <> LeaveApp.Status::Approved then begin
+            LeaveApp.Validate(Status, LeaveApp.Status::Approved);
+            LeaveApp."Approval Status" := LeaveApp."Approval Status"::Approved;
+            LeaveApp.Modify(true);
+        end;
+        if (LeaveApp.Status <> LeaveApp.Status::Approved) and (LeaveApp.Status <> LeaveApp.Status::Posted) then
+            Error('Leave application %1 must be fully approved before it can be posted.', applicationCode);
+        if not LeaveApp.Posted then begin
+            LeaveApp.Status := LeaveApp.Status::Posted;
+            LeaveApp.Posted := true;
+            LeaveApp."Posted By" := UserId;
+            LeaveApp."Date Posted" := Today;
+            LeaveApp."Time Posted" := Time;
+            LeaveApp.Modify(true);
+        end;
+        return_value := true;
+    end;
+
     local procedure FnFindOpenApprovalEntry(entryNo: Integer; docNo: Code[100]; portalApproverID: Code[50]): Boolean
     begin
         TbApprovalEntry.Reset;
@@ -338,6 +371,16 @@ codeunit 50049 "Staff Portal Codeunit"
                     LeaveApp.Validate(Status, LeaveApp.Status::Approved);
                     LeaveApp."Approval Status" := LeaveApp."Approval Status"::Approved;
                     LeaveApp.Modify(true);
+                    // Validating Status to Approved writes the negative allocation.
+                    // Do not call fn_PostLeaveApplication as well.
+                    if not LeaveApp.Posted then begin
+                        LeaveApp.Status := LeaveApp.Status::Posted;
+                        LeaveApp.Posted := true;
+                        LeaveApp."Posted By" := UserId;
+                        LeaveApp."Date Posted" := Today;
+                        LeaveApp."Time Posted" := Time;
+                        LeaveApp.Modify(true);
+                    end;
                 end;
         end;
     end;
@@ -1918,8 +1961,7 @@ codeunit 50049 "Staff Portal Codeunit"
                 Error('Purpose / Justification is required.');
             if TbStoreRequisition."Required Date" = 0D then
                 Error('Required Date is required.');
-            if not HasPortalDocumentAttachment(Database::"Store Requistion Header", reqNo) then
-                Error('Attach at least one supporting document before requesting approval for store requisition.');
+            // A specification file is optional. Do not block approval when none is attached.
             if RequesterUserID = '' then
                 RequesterUserID := TbStoreRequisition."User ID";
             if RequesterUserID <> '' then
@@ -4003,7 +4045,23 @@ codeunit 50049 "Staff Portal Codeunit"
           '#CustomerNo=' + HREmployee."Customer No" +
           '#FullName=' + HREmployee."Full Name" +
           '#Gender=' + Format(HREmployee.Gender) +
-          '#MaritalStatus=' + Format(HREmployee."Marital Status");
+          '#MaritalStatus=' + Format(HREmployee."Marital Status") +
+          '#DateOfJoining=' + PortalProfileDate(HREmployee."Date Of Joining the Company") +
+          '#EndOfProbation=' + PortalProfileDate(HREmployee."End Of Probation Date") +
+          '#ContractEnd=' + PortalProfileDate(HREmployee."Contract End Date") +
+          '#EndOfContract=' + PortalProfileDate(HREmployee."End of Contract Date") +
+          '#ContractType=' + HREmployee."Contract Type" +
+          '#EmployeeContractType=' + Format(HREmployee."Employee Contract Type") +
+          '#EmployeeType=' + Format(HREmployee."Employee Type") +
+          '#OnProbation=' + Format(HREmployee."On Probation") +
+          '#ContractDuration=' + Format(HREmployee."Contract Duration");
+    end;
+
+    local procedure PortalProfileDate(Value: Date): Text
+    begin
+        if Value = 0D then
+            exit('');
+        exit(Format(Value, 0, 9));
     end;
 
     procedure GetLeaveDates(empNo: Code[30]; leaveType: code[30]; startDate: Date; noOfDays: Decimal) return_value: text

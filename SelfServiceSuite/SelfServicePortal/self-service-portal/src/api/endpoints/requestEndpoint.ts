@@ -91,6 +91,30 @@ export async function getStoreRequisitionProcess(id: string) {
   return authGet<Record<string, unknown>>(`/api/requests/${encodeURIComponent(id)}/store-process`)
 }
 
+async function downloadRequestPdf(id: string, path: string, filename: string) {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>(
+    `/api/requests/${encodeURIComponent(id)}/${path}`,
+    { responseType: 'blob' },
+  )
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+export async function downloadStoreRequisitionVoucher(id: string, requestNo: string) {
+  return downloadRequestPdf(id, 'requisition-voucher', `Store-Requisition-${requestNo}.pdf`)
+}
+
+export async function downloadStoreBorrowingForm(id: string, requestNo: string) {
+  return downloadRequestPdf(id, 'borrowing-form', `Item-Borrowing-Form-${requestNo}.pdf`)
+}
+
 export async function updateStoreRequisitionProcess(id: string, actionCode: string) {
   requireAuthApiUrl()
   return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(

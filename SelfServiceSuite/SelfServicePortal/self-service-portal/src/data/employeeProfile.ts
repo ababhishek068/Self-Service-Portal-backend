@@ -35,6 +35,7 @@ export interface AssignedAsset {
 export interface EmployeeProfileDetails {
   jobTitle?: string
   jobGrade?: string
+  jobId?: string
   monthlySalaryBase?: number
   sector: string
   division: string
@@ -45,10 +46,22 @@ export interface EmployeeProfileDetails {
   employmentType: string
   gender: string
   phoneNumber: string
+  workPhoneNumber?: string
+  email?: string
+  idNumber?: string
+  status?: string
+  annualLeaveBalance?: string
+  employeeAccountNo?: string
+  responsibilityCenter?: string
+  dateOfBirth?: string
+  nationality?: string
+  postalAddress?: string
   dateOfJoin: string
   contractStartDate: string
   contractEndDate: string
   probationEndDate: string
+  onProbation?: string
+  contractDuration?: string
   nextOfKin: NextOfKin[]
   employmentHistory: EmploymentRecord[]
   qualifications: Qualification[]
