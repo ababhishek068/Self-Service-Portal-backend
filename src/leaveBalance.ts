@@ -353,6 +353,28 @@ export function resolveLeaveBalanceBreakdown(input: {
   }
 }
 
+/** BC also includes annual-card fields in responses for other leave types.
+ * Keep those fields out of non-annual figures and preserve BC's live ledger net.
+ * A missing balance is unavailable, never the full setup entitlement or annual balance.
+ */
+export function resolveNonAnnualLeaveBalanceBreakdown(
+  summary: BcLeaveSummary | null,
+): LeaveBalanceBreakdown | null {
+  const balance = summary?.currentLeaveBalance
+  if (balance === null || balance === undefined || !Number.isFinite(balance)) return null
+  const entitlement = summary?.allocatedDays ?? summary?.leaveEntitlement ?? summary?.setupDays ?? 0
+  const carryForward = summary?.carryForwardBalanceForType ?? summary?.carryForward ?? 0
+  const reimbursements = summary?.reimbursedDays ?? 0
+  return {
+    leaveEntitlement: roundedLeaveValue(entitlement),
+    carryForward: roundedLeaveValue(carryForward),
+    totalAvailableLeaveBalance: roundedLeaveValue(entitlement + carryForward + reimbursements),
+    leaveAccruedToDate: null,
+    totalLeaveTakenToDate: roundedLeaveValue(Math.abs(summary?.currentTotalLeaveTaken ?? summary?.totalLeaveTakenToDate ?? 0)),
+    availableLeaveBalance: roundedLeaveValue(balance),
+  }
+}
+
 export function leaveApplicationExceedsAvailableBalance(
   appliedDays: number,
   availableLeaveBalance: number | null,

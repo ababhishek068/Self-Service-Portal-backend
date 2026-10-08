@@ -124,6 +124,13 @@ function formatPayloadDate(value: string) {
   return formatPretty(value) || value
 }
 
+function formatReturnDate(returnValue: string, endValue: string) {
+  const formatted = formatPayloadDate(returnValue)
+  if (formatted === DASH) return DASH
+  const sameDate = returnValue.slice(0, 10) === endValue.slice(0, 10)
+  return `${formatted}${sameDate ? ' (Afternoon)' : ''}`
+}
+
 function normalizeLeaveTypeCode(value: unknown) {
   return String(value ?? '').trim().toUpperCase()
 }
@@ -1346,7 +1353,11 @@ export function LeaveRequest() {
                     <div className="space-y-1.5">
                       <Label>Return Date</Label>
                       <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                        {datesLoading ? <Skeleton className="h-5 w-32" /> : returnDate ? formatPretty(returnDate) : DASH}
+                        {datesLoading ? (
+                          <Skeleton className="h-5 w-32" />
+                        ) : returnDate ? (
+                          `${formatPretty(returnDate)}${returnDate === endDate ? ' (Afternoon)' : ''}`
+                        ) : DASH}
                       </p>
                     </div>
                   </>
@@ -1552,7 +1563,7 @@ export function LeaveRequest() {
                   <div>
                     <dt className="text-xs text-slate-500">Return Date</dt>
                     <dd className="text-sm font-medium">
-                      {formatPayloadDate(
+                      {formatReturnDate(
                         payloadValue(selectedPayload, [
                           'ReturnDate',
                           'Return_Date',
@@ -1560,6 +1571,7 @@ export function LeaveRequest() {
                           'Expected_Return_Date',
                           'returnDate',
                         ]),
+                        payloadValue(selectedPayload, ['EndDate', 'End_Date', 'endDate']),
                       )}
                     </dd>
                   </div>

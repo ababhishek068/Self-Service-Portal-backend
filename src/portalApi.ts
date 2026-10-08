@@ -1,3 +1,4 @@
+import { fetchPortalProfileDetails } from './profileDetails.js'
 import { Router, type Request, type Response } from 'express'
 import {
   macFromAttendanceLocation,
@@ -93,6 +94,7 @@ import {
   moduleSpecSupportsAttachments,
   hospitalCategoryCode,
   parsePurchaseOtherRequirements,
+  portalDraftDeleteAllowed,
   portalModuleDocumentOwnedByUser,
   resolveAttachmentDocNo,
   storeOriginatedPurchaseVisible,
@@ -145,48 +147,6 @@ function user(req: Request) {
     throw Object.assign(new Error('Unauthenticated'), { status: 401 })
   }
   return req.session.authUser
-}
-
-function profileValueByKey(row: ODataRecord, pattern: RegExp) {
-  for (const [key, value] of Object.entries(row)) {
-    if (!pattern.test(key) || blankProfileValue(value)) continue
-    return String(value)
-  }
-  return ''
-}
-
-function soapProfileValue(raw: string, name: string) {
-  const match = raw.match(new RegExp(`(?:^|#)${name}=([^#]*)`, 'i'))
-  return match?.[1]?.trim() ?? ''
-}
-
-function blankProfileValue(value: unknown) {
-  const textValue = String(value ?? '').trim()
-  return !textValue || textValue.startsWith('0001-01-01') || textValue === '0D'
-}
-
-async function applyEmployeeContractFromSoap(employeeNo: string, employee: ODataRecord) {
-  if (!employeeNo.trim()) return
-  try {
-    const profile = await callSoapMethod('FnGetEmployeeProfile', { employeeNo })
-    const raw = String(profile.returnValue ?? '')
-    const fill = (key: string, soapName: string) => {
-      const value = soapProfileValue(raw, soapName)
-      if (!value || value === '0D') return
-      if (blankProfileValue(employee[key])) employee[key] = value
-    }
-    fill('DateOfJoiningtheCompany', 'DateOfJoining')
-    fill('EndOfProbationDate', 'EndOfProbation')
-    fill('ContractEndDate', 'ContractEnd')
-    fill('EndofContractDate', 'EndOfContract')
-    fill('ContractType', 'ContractType')
-    fill('EmployeeContractType', 'EmployeeContractType')
-    fill('EmployeeType', 'EmployeeType')
-    fill('OnProbation', 'OnProbation')
-    fill('ContractDuration', 'ContractDuration')
-  } catch {
-    // The published profile method may not include contract fields yet.
-  }
 }
 
 function text(row: ODataRecord, keys: string[], fallback = '') {
@@ -468,7 +428,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v220 — 1.0.3.374 (Borrowing form, confirm receipt, contract dates)'
+export const PORTAL_API_BUILD = 'v224 — 1.0.3.378 (BC employee profile sync; BC leave sync; complete borrowing PDF)'
 
 interface LookupSpec {
   service: string
@@ -994,8 +954,17 @@ export type StoreStockLineCheck = {
   itemName: string
   requested: number
   available: number
-  needsBcMapping: boolean
   sufficient: boolean
+  /** True when ESSP free-text line is not yet mapped to a real BC Item No. */
+  needsBcMapping: boolean
+}
+
+export type StoreStockCheckResult = {
+  issuingStore: string
+  allAvailable: boolean
+  needsBcPrep: boolean
+  prepHints: string[]
+  lines: StoreStockLineCheck[]
 }
 
 export async function fetchItemLocationBalance(itemNo: string, locationCode: string) {
@@ -1127,6 +1096,7 @@ export function storePrepHints(
   lines: Array<{ needsBcMapping?: boolean }>,
 ) {
   const hints: string[] = []
+  if (!lines.length) hints.push('Add at least one item line before the stock decision.')
   if (!issuingStore) hints.push('Set Issuing Store on the Store Requisition header.')
   if (lines.some((line) => line.needsBcMapping)) {
     hints.push('Replace each PORTAL-* line with a real Item No.')
@@ -1138,7 +1108,7 @@ export function storePrepHints(
 export async function buildStoreRequisitionStockCheck(
   payload: ODataRecord,
   lines: Array<Record<string, unknown>>,
-) {
+): Promise<StoreStockCheckResult> {
   const issuingStore = text(payload, ['IssuingStore', 'Issuing_Store', 'issuingStore'])
   const itemLines = lines.filter((line) => storeLineIsItem(line))
   const checks: StoreStockLineCheck[] = await Promise.all(
@@ -1164,7 +1134,7 @@ export async function buildStoreRequisitionStockCheck(
       }
     }),
   )
-  const needsBcPrep = !issuingStore || checks.some((entry) => entry.needsBcMapping)
+  const needsBcPrep = !issuingStore || checks.length === 0 || checks.some((entry) => entry.needsBcMapping)
   return {
     issuingStore,
     needsBcPrep,
@@ -1220,7 +1190,7 @@ export function facilityProcessRoles(authUser: FacilityAuth): FacilityProcessRol
   ) {
     resolved.add('operations')
   }
-  if (/(^|[^a-z])(procurement|proc|purchasing)([^a-z]|$)/.test(allText)) {
+  if (/(^|[^a-z])(procurement|proc|purchase|purchasing|buyer)([^a-z]|$)/.test(allText)) {
     resolved.add('procurement')
   }
   if (/(^|[^a-z])(finance|administration|accounts?|accounting|accountant)([^a-z]|$)/.test(allText)) {
@@ -1251,16 +1221,17 @@ interface FacilityActionRule {
 }
 
 const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRule>> = {
-  STOCK_CHECK: {
-    STOCK_AVAILABLE: { roles: ['operations'] },
-    STOCK_UNAVAILABLE: { roles: ['operations'] },
-  },
+  PURCHASE_SOURCING: { START_PURCHASE: { roles: ['procurement'] } },
   LPR_PREPARATION: { LINK_LPR: { roles: ['procurement'] } },
   RFQ: { LINK_RFQ: { roles: ['procurement'] } },
   EVALUATION: { EVALUATION_COMPLETE: { roles: ['procurement'] } },
   PROCUREMENT_APPROVAL: {
     PROCUREMENT_APPROVED: { roles: ['finance'] },
     PROCUREMENT_RETURNED: { roles: ['finance'], commentRequired: true },
+  },
+  PURCHASE_APPROVAL: {
+    PURCHASE_APPROVED: { roles: ['finance'] },
+    PURCHASE_RETURNED: { roles: ['finance'], commentRequired: true },
   },
   LPR_CORRECTION: { LPR_RESUBMITTED: { roles: ['procurement'] } },
   PO: { LINK_PO: { roles: ['procurement'] } },
@@ -1277,6 +1248,7 @@ const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActio
   INVOICE_CORRECTION: { INVOICE_RESUBMITTED: { roles: ['procurement'] } },
   PAYMENT: { LINK_PAYMENT: { roles: ['finance'] } },
   DELIVERY: { DELIVERY_CONFIRMED: { roles: ['procurement'] } },
+  GRV: { LINK_GRV: { roles: ['operations'] } },
   GRN: { LINK_GRN: { roles: ['operations'] } },
   AUDIT_REVIEW: {
     AUDIT_APPROVED: { roles: ['auditor'] },
@@ -1290,7 +1262,6 @@ const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActio
     FINANCE_REVIEWED: { roles: ['finance'] },
     FINANCE_RETURNED: { roles: ['finance'], commentRequired: true },
   },
-  GIN_ISSUE: { LINK_GIN: { roles: ['operations'] } },
 }
 
 const STORE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRule>> = {
@@ -1372,7 +1343,7 @@ function procurementStageCode(process: Record<string, unknown>) {
   return String(process.stageCode ?? process.StageCode ?? process.stage ?? '').trim().toUpperCase()
 }
 
-export type ProcurementLinkKind = 'lpr' | 'rfq' | 'po' | 'invoice' | 'payment' | 'grn' | 'gin'
+export type ProcurementLinkKind = 'lpr' | 'rfq' | 'po' | 'invoice' | 'payment' | 'grv' | 'grn' | 'gin'
 
 export interface ProcurementLinkOption {
   no: string
@@ -1394,6 +1365,8 @@ function procurementLinkKindForStage(stage: string): ProcurementLinkKind | null 
       return 'payment'
     case 'GRN':
       return 'grn'
+    case 'GRV':
+      return 'grv'
     case 'GIN_ISSUE':
       return 'gin'
     default:
@@ -1464,7 +1437,7 @@ export async function listProcurementLinkOptions(
 ): Promise<{ kind: ProcurementLinkKind; options: ProcurementLinkOption[] } | null> {
   const kind =
     procurementLinkKindForStage(stageOrKind) ??
-    (['lpr', 'rfq', 'po', 'invoice', 'payment', 'grn', 'gin'].includes(stageOrKind.toLowerCase())
+    (['lpr', 'rfq', 'po', 'invoice', 'payment', 'grv', 'grn', 'gin'].includes(stageOrKind.toLowerCase())
       ? (stageOrKind.toLowerCase() as ProcurementLinkKind)
       : null)
   if (!kind) return null
@@ -1897,13 +1870,15 @@ function mapStoreLine(row: ODataRecord, index: number) {
   const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
   const rawType = text(row, ['type', 'Type'])
   const itemName = text(row, ['itemName', 'ItemName', 'Description'])
+  const storedItemNo = text(row, ['itemNo', 'ItemNo', 'Item_No', 'No'])
+  const itemNo = /^PORTAL-\d+$/i.test(storedItemNo) ? '' : storedItemNo
   const extraDescription = text(row, ['remarks', 'Remarks', 'lineDescription'])
   return {
     id: lineNo,
     lineNo,
     type: optionCode(rawType, { item: '1', asset: '2', ' ': '1' }) || '1',
     issuingStore: text(row, ['issuingStore', 'IssuingStore', 'Issuing_Store', 'LocationCode', 'Location']),
-    itemNo: text(row, ['itemNo', 'ItemNo', 'Item_No', 'No']),
+    itemNo,
     itemName,
     description: extraDescription || itemName,
     preferredBrandModel: text(row, [
@@ -4060,17 +4035,19 @@ export function buildPortalApiRouter() {
       await requireOwnedPortalRequest(requestId, authUser)
       const detail = await requestDetail(requestId, authUser).catch(() => null)
       const status = String(detail?.status ?? '').trim()
-      const deletable =
-        status === 'Draft' ||
-        status === 'Open' ||
-        status === 'Cancelled' ||
-        status === 'Rejected' ||
-        (module === 'training' && status === 'New')
+      const normalizedStatus = status.toLowerCase()
+      const deletable = portalDraftDeleteAllowed(module, status)
       if (!deletable) {
+        const storeDeleteMessage =
+          normalizedStatus === 'pending approval'
+            ? 'Cancel the pending approval first. After Business Central reopens the Store requisition, the draft can be deleted.'
+            : 'A Store requisition can only be permanently deleted while its Business Central status is Open. Released, Posted, Rejected, and Cancelled documents are retained for audit.'
         throw portalError(
-          status === 'Pending Approval'
-            ? 'Cancel the pending approval first; then the draft can be deleted.'
-            : 'Only draft, cancelled, or rejected documents can be permanently deleted. Approved documents cannot be deleted.',
+          module === 'storeRequisition'
+            ? storeDeleteMessage
+            : normalizedStatus === 'pending approval'
+              ? 'Cancel the pending approval first; then the draft can be deleted.'
+              : 'Only draft, cancelled, or rejected documents can be permanently deleted. Approved documents cannot be deleted.',
           422,
           'DELETE_NOT_ALLOWED',
         )
@@ -4229,7 +4206,7 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'purchaseRequisition') {
-        throw portalError('Procurement process applies to Purchase Requisition only', 422)
+        throw portalError('Purchase process applies to Purchase Requisition only', 422)
       }
       await requestDetail(requestId, authUser)
       const result = await callSoapMethod('GetPurchaseProcurementProcess', { requestNo: no })
@@ -4256,7 +4233,7 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'purchaseRequisition') {
-        throw portalError('Procurement process applies to Purchase Requisition only', 422)
+        throw portalError('Purchase process applies to Purchase Requisition only', 422)
       }
       await requestDetail(requestId, authUser)
       const currentResult = await callSoapMethod('GetPurchaseProcurementProcess', { requestNo: no })
@@ -4337,7 +4314,7 @@ export function buildPortalApiRouter() {
       const detail = await requestDetail(requestId, authUser)
       if (storeRequisitionIsAsset(detail.payload as ODataRecord)) {
         throw portalError(
-          'Asset Store Requisitions must be handed over and recorded in Business Central; item-stock GIN actions are not available.',
+          'Asset Store Requisitions must be handed over and recorded in Business Central; item-stock GIV actions are not available.',
           422,
           'ASSET_STORE_PROCESS_NOT_SUPPORTED',
         )
@@ -5264,148 +5241,8 @@ export function buildPortalApiRouter() {
   router.get(
     '/profile/details',
     safe(async (req, res) => {
-      const authUser = user(req)
-      const [employeeRecord, kin, history, qualifications, assets] = await Promise.all([
-        fetchEmployeeRecordWithCardFields(authUser.employeeNo),
-        fetchOData('QyHREmployeeKin', {
-          $filter: `EmployeeCode eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyEmploymentHistory', {
-          $filter: `Employee_No eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyEmployeeQualifications', {
-          $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyFixedAssets', {
-          $filter: `ResponsibleEmployee eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-      ])
-      const employee = employeeRecord ?? {}
-      await applyEmployeeContractFromSoap(authUser.employeeNo, employee)
-      const hrRows = await fetchOData('QyHREmployee', {
-        $filter: `No eq '${odataString(authUser.employeeNo)}'`,
-        $top: 1,
-      }).catch(() => [] as ODataRecord[])
-      const hrEmployee = Array.isArray(hrRows) ? hrRows[0] : undefined
-      if (hrEmployee) {
-        for (const [key, value] of Object.entries(hrEmployee)) {
-          if (blankProfileValue(value)) continue
-          if (blankProfileValue(employee[key])) employee[key] = value
-        }
-      }
-      const org = mapAbhEmployeeOrg(employee)
-      const directJobTitle = text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'])
-      let jobTitle = jobTitleNeedsRefresh(directJobTitle) ? '' : directJobTitle
-      if (!jobTitle) {
-        jobTitle = await resolveEmployeeJobTitle(employee, authUser.employeeNo)
-      }
-      if (jobTitleNeedsRefresh(jobTitle)) {
-        jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
-      }
-      if (jobTitleNeedsRefresh(jobTitle)) {
-        jobTitle = jobTitleNeedsRefresh(authUser.jobTitle) ? '' : authUser.jobTitle
-      }
-      res.json({
-        jobTitle,
-        jobGrade: text(
-          employee,
-          ['JobGrade', 'JobGroup', 'Job_Group', 'SalaryGrade', 'Salary_Grade', 'Grade'],
-          authUser.jobGrade,
-        ),
-        sector: org.sector,
-        division: org.divisionName,
-        department: org.departmentName,
-        district: org.district,
-        branch: org.branchName,
-        maritalStatus: text(employee, ['MaritalStatus', 'Marital_Status']),
-        employmentType: text(employee, [
-          'EmployeeContractType',
-          'Employee_Contract_Type',
-          'EmployeeType',
-          'Employee_Type',
-          'ContractType',
-          'EmploymentType',
-        ]) || profileValueByKey(employee, /contracttype|employeetype|employmenttype/i),
-        onProbation: (() => {
-          const raw = (text(employee, ['OnProbation', 'On_Probation']) || profileValueByKey(employee, /^onprobation$/i)).toLowerCase()
-          if (['true', 'yes', '1'].includes(raw)) return 'Yes'
-          if (['false', 'no', '0'].includes(raw)) return 'No'
-          return text(employee, ['OnProbation', 'On_Probation'])
-        })(),
-        contractDuration: text(employee, ['ContractDuration', 'Contract_Duration']) || profileValueByKey(employee, /contractduration/i),
-        gender: text(employee, ['Gender'], authUser.gender),
-        phoneNumber: text(employee, ['CellPhoneNumber', 'HomePhoneNumber'], authUser.phoneNumber),
-        workPhoneNumber: text(employee, ['WorkPhoneNumber', 'Work_Phone_Number']),
-        email: text(employee, ['CompanyEMail', 'Company_E_Mail', 'EMail', 'E_Mail'], authUser.email),
-        idNumber: text(employee, ['IDNumber', 'ID_Number']),
-        jobId: text(employee, ['JobID', 'Job_ID']),
-        status: text(employee, ['Status']),
-        annualLeaveBalance: text(employee, ['AnnualLeaveBalance', 'Annual_Leave_balance']),
-        employeeAccountNo: text(employee, ['CustomerNo', 'Customer_No']),
-        responsibilityCenter: text(employee, ['ResponsibilityCenter', 'Responsibility_Center'], authUser.responsibleCenter),
-        dateOfBirth: text(employee, ['DateOfBirth', 'Date_Of_Birth', 'BirthDate']),
-        nationality: text(employee, ['Nationality', 'Citizenship']),
-        postalAddress: text(employee, ['PostalAddress', 'Postal_Address', 'Address']),
-        dateOfJoin: text(employee, [
-          'DateOfJoiningtheCompany',
-          'Date_Of_Joining_the_Company',
-          'DateOfJoiningTheCompany',
-          'EmploymentDate',
-          'DateOfJoin',
-        ]) || profileValueByKey(employee, /join/i),
-        contractStartDate:
-          text(employee, ['ContractStartDate', 'Contract_Start_Date']) ||
-          text(employee, [
-            'DateOfJoiningtheCompany',
-            'Date_Of_Joining_the_Company',
-            'EmploymentDate',
-            'DateOfJoin',
-          ]),
-        contractEndDate: text(employee, [
-          'ContractEndDate',
-          'EndofContractDate',
-          'End_of_Contract_Date',
-          'Contract_End_Date',
-        ]) || profileValueByKey(employee, /contractend|endofcontract/i),
-        probationEndDate: text(employee, [
-          'EndOfProbationDate',
-          'End_Of_Probation_Date',
-          'ProbationEndDate',
-        ]) || profileValueByKey(employee, /probationdate|endofprobation|probationend/i),
-        nextOfKin: (Array.isArray(kin) ? kin : []).map((row) => ({
-          no: text(row, ['No', 'No_']),
-          name: text(row, ['Name', 'FullName', 'OtherNames']) ||
-            [text(row, ['SurName', 'Surname']), text(row, ['OtherNames', 'Other_Names'])]
-              .filter(Boolean)
-              .join(' ')
-              .trim(),
-          relationship: text(row, ['Relationship']),
-          dateOfBirth: text(row, ['DateOfBirth', 'Date_Of_Birth']),
-          gender: text(row, ['Gender']),
-          type: text(row, ['Type']),
-          phone: text(row, ['PhoneNo', 'PhoneNumber', 'HomeTelNo']),
-          address: text(row, ['Address']),
-        })),
-        employmentHistory: (Array.isArray(history) ? history : []).map((row) => ({
-          organisation: text(row, ['Employer', 'Organisation', 'CompanyName']),
-          position: text(row, ['Position', 'JobTitle']),
-          fromDate: text(row, ['FromDate', 'StartDate']),
-          toDate: text(row, ['ToDate', 'EndDate'], 'Present'),
-          type: text(row, ['Type'], 'External'),
-        })),
-        qualifications: (Array.isArray(qualifications) ? qualifications : []).map((row) => ({
-          title: text(row, ['Qualification', 'Description']),
-          institution: text(row, ['Institution']),
-          year: text(row, ['Year', 'CompletionYear']),
-          level: text(row, ['Level', 'QualificationType']),
-        })),
-        assignedAssets: (Array.isArray(assets) ? assets : []).map((row) => ({
-          tagNumber: text(row, ['No', 'FATagNumber']),
-          description: text(row, ['Description']),
-          assignedDate: text(row, ['AcquisitionDate', 'AssignedDate']),
-          status: text(row, ['Status'], 'Active'),
-        })),
-      })
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await fetchPortalProfileDetails(user(req).employeeNo))
     }),
   )
 
@@ -5431,7 +5268,7 @@ export function buildPortalApiRouter() {
         $filter:
           `No eq '${odataString(authUser.employeeNo)}'` +
           ' and TableID eq 50746',
-      }).catch(() => [] as ODataRecord[])
+      })
       res.json({ rows: mapAttachments(rows) })
     }),
   )

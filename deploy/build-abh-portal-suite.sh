@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-1.0.3.353}"
-BUILD_STAMP="${2:-v202 — ${VERSION} (Store GIV workflow; receive disabled; BC 362)}"
+VERSION="${1:-1.0.3.374}"
+BUILD_STAMP="${2:-v220 — ${VERSION} (Borrowing form, confirm receipt, contract dates)}"
 OUT_NAME="ABH-Portal-COMPLETE-${VERSION}"
 OUT_DIR="$ROOT/$OUT_NAME"
 DESKTOP_ZIP="${DESKTOP_ZIP:-$HOME/Desktop/${OUT_NAME}.zip}"
@@ -14,7 +14,7 @@ SUITE_BC="$ROOT/SelfServiceSuite/SelfServiceBackend"
 # were not copied at all — a package without them looks complete but leaves claim
 # and store-requisition approvals dead, because no workflow listens for the event.
 BC_ASSET_DIR="${BC_ASSET_DIR:-$ROOT/deploy/businesscentral}"
-BC_APP_NAME="${BC_APP_NAME:-Technology Associates EA Ltd_BC24_TA App_1.0.3.273.app}"
+BC_APP_NAME="${BC_APP_NAME:-Technology Associates EA Ltd_BC24_TA App_1.0.3.308.app}"
 BC_APP="${BC_APP:-$BC_ASSET_DIR/$BC_APP_NAME}"
 BC_WORKFLOW_DIR="$BC_ASSET_DIR/Workflows"
 
@@ -80,6 +80,7 @@ fi
 cp "$BC_APP" "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
 cp "$BC_ASSET_DIR/ABH-PUBLISH-BC.ps1" "$OUT_DIR/BusinessCentral/ABH-PUBLISH-BC.ps1"
 cp "$BC_ASSET_DIR/ABH-PRODUCTION-SETUP.txt" "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
+cp "$BC_ASSET_DIR/STORE-UAT-GO-LIVE-CHECKLIST.txt" "$OUT_DIR/BusinessCentral/STORE-UAT-GO-LIVE-CHECKLIST.txt"
 
 AL_ROOT="${ABH_AL_PROJECT:-/Users/abhishekbehera/ABH_UAT_LIVE_V2}"
 AL_APP_VERSION="$(python3 -c "import json; print(json.load(open('$AL_ROOT/app.json'))['version'])")"
@@ -105,8 +106,12 @@ cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/Employee.Page.al
 cp "$AL_ROOT/src/src/Table/StaffClaimLines.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/MedicalClaimManagement.Codeunit.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Table/StoreRequistionHeader.Table.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Table/StoreRequistionLines.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Query/StoreRequisitionsHeader.Query.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Query/StoreRequisitionLines.Query.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Page/StoreRequisitionHeaderUP.Page.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Store/StoreMgmt.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Store/StoreSetupChecklist.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplication.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveAppCard.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplicationCard.Page.al" "$AL_SRC_DIR/"
@@ -249,6 +254,10 @@ ABH REFERENCE AUDIT — SIMPLE RESULT
 - Store requesters state the required item/asset in free text; inventory masters and stock balances are not exposed.
 - Operations/Store assigns the fulfillment location internally after approval.
 - Store, Procurement, Finance, and Auditor actions are role protected.
+- Store approval cancellation is verified against Business Central after the SOAP
+  call; BC 1.0.3.307 also reconciles incomplete legacy workflow cancel responses.
+- Multiple unresolved free-text Store lines retain schema-compatible unique keys
+  until Store assigns the final Item or Fixed Asset number.
 - Requested By shows the employee name; Employee No remains a separate field.
 - Annual leave shows Leave Entitlement, Carry Forward, Total Available Leave Balance,
   Leave Accrued To-Date, Total Leave Taken To-Date, and Available Leave Balance.
@@ -290,6 +299,7 @@ REQUIRED=(
   "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
   "$OUT_DIR/BusinessCentral/ABH-PUBLISH-BC.ps1"
   "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
+  "$OUT_DIR/BusinessCentral/STORE-UAT-GO-LIVE-CHECKLIST.txt"
   "$OUT_DIR/BusinessCentral/Workflows/Staff-Medical-Claim-Approval-Workflow.xml"
   "$OUT_DIR/BusinessCentral/Workflows/Store-Requisition-Approval-Workflow.xml"
   "$OUT_DIR/BusinessCentral/Workflows/Purchase-Requisition-Approval-Workflow.xml"
@@ -299,6 +309,12 @@ REQUIRED=(
   "$AL_SRC_DIR/PortalWorkflowSetupUpgrade.Codeunit.al"
   "$AL_SRC_DIR/StaffClaimLines.Table.al"
   "$AL_SRC_DIR/MedicalClaimManagement.Codeunit.al"
+  "$AL_SRC_DIR/StoreRequistionHeader.Table.al"
+  "$AL_SRC_DIR/StoreRequistionLines.Table.al"
+  "$AL_SRC_DIR/StoreRequisitionsHeader.Query.al"
+  "$AL_SRC_DIR/StoreRequisitionLines.Query.al"
+  "$AL_SRC_DIR/StoreMgmt.Codeunit.al"
+  "$AL_SRC_DIR/StoreSetupChecklist.Page.al"
   "$AL_SRC_DIR/HRLeaveApplication.Table.al"
   "$AL_SRC_DIR/HRLeaveAppCard.Page.al"
   "$AL_SRC_DIR/HRLeaveApplicationCard.Page.al"

@@ -1,4 +1,5 @@
-import { Router, type Request } from 'express'
+import { fetchPortalProfileDetails } from './profileDetails.js'
+import { Router, type Request, type Response } from 'express'
 import {
   macFromAttendanceLocation,
   normalizeMacAddress,
@@ -58,6 +59,7 @@ import {
   selectApprovalWorkflowEntries,
 } from './leaveApprovalSteps.js'
 import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvanceAmount.js'
+import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import {
   enrichFinanceHeaderFromEmployee,
   enrichFinanceHeaderRow,
@@ -92,6 +94,7 @@ import {
   moduleSpecSupportsAttachments,
   hospitalCategoryCode,
   parsePurchaseOtherRequirements,
+  portalDraftDeleteAllowed,
   portalModuleDocumentOwnedByUser,
   resolveAttachmentDocNo,
   storeOriginatedPurchaseVisible,
@@ -425,7 +428,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v194 — 1.0.3.345 (Idempotent Leave approval submission)'
+export const PORTAL_API_BUILD = 'v224 — 1.0.3.378 (BC employee profile sync; BC leave sync; complete borrowing PDF)'
 
 interface LookupSpec {
   service: string
@@ -952,6 +955,16 @@ export type StoreStockLineCheck = {
   requested: number
   available: number
   sufficient: boolean
+  /** True when ESSP free-text line is not yet mapped to a real BC Item No. */
+  needsBcMapping: boolean
+}
+
+export type StoreStockCheckResult = {
+  issuingStore: string
+  allAvailable: boolean
+  needsBcPrep: boolean
+  prepHints: string[]
+  lines: StoreStockLineCheck[]
 }
 
 export async function fetchItemLocationBalance(itemNo: string, locationCode: string) {
@@ -972,10 +985,130 @@ function storeLineIsItem(line: Record<string, unknown>) {
   return type !== '2' && type !== 'asset'
 }
 
+/** Requester lines stay unmapped until Operations replaces them with a real BC item. */
+/** BC Issue Stage: blank, Prepared by Store, Accepted by Manager, In Transit, Received. */
+export function storeIssueStageCode(value: unknown) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (!text || text === '0' || text === '_') return ''
+  if (text.includes('prepared') || text === '1') return 'PREPARED'
+  if (text.includes('accepted') || text === '2') return 'ACCEPTED'
+  if (text.includes('transit') || text === '3') return 'TRANSIT'
+  if (text.includes('received') || text === '4') return 'RECEIVED'
+  return ''
+}
+
+function storeDocumentInput(
+  detail: {
+    requestNo: string
+    makerName?: string
+    makerEmployeeNo?: string
+    departmentName?: string
+    createdAt?: string
+    title?: string
+    payload?: ODataRecord
+  },
+  documentKind: 'requisition' | 'borrowing',
+) {
+  const payload = (detail.payload ?? {}) as ODataRecord
+  const lines = Array.isArray(payload.lines) ? (payload.lines as Array<Record<string, unknown>>) : []
+  return {
+    documentKind,
+    requestNo: detail.requestNo,
+    storeIssueNo: String(payload.StoreIssueNo ?? payload.SRNNo ?? ''),
+    requisitionType: String(payload.RequisitionType ?? payload.StoreRequisitionType ?? ''),
+    requestDate: String(payload.Requestdate ?? detail.createdAt ?? ''),
+    requiredDate: String(payload.RequiredDate ?? ''),
+    issueDate: String(payload.IssueDate ?? ''),
+    requesterName: String(detail.makerName ?? payload.RequestedBy ?? ''),
+    employeeNo: String(detail.makerEmployeeNo ?? payload.EmployeeNo ?? ''),
+    division: String(payload.GlobalDimension1Code ?? ''),
+    functionName: String(payload.FunctionName ?? ''),
+    department: String(payload.DepartmentName ?? detail.departmentName ?? ''),
+    issuingStore: String(payload.IssuingStore ?? ''),
+    purpose: String(payload.Justification ?? detail.title ?? ''),
+    lines: storeBorrowingLines(lines),
+  }
+}
+
+function storeBorrowingLines(lines: Array<Record<string, unknown>>) {
+  const mapped = lines.map((line) => ({
+    itemNo: String(line.itemNo ?? ''),
+    description: String(line.description ?? line.itemName ?? ''),
+    unitOfMeasure: String(line.unitOfMeasure ?? ''),
+    quantityRequested: String(line.quantityRequested ?? line.quantity ?? ''),
+    quantityIssued: String(line.quantityIssued ?? line.quantityToIssue ?? ''),
+    lineRole: String(line.lineRole ?? line.ABHLineRole ?? ''),
+  }))
+  const offers = mapped.filter((line) => /store offer|^1$/i.test(line.lineRole))
+  return (offers.length ? offers : mapped).map(({ lineRole: _role, ...line }) => line)
+}
+
+async function approvedStoreDocument(requestId: string, authUser: AuthUser) {
+  const { module } = parseRequestId(requestId)
+  if (module !== 'storeRequisition') {
+    throw portalError('This document is only available for a store requisition', 422)
+  }
+  const detail = await requestDetail(requestId, authUser)
+  const status = String(detail.status ?? '').trim().toLowerCase()
+  if (!['approved', 'released', 'posted'].includes(status)) {
+    throw portalError('Download the requisition after it is approved.', 409, 'STORE_DOCUMENT_NOT_READY')
+  }
+  return detail
+}
+
+function sendPdf(res: Response, pdf: Buffer, fileName: string) {
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+  res.send(pdf)
+}
+
+async function callStoreIssueHandoff(method: string, requestNo: string, actorUserID: string) {
+  try {
+    await callSoapMethod(method, { requestNo, actorUserID })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/not found|unknown|not published|could not find|procedure|method/i.test(message)) {
+      throw portalError(
+        'Publish the Business Central store issue hand-off before this step. The portal is calling PreparePortalStoreIssue, AcceptPortalStoreIssue, and ConfirmPortalStoreReceipt.',
+        502,
+        'STORE_HANDOFF_NOT_PUBLISHED',
+      )
+    }
+    throw error
+  }
+}
+
+export function portalUserIsStoreManager(authUser: FacilityAuth) {
+  const text = [authUser.jobTitle, authUser.department, authUser.departmentName, ...(authUser.roles ?? [])]
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ')
+  return /\bstore\s*manager\b|\bstores\s*manager\b|\bmain\s*store\b|\bstoremanager\b/.test(text)
+}
+
+export function storeLineNeedsBcMapping(itemNo: string) {
+  const code = itemNo.trim()
+  return !code || /^PORTAL-/i.test(code)
+}
+
+export function storePrepHints(
+  issuingStore: string,
+  lines: Array<{ needsBcMapping?: boolean }>,
+) {
+  const hints: string[] = []
+  if (!lines.length) hints.push('Add at least one item line before the stock decision.')
+  if (!issuingStore) hints.push('Set Issuing Store on the Store Requisition header.')
+  if (lines.some((line) => line.needsBcMapping)) {
+    hints.push('Replace each PORTAL-* line with a real Item No.')
+  }
+  if (hints.length) hints.push('Confirm on-hand quantity at that location.')
+  return hints
+}
+
 export async function buildStoreRequisitionStockCheck(
   payload: ODataRecord,
   lines: Array<Record<string, unknown>>,
-) {
+): Promise<StoreStockCheckResult> {
   const issuingStore = text(payload, ['IssuingStore', 'Issuing_Store', 'issuingStore'])
   const itemLines = lines.filter((line) => storeLineIsItem(line))
   const checks: StoreStockLineCheck[] = await Promise.all(
@@ -985,26 +1118,41 @@ export async function buildStoreRequisitionStockCheck(
         0,
         Number(line.quantityRequested ?? line.quantity ?? 0),
       )
+      const needsBcMapping = storeLineNeedsBcMapping(itemNo)
       const available =
-        itemNo && issuingStore ? await fetchItemLocationBalance(itemNo, issuingStore) : 0
+        !needsBcMapping && issuingStore
+          ? await fetchItemLocationBalance(itemNo, issuingStore)
+          : 0
       return {
         itemNo,
         itemName: text(line as ODataRecord, ['itemName', 'Description', 'description']),
         requested,
         available,
-        sufficient: requested > 0 && available >= requested,
+        needsBcMapping,
+        sufficient:
+          !needsBcMapping && Boolean(issuingStore) && requested > 0 && available >= requested,
       }
     }),
   )
+  const needsBcPrep = !issuingStore || checks.length === 0 || checks.some((entry) => entry.needsBcMapping)
   return {
     issuingStore,
-    allAvailable: checks.length > 0 && checks.every((entry) => entry.sufficient),
+    needsBcPrep,
+    prepHints: storePrepHints(issuingStore, checks),
+    allAvailable:
+      checks.length > 0 && !needsBcPrep && checks.every((entry) => entry.sufficient),
     lines: checks,
   }
 }
 
 function formatStoreStockFailure(stockCheck: Awaited<ReturnType<typeof buildStoreRequisitionStockCheck>>) {
-  const shortages = stockCheck.lines.filter((line) => !line.sufficient)
+  const shortages = stockCheck.lines.filter((line) => !line.sufficient && !line.needsBcMapping)
+  if (stockCheck.needsBcPrep) {
+    const hints = stockCheck.prepHints.length
+      ? ` ${stockCheck.prepHints.join(' ')}`
+      : ''
+    return `Finish Business Central prep before recording the stock decision.${hints}`
+  }
   if (!stockCheck.issuingStore) {
     return 'Issuing Store has not been assigned. Operations/Store must assign the fulfillment location in Business Central before recording the stock decision.'
   }
@@ -1042,7 +1190,7 @@ export function facilityProcessRoles(authUser: FacilityAuth): FacilityProcessRol
   ) {
     resolved.add('operations')
   }
-  if (/(^|[^a-z])(procurement|proc|purchasing)([^a-z]|$)/.test(allText)) {
+  if (/(^|[^a-z])(procurement|proc|purchase|purchasing|buyer)([^a-z]|$)/.test(allText)) {
     resolved.add('procurement')
   }
   if (/(^|[^a-z])(finance|administration|accounts?|accounting|accountant)([^a-z]|$)/.test(allText)) {
@@ -1073,16 +1221,17 @@ interface FacilityActionRule {
 }
 
 const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRule>> = {
-  STOCK_CHECK: {
-    STOCK_AVAILABLE: { roles: ['operations'] },
-    STOCK_UNAVAILABLE: { roles: ['operations'] },
-  },
+  PURCHASE_SOURCING: { START_PURCHASE: { roles: ['procurement'] } },
   LPR_PREPARATION: { LINK_LPR: { roles: ['procurement'] } },
   RFQ: { LINK_RFQ: { roles: ['procurement'] } },
   EVALUATION: { EVALUATION_COMPLETE: { roles: ['procurement'] } },
   PROCUREMENT_APPROVAL: {
     PROCUREMENT_APPROVED: { roles: ['finance'] },
     PROCUREMENT_RETURNED: { roles: ['finance'], commentRequired: true },
+  },
+  PURCHASE_APPROVAL: {
+    PURCHASE_APPROVED: { roles: ['finance'] },
+    PURCHASE_RETURNED: { roles: ['finance'], commentRequired: true },
   },
   LPR_CORRECTION: { LPR_RESUBMITTED: { roles: ['procurement'] } },
   PO: { LINK_PO: { roles: ['procurement'] } },
@@ -1099,6 +1248,7 @@ const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActio
   INVOICE_CORRECTION: { INVOICE_RESUBMITTED: { roles: ['procurement'] } },
   PAYMENT: { LINK_PAYMENT: { roles: ['finance'] } },
   DELIVERY: { DELIVERY_CONFIRMED: { roles: ['procurement'] } },
+  GRV: { LINK_GRV: { roles: ['operations'] } },
   GRN: { LINK_GRN: { roles: ['operations'] } },
   AUDIT_REVIEW: {
     AUDIT_APPROVED: { roles: ['auditor'] },
@@ -1112,7 +1262,6 @@ const PURCHASE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActio
     FINANCE_REVIEWED: { roles: ['finance'] },
     FINANCE_RETURNED: { roles: ['finance'], commentRequired: true },
   },
-  GIN_ISSUE: { LINK_GIN: { roles: ['operations'] } },
 }
 
 const STORE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRule>> = {
@@ -1194,7 +1343,7 @@ function procurementStageCode(process: Record<string, unknown>) {
   return String(process.stageCode ?? process.StageCode ?? process.stage ?? '').trim().toUpperCase()
 }
 
-export type ProcurementLinkKind = 'lpr' | 'rfq' | 'po' | 'invoice' | 'payment' | 'grn' | 'gin'
+export type ProcurementLinkKind = 'lpr' | 'rfq' | 'po' | 'invoice' | 'payment' | 'grv' | 'grn' | 'gin'
 
 export interface ProcurementLinkOption {
   no: string
@@ -1216,6 +1365,8 @@ function procurementLinkKindForStage(stage: string): ProcurementLinkKind | null 
       return 'payment'
     case 'GRN':
       return 'grn'
+    case 'GRV':
+      return 'grv'
     case 'GIN_ISSUE':
       return 'gin'
     default:
@@ -1286,7 +1437,7 @@ export async function listProcurementLinkOptions(
 ): Promise<{ kind: ProcurementLinkKind; options: ProcurementLinkOption[] } | null> {
   const kind =
     procurementLinkKindForStage(stageOrKind) ??
-    (['lpr', 'rfq', 'po', 'invoice', 'payment', 'grn', 'gin'].includes(stageOrKind.toLowerCase())
+    (['lpr', 'rfq', 'po', 'invoice', 'payment', 'grv', 'grn', 'gin'].includes(stageOrKind.toLowerCase())
       ? (stageOrKind.toLowerCase() as ProcurementLinkKind)
       : null)
   if (!kind) return null
@@ -1719,13 +1870,15 @@ function mapStoreLine(row: ODataRecord, index: number) {
   const quantityRequested = number(row, ['quantityRequested', 'QuantityRequested', 'Quantity_Requested', 'Quantity', 'Qty'])
   const rawType = text(row, ['type', 'Type'])
   const itemName = text(row, ['itemName', 'ItemName', 'Description'])
+  const storedItemNo = text(row, ['itemNo', 'ItemNo', 'Item_No', 'No'])
+  const itemNo = /^PORTAL-\d+$/i.test(storedItemNo) ? '' : storedItemNo
   const extraDescription = text(row, ['remarks', 'Remarks', 'lineDescription'])
   return {
     id: lineNo,
     lineNo,
     type: optionCode(rawType, { item: '1', asset: '2', ' ': '1' }) || '1',
     issuingStore: text(row, ['issuingStore', 'IssuingStore', 'Issuing_Store', 'LocationCode', 'Location']),
-    itemNo: text(row, ['itemNo', 'ItemNo', 'Item_No', 'No']),
+    itemNo,
     itemName,
     description: extraDescription || itemName,
     preferredBrandModel: text(row, [
@@ -1748,6 +1901,7 @@ function mapStoreLine(row: ODataRecord, index: number) {
     reasonForLessIssued: text(row, ['ReasonforlessQtyIssued', 'ReasonForLessIssued']),
     remarks: text(row, ['Remarks', 'Remark']),
     fulfillmentStatus: text(row, ['FulfillmentStatus', 'LineStatus', 'Status']),
+    lineRole: text(row, ['ABHLineRole', 'ABH_Line_Role', 'LineRole', 'lineRole']),
   }
 }
 
@@ -3881,17 +4035,19 @@ export function buildPortalApiRouter() {
       await requireOwnedPortalRequest(requestId, authUser)
       const detail = await requestDetail(requestId, authUser).catch(() => null)
       const status = String(detail?.status ?? '').trim()
-      const deletable =
-        status === 'Draft' ||
-        status === 'Open' ||
-        status === 'Cancelled' ||
-        status === 'Rejected' ||
-        (module === 'training' && status === 'New')
+      const normalizedStatus = status.toLowerCase()
+      const deletable = portalDraftDeleteAllowed(module, status)
       if (!deletable) {
+        const storeDeleteMessage =
+          normalizedStatus === 'pending approval'
+            ? 'Cancel the pending approval first. After Business Central reopens the Store requisition, the draft can be deleted.'
+            : 'A Store requisition can only be permanently deleted while its Business Central status is Open. Released, Posted, Rejected, and Cancelled documents are retained for audit.'
         throw portalError(
-          status === 'Pending Approval'
-            ? 'Cancel the pending approval first; then the draft can be deleted.'
-            : 'Only draft, cancelled, or rejected documents can be permanently deleted. Approved documents cannot be deleted.',
+          module === 'storeRequisition'
+            ? storeDeleteMessage
+            : normalizedStatus === 'pending approval'
+              ? 'Cancel the pending approval first; then the draft can be deleted.'
+              : 'Only draft, cancelled, or rejected documents can be permanently deleted. Approved documents cannot be deleted.',
           422,
           'DELETE_NOT_ALLOWED',
         )
@@ -4030,21 +4186,16 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
-      const { module, no } = parseRequestId(requestId)
+      const { module } = parseRequestId(requestId)
       if (module !== 'storeRequisition') {
         throw portalError('Line receiving is only supported for Store Requisition', 422)
       }
       await requireOwnedPortalRequest(requestId, authUser)
-      const result = await callSoapMethod('ReceiveStoreLineItems', {
-        lineNo: req.params.lineId,
-        requisitionNo: no,
-        quantityToReceive: Number(req.body?.quantityToReceive ?? 0),
-        reason: String(req.body?.reason ?? ''),
-      })
-      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
-        throw portalError('Business Central did not receive the store requisition line', 502)
-      }
-      res.json(await requestDetail(requestId, authUser))
+      throw portalError(
+        'Requester receive is not used. Inventory is reduced when Operations posts the GIV in Business Central.',
+        422,
+        'STORE_RECEIVE_DISABLED',
+      )
     }),
   )
 
@@ -4055,7 +4206,7 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'purchaseRequisition') {
-        throw portalError('Procurement process applies to Purchase Requisition only', 422)
+        throw portalError('Purchase process applies to Purchase Requisition only', 422)
       }
       await requestDetail(requestId, authUser)
       const result = await callSoapMethod('GetPurchaseProcurementProcess', { requestNo: no })
@@ -4082,7 +4233,7 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'purchaseRequisition') {
-        throw portalError('Procurement process applies to Purchase Requisition only', 422)
+        throw portalError('Purchase process applies to Purchase Requisition only', 422)
       }
       await requestDetail(requestId, authUser)
       const currentResult = await callSoapMethod('GetPurchaseProcurementProcess', { requestNo: no })
@@ -4106,6 +4257,28 @@ export function buildPortalApiRouter() {
         process: parseProcurementProcess(result.returnValue),
         request: await requestDetail(requestId, authUser),
       })
+    }),
+  )
+
+  router.get(
+    '/requests/:id/requisition-voucher',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const detail = await approvedStoreDocument(requestId, authUser)
+      const pdf = buildStoreBorrowingFormPdf(storeDocumentInput(detail, 'requisition'))
+      sendPdf(res, pdf, `Store-Requisition-${detail.requestNo}.pdf`)
+    }),
+  )
+
+  router.get(
+    '/requests/:id/borrowing-form',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const detail = await approvedStoreDocument(requestId, authUser)
+      const pdf = buildStoreBorrowingFormPdf(storeDocumentInput(detail, 'borrowing'))
+      sendPdf(res, pdf, `Item-Borrowing-Form-${detail.requestNo}.pdf`)
     }),
   )
 
@@ -4141,10 +4314,129 @@ export function buildPortalApiRouter() {
       const detail = await requestDetail(requestId, authUser)
       if (storeRequisitionIsAsset(detail.payload as ODataRecord)) {
         throw portalError(
-          'Asset Store Requisitions must be handed over and recorded in Business Central; item-stock GIN actions are not available.',
+          'Asset Store Requisitions must be handed over and recorded in Business Central; item-stock GIV actions are not available.',
           422,
           'ASSET_STORE_PROCESS_NOT_SUPPORTED',
         )
+      }
+      const requestedAction = String(req.body?.actionCode ?? '').trim().toUpperCase()
+      if (
+        requestedAction === 'PREPARE_ISSUE' ||
+        requestedAction === 'ACCEPT_ISSUE' ||
+        requestedAction === 'ACCEPT_ITEM' ||
+        requestedAction === 'DECLINE_ITEM' ||
+        requestedAction === 'CONFIRM_RECEIPT'
+      ) {
+        const issueStage = storeIssueStageCode(
+          (detail.payload as ODataRecord).IssueStage ??
+            (detail.payload as ODataRecord).Issue_Stage,
+        )
+        if (requestedAction === 'PREPARE_ISSUE') {
+          if (!canManagePurchaseStock(authUser)) {
+            throw portalError('Only the storekeeper can submit an issue to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
+          }
+          if (issueStage) {
+            throw portalError('This requisition has already been handed to the store manager.', 409, 'INVALID_PROCESS_TRANSITION')
+          }
+          await callStoreIssueHandoff('PreparePortalStoreIssue', no, authUser.userID)
+        } else if (requestedAction === 'ACCEPT_ISSUE') {
+          if (!portalUserIsStoreManager(authUser)) {
+            throw portalError('Only the store manager can accept and issue this requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
+          }
+          if (issueStage !== 'PREPARED') {
+            throw portalError('The storekeeper must submit the issue before the store manager can accept it.', 409, 'INVALID_PROCESS_TRANSITION')
+          }
+          await callStoreIssueHandoff('AcceptPortalStoreIssue', no, authUser.userID)
+        } else if (requestedAction === 'ACCEPT_ITEM' || requestedAction === 'DECLINE_ITEM') {
+          const payload = detail.payload as ODataRecord
+          const owners = [
+            detail.makerEmployeeNo,
+            text(payload, ['EmployeeNo', 'Employee_No', 'UserID', 'User_ID', 'RequesterID', 'Requester_ID']),
+          ]
+            .map((value) => String(value ?? '').trim().toUpperCase())
+            .filter(Boolean)
+          const actors = [authUser.employeeNo, authUser.userID]
+            .map((value) => String(value ?? '').trim().toUpperCase())
+            .filter(Boolean)
+          if (!owners.some((owner) => actors.includes(owner))) {
+            throw portalError('Only the requester can accept or decline the offered item.', 403, 'PROCESS_ACTION_FORBIDDEN')
+          }
+          if (issueStage !== 'ACCEPTED') {
+            throw portalError(
+              'The store manager must accept the offered item before you can accept or decline it.',
+              409,
+              'INVALID_PROCESS_TRANSITION',
+            )
+          }
+          await callStoreIssueHandoff(
+            requestedAction === 'ACCEPT_ITEM' ? 'AcceptPortalRevisedItem' : 'DeclinePortalRevisedItem',
+            no,
+            authUser.userID,
+          )
+        } else {
+          const payload = detail.payload as ODataRecord
+          const owners = [
+            detail.makerEmployeeNo,
+            text(payload, ['EmployeeNo', 'Employee_No', 'UserID', 'User_ID', 'RequesterID', 'Requester_ID']),
+          ]
+            .map((value) => String(value ?? '').trim().toUpperCase())
+            .filter(Boolean)
+          const actors = [authUser.employeeNo, authUser.userID]
+            .map((value) => String(value ?? '').trim().toUpperCase())
+            .filter(Boolean)
+          if (!owners.some((owner) => actors.includes(owner))) {
+            throw portalError('Only the requester can confirm receipt of goods in transit.', 403, 'PROCESS_ACTION_FORBIDDEN')
+          }
+          const lineRows = [
+            ...requestDetailLines(detail as Record<string, unknown>),
+            ...(Array.isArray(payload.lines) ? (payload.lines as Array<Record<string, unknown>>) : []),
+          ]
+          const issuedByManager = lineRows.some((line) => Number(line.quantityIssued ?? line.QuantityIssued ?? 0) > 0)
+          if (issueStage !== 'TRANSIT' && !issuedByManager && !['posted', 'approved', 'released'].includes(String(detail.status ?? '').trim().toLowerCase())) {
+            throw portalError(
+              'Confirm receipt after the store requisition is approved.',
+              409,
+              'INVALID_PROCESS_TRANSITION',
+            )
+          }
+          try {
+            await callStoreIssueHandoff('ConfirmPortalStoreReceipt', no, authUser.userID)
+          } catch (error) {
+            const code = (error as { code?: string }).code
+            const message = error instanceof Error ? error.message : ''
+            const portalCanContinue =
+              code === 'STORE_HANDOFF_NOT_PUBLISHED' ||
+              /in transit|issue stage|not been issued|not issued|must accept/i.test(message)
+            if (!portalCanContinue) throw error
+          }
+        }
+        const refreshed = await requestDetail(requestId, authUser)
+        const issueStageLabel =
+          requestedAction === 'PREPARE_ISSUE'
+            ? 'Prepared by Store'
+            : requestedAction === 'ACCEPT_ISSUE'
+              ? 'Accepted by Manager'
+              : requestedAction === 'ACCEPT_ITEM'
+                ? 'In Transit'
+                : requestedAction === 'DECLINE_ITEM'
+                  ? ''
+                  : 'Received'
+        const requestWithStage = {
+          ...refreshed,
+          payload: {
+            ...(refreshed.payload ?? {}),
+            IssueStage: issueStageLabel,
+          },
+        }
+        const stockCheck = await buildStoreRequisitionStockCheck(
+          requestWithStage.payload as ODataRecord,
+          requestDetailLines(requestWithStage as Record<string, unknown>),
+        )
+        res.json({
+          process: { stageCode: requestedAction, stockCheck },
+          request: requestWithStage,
+        })
+        return
       }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)
@@ -4159,6 +4451,9 @@ export function buildPortalApiRouter() {
         detail.payload as ODataRecord,
         requestDetailLines(detail as Record<string, unknown>),
       )
+      if (stockCheck.needsBcPrep) {
+        throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_BC_PREP_REQUIRED')
+      }
       if (actionCode === 'STOCK_AVAILABLE' && !stockCheck.allAvailable) {
         throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_STOCK_UNAVAILABLE')
       }
@@ -4183,18 +4478,16 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
-      const { module, no } = parseRequestId(requestId)
+      const { module } = parseRequestId(requestId)
       if (module !== 'storeRequisition') {
         throw portalError('Posting receipts is only supported for Store Requisition', 422)
       }
       await requireOwnedPortalRequest(requestId, authUser)
-      const result = await callSoapMethod('PostToReceiveStoreRequisition', {
-        requisitionNo: no,
-      })
-      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
-        throw portalError('Business Central did not post the store requisition receipt', 502)
-      }
-      res.json(await requestDetail(requestId, authUser))
+      throw portalError(
+        'Requester receive is not used. Inventory is reduced when Operations posts the GIV in Business Central.',
+        422,
+        'STORE_RECEIVE_DISABLED',
+      )
     }),
   )
 
@@ -4948,89 +5241,8 @@ export function buildPortalApiRouter() {
   router.get(
     '/profile/details',
     safe(async (req, res) => {
-      const authUser = user(req)
-      const [employeeRecord, kin, history, qualifications, assets] = await Promise.all([
-        fetchEmployeeRecordWithCardFields(authUser.employeeNo),
-        fetchOData('QyHREmployeeKin', {
-          $filter: `EmployeeCode eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyEmploymentHistory', {
-          $filter: `Employee_No eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyEmployeeQualifications', {
-          $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-        fetchOData('QyFixedAssets', {
-          $filter: `ResponsibleEmployee eq '${odataString(authUser.employeeNo)}'`,
-        }).catch(() => [] as ODataRecord[]),
-      ])
-      const employee = employeeRecord ?? {}
-      const org = mapAbhEmployeeOrg(employee)
-      const directJobTitle = text(employee, ['JobTitle', 'Job_Title', 'CurrentJobTitle'])
-      let jobTitle = jobTitleNeedsRefresh(directJobTitle) ? '' : directJobTitle
-      if (!jobTitle) {
-        jobTitle = await resolveEmployeeJobTitle(employee, authUser.employeeNo)
-      }
-      if (jobTitleNeedsRefresh(jobTitle)) {
-        jobTitle = await resolveEmployeeJobTitleByNo(authUser.employeeNo)
-      }
-      if (jobTitleNeedsRefresh(jobTitle)) {
-        jobTitle = jobTitleNeedsRefresh(authUser.jobTitle) ? '' : authUser.jobTitle
-      }
-      res.json({
-        jobTitle,
-        jobGrade: text(
-          employee,
-          ['JobGrade', 'JobGroup', 'Job_Group', 'SalaryGrade', 'Salary_Grade', 'Grade'],
-          authUser.jobGrade,
-        ),
-        sector: org.sector,
-        division: org.divisionName,
-        department: org.departmentName,
-        district: org.district,
-        branch: org.branchName,
-        maritalStatus: text(employee, ['MaritalStatus', 'Marital_Status']),
-        employmentType: text(employee, ['EmploymentType', 'ContractType']),
-        gender: text(employee, ['Gender'], authUser.gender),
-        phoneNumber: text(employee, ['CellPhoneNumber', 'HomePhoneNumber'], authUser.phoneNumber),
-        dateOfJoin: text(employee, ['EmploymentDate', 'DateOfJoin']),
-        contractStartDate: text(employee, ['ContractStartDate']),
-        contractEndDate: text(employee, ['ContractEndDate']),
-        probationEndDate: text(employee, ['ProbationEndDate']),
-        nextOfKin: (Array.isArray(kin) ? kin : []).map((row) => ({
-          no: text(row, ['No', 'No_']),
-          name: text(row, ['Name', 'FullName', 'OtherNames']) ||
-            [text(row, ['SurName', 'Surname']), text(row, ['OtherNames', 'Other_Names'])]
-              .filter(Boolean)
-              .join(' ')
-              .trim(),
-          relationship: text(row, ['Relationship']),
-          dateOfBirth: text(row, ['DateOfBirth', 'Date_Of_Birth']),
-          gender: text(row, ['Gender']),
-          type: text(row, ['Type']),
-          phone: text(row, ['PhoneNo', 'PhoneNumber', 'HomeTelNo']),
-          address: text(row, ['Address']),
-        })),
-        employmentHistory: (Array.isArray(history) ? history : []).map((row) => ({
-          organisation: text(row, ['Employer', 'Organisation', 'CompanyName']),
-          position: text(row, ['Position', 'JobTitle']),
-          fromDate: text(row, ['FromDate', 'StartDate']),
-          toDate: text(row, ['ToDate', 'EndDate'], 'Present'),
-          type: text(row, ['Type'], 'External'),
-        })),
-        qualifications: (Array.isArray(qualifications) ? qualifications : []).map((row) => ({
-          title: text(row, ['Qualification', 'Description']),
-          institution: text(row, ['Institution']),
-          year: text(row, ['Year', 'CompletionYear']),
-          level: text(row, ['Level', 'QualificationType']),
-        })),
-        assignedAssets: (Array.isArray(assets) ? assets : []).map((row) => ({
-          tagNumber: text(row, ['No', 'FATagNumber']),
-          description: text(row, ['Description']),
-          assignedDate: text(row, ['AcquisitionDate', 'AssignedDate']),
-          status: text(row, ['Status'], 'Active'),
-        })),
-      })
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await fetchPortalProfileDetails(user(req).employeeNo))
     }),
   )
 
@@ -5056,7 +5268,7 @@ export function buildPortalApiRouter() {
         $filter:
           `No eq '${odataString(authUser.employeeNo)}'` +
           ' and TableID eq 50746',
-      }).catch(() => [] as ODataRecord[])
+      })
       res.json({ rows: mapAttachments(rows) })
     }),
   )

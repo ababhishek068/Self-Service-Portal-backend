@@ -1,0 +1,33 @@
+ABH FIX DEPLOY (delete + purchase line edit)
+============================================
+
+Your delete error:
+  Method 'DeletePortalDraftDocument' is invalid!
+means the PORTAL already has Delete, but BUSINESS CENTRAL does not yet.
+
+DO THIS ORDER ON THE WINDOWS UAT SERVER:
+
+1) BUSINESS CENTRAL FIRST
+   Copy to C:\TA\publish\:
+     - Technology Associates EA Ltd_BC24_TA App_1.0.3.217.app
+     - PUBLISH-ABH-1.0.3.217.ps1
+   Open Business Central Administration Shell as Admin:
+     cd C:\TA\publish
+     .\PUBLISH-ABH-1.0.3.217.ps1
+   Wait for Restart to finish.
+
+2) PORTAL SECOND
+   Use: ABH-Portal-COMPLETE-1.0.3.317.zip (not 316)
+   Extract, copy .env, START-ABH-PORTAL.bat
+   Check: http://127.0.0.1:4000/api/portal-build
+   Expect: v166 — 1.0.3.317
+
+3) RETEST
+   Local Purchase → Delete on Open draft → should succeed
+   Add line → Qty 2 + Unit 120000 → Total 240000
+   Save → Edit → fields still present
+
+Both packages are on your Mac Desktop:
+  ABH-Portal-COMPLETE-1.0.3.317.zip
+  Technology Associates EA Ltd_BC24_TA App_1.0.3.217.app
+  PUBLISH-ABH-1.0.3.217.ps1

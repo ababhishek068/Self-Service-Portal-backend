@@ -435,6 +435,21 @@ export function resolveModuleRequestStatus(
   return base
 }
 
+/**
+ * True only when BC has completed an approval cancellation: the header is
+ * editable again and no approval entry remains actionable. This is used after
+ * a late/lost SOAP response so SSP reports the authoritative BC result instead
+ * of encouraging a duplicate second click.
+ */
+export function approvalCancellationComplete(
+  row: ODataRecord,
+  requestType: PortalModuleKey,
+  approvalEntries: ODataRecord[] = [],
+) {
+  const base = statusFromBc(documentStatusFromBc(row, requestType))
+  return (base === 'Open' || base === 'Draft') && !hasActiveApprovalEntries(approvalEntries)
+}
+
 export function leaveSentForApproval(row: ODataRecord) {
   const sentAt = text(row, [
     'DateTimeSentforApproval',

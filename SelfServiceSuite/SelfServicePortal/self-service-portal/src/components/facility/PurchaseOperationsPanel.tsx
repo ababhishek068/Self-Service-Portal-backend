@@ -28,6 +28,15 @@ interface ProcessAction {
 }
 
 const processActions: Record<string, ProcessAction[]> = {
+  PURCHASE_SOURCING: [
+    {
+      code: 'START_PURCHASE',
+      label: 'Start purchase sourcing',
+      owner: 'procurement',
+      confirmTitle: 'Start purchase sourcing',
+      confirmMessage: 'Confirm that Purchase is starting the approved sourcing process.',
+    },
+  ],
   ADMIN_FINANCE_REVIEW: [
     {
       code: 'FINANCE_REVIEWED',
@@ -44,32 +53,6 @@ const processActions: Record<string, ProcessAction[]> = {
       confirmMessage: 'Return this purchase request to the requester for correction.',
       requiresComment: true,
       returnAction: true,
-    },
-  ],
-  STOCK_CHECK: [
-    {
-      code: 'STOCK_AVAILABLE',
-      label: 'Stock available — issue GIN',
-      owner: 'stock',
-      confirmTitle: 'Issue GIN',
-      confirmMessage: 'Confirm the requested items are available and issue them through GIN.',
-    },
-    {
-      code: 'STOCK_UNAVAILABLE',
-      label: 'Stock not available — start LPR',
-      owner: 'stock',
-      confirmTitle: 'Start LPR',
-      confirmMessage: 'Confirm the requested items are unavailable and continue to procurement.',
-    },
-  ],
-  GIN_ISSUE: [
-    {
-      code: 'LINK_GIN',
-      label: 'Link GIN',
-      owner: 'stock',
-      confirmTitle: 'Link GIN',
-      confirmMessage: 'Link the issued goods issue note and complete this legacy stock path.',
-      documentLabel: 'GIN No.',
     },
   ],
   LPR_PREPARATION: [
@@ -107,23 +90,41 @@ const processActions: Record<string, ProcessAction[]> = {
       label: 'Complete evaluation',
       owner: 'procurement',
       confirmTitle: 'Complete evaluation',
-      confirmMessage: 'Confirm that the procurement evaluation is complete.',
+      confirmMessage: 'Confirm that the purchase evaluation is complete.',
     },
   ],
   PROCUREMENT_APPROVAL: [
     {
       code: 'PROCUREMENT_APPROVED',
-      label: 'Approve procurement',
+      label: 'Approve purchase evaluation',
       owner: 'finance',
-      confirmTitle: 'Approve procurement',
-      confirmMessage: 'Approve the procurement evaluation and continue to PO preparation.',
+      confirmTitle: 'Approve purchase evaluation',
+      confirmMessage: 'Approve the purchase evaluation and continue to PO preparation.',
     },
     {
       code: 'PROCUREMENT_RETURNED',
-      label: 'Return procurement',
+      label: 'Return purchase evaluation',
       owner: 'finance',
-      confirmTitle: 'Return procurement',
-      confirmMessage: 'Return the procurement evaluation for correction.',
+      confirmTitle: 'Return purchase evaluation',
+      confirmMessage: 'Return the purchase evaluation for correction.',
+      requiresComment: true,
+      returnAction: true,
+    },
+  ],
+  PURCHASE_APPROVAL: [
+    {
+      code: 'PURCHASE_APPROVED',
+      label: 'Approve purchase evaluation',
+      owner: 'finance',
+      confirmTitle: 'Approve purchase evaluation',
+      confirmMessage: 'Approve the purchase evaluation and continue to purchase-order preparation.',
+    },
+    {
+      code: 'PURCHASE_RETURNED',
+      label: 'Return purchase evaluation',
+      owner: 'finance',
+      confirmTitle: 'Return purchase evaluation',
+      confirmMessage: 'Return the purchase evaluation to Purchase for correction.',
       requiresComment: true,
       returnAction: true,
     },
@@ -144,7 +145,7 @@ const processActions: Record<string, ProcessAction[]> = {
       label: 'Approve purchase order',
       owner: 'finance',
       confirmTitle: 'Approve purchase order',
-      confirmMessage: 'Approve the linked purchase order and continue to invoicing.',
+      confirmMessage: 'Approve the linked purchase order and continue to goods receiving.',
     },
     {
       code: 'PO_RETURNED',
@@ -218,17 +219,27 @@ const processActions: Record<string, ProcessAction[]> = {
       label: 'Confirm delivery',
       owner: 'procurement',
       confirmTitle: 'Confirm delivery',
-      confirmMessage: 'Confirm that the goods or services have been delivered.',
+      confirmMessage: 'Confirm that the goods or services have arrived and are ready for receiving verification.',
+    },
+  ],
+  GRV: [
+    {
+      code: 'LINK_GRV',
+      label: 'Link posted GRV',
+      owner: 'stock',
+      confirmTitle: 'Link posted GRV',
+      confirmMessage: 'Link the posted goods received voucher and confirm that inventory was updated.',
+      documentLabel: 'GRV No.',
     },
   ],
   GRN: [
     {
       code: 'LINK_GRN',
-      label: 'Link GRN',
+      label: 'Link posted GRV',
       owner: 'stock',
-      confirmTitle: 'Link GRN',
-      confirmMessage: 'Link the verified goods receipt note and send the request for audit review.',
-      documentLabel: 'GRN No.',
+      confirmTitle: 'Link posted GRV',
+      confirmMessage: 'Link the posted goods received voucher and confirm that inventory was updated.',
+      documentLabel: 'GRV No.',
     },
   ],
   AUDIT_REVIEW: [
@@ -237,14 +248,14 @@ const processActions: Record<string, ProcessAction[]> = {
       label: 'Approve audit review',
       owner: 'audit',
       confirmTitle: 'Approve audit review',
-      confirmMessage: 'Confirm the procurement file is complete and close the process.',
+      confirmMessage: 'Confirm the purchase and inventory file is complete and close the process.',
     },
     {
       code: 'AUDIT_RETURNED',
       label: 'Return audit review',
       owner: 'audit',
       confirmTitle: 'Return audit review',
-      confirmMessage: 'Return the procurement file for correction.',
+      confirmMessage: 'Return the purchase and inventory file for correction.',
       requiresComment: true,
       returnAction: true,
     },
@@ -287,7 +298,7 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
     /\b(operations?|ops|store|storekeeper)\b/.test(assignment)
   const procurement =
     Boolean(employee?.roles?.includes('procurement')) ||
-    /\b(procurement|proc)\b/.test(assignment)
+    /\b(procurement|proc|purchase|purchasing|buyer)\b/.test(assignment)
   const audit = Boolean(employee?.roles?.includes('audit')) || /\b(audit|auditor)\b/.test(assignment)
   const canViewProcess = finance || stockManager || procurement || audit
   const permissions: Record<ActionOwner, boolean> = {
@@ -389,10 +400,9 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
   const stock = text(processQuery.data?.stockDecision)
   const links = processQuery.data?.links as Record<string, unknown> | undefined
   const lprNo = linkedValue(links, 'lprNo', 'LPRNo')
-  const ginNo = linkedValue(links, 'ginNo', 'GINNo')
   const poNo = linkedValue(links, 'poNo', 'purchaseOrderNo', 'PONo')
   const invoiceNo = linkedValue(links, 'invoiceNo', 'InvoiceNo')
-  const grnNo = linkedValue(links, 'grnNo', 'GRNNo')
+  const grvNo = linkedValue(links, 'grvNo', 'GRVNo', 'grnNo', 'GRNNo')
   const rfqNo = linkedValue(links, 'rfqNo', 'RFQNo')
   const actions = processActions[stage] ?? []
   const allowedActions = actions.filter((action) => permissions[action.owner])
@@ -438,19 +448,18 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
       <p className="mt-1 text-slate-600">Complete only the action assigned to your role at the current stage.</p>
       {processQuery.isError ? (
         <p className="mt-2 text-red-700">
-          {processQuery.error instanceof Error ? processQuery.error.message : 'Could not load procurement stage.'}
+          {processQuery.error instanceof Error ? processQuery.error.message : 'Could not load purchase stage.'}
         </p>
       ) : (
         <p className="mt-2">
           Stage: <strong>{label}</strong>
           {owner ? ` · Owner: ${owner}` : ''}
           {stock ? ` · Stock: ${stock}` : ''}
-          {ginNo ? ` · GIN: ${ginNo}` : ''}
           {lprNo ? ` · LPR: ${lprNo}` : ''}
           {rfqNo ? ` · RFQ: ${rfqNo}` : ''}
           {poNo ? ` · PO: ${poNo}` : ''}
           {invoiceNo ? ` · Invoice: ${invoiceNo}` : ''}
-          {grnNo ? ` · GRN: ${grnNo}` : ''}
+          {grvNo ? ` · GRV: ${grvNo}` : ''}
         </p>
       )}
 
@@ -529,7 +538,7 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
         </p>
       ) : null}
       {stage === 'COMPLETED' ? (
-        <p className="mt-2 text-teal-800">Purchase and audit process complete.</p>
+        <p className="mt-2 text-teal-800">Purchase receiving is complete and the posted GRV has updated inventory.</p>
       ) : null}
     </section>
   )

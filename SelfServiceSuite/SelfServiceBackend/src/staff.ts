@@ -50,12 +50,15 @@ import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
 import { fetchEmployeeRecordWithCardFields } from './employeeProfile.js'
 import {
+  applyUnpostedApprovedLeave,
+  approvedLeaveDaysNotPosted,
   employeeAnnualLeaveBalance,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
   resolveAnnualAvailableLeaveBalance,
   resolveBcLeaveBalance,
   resolveLeaveBalanceBreakdown,
+  resolveNonAnnualLeaveBalanceBreakdown,
 } from './leaveBalance.js'
 
 /* -------------------------------------------------------------------------- */
@@ -1240,6 +1243,94 @@ async function deleteLeaveApplicationInBc(
   )
 }
 
+function leaveRowBelongsToUser(row: ODataRecord, user: ReturnType<typeof authUser>) {
+  const employeeNo = fieldText(row, ['EmployeeNo', 'Employee_No'])
+  const userId = fieldText(row, ['UserID', 'User_ID'])
+  if (employeeNo && employeeNo === user.employeeNo) return true
+  if (userId && userId.toUpperCase() === user.userID.toUpperCase()) return true
+  return false
+}
+
+async function postApprovedLeaveForRequester(user: ReturnType<typeof authUser>, no: string) {
+  const row = await fetchOwnedLeaveRow(user, no)
+  if (!row || !leaveRowBelongsToUser(row, user)) {
+    return { statusCode: 404, body: { ok: false, message: 'Leave application not found.' } }
+  }
+
+  const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
+  const approvalEntries = leaveApprovalEntriesForDocument(
+    await fetchLeaveApprovalEntriesByDocumentNos([applicationCode]),
+    applicationCode,
+  )
+  const status = resolveLeaveStatus(row, approvalEntries)
+  if (status === 'Posted') {
+    return {
+      statusCode: 200,
+      body: {
+        ok: true,
+        status: 'Posted',
+        message: `Leave ${applicationCode} is already posted.`,
+      },
+    }
+  }
+  if (status !== 'Approved') {
+    return {
+      statusCode: 422,
+      body: {
+        ok: false,
+        message: 'Leave can be posted only after it is fully approved.',
+        code: 'LEAVE_NOT_APPROVED',
+      },
+    }
+  }
+
+  try {
+    const result = await callSoapMethod('PostApprovedPortalLeave', {
+      employeeNo: user.employeeNo,
+      applicationCode,
+    })
+    if (!soapTruthy(result.returnValue)) {
+      return {
+        statusCode: 422,
+        body: {
+          ok: false,
+          message: `Business Central did not post leave ${applicationCode}.`,
+          code: 'LEAVE_POST_FAILED',
+        },
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Leave posting failed.'
+    if (/already been posted/i.test(message)) {
+      return {
+        statusCode: 200,
+        body: {
+          ok: true,
+          status: 'Posted',
+          message: `Leave ${applicationCode} is already posted.`,
+        },
+      }
+    }
+    const statusCode =
+      typeof error === 'object' && error && 'status' in error && typeof error.status === 'number'
+        ? error.status
+        : 422
+    return {
+      statusCode,
+      body: { ok: false, message, code: 'LEAVE_POST_FAILED' },
+    }
+  }
+
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      status: 'Posted',
+      message: `Leave ${applicationCode} posted. Your leave balance has been reduced.`,
+    },
+  }
+}
+
 async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string) {
   const filters = [
     `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
@@ -1432,18 +1523,21 @@ export function sickLeaveStartDateAllowed(startDate: string, now = new Date()) {
   return start >= today && start <= tomorrow
 }
 
-function isWeekendIso(iso: string) {
+function workingDayCapacityIso(iso: string) {
   const parts = parseIsoDateParts(iso)
-  if (!parts) return false
+  if (!parts) return 0
   const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
   const dow = date.getUTCDay()
-  return dow === 0 || dow === 6
+  // Normal leave skips Saturday and Sunday. Leave types that include weekends
+  // are resolved by Business Central GetPortalLeaveDates.
+  if (dow === 0 || dow === 6) return 0
+  return 1
 }
 
 function nextWorkingDayIso(iso: string) {
   let cursor = addCalendarDays(iso, 1)
   let guard = 0
-  while (isWeekendIso(cursor) && guard < 14) {
+  while (workingDayCapacityIso(cursor) === 0 && guard < 14) {
     cursor = addCalendarDays(cursor, 1)
     guard += 1
   }
@@ -1451,32 +1545,52 @@ function nextWorkingDayIso(iso: string) {
 }
 
 /**
- * Safe local fallback when BC GetLeaveDates is temporarily unavailable.
- * ABH leave starts on a working day and ordinary leave does not consume
- * Saturday/Sunday. Business Central remains authoritative for configured
- * holidays and leave types that explicitly include non-working days.
+ * Safe local fallback when BC GetPortalLeaveDates is temporarily unavailable.
+ * Normal leave skips weekends: Mon-Fri = 1 day each. Example: Fri 25 + 2 days
+ * → leave Fri 25 and Mon 28 → End 28, Return 29 (next working day).
+ * Morning half-day returns the same afternoon; otherwise return is next working day.
  */
 export function computeLeaveDatesFallback(startDate: string, noOfDays: number, halfDay: string) {
   const start = formatBcSoapDate(startDate)
   if (!start) return { endDate: '', returnDate: '' }
 
   const half = halfDayOptionValue(halfDay)
-  if (half === 1 || half === 2 || noOfDays <= 0.5) {
+  const startCapacity = workingDayCapacityIso(start)
+  if (startCapacity === 0) return { endDate: '', returnDate: '' }
+
+  if (half === 1 || half === 2) {
+    const returnsAfterLunch = half === 1
     return {
       endDate: start,
-      returnDate: nextWorkingDayIso(start),
+      returnDate: returnsAfterLunch ? start : nextWorkingDayIso(start),
     }
   }
 
-  let remaining = Math.max(1, Math.ceil(noOfDays)) - 1
+  let remaining = Math.max(0.5, noOfDays)
   let endDate = start
-  while (remaining > 0) {
-    endDate = nextWorkingDayIso(endDate)
-    remaining -= 1
+  let endsAtMidday = false
+  let cursor = start
+  let guard = 0
+  while (remaining > 0 && guard < 3660) {
+    const capacity = workingDayCapacityIso(cursor)
+    if (capacity > 0) {
+      endDate = cursor
+      if (remaining < capacity) {
+        remaining = 0
+        endsAtMidday = true
+      } else {
+        remaining -= capacity
+        endsAtMidday = false
+      }
+    }
+    if (remaining > 0) cursor = addCalendarDays(cursor, 1)
+    guard += 1
   }
+
+  if (remaining > 0) return { endDate: '', returnDate: '' }
   return {
     endDate,
-    returnDate: nextWorkingDayIso(endDate),
+    returnDate: endsAtMidday ? endDate : nextWorkingDayIso(endDate),
   }
 }
 
@@ -1490,39 +1604,31 @@ async function resolveLeaveDatesFromBc(
   const start = normalizeLeaveStartDate(startDate)
   const half = halfDayOptionValue(halfDay)
   const productionDates = computeLeaveDatesFallback(start, noOfDays, halfDay)
-  const attempts: Array<Record<string, unknown>> = [
+  const attempts: Array<{ method: string; params: Record<string, unknown> }> = [
     {
-      empNo: user.employeeNo,
-      leaveType,
-      noOfDays,
-      startDate: start,
-      whetherIsHalfDay: half,
+      method: 'GetPortalLeaveDates',
+      params: {
+        empNo: user.employeeNo,
+        leaveType,
+        noOfDays,
+        startDate: start,
+        whetherIsHalfDay: half,
+      },
+    },
+    {
+      method: 'GetLeaveDates',
+      params: {
+        empNo: user.employeeNo,
+        leaveType,
+        noOfDays,
+        startDate: start,
+      },
     },
   ]
 
-  if (half !== 0) {
-    // Some BC builds accept a Boolean half-day flag instead of 0/1/2.
-    attempts.push({
-      empNo: user.employeeNo,
-      leaveType,
-      noOfDays,
-      startDate: start,
-      whetherIsHalfDay: isHalfDaySelection(halfDay),
-    })
-    if (noOfDays < 1) {
-      attempts.push({
-        empNo: user.employeeNo,
-        leaveType,
-        noOfDays: 1,
-        startDate: start,
-        whetherIsHalfDay: half,
-      })
-    }
-  }
-
-  for (const params of attempts) {
+  for (const attempt of attempts) {
     try {
-      const result = await callSoapMethod('GetLeaveDates', params)
+      const result = await callSoapMethod(attempt.method, attempt.params)
       const parsed = parseLeaveDatesReturn(result.returnValue)
       if (parsed.endDate) {
         const end = formatBcSoapDate(parsed.endDate) || parsed.endDate
@@ -1530,12 +1636,32 @@ async function resolveLeaveDatesFromBc(
           formatBcSoapDate(parsed.returnDate) ||
           parsed.returnDate ||
           addCalendarDays(end, 1)
+        // Old BC builds counted Saturday as 0.5 leave day and returned
+        // End==Return (Afternoon) for whole Normal leave that crossed a weekend.
+        // Prefer the Mon-Fri fallback until BC 1.0.3.284+ is published.
+        const wholeNormalDays =
+          half === 0 && Number.isFinite(noOfDays) && Math.abs(noOfDays - Math.round(noOfDays)) < 1e-9
+        if (
+          wholeNormalDays &&
+          end &&
+          ret === end &&
+          productionDates.endDate &&
+          productionDates.returnDate &&
+          productionDates.returnDate !== productionDates.endDate
+        ) {
+          return { ...productionDates, source: 'fallback' as const }
+        }
         // BC owns leave-type weekend/holiday policy. Do not replace its working-
         // day result with a portal calendar-day calculation.
         return { endDate: end, returnDate: ret, source: 'bc' as const }
       }
     } catch {
-      // Try the next BC parameter strategy.
+      // Older BC builds may lack GetPortalLeaveDates or still use Saturday
+      // half-day leave dating. Prefer the Mon-Fri working-day fallback so
+      // End/Return stay correct until BC 1.0.3.284+ is published.
+      if (attempt.method === 'GetPortalLeaveDates' && productionDates.endDate) {
+        return { ...productionDates, source: 'fallback' as const }
+      }
     }
   }
 
@@ -2186,6 +2312,14 @@ export function buildStaffRouter() {
         .map((row) => fieldNumber(row, ['CurrentLeaveBalance', 'Current_Leave_Balance']))
         .find((value): value is number => value !== null)
       const exactSummary = parseBcLeaveSummary(summarySoap?.returnValue)
+      const nonAnnualBreakdown = isAnnual ? null : resolveNonAnnualLeaveBalanceBreakdown(exactSummary)
+      if (!isAnnual && !nonAnnualBreakdown) {
+        res.status(502).json({
+          code: 'LEAVE_BALANCE_UNAVAILABLE',
+          message: 'Business Central did not return the selected leave balance. Please retry or contact HR.',
+        })
+        return
+      }
       const cardAnnualBalance =
         employeeAnnualLeaveBalance(employeeRow) ??
         metrics.leaveBalance ??
@@ -2227,14 +2361,17 @@ export function buildStaffRouter() {
         openNet,
         ledgerNetDays: ledgerNet,
       }))
-      const breakdown = resolveLeaveBalanceBreakdown({
-        summary: exactSummary,
-        entitlement,
-        carryForward: carryForwardBalance,
-        leaveAccruedToDate,
-        totalLeaveTakenToDate,
-        availableLeaveBalance: balance,
-      })
+      const breakdown = isAnnual ? applyUnpostedApprovedLeave(
+        resolveLeaveBalanceBreakdown({
+          summary: exactSummary,
+          entitlement,
+          carryForward: carryForwardBalance,
+          leaveAccruedToDate,
+          totalLeaveTakenToDate,
+          availableLeaveBalance: balance,
+        }),
+        approvedLeaveDaysNotPosted(applicationRows),
+      ) : nonAnnualBreakdown!
       const balanceSource = isAnnual
         ? exactSummary?.availableLeaveBalance !== null &&
           exactSummary?.availableLeaveBalance !== undefined
@@ -2242,12 +2379,7 @@ export function buildStaffRouter() {
           : leaveAccruedToDate !== null
             ? 'employeeCardAccruedLimit'
             : 'unavailable'
-        : (exactSummary?.availableLeaveBalance !== null &&
-              exactSummary?.availableLeaveBalance !== undefined) ||
-            (exactSummary?.currentLeaveBalance !== null &&
-              exactSummary?.currentLeaveBalance !== undefined)
-          ? 'leaveLedger'
-          : 'leaveTypeSetup'
+        : 'leaveLedger'
 
       res.json({
         // Canonical six employee-facing values. These names are intentionally
@@ -2285,6 +2417,8 @@ export function buildStaffRouter() {
 
       const startAsDate = new Date(`${formatBcSoapDate(startDate)}T12:00:00`)
       const day = startAsDate.getDay()
+      // Leave start must be a weekday. Sat/Sun are blocked here; BC also rejects
+      // non-working starts and configured calendar holidays.
       const isWeekend = !Number.isNaN(startAsDate.getTime()) && (day === 0 || day === 6)
 
       if (!type || !start || !Number.isFinite(days) || days <= 0) {
@@ -2293,6 +2427,16 @@ export function buildStaffRouter() {
           returnDate: '',
           isWeekend,
           message: 'Start date and applied days are required to calculate leave dates.',
+        })
+        return
+      }
+
+      if (isWeekend) {
+        res.json({
+          endDate: '',
+          returnDate: '',
+          isWeekend: true,
+          message: 'Leave start date cannot be on a weekend.',
         })
         return
       }
@@ -2449,6 +2593,16 @@ export function buildStaffRouter() {
         ok: true,
         attachments: mapLeaveAttachmentsSimple(Array.isArray(attachments) ? attachments : []),
       })
+    }),
+  )
+
+  router.post(
+    '/leave/:no/post',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const no = String(req.params.no ?? '').trim()
+      const result = await postApprovedLeaveForRequester(user, no)
+      res.status(result.statusCode).json(result.body)
     }),
   )
 
@@ -2620,7 +2774,15 @@ export function buildStaffRouter() {
             totalLeaveTakenToDate:
               employeeTakenRaw === null ? null : Math.abs(employeeTakenRaw),
           })
-        : balanceSummary?.availableLeaveBalance ?? balanceSummary?.currentLeaveBalance ?? 0
+        : resolveNonAnnualLeaveBalanceBreakdown(balanceSummary)?.availableLeaveBalance ?? null
+      if (!leaveTypeIsAnnual(leaveTypeRow) && availableLeaveBalance === null) {
+        res.status(502).json({
+          ok: false,
+          code: 'LEAVE_BALANCE_UNAVAILABLE',
+          message: 'Business Central did not return the selected leave balance. Please retry or contact HR.',
+        })
+        return
+      }
       const requestedBalanceDays = body.deliveryDate
         ? 1
         : isHalfDaySelection(body.isHalfDayLeave)
@@ -2642,6 +2804,18 @@ export function buildStaffRouter() {
       }
 
       const deliveryDate = formatBcSoapDate(body.deliveryDate)
+      const formattedStartDate = formatBcSoapDate(deliveryDate || body.startDate)
+      if (!deliveryDate && formattedStartDate) {
+        const startDow = new Date(`${formattedStartDate}T12:00:00`).getDay()
+        if (startDow === 0 || startDow === 6) {
+          res.status(422).json({
+            ok: false,
+            code: 'LEAVE_WEEKEND_START',
+            message: 'Leave start date cannot be on a weekend.',
+          })
+          return
+        }
+      }
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
       // Maternity/prenatal leave uses Delivery Date in BC; skip date math when provided.
       const calculatedDates = deliveryDate
@@ -2653,7 +2827,6 @@ export function buildStaffRouter() {
             body.startDate,
             body.isHalfDayLeave,
           )
-      const formattedStartDate = formatBcSoapDate(deliveryDate || body.startDate)
       const formattedEndDate = formatBcSoapDate(
         calculatedDates.endDate || body.endDate || (deliveryDate ? deliveryDate : ''),
       )

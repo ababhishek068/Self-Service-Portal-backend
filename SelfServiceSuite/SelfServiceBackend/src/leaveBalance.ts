@@ -238,6 +238,48 @@ function roundedLeaveValue(value: number) {
   return Math.round(value * 100) / 100
 }
 
+/** Days on fully approved applications that have not yet been posted to the ledger. */
+export function approvedLeaveDaysNotPosted(rows: Array<Record<string, unknown>>) {
+  let days = 0
+  for (const row of rows) {
+    const postedRaw = row.Posted ?? row.posted
+    const posted =
+      postedRaw === true ||
+      ['true', 'yes', '1'].includes(String(postedRaw ?? '').trim().toLowerCase())
+    const status = String(row.Status ?? row.status ?? '').trim().toLowerCase()
+    if (posted || status === 'posted') continue
+    if (status !== 'approved') continue
+    const applied = Number(row.DaysApplied ?? row.Days_Applied ?? row.daysApplied ?? 0)
+    if (Number.isFinite(applied) && applied > 0) days += applied
+  }
+  return roundedLeaveValue(days)
+}
+
+/**
+ * Approved leave used to reduce the balance only after it was posted.
+ * Until that ledger entry exists, count those days as taken so the cards match
+ * a fully approved application. Posted rows are excluded, so a later post
+ * does not deduct the same day twice.
+ */
+export function applyUnpostedApprovedLeave(
+  breakdown: LeaveBalanceBreakdown,
+  unpostedApprovedDays: number,
+): LeaveBalanceBreakdown {
+  if (!Number.isFinite(unpostedApprovedDays) || unpostedApprovedDays <= 0) return breakdown
+  const totalLeaveTakenToDate = roundedLeaveValue(
+    breakdown.totalLeaveTakenToDate + unpostedApprovedDays,
+  )
+  const availableLeaveBalance =
+    breakdown.leaveAccruedToDate === null
+      ? breakdown.availableLeaveBalance
+      : roundedLeaveValue(Math.max(0, breakdown.leaveAccruedToDate - totalLeaveTakenToDate))
+  return {
+    ...breakdown,
+    totalLeaveTakenToDate,
+    availableLeaveBalance,
+  }
+}
+
 /**
  * Present the six leave figures requested by ABH without mixing their meanings.
  *
@@ -308,6 +350,28 @@ export function resolveLeaveBalanceBreakdown(input: {
     leaveAccruedToDate,
     totalLeaveTakenToDate,
     availableLeaveBalance,
+  }
+}
+
+/** BC also includes annual-card fields in responses for other leave types.
+ * Keep those fields out of non-annual figures and preserve BC's live ledger net.
+ * A missing balance is unavailable, never the full setup entitlement or annual balance.
+ */
+export function resolveNonAnnualLeaveBalanceBreakdown(
+  summary: BcLeaveSummary | null,
+): LeaveBalanceBreakdown | null {
+  const balance = summary?.currentLeaveBalance
+  if (balance === null || balance === undefined || !Number.isFinite(balance)) return null
+  const entitlement = summary?.allocatedDays ?? summary?.leaveEntitlement ?? summary?.setupDays ?? 0
+  const carryForward = summary?.carryForwardBalanceForType ?? summary?.carryForward ?? 0
+  const reimbursements = summary?.reimbursedDays ?? 0
+  return {
+    leaveEntitlement: roundedLeaveValue(entitlement),
+    carryForward: roundedLeaveValue(carryForward),
+    totalAvailableLeaveBalance: roundedLeaveValue(entitlement + carryForward + reimbursements),
+    leaveAccruedToDate: null,
+    totalLeaveTakenToDate: roundedLeaveValue(Math.abs(summary?.currentTotalLeaveTaken ?? summary?.totalLeaveTakenToDate ?? 0)),
+    availableLeaveBalance: roundedLeaveValue(balance),
   }
 }
 

@@ -1,3 +1,6 @@
+import {fetchPortalProfileDetails, mapProfileDetails, mergeProfileRecords, parseLegacyProfile, profileText} from './profileDetails.js'
+import { runStoreApprovalOnce, storeApprovalSubmissionComplete } from './storeApprovalSubmission.js'
+import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { Request } from 'express'
@@ -22,6 +25,8 @@ import {
   purchasePriorityCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
+  portalAttachmentRequiredForModule,
+  portalDraftDeleteAllowed,
   uniqueExactMasterNoByName,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
@@ -74,6 +79,10 @@ import {
   approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
+  storeLineNeedsBcMapping,
+  storePrepHints,
+  storeIssueStageCode,
+  portalUserIsStoreManager,
   weeklyLateAttendanceSummary,
   authUserCanManageHrPolicies,
   parseHrPolicyUpload,
@@ -86,6 +95,54 @@ import {
   validateEmployeeExitDetails,
 } from './employeeExit.js'
 import { hrServiceLetterCanBeDeleted } from './hrServiceLetters.js'
+
+describe('Portal attachment policy', () => {
+  it('keeps store and purchase attachments optional while claims remain mandatory', () => {
+    assert.equal(portalAttachmentRequiredForModule('store-requisition'), false)
+    assert.equal(portalAttachmentRequiredForModule('purchase-requisition'), false)
+    assert.equal(portalAttachmentRequiredForModule('claim'), true)
+  })
+})
+
+describe('Store draft deletion lifecycle', () => {
+  it('matches Leave: delete Open/Draft only and cancel pending approval first', () => {
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Open'), true)
+    assert.equal(portalDraftDeleteAllowed('storeRequisition', 'Open'), true)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', ' draft '), true)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Pending Approval'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Cancelled'), false)
+    assert.equal(portalDraftDeleteAllowed('storeRequisition', 'Cancelled'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Rejected'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Approved'), false)
+  })
+
+  it('accepts cancellation only after BC reopens the header and closes active entries', () => {
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Open' },
+        'storeRequisition',
+        [{ Status: 'Canceled' }, { Status: 'Approved' }],
+      ),
+      true,
+    )
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Open' },
+        'storeRequisition',
+        [{ Status: 'Open' }],
+      ),
+      false,
+    )
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Pending Approval' },
+        'storeRequisition',
+        [{ Status: 'Canceled' }],
+      ),
+      false,
+    )
+  })
+})
 
 describe('Leave approval SOAP contract', () => {
   it('emits RequestLeaveApproval parameters in the positional order required by BC', () => {
@@ -134,13 +191,17 @@ import {
   pickDimensionCodeFromRow,
 } from './employeeProfile.js'
 import {
+  applyUnpostedApprovedLeave,
+  approvedLeaveDaysNotPosted,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
   resolveAnnualAvailableLeaveBalance,
   resolveBcLeaveBalance,
   resolveLeaveBalanceBreakdown,
+  resolveNonAnnualLeaveBalanceBreakdown,
 } from './leaveBalance.js'
 import {
+  approvalCancellationComplete,
   documentStatusFromBc,
   injectSalaryAdvanceSalaryHint,
   mapRequest,
@@ -169,9 +230,10 @@ describe('purchase stock decision authorization', () => {
     assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'Finance Manager' }), false)
   })
 
-  it('separates Operations, Procurement, Finance, and Audit assignments', () => {
+  it('separates Operations, Purchase, Finance, and Audit assignments', () => {
     assert.deepEqual(facilityProcessRoles({ ...base, roles: ['OPS'] }), ['operations'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Purchasing Officer' }), ['procurement'])
+    assert.deepEqual(facilityProcessRoles({ ...base, departmentName: 'Purchase Department' }), ['procurement'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Accountant' }), ['finance'])
     assert.deepEqual(facilityProcessRoles({ ...base, departmentName: 'Internal Audit' }), ['auditor'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'ICT Administrator' }), [])
@@ -184,8 +246,16 @@ describe('purchase stock decision authorization', () => {
     const auditor = { ...base, roles: ['auditor'] }
 
     assert.equal(
-      assertPurchaseProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
-      'STOCK_AVAILABLE',
+      assertPurchaseProcessActionAllowed(procurement, 'PURCHASE_SOURCING', 'START_PURCHASE'),
+      'START_PURCHASE',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(finance, 'PURCHASE_APPROVAL', 'PURCHASE_APPROVED'),
+      'PURCHASE_APPROVED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(operations, 'GRV', 'LINK_GRV'),
+      'LINK_GRV',
     )
     assert.equal(
       assertPurchaseProcessActionAllowed(procurement, 'LPR_CORRECTION', 'LPR_RESUBMITTED'),
@@ -216,8 +286,8 @@ describe('purchase stock decision authorization', () => {
       'AUDIT_RESUBMITTED',
     )
     assert.throws(
-      () => assertPurchaseProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
-      /not authorized/i,
+      () => assertPurchaseProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
+      /not valid/i,
     )
     assert.throws(
       () => assertPurchaseProcessActionAllowed(finance, 'PROCUREMENT_APPROVAL', 'PROCUREMENT_RETURNED'),
@@ -243,6 +313,26 @@ describe('purchase stock decision authorization', () => {
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
+    assert.equal(storeLineNeedsBcMapping(''), true)
+    assert.equal(storeLineNeedsBcMapping('PORTAL-12'), true)
+    assert.equal(storeLineNeedsBcMapping('ITEM-100'), false)
+    assert.deepEqual(storePrepHints('', [{ needsBcMapping: true }]), [
+      'Set Issuing Store on the Store Requisition header.',
+      'Replace each PORTAL-* line with a real Item No.',
+      'Confirm on-hand quantity at that location.',
+    ])
+    assert.deepEqual(storePrepHints('MAIN', [{ needsBcMapping: false }]), [])
+    assert.equal(storeIssueStageCode('Prepared by Store'), 'PREPARED')
+    assert.equal(storeIssueStageCode('In Transit'), 'TRANSIT')
+    assert.equal(storeIssueStageCode(''), '')
+    assert.equal(
+      portalUserIsStoreManager({ roles: [], jobTitle: 'Store Manager', department: '', departmentName: '' }),
+      true,
+    )
+    assert.equal(
+      portalUserIsStoreManager({ roles: ['store'], jobTitle: 'Storekeeper', department: 'IT', departmentName: 'IT' }),
+      false,
+    )
   })
 })
 
@@ -1186,6 +1276,34 @@ describe('resolveBcLeaveBalance', () => {
   })
 })
 
+describe('approved leave that is not yet posted', () => {
+  it('adds the approved days to taken and reduces available once', () => {
+    const shown = applyUnpostedApprovedLeave(
+      {
+        leaveEntitlement: 21,
+        carryForward: 27,
+        totalAvailableLeaveBalance: 48,
+        leaveAccruedToDate: 31.89,
+        totalLeaveTakenToDate: 10,
+        availableLeaveBalance: 21.89,
+      },
+      approvedLeaveDaysNotPosted([{ Status: 'Approved', DaysApplied: 1, Posted: false }]),
+    )
+    assert.equal(shown.totalLeaveTakenToDate, 11)
+    assert.equal(shown.availableLeaveBalance, 20.89)
+  })
+
+  it('does not count a leave that is already posted', () => {
+    assert.equal(
+      approvedLeaveDaysNotPosted([
+        { Status: 'Posted', DaysApplied: 1, Posted: true },
+        { Status: 'Approved', DaysApplied: 2, Posted: false },
+      ]),
+      2,
+    )
+  })
+})
+
 describe('six-field leave balance contract', () => {
   it('keeps Total Available separate from the balance the employee may apply against', () => {
     const summary = parseBcLeaveSummary(
@@ -1477,17 +1595,43 @@ describe('parseLeaveDatesReturn', () => {
 })
 
 describe('computeLeaveDatesFallback', () => {
-  it('uses the same day for half-day leave and the next working day as return', () => {
+  it('returns after lunch for morning half-day leave', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
       endDate: '2026-07-17',
       returnDate: '2026-07-20',
     })
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '1'), {
+      endDate: '2026-07-17',
+      returnDate: '2026-07-17',
+    })
   })
 
-  it('does not consume a weekend for normal leave', () => {
-    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
-      endDate: '2026-07-20',
-      returnDate: '2026-07-21',
+  it('skips weekend for Fri + 2 Normal days (End Mon, Return Tue)', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 2, '0'), {
+      endDate: '2026-09-07',
+      returnDate: '2026-09-08',
+    })
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-25', 2, '0'), {
+      endDate: '2026-09-28',
+      returnDate: '2026-09-29',
+    })
+  })
+
+  it('returns next Monday when Friday is the only leave day', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 1, '0'), {
+      endDate: '2026-09-04',
+      returnDate: '2026-09-07',
+    })
+  })
+
+  it('rejects Saturday or Sunday start dates', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-05', 2, '0'), {
+      endDate: '',
+      returnDate: '',
+    })
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-06', 2, '0'), {
+      endDate: '',
+      returnDate: '',
     })
   })
 })
@@ -1685,7 +1829,6 @@ describe('staffClaim saveLine params', () => {
         spec!.params!.saveLine!({
           req: {
             body: {
-              itemName: 'Laptop',
               quantity: 1,
               uom: 'PCS',
             },
@@ -1693,21 +1836,20 @@ describe('staffClaim saveLine params', () => {
           user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
           no: 'SREQ-TEST',
         } as never),
-      /description, UOM, and a positive quantity are required/i,
+      /Describe the item or asset you need and enter a positive quantity/i,
     )
   })
 
-  it('creates a store requisition line from the stated business need without a BC item lookup', async () => {
+  it('saves a typed store request without a catalog item code and without issuing stock', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveLine)
     const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           type: '1',
-          itemNo: 'ITEM-001',
-          itemName: 'Heavy-duty archive boxes',
-          description: 'A4 document storage with lids',
-          quantity: 12,
+          itemName: 'All in one Desktop',
+          lineDescription: 'With keyboard',
+          quantity: 1,
           uom: 'PCS',
         },
       },
@@ -1716,9 +1858,10 @@ describe('staffClaim saveLine params', () => {
     } as never)) as Record<string, unknown>
 
     assert.equal(payload.itemNo, '')
-    assert.equal(payload.description, 'Heavy-duty archive boxes')
-    assert.equal(payload.remarks, 'A4 document storage with lids')
-    assert.equal(payload.quantity, 12)
+    assert.equal(payload.description, 'All in one Desktop')
+    assert.equal(payload.remarks, 'With keyboard')
+    assert.equal(payload.quantity, 1)
+    assert.equal(payload.location, '')
   })
 
   it('rejects an incomplete purchase requisition header before calling Business Central', async () => {
@@ -2482,6 +2625,16 @@ describe('leave status is driven only by Business Central', () => {
     )
   })
 
+  it('shows Posted after the leave is written to the ledger, even when approval entries stay Approved', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV-00001', Status: 'Posted', ApprovalStatus: 'Approved', Posted: true },
+        [{ Status: 'Approved', DocumentNo: 'LV-00001' }],
+      ),
+      'Posted',
+    )
+  })
+
   it('shows Rejected when an approval step was rejected (even if Sent_for_approval is still set)', () => {
     assert.equal(
       resolveLeaveStatus(
@@ -2768,5 +2921,204 @@ describe('HOD role resolution', () => {
     assert.equal(merged?.IsHOD, true)
     assert.equal(merged?.ICTOfficer, true)
     assert.equal(merged?.FirstName, 'Hermon')
+  })
+})
+
+// The BC-style borrowing form must retain every item across continuation pages.
+describe('borrowing form pagination', () => {
+  const input = {
+    requestNo: 'SR-TEST', storeIssueNo: '', requisitionType: 'Stationery',
+    requestDate: '2026-10-07', requiredDate: '2026-10-07', issueDate: '',
+    requesterName: 'Test Requester', employeeNo: 'EMP-1', division: 'Admin',
+    functionName: 'Admin', department: 'IT', issuingStore: 'MAIN', purpose: 'Test',
+  }
+  const line = (i: number) => ({
+    itemNo: `ITEM-${i}`, description: `Description ${i}`, unitOfMeasure: 'EA',
+    quantityRequested: '1', quantityIssued: '0',
+  })
+  it('keeps the single-item form on one page', () => {
+    const pdf = buildStoreBorrowingFormPdf({ ...input, lines: [line(1)] }).toString()
+    assert.match(pdf, /\/Count 1\b/)
+    assert.match(pdf, /ABH MAIN Item Borrowing Form/)
+    assert.match(pdf, /Requester signature:/)
+  })
+  it('includes all 65 items and repeats table headings on continuation pages', () => {
+    const pdf = buildStoreBorrowingFormPdf({ ...input, lines: Array.from({ length: 65 }, (_, i) => line(i + 1)) }).toString()
+    for (let i = 1; i <= 65; i++) assert.ok(pdf.includes(`(ITEM-${i}) Tj`))
+    const pages = Number(pdf.match(/\/Count (\d+)/)?.[1])
+    assert.ok(pages > 1)
+    assert.equal((pdf.match(/\(Item Code\) Tj/g) ?? []).length, pages)
+    assert.equal((pdf.match(/Requester signature:/g) ?? []).length, 1)
+    assert.ok(pdf.includes(`Page ${pages} of ${pages}`))
+  })
+})
+
+
+describe('non-annual BC leave balance synchronization', () => {
+  // GetLeaveBalance includes annual Employee Card fields even for other types.
+  const summaryFor = (values: Record<string, unknown>) => parseBcLeaveSummary(JSON.stringify({
+    accruedDays: 5.29, leaveAccruedToDate: 32.29, earnedLeaveDays: 32.29,
+    totalAvailableLeaveBalance: 48, carryForwardBalance: 27,
+    carryForwardBalanceForType: 0, ...values,
+  }))
+  for (const type of ['MOURNING', 'PATERNITY', 'WEDDING']) {
+    it(`uses the live ${type} balance without annual accrual contamination`, () => {
+      const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+        allocatedDays: 3, currentTotalLeaveTaken: 1, currentLeaveBalance: 2,
+        availableLeaveBalance: 23.8,
+      }))
+      assert.deepEqual(result, {
+        leaveEntitlement: 3, carryForward: 0, totalAvailableLeaveBalance: 3,
+        totalLeaveTakenToDate: 1, leaveAccruedToDate: null, availableLeaveBalance: 2,
+      })
+    })
+  }
+  it('keeps BC maternity entitlement and balance at 120', () => {
+    const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+      allocatedDays: 120, currentTotalLeaveTaken: 0, currentLeaveBalance: 120,
+    }))
+    assert.equal(result?.availableLeaveBalance, 120)
+    assert.equal(result?.totalAvailableLeaveBalance, 120)
+  })
+  it('preserves zero and negative sick balances and does not substitute an application cap', () => {
+    for (const balance of [0, -2]) {
+      const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+        allocatedDays: 0, currentTotalLeaveTaken: -balance, currentLeaveBalance: balance,
+        unlimitedDays: true, maximumApplicationDays: 180,
+      }))
+      assert.equal(result?.availableLeaveBalance, balance)
+      assert.equal(result?.leaveAccruedToDate, null)
+    }
+  })
+  it('includes type-specific carry forward and reimbursement without deducting twice', () => {
+    const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+      allocatedDays: 10, carryForwardBalanceForType: 2, reimbursedDays: 1.5,
+      currentTotalLeaveTaken: 3.5, currentLeaveBalance: 10,
+    }))
+    assert.equal(result?.totalAvailableLeaveBalance, 13.5)
+    assert.equal(result?.availableLeaveBalance, 10)
+  })
+  it('reports unavailable when BC supplies no type-specific balance', () => {
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(null), null)
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(summaryFor({ setupDays: 30, availableLeaveBalance: 23.8 })), null)
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(summaryFor({ currentLeaveBalance: 'invalid' })), null)
+  })
+})
+
+describe('Store approval submission recovery', () => {
+  it('does not treat a failed Open submission or historical entries as success', () => {
+    for (const status of ['Approved', 'Rejected', 'Canceled']) {
+      assert.equal(storeApprovalSubmissionComplete({ Status: 'Open' }, [{ Status: status }]), false)
+    }
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Open' }, []), false)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, []), false)
+  })
+  it('recognizes a live approval or a completed header for idempotent retries', () => {
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, [{ Status: 'Open' }]), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, [{ Status: 'Created' }]), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Released' }, []), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Posted' }, []), true)
+  })
+  it('does not accept active entries when the header remains editable or was cancelled', () => {
+    for (const status of ['Open', 'Draft', 'Cancelled', 'Rejected']) {
+      assert.equal(storeApprovalSubmissionComplete({ Status: status }, [{ Status: 'Open' }]), false)
+    }
+  })
+  it('sends concurrent clicks only once and permits a later approval cycle', async () => {
+    let calls = 0
+    let finish!: () => void
+    const action = async () => { calls++; await new Promise<void>((resolve) => { finish = resolve }) }
+    const first = runStoreApprovalOnce('test-SR', action)
+    const second = runStoreApprovalOnce('test-SR', action)
+    await Promise.resolve()
+    assert.equal(calls, 1)
+    finish()
+    await Promise.all([first, second])
+    await runStoreApprovalOnce('test-SR', async () => { calls++ })
+    assert.equal(calls, 2)
+  })
+  it('propagates BC failures to all waiting callers and allows retry', async () => {
+    const failure = new Error('BC approval rolled back')
+    const action = async () => { throw failure }
+    const results = await Promise.allSettled([
+      runStoreApprovalOnce('test-failed-SR', action), runStoreApprovalOnce('test-failed-SR', action),
+    ])
+    for (const result of results) {
+      assert.equal(result.status, 'rejected')
+      if (result.status === 'rejected') assert.equal(result.reason, failure)
+    }
+    await runStoreApprovalOnce('test-failed-SR', async () => {})
+  })
+})
+
+describe('BC profile display contract', () => {
+  it('recovers real SOAP profile fields and ignores empty option zero', () => {
+    const profile = mapProfileDetails(mergeProfileRecords({No:'ABH-010',FullName:'Zerihun',Gender:'Male'},parseLegacyProfile('JobID=MIE#FullName=Zerihun Sisay Reta#MaritalStatus=Married#ContractType=PERMANENT#EmployeeContractType=0#EmployeeType=Primary#DateOfJoining=2015-06-08#OnProbation=No')))
+    assert.equal(profile.jobId,'MIE')
+    assert.equal(profile.fullName,'Zerihun Sisay Reta')
+    assert.equal(profile.maritalStatus,'Married')
+    assert.equal(profile.employmentType,'PERMANENT')
+    assert.equal(profile.onProbation,'No')
+    assert.equal(profile.dateOfJoin,'2015-06-08')
+    assert.equal(profile.contractStartDate,'')
+    assert.equal(profile.branch,'')
+  })
+  it('keeps bank branches separate from the work branch and retains full addresses', () => {
+    const p=mapProfileDetails({BranchName:'Bank branch',Citizenship:'ET',SupervisorName:'Manager',PostalAddress:'Line 1',PostalAddress2:'Line 2',PostalAddress3:'Line 3'})
+    assert.equal(p.branch,'');assert.equal(p.nationality,'ET');assert.equal(p.supervisorName,'Manager')
+    assert.equal(p.postalAddress,'Line 1, Line 2, Line 3')
+    assert.equal(mapProfileDetails({BranchName:'Bank',BranchDisplayName:'Actual work branch'}).branch,'Actual work branch')
+    assert.equal(mapProfileDetails({}, {qualifications:[{LineNo:1}]}).qualifications.length,0)
+  })
+  it('retains real zero balances and false booleans but hides absent dates and enums', () => {
+    const p=mapProfileDetails({AnnualLeaveBalance:0,OnProbation:false,EmployeeContractType:0,Gender:0,DateOfBirth:'0001-01-01',ContractEndDate:'0D'})
+    assert.equal(p.annualLeaveBalance,'0');assert.equal(p.onProbation,'No')
+    assert.equal(p.employmentType,'');assert.equal(p.gender,'');assert.equal(p.dateOfBirth,'');assert.equal(p.contractEndDate,'')
+  })
+  it('uses BC option definitions and never exposes an unknown numeric enum', () => {
+    assert.equal(mapProfileDetails({EmployeeType:1,EmployeeContractType:1}).employeeType,'Seconded')
+    assert.equal(mapProfileDetails({EmployeeContractType:1}).employmentType,'Permanent and Pensionable')
+    assert.equal(mapProfileDetails({EmployeeContractType:987,Gender:987}).employmentType,'')
+  })
+  it('maps all kin names and real history fields without invented values', () => {
+    const p=mapProfileDetails({}, {nextOfKin:[{SurName:'Doe',OtherNames:'Jane',HomeTelNo:'123'}],employmentHistory:[{Company_Name:'Example',Job_Title:'Analyst',From:'2020-01-01',To_Date:'0001-01-01'}],assignedAssets:[{No:'FA1',Description:'Laptop',AcquisitionDate:'2021-01-01'}]})
+    assert.equal(p.nextOfKin[0]?.name,'Doe Jane')
+    assert.equal(p.employmentHistory[0]?.organisation,'Example')
+    assert.equal(p.employmentHistory[0]?.position,'Analyst')
+    assert.equal(p.employmentHistory[0]?.toDate,'')
+    assert.equal(p.employmentHistory[0]?.type,'')
+    assert.equal(p.assignedAssets[0]?.assignedDate,'')
+    assert.equal(p.assignedAssets[0]?.status,'')
+  })
+  it('allowlists public profile fields and preserves delimiter characters in JSON values', () => {
+    const p=mapProfileDetails({No:'ABH-010',FullName:'Name #1 = Name',PortalPassword:'secret',PortalOTPCode:'123456',PortalResetToken:'secret',SystemId:'internal'})
+    assert.equal(p.fullName,'Name #1 = Name')
+    assert.equal(JSON.stringify(p).includes('secret'),false)
+    assert.equal('PortalOTPCode' in p,false)
+    assert.equal(profileText(' — '),'')
+  })
+})
+
+describe('profile source failure and identity handling',()=>{
+  const body={employee:{No:'ABH-010',FullName:'Test employee'},nextOfKin:[],qualifications:[],employmentHistory:[],assignedAssets:[]}
+  it('never calls legacy sources when the complete profile is available',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>{throw new Error('must not call')}})
+    assert.equal(profile.employeeNo,'ABH-010');assert.deepEqual(profile.unavailableSections,[])
+  })
+  it('rejects a different employee response rather than displaying it',async()=>{
+    await assert.rejects(fetchPortalProfileDetails('ABH-011',{soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>[]}),/identity/)
+  })
+  it('does not hide an outage or malformed response behind a legacy fallback',async()=>{
+    for(const response of ['invalid JSON',JSON.stringify({...body,qualifications:{}})]){
+      await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:response}),odata:async()=>{throw new Error('must not call')}}))
+    }
+    await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>{throw new Error('connection timed out')},odata:async()=>[]}),/timed out/)
+  })
+  it('supports an undeployed method while distinguishing a failed section from an empty one',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{
+      soap:async(method)=>{if(method==='GetEmployeeProfileDetails')throw new Error("Method 'GetEmployeeProfileDetails' is invalid!");return {returnValue:'FullName=Test employee#JobID=MIE'}},
+      odata:async(service)=>{if(service==='QyHREmployee')return [{No:'ABH-010'}];if(service==='QyHREmployeeKin')throw new Error('unavailable');return []},
+    })
+    assert.equal(profile.jobId,'MIE');assert.ok(profile.unavailableSections.includes('kin'));assert.equal(profile.unavailableSections.includes('history'),false)
   })
 })
