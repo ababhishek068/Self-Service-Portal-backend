@@ -9,6 +9,10 @@ const SECRET_PROFILE_KEYS = new Set([
 function isSecretProfileKey(key: string) {
   return SECRET_PROFILE_KEYS.has(keyOf(key)) || /password|otp|token|secret|userid|user id/i.test(key)
 }
+/** Captions are human text ("Laptop", "Promoted") so only whole-word secret terms disqualify a label. */
+function isSecretProfileLabel(label: string) {
+  return /\b(password|otp|token|secret|user ?id)\b/i.test(label)
+}
 export function profileText(value: unknown): string {
   if (value === null || value === undefined || typeof value === 'object') return ''
   const text = String(value).trim()
@@ -184,6 +188,12 @@ function humanizeFieldKey(key: string) {
     .replace(/\s+/g, ' ')
     .trim()
 }
+/** Schema-1 AL formats decimals with raw precision ("44,534.261750000005"); show money-style values with 2 decimals. */
+function tidyNumberText(text: string) {
+  if (!/^-?[\d,]+\.\d{3,}$/.test(text)) return text
+  const numeric = Number(text.replace(/,/g, ''))
+  return Number.isFinite(numeric) ? numeric.toLocaleString('en-US', { maximumFractionDigits: 2 }) : text
+}
 
 type FlatProfile = Omit<
   MappedProfileDetails,
@@ -205,7 +215,7 @@ export function collectExtraProfileFields(
   const seen = new Set<string>()
 
   const push = (key: string, label: string, value: unknown) => {
-    const text = profileText(value)
+    const text = tidyNumberText(profileText(value))
     if (!text || isSecretProfileKey(key) || KNOWN_PROFILE_VALUE_KEYS.has(keyOf(key))) return
     const dedupe = `${keyOf(key)}:${text.toLowerCase()}`
     if (seen.has(dedupe) || shownValues.has(text.toLowerCase())) return
@@ -253,7 +263,7 @@ export function parseProfileSections(raw: unknown): ProfileSection[] {
       const key = String(item.key ?? '').replace(/[^a-z0-9]/gi, '').slice(0, 80)
       const label = profileText(item.label).slice(0, 120)
       const value = profileText(item.value).slice(0, 2000)
-      if (!key || !label || !value || usedFieldKeys.has(key) || isSecretProfileKey(key) || isSecretProfileKey(label)) continue
+      if (!key || !label || !value || usedFieldKeys.has(key) || isSecretProfileKey(key) || isSecretProfileLabel(label)) continue
       const typeText = String(item.type ?? 'text').toLowerCase()
       const type = (PROFILE_FIELD_TYPES as readonly string[]).includes(typeText) ? (typeText as ProfileFieldType) : 'text'
       usedFieldKeys.add(key)
@@ -499,6 +509,7 @@ const UNAVAILABLE_SECTION_KEYS = [
 function validProfileList(value: unknown) {
   return Array.isArray(value) && value.every(row => isPlainObject(row))
 }
+const legacyKinType = (row: ODataRecord) => profilePick(row, 'Type').toLowerCase()
 
 export async function fetchPortalProfileDetails(
   employeeNo: string,
@@ -525,6 +536,13 @@ export async function fetchPortalProfileDetails(
     const lists = Object.fromEntries(
       [...REQUIRED_PROFILE_LISTS, ...OPTIONAL_PROFILE_LISTS].map(key => [key, Array.isArray(body[key]) ? (body[key] as ODataRecord[]) : []]),
     ) as Record<(typeof REQUIRED_PROFILE_LISTS)[number] | (typeof OPTIONAL_PROFILE_LISTS)[number], ODataRecord[]>
+    // Schema 1 (first AL iteration) returns every HR Employee Kin row in nextOfKin; split by Type like the card.
+    if (!Array.isArray(body.dependants) && !Array.isArray(body.beneficiaries)) {
+      const kinRows = lists.nextOfKin
+      lists.nextOfKin = kinRows.filter(row => !['dependant', 'beneficiary', '3', '2'].includes(legacyKinType(row)))
+      lists.dependants = kinRows.filter(row => ['dependant', '3'].includes(legacyKinType(row)))
+      lists.beneficiaries = kinRows.filter(row => ['beneficiary', '2'].includes(legacyKinType(row)))
+    }
     return {
       ...mapProfileDetails(body.employee as ODataRecord, {
         ...lists,
@@ -568,13 +586,12 @@ export async function fetchPortalProfileDetails(
   if (results[3].status === 'rejected') unavailableSections.push('history')
   // The legacy kin query returns every kin type in one list; split dependants / beneficiaries like the card does.
   const kinRows = results[2].status === 'fulfilled' ? results[2].value.filter(isPlainObject) : []
-  const kinType = (row: ODataRecord) => profilePick(row, 'Type').toLowerCase()
   // Qualifications / assets are best-effort until GetEmployeeProfileDetails is published.
   return {
     ...mapProfileDetails(mergeProfileRecords(hr ?? {}, soap, { No: employeeNo }), {
-      nextOfKin: kinRows.filter(row => !['dependant', 'beneficiary', '3', '2'].includes(kinType(row))),
-      dependants: kinRows.filter(row => ['dependant', '3'].includes(kinType(row))),
-      beneficiaries: kinRows.filter(row => ['beneficiary', '2'].includes(kinType(row))),
+      nextOfKin: kinRows.filter(row => !['dependant', 'beneficiary', '3', '2'].includes(legacyKinType(row))),
+      dependants: kinRows.filter(row => ['dependant', '3'].includes(legacyKinType(row))),
+      beneficiaries: kinRows.filter(row => ['beneficiary', '2'].includes(legacyKinType(row))),
       employmentHistory: results[3].status === 'fulfilled' ? results[3].value : [],
       qualifications: results[4].status === 'fulfilled' ? results[4].value : [],
       assignedAssets: results[5].status === 'fulfilled' ? results[5].value : [],

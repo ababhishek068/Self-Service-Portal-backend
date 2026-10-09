@@ -1,4 +1,4 @@
-import {fetchPortalProfileDetails, mapProfileDetails, mergeProfileRecords, parseLegacyProfile, profileText} from './profileDetails.js'
+import {fetchPortalProfileDetails, mapProfileDetails, mergeProfileRecords, parseLegacyProfile, parseProfileSections, profileText} from './profileDetails.js'
 import { runStoreApprovalOnce, storeApprovalSubmissionComplete } from './storeApprovalSubmission.js'
 import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import assert from 'node:assert/strict'
@@ -3200,6 +3200,32 @@ describe('schema-2 employee card contract (codeunit 50997)',()=>{
     unavailableSections:['allowances','bogus'],
   }
   const services={soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>{throw new Error('must not call')}}
+  it('splits schema-1 kin rows into next of kin and dependants when BC does not send the lists', async () => {
+    const body = {
+      employee: { No: 'ABH-010', FullName: 'Zerihun' },
+      details: [{ key: 'Religion', label: 'Religion', value: 'CHRISTIAN' }, { key: 'BasicPay', label: 'Basic Pay', value: '44,534.261750000005' }],
+      nextOfKin: [
+        { SurName: 'Alemahu', OtherNames: 'Etaferahu', Relationship: 'Spouse', Type: 'Next of Kin' },
+        { SurName: 'Zerihun', OtherNames: 'Nael', Relationship: 'Child', Type: 'Dependant' },
+      ],
+      qualifications: [], employmentHistory: [], assignedAssets: [],
+    }
+    const profile = await fetchPortalProfileDetails('ABH-010', { soap: async () => ({ returnValue: JSON.stringify(body) }), odata: async () => { throw new Error('must not call') } })
+    assert.deepEqual(profile.nextOfKin.map(r => r.name), ['Alemahu Etaferahu'])
+    assert.deepEqual(profile.dependants.map(r => r.name), ['Zerihun Nael'])
+    assert.equal(profile.beneficiaries.length, 0)
+    assert.ok(profile.extraFields.some(f => f.label === 'Religion' && f.value === 'CHRISTIAN'))
+    assert.ok(profile.extraFields.some(f => f.label === 'Basic Pay' && f.value === '44,534.26'))
+  })
+  it('keeps captions that merely contain a secret-looking substring but drops real secret labels', () => {
+    const sections = parseProfileSections([{ key: 'assets', title: 'Assets', fields: [
+      { key: 'laptopModel', label: 'Laptop Model', value: 'ThinkPad', type: 'text' },
+      { key: 'promotedDate', label: 'Promoted', value: 'Yes', type: 'boolean' },
+      { key: 'otpDevice', label: 'OTP Device', value: 'phone', type: 'text' },
+      { key: 'portalAccess', label: 'Portal Password', value: 'x', type: 'text' },
+    ] }])
+    assert.deepEqual(sections[0]?.fields.map(field => field.label), ['Laptop Model', 'Promoted'])
+  })
   it('keeps every populated card group and drops secrets, blanks, placeholders and duplicates',async()=>{
     const profile=await fetchPortalProfileDetails('ABH-010',services)
     assert.deepEqual(profile.sections.map(s=>s.key),['identity','leave'])

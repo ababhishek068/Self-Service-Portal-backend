@@ -14,7 +14,7 @@ SUITE_BC="$ROOT/SelfServiceSuite/SelfServiceBackend"
 # were not copied at all — a package without them looks complete but leaves claim
 # and store-requisition approvals dead, because no workflow listens for the event.
 BC_ASSET_DIR="${BC_ASSET_DIR:-$ROOT/deploy/businesscentral}"
-BC_APP_NAME="${BC_APP_NAME:-Technology Associates EA Ltd_BC24_TA App_1.0.3.308.app}"
+BC_APP_NAME="${BC_APP_NAME:-Technology Associates EA Ltd_BC24_TA App_1.0.3.310.app}"
 BC_APP="${BC_APP:-$BC_ASSET_DIR/$BC_APP_NAME}"
 BC_WORKFLOW_DIR="$BC_ASSET_DIR/Workflows"
 
