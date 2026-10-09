@@ -102,6 +102,8 @@ cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/NewChangeA/PortalWorkfl
 mkdir -p "$AL_SRC_DIR/ProcurementProcess"
 rsync -a "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/ProcurementProcess/" "$AL_SRC_DIR/ProcurementProcess/"
 cp "$AL_ROOT/src/src/staffPortal/query/HrEmployee.Query.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/staffPortal/PortalEmployeeProfile.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/staffPortal/ABHStaffServicesUAT.PermissionSet.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES/Employee.Page.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Table/StaffClaimLines.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/src/src/src/src/src/src/src/src/HR3/HR/MedicalClaimManagement.Codeunit.al" "$AL_SRC_DIR/"
@@ -136,6 +138,10 @@ ABH AL source — production portal/ERP sync
 Publish this .app (or merge sources) on Windows BC, then restart.
 
 Key fixes:
+- My Profile reads the whole Employee Card through SOAP CuStaffPortal.GetEmployeeProfileDetails (codeunit 50997 "Portal Employee Profile", schema 2):
+  card groups (personal, contact, organisation, job, employment, leave summary, benefits, payment, salary, separation) plus
+  next of kin / beneficiaries / dependants, qualifications, external + internal employment history, training, memberships,
+  rewards, assigned assets and current-period salary allowances. Empty values are never emitted; passwords/OTP/tokens/user ids never leave BC.
 - Purchase and Store Requisition fields/lines follow the approved ABH templates
 - Portal approval decisions use Business Central's native workflow responses; hierarchy is never advanced in portal code
 - Rejection notes are entered separately from the request reason and remain visible to the requester

@@ -3052,6 +3052,34 @@ describe('Store approval submission recovery', () => {
 })
 
 describe('BC profile display contract', () => {
+  
+  it('surfaces extra BC card fields that are not in the fixed bio layout', async () => {
+    const { collectExtraProfileFields, mapProfileDetails } = await import('./profileDetails.js')
+    const mapped = mapProfileDetails({
+      No: 'ABH-010',
+      FullName: 'Zerihun',
+      Gender: 'Male',
+      BloodGroup: 'O+',
+      NHIFNo: '12345',
+      PortalPassword: 'secret',
+    }, { details: [{ key: 'NSSFNo', label: 'NSSF No.', value: '9988' }, { key: 'BloodGroup', label: 'Blood Group', value: 'O+' }] })
+    assert.ok(mapped.extraFields.some(f => f.label === 'NSSF No.' && f.value === '9988'))
+    assert.ok(!mapped.extraFields.some(f => /password/i.test(f.key) || /password/i.test(f.label)))
+    assert.ok(!mapped.extraFields.some(f => f.key === 'FullName' || f.label === 'Full Name'))
+    const extras = collectExtraProfileFields({ CustomFlag: 'Yes', FullName: 'Zerihun' }, {
+      employeeNo: 'ABH-010', fullName: 'Zerihun', jobTitle: '', jobId: '', jobGrade: '', division: '', department: '',
+      sector: '', district: '', branch: '', responsibilityCenter: '', placeOfDuty: '', maritalStatus: '', gender: '',
+      employmentType: '', employeeType: '', status: '', phoneNumber: '', homePhoneNumber: '', workPhoneNumber: '',
+      extension: '', email: '', personalEmail: '', idNumber: '', employeeAccountNo: '', annualLeaveBalance: '',
+      nationality: '', country: '', postalAddress: '', residentialAddress: '', city: '', postCode: '', region: '',
+      dateOfBirth: '', dateOfJoin: '', contractStartDate: '', contractEndDate: '', probationEndDate: '', onProbation: '',
+      contractDuration: '', noticePeriod: '', supervisorNo: '', supervisorName: '', actingJob: '', actingJobStartDate: '',
+      actingJobExpiryDate: '', temporaryJob: '', temporaryJobExpiryDate: '', dateOfLeaving: '', pensionSchemeJoin: '',
+      medicalSchemeJoin: '',
+    })
+    assert.ok(extras.some(f => f.key === 'CustomFlag' && f.value === 'Yes'))
+  })
+
   it('recovers real SOAP profile fields and ignores empty option zero', () => {
     const profile = mapProfileDetails(mergeProfileRecords({No:'ABH-010',FullName:'Zerihun',Gender:'Male'},parseLegacyProfile('JobID=MIE#FullName=Zerihun Sisay Reta#MaritalStatus=Married#ContractType=PERMANENT#EmployeeContractType=0#EmployeeType=Primary#DateOfJoining=2015-06-08#OnProbation=No')))
     assert.equal(profile.jobId,'MIE')
@@ -3060,7 +3088,8 @@ describe('BC profile display contract', () => {
     assert.equal(profile.employmentType,'PERMANENT')
     assert.equal(profile.onProbation,'No')
     assert.equal(profile.dateOfJoin,'2015-06-08')
-    assert.equal(profile.contractStartDate,'')
+    // ABH cards usually omit a separate contract start; mirror joining date for display.
+    assert.equal(profile.contractStartDate,'2015-06-08')
     assert.equal(profile.branch,'')
   })
   it('keeps bank branches separate from the work branch and retains full addresses', () => {
@@ -3120,5 +3149,84 @@ describe('profile source failure and identity handling',()=>{
       odata:async(service)=>{if(service==='QyHREmployee')return [{No:'ABH-010'}];if(service==='QyHREmployeeKin')throw new Error('unavailable');return []},
     })
     assert.equal(profile.jobId,'MIE');assert.ok(profile.unavailableSections.includes('kin'));assert.equal(profile.unavailableSections.includes('history'),false)
+  })
+  it('splits legacy kin rows into next of kin, dependants and beneficiaries like the BC card',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{
+      soap:async(method)=>{if(method==='GetEmployeeProfileDetails')throw new Error("Method 'GetEmployeeProfileDetails' is invalid!");return {returnValue:'FullName=Test employee'}},
+      odata:async(service)=>{
+        if(service==='QyHREmployee')return [{No:'ABH-010'}]
+        if(service==='QyHREmployeeKin')return [{SurName:'Reta',OtherNames:'Abebe',Type:'Next of Kin'},{SurName:'Reta',OtherNames:'Kid',Type:'Dependant'},{SurName:'Reta',OtherNames:'Ben',Type:'2'}]
+        return []
+      },
+    })
+    assert.deepEqual(profile.nextOfKin.map(r=>r.name),['Reta Abebe'])
+    assert.deepEqual(profile.dependants.map(r=>r.name),['Reta Kid'])
+    assert.deepEqual(profile.beneficiaries.map(r=>r.name),['Reta Ben'])
+    assert.deepEqual(profile.sections,[])
+  })
+})
+
+describe('schema-2 employee card contract (codeunit 50997)',()=>{
+  const body={
+    schema:2,
+    employee:{No:'ABH-010',FullName:'Zerihun Sisay Reta',JobTitle:'Senior Developer',SupervisorName:'Fikadu Kebede',Age:'35 Years 2 Months',LengthOfService:'11 Years 4 Months',AvailableLeaveBalance:'19.41',PortalPassword:'secret'},
+    sections:[
+      {key:'identity',title:'Personal Information',fields:[
+        {key:'firstName',label:'First Name',value:'Zerihun',type:'text'},
+        {key:'dateOfBirth',label:'Date Of Birth',value:'1991-08-01',type:'date'},
+        {key:'portalPassword',label:'Portal Password',value:'secret',type:'text'},
+        {key:'blank',label:'Blank',value:'   ',type:'text'},
+        {key:'placeholder',label:'Placeholder',value:'0001-01-01',type:'date'},
+        {key:'firstName',label:'Duplicate',value:'again',type:'text'},
+        {key:'weird',label:'Weird Type',value:'x',type:'blob'},
+      ]},
+      {key:'leave',title:'Leave Summary',fields:[{key:'availableLeaveBalance',label:'Available Leave Balance (Days)',value:'19.41',type:'number'}]},
+      {key:'empty',title:'Empty Group',fields:[]},
+      {key:'bad',title:'Bad Group'},
+      'not an object',
+    ],
+    nextOfKin:[{lineNo:'1',type:'Next of Kin',surName:'Reta',otherNames:'Abebe',relationship:'Parent/Guardian',homeTelNo:'0911'}],
+    beneficiaries:[],
+    dependants:[{lineNo:'2',type:'Dependant',fullName:'Kid Reta',relationship:'Child',dateOfBirth:'2018-02-03',identificationType:'Birth Cert. No.',cardNo:'BC-1'}],
+    qualifications:[{source:'Employee Qualifications',level:'Masters',qualification:'MSc Computer Science',institution:'AAU',fromDate:'2014-09-01',toDate:'2016-07-01',highestQualification:'Yes'}],
+    employmentHistory:[],
+    internalHistory:[{refNo:'PRM-1',reasonForChange:'Promotion',jobTitle:'Senior Developer',jobId:'SD',fromDate:'2020-01-01',status:'Approved',current:'Yes'}],
+    trainingHistory:[{applicationNo:'TR-1',courseTitle:'AZ-900',description:'Azure Fundamentals',institution:'Microsoft',fromDate:'2023-03-01',toDate:'2023-03-03',duration:'3 Days',trainingStatus:'Completed Successfully'}],
+    memberships:[{membershipNo:'M-1',nameOfBody:'IEEE',dateOfMembership:'2019-01-01',status:'Active'}],
+    rewards:[],
+    assignedAssets:[{no:'FA-7',description:'Laptop',faClassCode:'ICT',faSubclassCode:'LAPTOP',serialNo:'SN1',inactive:'Yes'}],
+    salaryAllowances:[{code:'HOUSE',name:'Housing Allowance',amount:'10000',period:'September 2026'},{code:'ZERO',name:'',amount:''}],
+    salaryAllowancePeriod:'September 2026',
+    unavailableSections:['allowances','bogus'],
+  }
+  const services={soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>{throw new Error('must not call')}}
+  it('keeps every populated card group and drops secrets, blanks, placeholders and duplicates',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',services)
+    assert.deepEqual(profile.sections.map(s=>s.key),['identity','leave'])
+    assert.deepEqual(profile.sections[0]?.fields.map(f=>f.key),['firstName','dateOfBirth','weird'])
+    assert.equal(profile.sections[0]?.fields.find(f=>f.key==='weird')?.type,'text')
+    assert.equal(profile.sections[1]?.fields[0]?.type,'number')
+    assert.equal(JSON.stringify(profile).includes('secret'),false)
+    assert.deepEqual(profile.extraFields,[])
+    assert.equal(profile.supervisorName,'Fikadu Kebede');assert.equal(profile.age,'35 Years 2 Months');assert.equal(profile.lengthOfService,'11 Years 4 Months');assert.equal(profile.availableLeaveBalance,'19.41')
+  })
+  it('maps the related lists the Employee card exposes',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',services)
+    assert.equal(profile.nextOfKin[0]?.name,'Reta Abebe');assert.equal(profile.nextOfKin[0]?.relationship,'Parent/Guardian');assert.equal(profile.nextOfKin[0]?.phone,'0911')
+    assert.equal(profile.dependants[0]?.name,'Kid Reta');assert.equal(profile.dependants[0]?.identification,'Birth Cert. No. BC-1');assert.equal(profile.dependants[0]?.dateOfBirth,'2018-02-03')
+    assert.deepEqual(profile.beneficiaries,[])
+    assert.equal(profile.qualifications[0]?.title,'MSc Computer Science');assert.equal(profile.qualifications[0]?.level,'Masters');assert.equal(profile.qualifications[0]?.highestQualification,'Yes')
+    assert.equal(profile.internalHistory[0]?.change,'Promotion');assert.equal(profile.internalHistory[0]?.current,'Yes')
+    assert.equal(profile.trainingHistory[0]?.course,'Azure Fundamentals');assert.equal(profile.trainingHistory[0]?.status,'Completed Successfully')
+    assert.equal(profile.memberships[0]?.body,'IEEE');assert.equal(profile.memberships[0]?.since,'2019-01-01')
+    assert.equal(profile.assignedAssets[0]?.assetClass,'ICT / LAPTOP');assert.equal(profile.assignedAssets[0]?.status,'Inactive')
+    assert.deepEqual(profile.salaryAllowances.map(r=>[r.name,r.amount]),[['Housing Allowance','10000']])
+    assert.equal(profile.salaryAllowancePeriod,'September 2026')
+    assert.deepEqual(profile.unavailableSections,['allowances'])
+  })
+  it('rejects malformed optional lists or card groups instead of showing a partial profile',async()=>{
+    for(const broken of [{...body,dependants:'x'},{...body,sections:{}},{...body,salaryAllowances:[null]}]){
+      await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:JSON.stringify(broken)}),odata:async()=>{throw new Error('must not call')}}),/invalid profile section/)
+    }
   })
 })
