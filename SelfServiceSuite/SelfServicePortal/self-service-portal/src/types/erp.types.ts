@@ -276,3 +276,4 @@ export type PortalModuleKey =
   | 'salaryAdvance'
   | 'training'
   | 'documentRequisition'
+  | 'procurementPlan'

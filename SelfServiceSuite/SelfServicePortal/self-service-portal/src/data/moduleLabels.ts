@@ -23,6 +23,7 @@ export const moduleLabels: Record<PortalModuleKey, string> = {
   salaryAdvance: 'Salary Advance',
   training: 'Training Request',
   documentRequisition: 'Document Requisition',
+  procurementPlan: 'Individual Procurement Budget',
 }
 
 /** Ordered list of statuses a request can transition through. */

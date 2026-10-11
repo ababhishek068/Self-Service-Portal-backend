@@ -266,17 +266,10 @@ export const imprestHeaderSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['returnDate'],
-        message: 'Return date must be on or after the travel start date',
+        message: 'Expected return date must be the same as or later than the travel start date',
       })
     }
-    // HB 05/08/2026: start and return must not be the same calendar day for duration display.
-    if (data.travelDate === data.returnDate) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['returnDate'],
-        message: 'Return date must be after the travel start date (duration cannot be the same day)',
-      })
-    }
+    // UAT 27/08/2026: same calendar day is allowed (return >= travel).
   })
 
 export const imprestLineHeaderSchema = z.object({

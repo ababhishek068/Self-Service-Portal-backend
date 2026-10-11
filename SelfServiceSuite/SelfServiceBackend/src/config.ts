@@ -107,6 +107,8 @@ const envSchema = z.object({
   BC_DOMAIN: z.string().optional().default(''),
   BC_NAV_USER: z.string().optional().default(''),
   BC_NAV_PASSWORD: z.string().optional().default(''),
+  /** IANA timezone for attendance clocks (HIJRA Ethiopia = Africa/Addis_Ababa, UTC+3). */
+  BC_COMPANY_TIMEZONE: z.string().optional().default('Africa/Addis_Ababa'),
 
   SESSION_SECRET: z.string().min(1).default('hijra-self-service-dev-secret-change-me'),
   JWT_SECRET: z.string().min(32).default('hijra-self-service-jwt-dev-secret-change-me'),

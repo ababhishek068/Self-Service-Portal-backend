@@ -882,6 +882,12 @@ export async function resolveEmployeeOrgDisplayFields(
     'GlobalDimension1Code',
     'Global_Dimension_1_Code',
   ])
+  let sectorName =
+    firstEmployeeFieldText(employee, EMPLOYEE_FINANCE_SECTOR_NAME_FIELDS) || ''
+  if (sectorCode && (!sectorName || sectorName === sectorCode)) {
+    sectorName =
+      (await resolveDimensionDisplayName(sectorCode)) || sectorName || sectorCode
+  }
   const divisionEntryNo = firstEmployeeFieldText(employee, [
     'DivisionEntryNo',
     'Division_Entry_No',
@@ -981,6 +987,7 @@ export async function resolveEmployeeOrgDisplayFields(
     branchName: orgKind === 'district' ? branchName : '',
     branchCode: orgKind === 'district' ? branchCode : '',
     sectorCode,
+    sectorName: sectorName || sectorCode,
     orgKind,
     scopeCode:
       (orgKind === 'district' ? districtCode || departmentCode : departmentCode || districtCode) ||

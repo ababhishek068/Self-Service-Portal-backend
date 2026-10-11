@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="1.0.3.292"
+VERSION="1.0.3.297"
 AL_INSTALLED_VERSION="1.0.5.173"
 AL_PATCH_VERSION="${AL_INSTALLED_VERSION}"
 BUNDLE="HIJRA-${VERSION}-COMPLETE-SUITE-FINAL"
@@ -17,7 +17,7 @@ cd "$SUITE/SelfServiceBackend"
 rm -rf "$SUITE/SelfServiceBackend/dist"
 npm run build
 npm run build:portal
-echo "hijra-portal-${VERSION}-FINAL-2026-08-21-same-origin-api" > dist/BUILD_ID.txt
+echo "hijra-portal-${VERSION}-FINAL-2026-09-01-uat-surrender-grade-fix" > dist/BUILD_ID.txt
 
 echo "==> Staging $BUNDLE..."
 rm -rf "$STAGE"
@@ -70,6 +70,7 @@ done
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/HR3/HR/HRLeaveApplication.Table.al" "$ROOT/BC-AL/FILES/HR-DEEP/"
 cp "$AL_PROJECT/src/src/src/src/src/src/src/src/src/Fleet/GatePass.Table.al" "$ROOT/BC-AL/FILES/BASE-DEEP/"
+cp "$AL_PROJECT/src/Table/ImprestSurrenderHeader.Table.al" "$ROOT/BC-AL/FILES/BASE-DEEP/"
 cp "$AL_PROJECT/src/Query/GatePass.Query.al" "$AL_PROJECT/src/Query/GatePassAssetTransfers.Query.al" "$AL_PROJECT/src/Query/GatePassTransferShipments.Query.al" "$ROOT/BC-AL/FILES/Query/"
 cp "$AL_PROJECT/src/Query/ImprestHeaders.Query.al" "$AL_PROJECT/src/Query/ImprestLines2.Query.al" "$AL_PROJECT/src/Query/ReceiptPaymentTypes.Query.al" "$ROOT/BC-AL/FILES/Query/"
 
@@ -94,39 +95,24 @@ cp "$REPO_ROOT/deploy/HIJRA-UAT-ROW-BY-ROW-IMPLEMENTATION-REPORT-2026-07-28.md" 
 cp "$REPO_ROOT/outputs/hijra-uat-2026-07-28/HIJRA-SSP-UAT-ROW-BY-ROW-EVIDENCE-2026-07-28.xlsx" "$ROOT/" 2>/dev/null || true
 
 cat > "$ROOT/UNDEPLOYED-FIXES-16-19-AUG-2026.txt" << 'EOF'
-HIJRA SSP — ALL UNDEPLOYED FIXES (16–19 August 2026)
+HIJRA SSP — ALL UNDEPLOYED FIXES (16 August–1 September 2026)
 ===================================================
-You have not deployed these yet. Deploy THIS zip once (v1.0.3.292).
-Do not use 1.0.3.288–1.0.3.291 (291 still baked API ports 4000/4001).
+You have not deployed these yet. Deploy THIS zip once (v1.0.3.297).
+Do not use 1.0.3.288–1.0.3.296 for the 1 Sep UAT imprest-surrender fix.
 
 PORTAL / BACKEND (already compiled into dist + public; source also in this zip)
 ------------------------------------------------------------------------------
-Salary advance (v1.0.3.284)
-  Approver amount = percentage × payroll salary (not BC Basic 40k).
-  Files: src/salaryAdvanceAmount.ts, src/erpMappings.ts, src/employeeProfile.ts,
-         src/portalApi.ts
+v1.0.3.297 — 1 Sep 2026
+  Imprest surrender: Job Group falls back to employee Grade when Job Group is blank.
+  Copies the issued imprest's approved rate and job-grade snapshot into surrender lines.
+  Fixes: "No Job Grade Advance Rate was found for Job Group and Imprest Type ...".
 
-Imprest surrender travel days (v1.0.3.285)
-  Multi-day travel no longer stamps 1 day. Portal syncs travel start from source imprest.
-  Files: src/staffModules.ts, src/financeRequestEnrichment.ts, src/imprestSurrenderLines.ts
-         portal: components/finance/ImprestSurrenderLinesEditor.tsx
-  AL: StaffPortalCodeunit — EnsureImprestSurrenderTravelStartDate,
-      DeduplicateImprestSurrenderLines
-
-Petty cash limit warning (v1.0.3.286)
-  Branch users no longer get a false “no positive petty-cash limit” amber warning.
-  Files: src/staffModules.ts (getPortalPettyCashDepartmentLimit), src/employeeProfile.ts
-         portal: pages/finance/PettyCashReplenishment.tsx
-
-Petty cash Limit Source / Responsibility Center (v1.0.3.287)
-  Branch staff: Limit Source = branch name; Responsibility Center = branch (not CENTRAL).
-  Files: src/portalApi.ts, src/financeRequestEnrichment.ts
-         portal: pages/finance/PettyCashReplenishment.tsx
-
-Finance org display — all finance modules (v1.0.3.288)
-  Branch (district-line): District + Branch; hide Department/Division.
-  HQ (department-line): Department + Division; hide District/Branch.
-  Responsibility Center: branch name for branch staff; division/department for HQ.
+v1.0.3.296 — 27 Aug 2026
+  Expected return date may equal travel start (return >= travel).
+  Imprest surrender: Actual Spent auto-filled when Actual Return Date is saved.
+  Petty cash request: Employee Name from HR card.
+  Petty cash settlement: hide Pay Mode; show Branch + Department on lines.
+  AL: RecalculateImprestSurrenderDocument auto-fills Actual Spent; dim3 on PC line edit.
   Modules: Petty Cash Settlement, Petty Cash Request, Imprest, Imprest Surrender, Staff Claim.
   Files: src/financeRequestEnrichment.ts, src/employeeProfile.ts, src/portalApi.ts
          portal: data/financeOrgDetailFields.ts, utils/financeOrgDisplay.ts,
@@ -146,7 +132,9 @@ Procurement Individual Budget (v1.0.3.289–290) — UAT R59–R61
 AL FELIX MUST PUBLISH (from BC-AL/FILES — live object IDs)
 ----------------------------------------------------------
   FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
-    imprest surrender travel start, surrender line dedupe, petty cash Insert-before-Validate
+    imprest surrender grade fallback, travel start, line dedupe, petty cash Insert-before-Validate
+  FILES/BASE-DEEP/ImprestSurrenderHeader.Table.al
+    employee Grade fallback and issued-imprest job-grade/rate snapshot copy
   FILES/staffPortal/facilityUat/PortalFacilityMgt.Codeunit.al   (codeunit 52161)
     procurement budget template enter / itemise / submit
   FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
@@ -161,8 +149,20 @@ DEPLOY ORDER
 ------------
 1. Felix: APPLY-HIJRA-PATCH.ps1 → AL: Package → publish (keep AL 1.0.5.173)
 2. TA: extract this zip to C:\TA\SelfServiceSuite, restore .env, START-HIJRA-PORTAL.bat
-3. Verify: http://10.30.4.23:4000/api/health → v1.0.3.292 then Ctrl+F5
+3. Verify: http://10.30.4.23:4000/api/health → v1.0.3.297 then Ctrl+F5
    (UI + /api share one PORT from .env — clear browser site data once after upgrade)
+
+v1.0.3.297 — 1 Sep 2026
+------------------------
+Imprest surrender Job Group/Grade fallback and issued-rate snapshot fix
+Also includes 296: expected return >= travel start, surrender Actual Spent auto-fill
+
+v1.0.3.296 — 27 Aug 2026
+------------------------
+Expected return >= travel start (same day OK)
+Imprest surrender Actual Spent auto-fill on return date save
+Petty cash request Employee Name; settlement hide Pay Mode + Branch/Department on lines
+Also includes 295: surrender ERP sync, sector, budget approver queue
 EOF
 
 cat > "$ROOT/START-HIJRA-PORTAL.bat" << BAT
@@ -463,8 +463,10 @@ FULL ALL MODULES — HR + Finance + Facility — deploy once.
 See ALL-FIXES-MANIFEST.txt inside the zip.
 EOF
 
-DESKTOP_ZIP="$HOME/Desktop/${BUNDLE}.zip"
-DESKTOP_FELIX="$HOME/Desktop/HIJRA-FELIX-AL-BUNDLE-${VERSION}.zip"
+OUTPUT_DIR="${HIJRA_OUTPUT_DIR:-$HOME/Desktop}"
+mkdir -p "$OUTPUT_DIR"
+DESKTOP_ZIP="$OUTPUT_DIR/${BUNDLE}.zip"
+DESKTOP_FELIX="$OUTPUT_DIR/HIJRA-FELIX-AL-BUNDLE-${VERSION}.zip"
 cd "$STAGE"
 rm -f "$DESKTOP_ZIP" "$DESKTOP_FELIX"
 zip -r "$DESKTOP_ZIP" "$BUNDLE" -x "*.DS_Store"
@@ -479,12 +481,16 @@ if [[ -d "$ROOT/FELIX-REPLACE-THESE-AL" ]]; then
   cp "$ROOT/FELIX-REPLACE-THESE-AL/"*.al "$STAGE/felix-al-only/" 2>/dev/null || true
   cp "$ROOT/FELIX-REPLACE-THESE-AL/REPLACE-THESE.txt" "$STAGE/felix-al-only/" 2>/dev/null || true
 fi
+# Base table needed for the UAT surrender-grade fix; the path-aware script also
+# installs this file into the one matching Hijra project location.
+cp "$ROOT/BC-AL/FILES/BASE-DEEP/ImprestSurrenderHeader.Table.al" "$STAGE/felix-al-only/"
 cat > "$STAGE/felix-al-only/FELIX-NOTES-${VERSION}.txt" << EOF
 HIJRA Felix REPLACE files v${VERSION} — keep AL ${AL_INSTALLED_VERSION}
 =======================================================================
 Overwrite the .al files at the ZIP ROOT (same file names). Then AL: Package.
 
   StaffPortalCodeunit.Codeunit.al
+  ImprestSurrenderHeader.Table.al
   PortalFacilityMgt.Codeunit.al
   PortalProcurementPlanHeader.Table.al
   PortalProcurementPlanLine.Table.al
@@ -492,6 +498,9 @@ Overwrite the .al files at the ZIP ROOT (same file names). Then AL: Package.
   QyProcurementPlanHeader.Query.al
   QyProcurementPlanLines.Query.al
   QyAssetTransfer.Query.al
+
+For the table file, use APPLY-HIJRA-PATCH.ps1 so the existing project path is
+resolved safely and backed up before replacement.
 
 See REPLACE-THESE.txt for the Hijra project paths.
 Publish BEFORE the portal zip ${VERSION}.

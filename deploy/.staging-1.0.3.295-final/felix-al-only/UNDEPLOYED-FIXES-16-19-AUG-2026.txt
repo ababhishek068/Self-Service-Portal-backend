@@ -1,0 +1,59 @@
+HIJRA SSP — ALL UNDEPLOYED FIXES (16–19 August 2026)
+===================================================
+You have not deployed these yet. Deploy THIS zip once (v1.0.3.295).
+Do not use 1.0.3.288–1.0.3.294 for the Aug 26 UAT fixes (surrender ERP sync, sector, budget approver).
+
+PORTAL / BACKEND (already compiled into dist + public; source also in this zip)
+------------------------------------------------------------------------------
+v1.0.3.295 — 26 Aug 2026
+  Imprest surrender / staff claim: Request*Approval must enable BC workflow (no false success).
+  Portal verifies QyApprovalEntry after submit so ERP Pending Approval stays in sync.
+  Sector shows employee sector name (not FIN dim code); petty cash duplicate Sector removed.
+  Staff claim per-diem end date no longer copies ReturnDate crosstalk.
+  Individual budget: Budget reference number label; Submitted plans appear in Approvals
+  with header + lines; DecideProcurementPlan updates ERP Status.
+  AL: StaffPortalCodeunit RequestImprestSurrenderApproval / RequestClaimApproval /
+      CancelImprestSurrender; PortalFacilityMgt Submit + DecideProcurementPlan.
+  Modules: Petty Cash Settlement, Petty Cash Request, Imprest, Imprest Surrender, Staff Claim.
+  Files: src/financeRequestEnrichment.ts, src/employeeProfile.ts, src/portalApi.ts
+         portal: data/financeOrgDetailFields.ts, utils/financeOrgDisplay.ts,
+                 data/approvalDetailFields.ts, components/finance/FinanceEmployeeOrgBanner.tsx,
+                 pages/finance/PettyCash.tsx, pages/finance/PettyCashReplenishment.tsx,
+                 components/shared/RequestFormPage.tsx, MultiStepRequestPage.tsx,
+                 pages/approvals/ApprovalDetail.tsx
+
+Procurement Individual Budget (v1.0.3.289–290) — UAT R59–R61
+  Department OR district opens their own template (org from employee card).
+  Itemise lines against that unit. Submit itemised plan.
+  Files: src/portalApi.ts, src/employeeProfile.ts
+         portal: pages/facility/ProcurementPlan.tsx, api/endpoints/procurementPlan.ts
+  AL: PortalFacilityMgt.Codeunit.al (52161) Save/SubmitProcurementPlan*
+      PortalProcurementPlanHeader.Table.al, PortalProcurementPlanLine.Table.al
+
+AL FELIX MUST PUBLISH (from BC-AL/FILES — live object IDs)
+----------------------------------------------------------
+  FILES/src/NEWCHANGES/StaffPortalCodeunit.Codeunit.al
+    imprest surrender travel start, surrender line dedupe, petty cash Insert-before-Validate
+  FILES/staffPortal/facilityUat/PortalFacilityMgt.Codeunit.al   (codeunit 52161)
+    procurement budget template enter / itemise / submit
+  FILES/staffPortal/facilityUat/PortalAssetTransferMgt.Codeunit.al
+    vehicle tools on asset transfer
+  FILES/staffPortal/facilityUat/PortalProcurementPlanHeader.Table.al
+  FILES/staffPortal/facilityUat/PortalProcurementPlanLine.Table.al
+
+Extra reviewed AL copies (do not overwrite live IDs blindly):
+  BC-AL/REVIEWED-AL-FIXES-16-19-AUG/
+
+DEPLOY ORDER
+------------
+1. Felix: APPLY-HIJRA-PATCH.ps1 → AL: Package → publish (keep AL 1.0.5.173)
+2. TA: extract this zip to C:\TA\SelfServiceSuite, restore .env, START-HIJRA-PORTAL.bat
+3. Verify: http://10.30.4.23:4000/api/health → v1.0.3.295 then Ctrl+F5
+   (UI + /api share one PORT from .env — clear browser site data once after upgrade)
+
+v1.0.3.295 — 26 Aug 2026
+------------------------
+Imprest surrender/staff claim: workflow-required Request*Approval + approval-entry verify
+Sector name (not FIN code); petty cash duplicate Sector removed; claim per-diem end fix
+Budget reference number + Submitted plans visible/decidable in Approvals (ERP Status)
+Also includes 294: budget lines+submit, attendance EAT, leave card, surrender dates

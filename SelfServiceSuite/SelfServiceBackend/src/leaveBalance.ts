@@ -70,10 +70,28 @@ export function employeeAnnualLeaveBalance(row: ODataRecord | null | undefined) 
   const discovered = discoverAnnualLeaveBalance(row)
   if (discovered !== null) return discovered
 
-  const genericBalance = fieldNumber(row, ['LeaveBalance', 'Leave_Balance'])
-  if (genericBalance !== null && genericBalance >= 0) return genericBalance
-
+  // Do NOT fall back to generic LeaveBalance — that field often holds unrelated totals.
   return null
+}
+
+export function employeeEarnedLeaveDaysOnly(row: ODataRecord | null | undefined) {
+  return fieldNumber(row, [
+    'EarnedLeaveDays',
+    'Earned_Leave_Days',
+    'EarnedLeave',
+    'Earned_Leave',
+  ])
+}
+
+export function employeeLeaveEntitlementDays(row: ODataRecord | null | undefined) {
+  return fieldNumber(row, [
+    'LeaveEntitlement',
+    'Leave_Entitlement',
+    'AnnualLeaveEntitlement',
+    'Annual_Leave_Entitlement',
+    'AllocatedDays',
+    'Allocated_Days',
+  ])
 }
 
 export function positiveSessionAnnualBalance(value: unknown) {
@@ -101,10 +119,12 @@ export function resolveAnnualLeaveBalance(
 export function resolveAnnualLeaveEntitlement(
   metrics: { annualLeaveBalance: number | null; earnedLeaveDays: number | null },
   leaveTypeDays: number,
+  cardEntitlement: number | null = null,
+  setupDays: number | null = null,
 ) {
-  if (metrics.annualLeaveBalance !== null && metrics.annualLeaveBalance >= 0) {
-    return metrics.annualLeaveBalance
-  }
+  // Entitlement ≠ available balance. Prefer card Leave Entitlement / setup / type days.
+  if (cardEntitlement !== null && cardEntitlement >= 0) return cardEntitlement
+  if (setupDays !== null && setupDays > 0) return setupDays
   if (leaveTypeDays > 0) return leaveTypeDays
   if (metrics.earnedLeaveDays !== null && metrics.earnedLeaveDays > 0) {
     return metrics.earnedLeaveDays
@@ -214,42 +234,20 @@ export function resolveBcLeaveBalance(input: {
   ledgerNetDays: number
 }) {
   if (input.isAnnual) {
-    const earned = input.earnedLeaveDays ?? input.summary?.earnedLeaveDays ?? null
-
+    // HR requirement: Annual Leave balance + Earned Leave Days from employee card only.
+    if (input.cardAnnualBalance !== null && input.cardAnnualBalance >= 0) {
+      return Math.max(0, input.cardAnnualBalance)
+    }
     if (
       input.summary &&
       input.summary.cardAnnualLeaveBalance !== null &&
       input.summary.cardAnnualLeaveBalance >= 0
     ) {
-      return input.summary.cardAnnualLeaveBalance
-    }
-
-    if (earned !== null && earned >= 0) {
-      // Prefer card balance when present; otherwise show earned accrual (incl. 0).
-      if (input.summary?.cardAnnualLeaveBalance === null || input.summary?.cardAnnualLeaveBalance === undefined) {
-        if (earned > 0) return earned
-      }
-    }
-
-    // Never surface a negative available balance to the portal — overdrawn cards
-    // mean the employee has no days left to apply.
-    if (input.summary && input.summary.cardAnnualLeaveBalance !== null) {
       return Math.max(0, input.summary.cardAnnualLeaveBalance)
     }
-
-    if (earned !== null) {
-      return Math.max(0, earned)
-    }
-
-    if (input.summary) {
-      if (input.summary.hasCurrentPeriodEntries) return Math.max(0, input.summary.currentPeriodNet)
-      if (input.summary.hasOpenEntries) return Math.max(0, input.summary.openNet)
-    }
-    if (input.hasCurrentPeriodEntries) return Math.max(0, input.currentPeriodNet)
-    if (input.hasOpenEntries) return Math.max(0, input.openNet)
-    if (input.cardAnnualBalance !== null) return Math.max(0, input.cardAnnualBalance)
-    const net = Number.isFinite(input.ledgerNetDays) ? input.ledgerNetDays : 0
-    return Math.max(0, net)
+    const earned = input.earnedLeaveDays ?? input.summary?.earnedLeaveDays ?? null
+    if (earned !== null && earned >= 0) return Math.max(0, earned)
+    return 0
   }
 
   const unlimitedDays = input.summary?.unlimitedDays ?? input.leaveTypeUnlimitedDays ?? false

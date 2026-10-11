@@ -64,10 +64,6 @@ export function PettyCash() {
           label: 'Employee Account No.',
           paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.AccountNo'],
         },
-        {
-          label: 'Pay Mode',
-          paths: ['payload.PayMode', 'payload.Pay_Mode', 'payload.PaymentMethod'],
-        },
         ...financeOrgDetailFields,
         {
           label: 'Job Title',
@@ -132,6 +128,8 @@ export function PettyCash() {
           { key: 'type', header: 'Type' },
           { key: 'name', header: 'Account Name' },
           { key: 'accountNo', header: 'Account No.' },
+          { key: 'department', header: 'Department' },
+          { key: 'branch', header: 'Branch' },
           { key: 'amount', header: 'Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
         ],
         emptyText: '*** No Petty Cash Lines Found ***',

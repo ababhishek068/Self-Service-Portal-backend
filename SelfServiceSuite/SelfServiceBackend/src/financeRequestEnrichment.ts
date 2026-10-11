@@ -339,7 +339,8 @@ function isPerDiemClaimLine(line: Record<string, unknown>) {
 
 function claimExpenditureDuration(lines: Record<string, unknown>[]) {
   const perDiemLines = lines.filter(isPerDiemClaimLine)
-  const dates = (perDiemLines.length ? perDiemLines : [])
+  const source = perDiemLines.length ? perDiemLines : lines
+  const dates = source
     .flatMap((line) =>
       [
         text(line as ODataRecord, [
@@ -360,7 +361,29 @@ function claimExpenditureDuration(lines: Record<string, unknown>[]) {
     .map((value) => value.slice(0, 10))
     .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
     .sort()
-  if (!dates.length) return { start: '', end: '' }
+  if (!dates.length) {
+    // Fall back to start + No. of Days when BC only stamped the first day.
+    for (const line of source) {
+      const start = text(line as ODataRecord, [
+        'expenditureDate',
+        'ExpenditureDate',
+        'Expenditure_Date',
+        'expenditureStartDate',
+        'ExpenditureStartDate',
+      ]).slice(0, 10)
+      const days = Number(
+        (line as ODataRecord).noOfDays ??
+          (line as ODataRecord).NoOfDays ??
+          (line as ODataRecord)['No of Days'] ??
+          (line as ODataRecord).NumberOfDays ??
+          0,
+      )
+      if (/^\d{4}-\d{2}-\d{2}$/.test(start) && Number.isFinite(days) && days >= 1) {
+        return { start, end: addCalendarDays(start, Math.max(0, Math.floor(days) - 1)) }
+      }
+    }
+    return { start: '', end: '' }
+  }
   return { start: dates[0]!, end: dates[dates.length - 1]! }
 }
 
@@ -490,6 +513,9 @@ export type FinanceEnrichmentHints = {
   /** When true, org fields come from the requester HR card — do not keep BC header HQ stamps. */
   employeeOrgResolved?: boolean
   orgKind?: 'department' | 'district'
+  sectorCode?: string
+  sectorName?: string
+  employeeName?: string
   jobTitle?: string
   jobGrade?: string
   responsibleCenter?: string
@@ -498,7 +524,14 @@ export type FinanceEnrichmentHints = {
   imprestNo?: string
 }
 
-export function isFinanceDetailModule(module: string): module is PortalModuleKey {
+export function isFinanceDetailModule(
+  module: string,
+): module is
+  | 'imprest'
+  | 'imprestSurrender'
+  | 'staffClaim'
+  | 'pettyCash'
+  | 'pettyCashReplenishment' {
   return FINANCE_DETAIL_MODULES.has(module as PortalModuleKey)
 }
 
@@ -700,16 +733,9 @@ export function enrichFinanceHeaderRow(
       durationEnd = fromLines
     }
   } else if (!durationEnd && durationStart) {
-    durationEnd = addCalendarDays(durationStart, 1)
+    durationEnd = durationStart
   }
-  if (
-    durationStart &&
-    durationEnd &&
-    durationStart.slice(0, 10) === durationEnd.slice(0, 10)
-  ) {
-    // HB: start and return must not be the same calendar day for approvers.
-    durationEnd = addCalendarDays(durationStart, 1)
-  }
+  // UAT 27/08/2026: same-day travel/return is valid — do not force +1 day.
 
   const enriched: ODataRecord = { ...row }
   if (dateRequired) {
@@ -863,16 +889,41 @@ export function enrichFinanceHeaderRow(
       enriched.PlaceOfDuty = lineDutyAreaFallback
     }
   }
-  if (durationStart) {
+  if (durationStart && module !== 'staffClaim') {
     enriched.TravelDate = durationStart
     enriched.TravelStartDate = durationStart
   }
-  if (durationEnd) {
+  if (durationEnd && module !== 'staffClaim') {
     enriched.ReturnDate = durationEnd
     enriched.ExpectedReturnDate = durationEnd
   }
-  if (durationStart || durationEnd) {
+  if ((durationStart || durationEnd) && module !== 'staffClaim') {
     enriched.DurationDate = formatDurationDate(durationStart, durationEnd)
+  }
+  // Stamp Sector from the employee card — never fall back to a raw Global Dim1 code
+  // like FIN on Staff Claim / Petty Cash detail (UAT: Sector showed FIN instead of name).
+  const sectorName =
+    (hints.sectorName || '').trim() ||
+    text(row, ['SectorName', 'Sector_Name']) ||
+    ''
+  const sectorCode = (hints.sectorCode || '').trim() || text(row, ['Sector', 'SectorCode', 'Sector_Code'])
+  if (sectorName) {
+    enriched.SectorName = sectorName
+    enriched.Sector_Name = sectorName
+    enriched.Sector = sectorName
+  } else if (sectorCode && sectorCode.length > 4) {
+    enriched.SectorName = sectorCode
+    enriched.Sector = sectorCode
+  } else if (sectorCode) {
+    enriched.Sector = sectorCode
+  }
+  const employeeName =
+    (hints.employeeName || '').trim() ||
+    text(row, ['EmployeeName', 'Employee_Name', 'Payee', 'FullName'])
+  if (employeeName) {
+    enriched.EmployeeName = employeeName
+    enriched.Employee_Name = employeeName
+    if (!text(row, ['Payee'])) enriched.Payee = employeeName
   }
   // Promote line daily rate to header so approvers see job-grade rate (Excel R7).
   if (module === 'imprest' || module === 'imprestSurrender') {
@@ -976,6 +1027,9 @@ export async function enrichFinanceHeaderFromEmployee(
       hints = {
         employeeOrgResolved: true,
         orgKind: org.orgKind,
+        sectorCode: org.sectorCode,
+        sectorName: org.sectorName,
+        employeeName: mapped.displayName || '',
         departmentCode: org.departmentCode || (org.orgKind === 'department' ? mapped.departmentCode : ''),
         departmentName: org.departmentName,
         division: org.division,

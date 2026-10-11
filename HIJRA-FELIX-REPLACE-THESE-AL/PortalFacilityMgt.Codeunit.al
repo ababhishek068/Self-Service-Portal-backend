@@ -441,6 +441,8 @@ codeunit 52161 "Portal Facility Mgt."
     var
         Header: Record "Portal Procurement Plan Hdr.";
         Line: Record "Portal Procurement Plan Line";
+        CustomApprovals: Codeunit "Custom Approvals Codeunit";
+        Variant: Variant;
     begin
         if not Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
             exit(false);
@@ -452,6 +454,36 @@ codeunit 52161 "Portal Facility Mgt."
             Error('Add at least one plan line before submitting procurement plan %1 / %2.', budgetName, planPeriod);
         Header.Status := 'Submitted';
         Header."Submitted On" := CurrentDateTime;
+        Header.Modify(true);
+        // When a BC workflow exists for table 52164, enqueue Approvals Entry so
+        // managers see the plan in the ERP approval inbox. Otherwise Status=Submitted
+        // is enough for the SSP Approvals queue (portal-native decide).
+        Variant := Header;
+        if CustomApprovals.CheckApprovalsWorkflowEnabled(Variant) then begin
+            CustomApprovals.OnSendDocForApproval(Variant);
+            if Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then begin
+                Header.Status := 'Pending Approval';
+                Header.Modify(true);
+            end;
+        end;
+        exit(true);
+    end;
+
+    /// <summary>Approver decision for an itemised procurement budget (SSP Approvals).</summary>
+    procedure DecideProcurementPlan(budgetName: Code[50]; globalDim1: Code[20]; globalDim2: Code[20]; planPeriod: Code[20]; approved: Boolean): Boolean
+    var
+        Header: Record "Portal Procurement Plan Hdr.";
+        StatusLower: Text;
+    begin
+        if not Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
+            Error('Procurement plan %1 / %2 was not found.', budgetName, planPeriod);
+        StatusLower := LowerCase(Header.Status);
+        if not (StatusLower in ['submitted', 'pending approval']) then
+            Error('Procurement plan %1 / %2 is %3 and cannot be decided.', budgetName, planPeriod, Header.Status);
+        if approved then
+            Header.Status := 'Approved'
+        else
+            Header.Status := 'Rejected';
         Header.Modify(true);
         exit(true);
     end;

@@ -22,6 +22,7 @@ export const APPROVAL_TABLE_IDS = {
   workTicket: 50866,
   salaryAdvance: 50880,
   paymentVoucher: 50000,
+  procurementPlan: 52164,
 } as const
 
 export type ApprovalTableKey = keyof typeof APPROVAL_TABLE_IDS
@@ -45,6 +46,7 @@ export const SUPPORTED_FRONTEND_MODULES = [
   'gatePass',
   'assetTransfer',
   'leave',
+  'procurementPlan',
 ] as const
 
 export type SupportedFrontendModule = (typeof SUPPORTED_FRONTEND_MODULES)[number]
@@ -224,6 +226,7 @@ export function resolveApprovalModuleFromTableId(
   if (tableId === APPROVAL_TABLE_IDS.transferOrder) return 'transferOrder'
   if (tableId === APPROVAL_TABLE_IDS.workTicket) return 'workTickets'
   if (tableId === APPROVAL_TABLE_IDS.fuel) return 'fuelRequest'
+  if (tableId === APPROVAL_TABLE_IDS.procurementPlan) return 'procurementPlan'
   if (doc.includes('imprest surrender')) return 'imprestSurrender'
   if (doc.includes('imprest')) return 'imprest'
   if (doc.includes('staff claim') || doc === 'claim') return 'staffClaim'
@@ -238,6 +241,7 @@ export function resolveApprovalModuleFromTableId(
   if (doc.includes('transport')) return 'transport'
   if (doc.includes('store requisition')) return 'storeRequisition'
   if (doc.includes('petty') || doc.includes('payment voucher') || doc === 'payment') return 'pettyCash'
+  if (doc.includes('procurement') || doc.includes('budget plan')) return 'procurementPlan'
   if (doc.includes('purchase') || doc === 'order') return 'purchaseRequisition'
   return null
 }

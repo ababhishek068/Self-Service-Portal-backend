@@ -26,14 +26,14 @@ import {
   resolveFinanceDepartmentCodeForSoap,
 } from './employeeProfile.js'
 import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
-import { rememberImprestHeaderDates, resolveImprestTravelStartDate } from './financeRequestEnrichment.js'
+import { rememberImprestHeaderDates, resolveImprestTravelStartDate, enrichImprestSurrenderFromSourceImprest } from './financeRequestEnrichment.js'
 import { uploadViaPortalAttachments } from './portalAttachments.js'
 import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
 import { trainingCourseCodeForBc } from './trainingCourses.js'
-import { resolveModuleRequestStatus } from './erpMappings.js'
+import { resolveModuleRequestStatus, documentSentForApproval } from './erpMappings.js'
 import {
   prepareImprestSurrenderLinesForSave,
   imprestSurrenderLinesToPersist,
@@ -644,10 +644,15 @@ export function resolveImprestHeaderDates(body: Record<string, unknown>) {
       code: 'IMPREST_RETURN_BACKDATE',
     })
   }
-  if (travelDate && (!returnDate || returnDate <= travelDate)) {
-    const next = new Date(`${travelDate}T12:00:00`)
-    next.setDate(next.getDate() + 1)
-    returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+  if (travelDate && returnDate && returnDate < travelDate) {
+    throw Object.assign(
+      new Error('Expected return date must be the same as or later than the travel start date.'),
+      { status: 422, code: 'IMPREST_RETURN_BEFORE_TRAVEL' },
+    )
+  }
+  // UAT 27/08/2026: same-day return is allowed. Only fill a missing return date.
+  if (travelDate && !returnDate) {
+    returnDate = travelDate
   }
   return { travelDate, returnDate, todayIso }
 }
@@ -4178,6 +4183,23 @@ export async function submitPortalModuleRequest(
     }
     throw Object.assign(new Error(`Business Central did not submit ${no}`), { status: 502 })
   }
+
+  // Imprest surrender / staff claim previously reported SOAP success when the AL
+  // routine returned true without creating approval entries. Verify ERP workflow.
+  if (spec.module === 'imprest-surrender' || spec.module === 'claim') {
+    const refreshed = (await getPortalModuleDocument(spec, user, no, false)) ?? header
+    const entries = await fetchPortalApprovalEntries(spec, no, refreshed)
+    if (!entries.length && !documentSentForApproval(refreshed)) {
+      const label = spec.module === 'imprest-surrender' ? 'Imprest Surrender' : 'Staff Claim'
+      throw Object.assign(
+        new Error(
+          `Business Central did not create an approval entry for ${label} ${no}. ` +
+            `Enable the approval workflow on table ${spec.headerTableId}, then request approval again.`,
+        ),
+        { status: 502, code: 'APPROVAL_ENTRY_MISSING' },
+      )
+    }
+  }
 }
 
 export async function getPortalPettyCashDepartmentLimit(
@@ -4544,18 +4566,24 @@ async function ensureImprestSurrenderReadyForSpend(
   user: AuthUser,
   no: string,
   header: Record<string, unknown>,
+  preferredReturnDate?: string,
 ): Promise<string> {
-  const existing = firstImprestSurrenderHeaderDate(header, [
-    'ActualReturnDate',
-    'Actual_Return_Date',
-    'actualReturnDate',
-  ])
+  const existing = firstImprestSurrenderHeaderDate(
+    {
+      ...header,
+      ...(preferredReturnDate
+        ? { actualReturnDate: preferredReturnDate, ActualReturnDate: preferredReturnDate }
+        : {}),
+    },
+    ['ActualReturnDate', 'Actual_Return_Date', 'actualReturnDate'],
+  )
   if (existing) {
-    await finalizeImprestSurrenderTravelDays(spec, user, no, header)
+    await finalizeImprestSurrenderTravelDays(spec, user, no, header, preferredReturnDate || existing)
     return existing
   }
 
   const fallback =
+    preferredReturnDate ||
     firstImprestSurrenderHeaderDate(header, [
       'ExpectedReturnDate',
       'Expected_Return_Date',
@@ -4563,7 +4591,8 @@ async function ensureImprestSurrenderReadyForSpend(
       'Return_Date',
       'TravelEndDate',
       'EndDate',
-    ]) || new Date().toISOString().slice(0, 10)
+    ]) ||
+    new Date().toISOString().slice(0, 10)
 
   const imprestIssueDocNo = String(
     header.ImprestIssueDocNo ??
@@ -4580,6 +4609,9 @@ async function ensureImprestSurrenderReadyForSpend(
     actualReturnDate: fallback,
     ActualReturnDate: fallback,
   })
+  header.actualReturnDate = fallback
+  header.ActualReturnDate = fallback
+  await finalizeImprestSurrenderTravelDays(spec, user, no, header, fallback)
   return fallback
 }
 
@@ -4593,17 +4625,36 @@ async function finalizeImprestSurrenderTravelDays(
   user: AuthUser,
   surrenderNo: string,
   header: Record<string, unknown>,
+  preferredReturnDate?: string,
 ) {
   await syncSurrenderTravelStartFromSourceImprest(surrenderNo, header)
 
-  const actualReturnDate = formatBcSoapDate(
+  const travelStart = firstImprestSurrenderHeaderDate(header, [
+    'TravelStartDate',
+    'Travel_Start_Date',
+    'TravelDate',
+    'Travel_Date',
+    'DateRequired',
+    'Date_Required',
+  ])
+  let actualReturnDate = formatBcSoapDate(
     String(
-      header.actualReturnDate ??
-        header.ActualReturnDate ??
-        header.Actual_Return_Date ??
+      preferredReturnDate ||
+        header.actualReturnDate ||
+        header.ActualReturnDate ||
+        header.Actual_Return_Date ||
         '',
     ),
   )
+  // Never SOAP-save a return date earlier than travel start (BC table rule).
+  if (
+    travelStart &&
+    actualReturnDate &&
+    !actualReturnDate.startsWith('0001-01-01') &&
+    actualReturnDate.slice(0, 10) < travelStart
+  ) {
+    actualReturnDate = travelStart
+  }
   if (
     actualReturnDate &&
     !actualReturnDate.startsWith('0001-01-01') &&
@@ -4626,6 +4677,8 @@ async function finalizeImprestSurrenderTravelDays(
         no: surrenderNo,
       })
       await callModuleSoap(spec, spec.soap.saveHeader, params)
+      header.actualReturnDate = actualReturnDate.slice(0, 10)
+      header.ActualReturnDate = actualReturnDate.slice(0, 10)
     } catch (err) {
       console.warn(
         `[imprest-surrender] travel-day revalidation failed for ${surrenderNo} (publish AL EnsureImprestSurrenderTravelStartDate)`,
@@ -4664,11 +4717,17 @@ async function syncSurrenderTravelStartFromSourceImprest(
     'DateRequired',
     'Date_Required',
   ])
-  // Start = return is the 1-day bug — always re-resolve from the source imprest.
-  if (!start || (actualReturn && start === actualReturn)) {
+  // Re-resolve when blank, equal to return (1-day bug), or AFTER return (stale stamp).
+  const startAfterReturn =
+    Boolean(start && actualReturn && start > actualReturn)
+  if (!start || (actualReturn && start === actualReturn) || startAfterReturn) {
     if (imprestNo) start = await resolveImprestTravelStartDate(imprestNo)
   }
-  if (!start || (actualReturn && start === actualReturn)) return
+  if (!start) return
+  if (actualReturn && start === actualReturn) return
+  if (actualReturn && start > actualReturn) {
+    // Still wrong after source lookup — keep source start; caller must use a later return.
+  }
   const bases = [config.BC_ODATA_BASE_URL].filter(Boolean)
   const bodies: Array<Record<string, unknown>> = [
     { Travel_Start_Date: start },
@@ -4679,6 +4738,8 @@ async function syncSurrenderTravelStartFromSourceImprest(
     for (const body of bodies) {
       try {
         await patchODataRecord(base, 'QyImprestSurrenderHeader', no, body)
+        header.TravelStartDate = start
+        header.Travel_Start_Date = start
         return
       } catch {
         // try next field alias
@@ -4736,11 +4797,39 @@ export async function setPortalModuleLines(
       )
     }
     const existingLines = await listPortalModuleLines(spec, header, no)
+    // Prefer portal-confirmed return date (from save payload / enriched view), not stale BC.
+    const preferredReturn =
+      firstImprestSurrenderHeaderDate(
+        {
+          actualReturnDate: lines.find((line) => line.actualReturnDate)?.actualReturnDate,
+          ActualReturnDate: lines.find((line) => line.ActualReturnDate)?.ActualReturnDate,
+        } as Record<string, unknown>,
+        ['actualReturnDate', 'ActualReturnDate'],
+      ) ||
+      firstImprestSurrenderHeaderDate(header as Record<string, unknown>, [
+        'ActualReturnDate',
+        'Actual_Return_Date',
+        'actualReturnDate',
+      ])
+    let spendHeader = header as Record<string, unknown>
+    try {
+      spendHeader = (await enrichImprestSurrenderFromSourceImprest(
+        header as ODataRecord,
+        existingLines,
+      )) as Record<string, unknown>
+    } catch {
+      spendHeader = header as Record<string, unknown>
+    }
+    if (preferredReturn) {
+      spendHeader.actualReturnDate = preferredReturn
+      spendHeader.ActualReturnDate = preferredReturn
+    }
     await ensureImprestSurrenderReadyForSpend(
       spec,
       user,
       no,
-      header as Record<string, unknown>,
+      spendHeader,
+      preferredReturn || undefined,
     )
     linesToSave = imprestSurrenderLinesToPersist(
       prepareImprestSurrenderLinesForSave(existingLines, lines),

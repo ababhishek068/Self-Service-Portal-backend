@@ -4,19 +4,105 @@
 /// PUBLISH AS SOAP WEB SERVICE: object = this codeunit, Service Name = "CuPortalFacility".
 /// Parameter names must not be changed — the portal backend calls them by name.
 /// </summary>
-codeunit 52122 "Portal Facility Mgt."
+codeunit 52161 "Portal Facility Mgt."
 {
     // ---------------------------------------------------------------------
-    // Maintenance (FLT Fuel & Maintenance Req. 50865 companion, table 52123)
+    // Maintenance (FLT Fuel & Maintenance Req. 50865 companion, table 52163)
     // ---------------------------------------------------------------------
+
+    /// <summary>UAT R20/R21: retain the vehicle/card fuel-standard context and current odometer.</summary>
+    procedure SaveFuelRequestStandard(requisitionNo: Code[20]; employeeNo: Code[20]; vehicleNo: Code[30]; currentOdometer: Decimal; requestedLitres: Decimal): Boolean
+    var
+        Extra: Record "Portal Fuel Maint. Extra";
+        Vehicle: Record "FLT-Vehicle Header";
+        FuelRequest: Record "FLT-Fuel & Maintenance Req.";
+    begin
+        if requisitionNo = '' then
+            exit(false);
+        EnsureMaintenanceExtra(Extra, requisitionNo);
+        Extra."Employee No." := employeeNo;
+        Extra."Request Type" := 0;
+        Extra."Vehicle No." := vehicleNo;
+        Extra."Current Odometer" := currentOdometer;
+        Extra."Requested Fuel Litres" := requestedLitres;
+
+        Vehicle.Reset();
+        Vehicle.SetRange("Registration No.", vehicleNo);
+        if Vehicle.FindFirst() then begin
+            Extra."Vehicle Fuel Rating" := Vehicle."Fuel Rating";
+            Extra."Vehicle Current Reading" := Vehicle."Current Reading";
+        end else begin
+            Vehicle.Reset();
+            if Vehicle.Get(vehicleNo) then begin
+                Extra."Vehicle Fuel Rating" := Vehicle."Fuel Rating";
+                Extra."Vehicle Current Reading" := Vehicle."Current Reading";
+            end;
+        end;
+        Extra.Modify(true);
+
+        if FuelRequest.Get(requisitionNo) then begin
+            FuelRequest."Initial Odometer Reading" := currentOdometer;
+            FuelRequest.Modify(true);
+        end;
+        exit(true);
+    end;
 
     /// <summary>Stamp a portal-created FLT requisition as a maintenance request and store the SSP template fields.</summary>
     procedure MarkAsMaintenanceRequest(requisitionNo: Code[20]; employeeNo: Code[20]; requestType: Integer; faTagNumber: Code[30]; vehicleNo: Code[30]; item: Text[100]; quantity: Decimal; priority: Text[20]; location: Text[100]; issueDescription: Text[500]; currentOdometer: Decimal; lastServiceOdometer: Decimal): Boolean
     var
         Extra: Record "Portal Fuel Maint. Extra";
+        FixedAsset: Record "Fixed Asset";
+        Vehicle: Record "FLT-Vehicle Header";
+        FuelRequest: Record "FLT-Fuel & Maintenance Req.";
+        ValidatedFATag: Code[30];
+        ValidatedVehicleNo: Code[30];
     begin
         if requisitionNo = '' then
             exit(false);
+
+        case requestType of
+            1:
+                begin
+                    ResolveFixedAssetAndEnsureTag(faTagNumber, FixedAsset);
+                    ValidatedFATag := CopyStr(FixedAsset."Asset Tag", 1, MaxStrLen(ValidatedFATag));
+                    if ValidatedFATag = '' then
+                        ValidatedFATag := CopyStr(FixedAsset."No.", 1, MaxStrLen(ValidatedFATag));
+                end;
+            2:
+                begin
+                    if vehicleNo = '' then
+                        Error('Vehicle Registration Number is required for vehicle service maintenance.');
+                    Vehicle.Reset();
+                    Vehicle.SetRange("Registration No.", vehicleNo);
+                    if not Vehicle.FindFirst() then
+                        Error('Vehicle Registration Number %1 was not found. Select a current vehicle from Business Central.', vehicleNo);
+                    if not FixedAsset.Get(Vehicle."No.") then
+                        Error('Vehicle %1 is not linked to Fixed Asset %2. Complete the vehicle Fixed Asset setup in Business Central.', vehicleNo, Vehicle."No.");
+                    EnsureFixedAssetTag(FixedAsset);
+                    if (faTagNumber <> '') and
+                       (FixedAsset."No." <> faTagNumber) and
+                       (FixedAsset."Asset Tag" <> faTagNumber)
+                    then
+                        Error('Fixed Asset %1 does not belong to vehicle %2. The linked Fixed Asset is %3 (Tag %4).', faTagNumber, vehicleNo, FixedAsset."No.", FixedAsset."Asset Tag");
+                    ValidatedFATag := CopyStr(FixedAsset."Asset Tag", 1, MaxStrLen(ValidatedFATag));
+                    if ValidatedFATag = '' then
+                        ValidatedFATag := CopyStr(FixedAsset."No.", 1, MaxStrLen(ValidatedFATag));
+                    ValidatedVehicleNo := CopyStr(Vehicle."Registration No.", 1, MaxStrLen(ValidatedVehicleNo));
+                end;
+            else
+                Error('Maintenance Request Type %1 is invalid. Select Fixed Asset Maintenance or Vehicle Service Maintenance.', requestType);
+        end;
+
+        if not FuelRequest.Get(requisitionNo) then
+            Error('Maintenance requisition %1 was not found.', requisitionNo);
+        FuelRequest.Type := FuelRequest.Type::Maintenance;
+        FuelRequest."Fixed Asset No" := FixedAsset."No.";
+        if requestType = 1 then
+            FuelRequest."Vehicle Reg No" := ''
+        else
+            FuelRequest."Vehicle Reg No" := ValidatedVehicleNo;
+        FuelRequest.Modify(true);
+
         if not Extra.Get(requisitionNo) then begin
             Extra.Init();
             Extra."Requisition No." := requisitionNo;
@@ -24,8 +110,8 @@ codeunit 52122 "Portal Facility Mgt."
         end;
         Extra."Employee No." := employeeNo;
         Extra."Request Type" := requestType;
-        Extra."FA Tag Number" := faTagNumber;
-        Extra."Vehicle No." := vehicleNo;
+        Extra."FA Tag Number" := ValidatedFATag;
+        Extra."Vehicle No." := ValidatedVehicleNo;
         Extra.Item := item;
         Extra.Quantity := quantity;
         Extra.Priority := priority;
@@ -45,11 +131,15 @@ codeunit 52122 "Portal Facility Mgt."
     procedure AssignMaintenanceTechnician(requisitionNo: Code[20]; technicianNo: Code[20]; myUserID: Code[50]): Boolean
     var
         Extra: Record "Portal Fuel Maint. Extra";
+        Technician: Record "HR-Employee";
     begin
         if (requisitionNo = '') or (technicianNo = '') then
             exit(false);
+        if not Technician.Get(technicianNo) then
+            Error('Employee %1 was not found. Select an internal technician from the employee list.', technicianNo);
         EnsureMaintenanceExtra(Extra, requisitionNo);
         Extra."Assigned Technician" := technicianNo;
+        Extra."Assigned Technician Name" := CopyStr(Technician."Full Name", 1, MaxStrLen(Extra."Assigned Technician Name"));
         Extra."Assigned By" := myUserID;
         Extra."Assigned On" := CurrentDateTime;
         Extra.Modify(true);
@@ -69,6 +159,52 @@ codeunit 52122 "Portal Facility Mgt."
         Extra."Receipt Remarks" := remarks;
         Extra.Modify(true);
         exit(true);
+    end;
+
+    local procedure ResolveFixedAssetAndEnsureTag(assetReference: Code[30]; var FixedAsset: Record "Fixed Asset")
+    begin
+        if assetReference = '' then
+            Error('Fixed Asset is required for fixed asset maintenance.');
+
+        FixedAsset.Reset();
+        if not FixedAsset.Get(assetReference) then begin
+            // Backward compatibility for portal builds that submitted the
+            // physical Asset Tag instead of the stable Fixed Asset No.
+            FixedAsset.Reset();
+            FixedAsset.SetRange("Asset Tag", assetReference);
+            if not FixedAsset.FindFirst() then
+                Error('Fixed Asset %1 was not found. Select a current fixed asset from Business Central.', assetReference);
+        end;
+
+        EnsureFixedAssetTag(FixedAsset);
+    end;
+
+    local procedure EnsureFixedAssetTag(var FixedAsset: Record "Fixed Asset")
+    var
+        AssetConversionSetup: Record "Asset Capitalization Setup";
+        AssetTagNoSeries: Codeunit "No. Series";
+        GeneratedTag: Code[20];
+    begin
+        // UAT HB 11/08/2026 v3 (CuPortalFacility): MarkAsMaintenanceRequest was still
+        // Erroring when Generate Asset Tags = Off. Always stamp a tag when blank —
+        // prefer No. Series when configured, otherwise Fixed Asset "No.".
+        if FixedAsset."Asset Tag" <> '' then
+            exit;
+
+        GeneratedTag := '';
+        if AssetConversionSetup.Get() then
+            if AssetConversionSetup."Generate Asset Tags" and (AssetConversionSetup."Asset Tag Nos." <> '') then
+                GeneratedTag :=
+                    AssetTagNoSeries.GetNextNo(AssetConversionSetup."Asset Tag Nos.", Today(), true);
+
+        if GeneratedTag = '' then
+            GeneratedTag := CopyStr(FixedAsset."No.", 1, MaxStrLen(FixedAsset."Asset Tag"));
+
+        if GeneratedTag = '' then
+            exit;
+
+        FixedAsset."Asset Tag" := GeneratedTag;
+        FixedAsset.Modify(false);
     end;
 
     /// <summary>UAT R41/R42: save odometer readings; Next Service KM = current + 5,000.</summary>
@@ -97,13 +233,52 @@ codeunit 52122 "Portal Facility Mgt."
     end;
 
     // ---------------------------------------------------------------------
-    // Work ticket flight booking (FLT Work Ticket 50866 companion, table 52122)
+    // Transport (FLT-Transport Requisition 50863)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// UAT Facility R30: lets the approver assign a vehicle from the SSP
+    /// approval screen instead of only inside Business Central. Setting
+    /// "Vehicle Allocated" runs the table's own OnValidate — it re-checks
+    /// the vehicle is not already allocated to an overlapping trip (raises
+    /// the same Error() BC itself would show) and auto-fills Driver
+    /// Allocated, Vehicle Registration and "Vehicle Allocated by" exactly as
+    /// assigning it manually in BC would.
+    /// </summary>
+    procedure AssignTransportVehicle(reqNo: Code[20]; vehicleNo: Code[20]; myUserID: Code[50]): Boolean
+    var
+        TransportReq: Record "FLT-Transport Requisition";
+        Vehicle: Record "FLT-Vehicle Header";
+        ResolvedVehicleNo: Code[20];
+    begin
+        if (reqNo = '') or (vehicleNo = '') then
+            exit(false);
+        if not TransportReq.Get(reqNo) then
+            Error('Transport requisition %1 was not found.', reqNo);
+
+        // SSP dropdown sends Registration No.; field TableRelation is Vehicle."No.".
+        ResolvedVehicleNo := vehicleNo;
+        if not Vehicle.Get(vehicleNo) then begin
+            Vehicle.Reset();
+            Vehicle.SetRange("Registration No.", vehicleNo);
+            if not Vehicle.FindFirst() then
+                Error('Vehicle %1 was not found in FLT-Vehicle Header.', vehicleNo);
+            ResolvedVehicleNo := Vehicle."No.";
+        end;
+
+        TransportReq.Validate("Vehicle Allocated", ResolvedVehicleNo);
+        exit(TransportReq.Modify(true));
+    end;
+
+    // ---------------------------------------------------------------------
+    // Work ticket flight booking (FLT Work Ticket 50866 companion, table 52162)
     // ---------------------------------------------------------------------
 
     /// <summary>UAT R45/R46: save the flight-booking fields of a work ticket.</summary>
     procedure SaveWorkTicketFlightDetails(ticketNo: Code[20]; travelerEmployeeNo: Code[20]; flightFrom: Text[100]; flightTo: Text[100]; departureDate: Text; returnDate: Text; ticketClass: Integer; airlinePreference: Text[100]; justification: Text[250]): Boolean
     var
         Flight: Record "Portal Work Ticket Flight";
+        Employee: Record Employee;
         ParsedDate: Date;
     begin
         if (ticketNo = '') or (flightFrom = '') or (flightTo = '') then
@@ -117,6 +292,8 @@ codeunit 52122 "Portal Facility Mgt."
         end;
         Flight."Booking Type" := 'Flight';
         Flight."Traveler Employee No." := travelerEmployeeNo;
+        if Employee.Get(travelerEmployeeNo) then
+            Flight."Traveler Name" := CopyStr(Employee.FullName(), 1, MaxStrLen(Flight."Traveler Name"));
         Flight."Flight From" := flightFrom;
         Flight."Flight To" := flightTo;
         Flight."Departure Date" := ParsedDate;
@@ -154,8 +331,42 @@ codeunit 52122 "Portal Facility Mgt."
         exit(true);
     end;
 
+    /// <summary>UAT R47: submit a completed work-ticket / flight booking to the configured manager workflow.</summary>
+    procedure RequestWorkTicketApproval(ticketNo: Code[20]): Boolean
+    var
+        WorkTicket: Record "FLT-Daily Work Ticket Header";
+        CustomApprovals: Codeunit "Custom Approvals Codeunit";
+        Variant: Variant;
+    begin
+        if ticketNo = '' then
+            exit(false);
+        if not WorkTicket.Get(ticketNo) then
+            Error('Work ticket %1 was not found.', ticketNo);
+        Variant := WorkTicket;
+        if not CustomApprovals.CheckApprovalsWorkflowEnabled(Variant) then
+            Error('No approval workflow is enabled for work tickets.');
+        CustomApprovals.OnSendDocForApproval(Variant);
+        exit(true);
+    end;
+
+    /// <summary>Cancel a pending work-ticket approval request before a manager decision.</summary>
+    procedure CancelWorkTicketApproval(ticketNo: Code[20]): Boolean
+    var
+        WorkTicket: Record "FLT-Daily Work Ticket Header";
+        CustomApprovals: Codeunit "Custom Approvals Codeunit";
+        Variant: Variant;
+    begin
+        if ticketNo = '' then
+            exit(false);
+        if not WorkTicket.Get(ticketNo) then
+            Error('Work ticket %1 was not found.', ticketNo);
+        Variant := WorkTicket;
+        CustomApprovals.OnCancelDocApprovalRequest(Variant);
+        exit(true);
+    end;
+
     // ---------------------------------------------------------------------
-    // Procurement budget template (tables 52124 / 52125)
+    // Procurement budget template (tables 52164 / 52165)
     // ---------------------------------------------------------------------
 
     /// <summary>UAT R59: department or district opens a budget template.</summary>
@@ -230,6 +441,8 @@ codeunit 52122 "Portal Facility Mgt."
     var
         Header: Record "Portal Procurement Plan Hdr.";
         Line: Record "Portal Procurement Plan Line";
+        CustomApprovals: Codeunit "Custom Approvals Codeunit";
+        Variant: Variant;
     begin
         if not Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
             exit(false);
@@ -241,6 +454,36 @@ codeunit 52122 "Portal Facility Mgt."
             Error('Add at least one plan line before submitting procurement plan %1 / %2.', budgetName, planPeriod);
         Header.Status := 'Submitted';
         Header."Submitted On" := CurrentDateTime;
+        Header.Modify(true);
+        // When a BC workflow exists for table 52164, enqueue Approvals Entry so
+        // managers see the plan in the ERP approval inbox. Otherwise Status=Submitted
+        // is enough for the SSP Approvals queue (portal-native decide).
+        Variant := Header;
+        if CustomApprovals.CheckApprovalsWorkflowEnabled(Variant) then begin
+            CustomApprovals.OnSendDocForApproval(Variant);
+            if Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then begin
+                Header.Status := 'Pending Approval';
+                Header.Modify(true);
+            end;
+        end;
+        exit(true);
+    end;
+
+    /// <summary>Approver decision for an itemised procurement budget (SSP Approvals).</summary>
+    procedure DecideProcurementPlan(budgetName: Code[50]; globalDim1: Code[20]; globalDim2: Code[20]; planPeriod: Code[20]; approved: Boolean): Boolean
+    var
+        Header: Record "Portal Procurement Plan Hdr.";
+        StatusLower: Text;
+    begin
+        if not Header.Get(budgetName, globalDim1, globalDim2, planPeriod) then
+            Error('Procurement plan %1 / %2 was not found.', budgetName, planPeriod);
+        StatusLower := LowerCase(Header.Status);
+        if not (StatusLower in ['submitted', 'pending approval']) then
+            Error('Procurement plan %1 / %2 is %3 and cannot be decided.', budgetName, planPeriod, Header.Status);
+        if approved then
+            Header.Status := 'Approved'
+        else
+            Header.Status := 'Rejected';
         Header.Modify(true);
         exit(true);
     end;
@@ -287,5 +530,23 @@ codeunit 52122 "Portal Facility Mgt."
         if Evaluate(result, value, 9) then
             exit(true);
         exit(Evaluate(result, value));
+    end;
+
+    // ---------------------------------------------------------------------
+    // Approval card routing (UAT R22-R24)
+    // Fuel and maintenance share table 50865 "FLT-Fuel & Maintenance Req.".
+    // The legacy default card (page 50634 "FLT Maintenance Request Sub.")
+    // filters Type = Maintenance, so a *fuel* document opened from an approval
+    // entry or record link resolves to a blank "maintenance" card. Route the
+    // shared table to the neutral "Portal Fleet Approval Card" (52172), which
+    // shows the fuel or maintenance fields by Type. Mirrors the existing
+    // "Page Management Ext" (50022) routing used for approval documents such
+    // as Payments Header.
+    // ---------------------------------------------------------------------
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"Page Management", 'OnAfterGetPageID', '', true, true)]
+    local procedure RouteFleetFuelMaintApprovalCard(RecordRef: RecordRef; var PageID: Integer)
+    begin
+        if RecordRef.Number = Database::"FLT-Fuel & Maintenance Req." then
+            PageID := Page::"Portal Fleet Approval Card";
     end;
 }

@@ -24,7 +24,11 @@ export type ProcurementPlanLine = {
   GlobalDimension1?: string
 }
 
-export async function listProcurementPlans(params?: { budgetName?: string; planPeriod?: string }) {
+export async function listProcurementPlans(params?: {
+  budgetName?: string
+  planPeriod?: string
+  globalDim2?: string
+}) {
   requireAuthApiUrl()
   return authGet<{
     headers: ProcurementPlanHeader[]

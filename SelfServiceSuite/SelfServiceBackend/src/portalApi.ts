@@ -380,13 +380,189 @@ function mapProcurementPlanHeader(row: ODataRecord) {
   const dim2Name = text(row, ['GlobalDimension2Name', 'DepartmentName', 'Department_Name'], dim2)
   const kind =
     /district/i.test(dim2Name) || /district/i.test(dim2) ? ('district' as const) : ('department' as const)
+  const budgetName = text(row, ['BudgetName', 'Budget_Name'])
   return {
-    BudgetName: text(row, ['BudgetName', 'Budget_Name']),
+    BudgetName: budgetName,
+    /** BC Budget Name is the budget reference number used across SSP and ERP. */
+    BudgetReferenceNo: budgetName,
     GlobalDimension1: text(row, ['GlobalDimension1', 'Global_Dimension_1', 'Sector']),
     GlobalDimension2: dim2,
     ProcurementPlanPeriod: text(row, ['ProcurementPlanPeriod', 'PlanPeriod', 'Plan_Period']),
     Status: text(row, ['Status'], 'Open'),
+    SubmittedOn: text(row, ['SubmittedOn', 'Submitted_On']),
+    CreatedBy: text(row, ['CreatedBy', 'Created_By']),
     FinanceOrgKind: kind,
+  }
+}
+
+function encodeProcurementPlanKey(header: {
+  BudgetName: string
+  GlobalDimension1: string
+  GlobalDimension2: string
+  ProcurementPlanPeriod: string
+}) {
+  return [header.BudgetName, header.GlobalDimension1, header.GlobalDimension2, header.ProcurementPlanPeriod]
+    .map((part) => encodeURIComponent(String(part ?? '').trim()))
+    .join('~')
+}
+
+function decodeProcurementPlanKey(raw: string) {
+  const parts = String(raw ?? '')
+    .split('~')
+    .map((part) => {
+      try {
+        return decodeURIComponent(part)
+      } catch {
+        return part
+      }
+    })
+  if (parts.length < 4) return null
+  return {
+    BudgetName: parts[0] ?? '',
+    GlobalDimension1: parts[1] ?? '',
+    GlobalDimension2: parts[2] ?? '',
+    ProcurementPlanPeriod: parts.slice(3).join('~'),
+  }
+}
+
+function procurementPlanPendingStatus(status: string) {
+  const normalized = status.trim().toLowerCase()
+  return normalized === 'submitted' || normalized === 'pending approval' || normalized.includes('pending')
+}
+
+async function listProcurementPlansForApproverQueue(
+  authUser: AuthUser,
+  type: 'pending' | 'approved' | 'rejected',
+) {
+  if (!authUser.canApprove && !authUser.HOD && !authUser.CEO) return []
+  let headerRows: ODataRecord[] = []
+  try {
+    headerRows = (await fetchOData('QyProcurementPlanHeader')) as ODataRecord[]
+  } catch {
+    return []
+  }
+  const mapped = (Array.isArray(headerRows) ? headerRows : []).map(mapProcurementPlanHeader)
+  return mapped
+    .filter((header) => {
+      const status = String(header.Status ?? '').trim().toLowerCase()
+      if (type === 'pending') return procurementPlanPendingStatus(status)
+      if (type === 'approved') return status === 'approved'
+      return status === 'rejected'
+    })
+    .map((header) => {
+      const key = encodeProcurementPlanKey(header)
+      return {
+        id: `procurementPlan-${key}`,
+        requestNo: header.BudgetReferenceNo || header.BudgetName,
+        module: 'procurementPlan' as const,
+        title: 'Individual Procurement Budget',
+        makerEmployeeNo: header.CreatedBy || '',
+        makerName: header.CreatedBy || header.GlobalDimension2 || '',
+        amount: 0,
+        status:
+          type === 'pending'
+            ? 'Pending Approval'
+            : type === 'approved'
+              ? 'Approved'
+              : 'Rejected',
+        submittedAt: header.SubmittedOn || new Date().toISOString(),
+        approverEmployeeNo: authUser.userID,
+        sourceDocumentNo: key,
+        BudgetName: header.BudgetName,
+        BudgetReferenceNo: header.BudgetReferenceNo,
+        GlobalDimension1: header.GlobalDimension1,
+        GlobalDimension2: header.GlobalDimension2,
+        ProcurementPlanPeriod: header.ProcurementPlanPeriod,
+      }
+    })
+}
+
+async function resolveProcurementPlanDetail(no: string, authUser: AuthUser) {
+  const key = decodeProcurementPlanKey(no)
+  if (!key?.BudgetName || !key.ProcurementPlanPeriod) {
+    throw portalError('Procurement plan reference is invalid', 400)
+  }
+  let headerRows: ODataRecord[] = []
+  let lineRows: ODataRecord[] = []
+  try {
+    headerRows = (await fetchOData('QyProcurementPlanHeader')) as ODataRecord[]
+    lineRows = (await fetchOData('QyProcurementPlanLines')) as ODataRecord[]
+  } catch (error) {
+    throw portalError(procurementSoapMessage('QyProcurementPlanHeader', error), 502)
+  }
+  const headers = (Array.isArray(headerRows) ? headerRows : []).map(mapProcurementPlanHeader)
+  const header =
+    headers.find(
+      (row) =>
+        row.BudgetName === key.BudgetName &&
+        row.GlobalDimension1 === key.GlobalDimension1 &&
+        row.GlobalDimension2 === key.GlobalDimension2 &&
+        row.ProcurementPlanPeriod === key.ProcurementPlanPeriod,
+    ) ??
+    headers.find(
+      (row) =>
+        row.BudgetName === key.BudgetName && row.ProcurementPlanPeriod === key.ProcurementPlanPeriod,
+    )
+  if (!header) throw portalError('Procurement plan not found', 404, 'REQUEST_NOT_FOUND')
+  const lines = (Array.isArray(lineRows) ? lineRows : [])
+    .map(mapProcurementPlanLine)
+    .filter(
+      (line) =>
+        line.BudgetName === header.BudgetName &&
+        line.ProcurementPlanPeriod === header.ProcurementPlanPeriod &&
+        (!header.GlobalDimension2 ||
+          !line.Department ||
+          line.Department.trim().toLowerCase() === header.GlobalDimension2.trim().toLowerCase()),
+    )
+    .map((line, index) => ({
+      id: `${line.TypeNo || index}`,
+      lineNo: index + 1,
+      type: line.Type,
+      typeNo: line.TypeNo,
+      description: line.Description,
+      quantity: line.Quantity,
+      unitCost: line.UnitCost,
+      amount: line.Amount,
+      department: line.Department,
+      planDate: line.PlanDate,
+    }))
+  const amount = lines.reduce((sum, line) => sum + Number(line.amount ?? 0), 0)
+  const statusRaw = String(header.Status ?? 'Open')
+  const status = procurementPlanPendingStatus(statusRaw)
+    ? 'Pending Approval'
+    : statusRaw.trim() || 'Open'
+  return {
+    id: `procurementPlan-${encodeProcurementPlanKey(header)}`,
+    requestNo: header.BudgetReferenceNo || header.BudgetName,
+    requestType: 'procurementPlan' as const,
+    title: `Procurement budget ${header.BudgetReferenceNo || header.BudgetName}`,
+    status,
+    makerEmployeeNo: header.CreatedBy || '',
+    makerName: header.CreatedBy || '',
+    departmentCode: header.GlobalDimension2,
+    departmentName: header.GlobalDimension2,
+    responsibleCenter: header.GlobalDimension2,
+    amount,
+    sourceDocument: {
+      documentNo: encodeProcurementPlanKey(header),
+      erpEntity: 'Portal Procurement Plan Hdr.',
+    },
+    createdAt: header.SubmittedOn || '',
+    submittedAt: header.SubmittedOn || '',
+    approverEmployeeNo: authUser.userID,
+    approverName: authUser.userID,
+    auditTrail: [],
+    approvalSteps: [],
+    attachments: [],
+    payload: {
+      ...header,
+      Sector: header.GlobalDimension1,
+      SectorName: header.GlobalDimension1,
+      Department: header.GlobalDimension2,
+      DepartmentName: header.GlobalDimension2,
+      lines,
+    },
+    lines,
   }
 }
 
@@ -406,9 +582,19 @@ function mapProcurementPlanLine(row: ODataRecord) {
   }
 }
 
-function procurementPlanAllowedOrgCodes(authUser: AuthUser, org: { globalDim2: string }) {
+function procurementPlanAllowedOrgCodes(
+  authUser: AuthUser,
+  org: { globalDim2: string },
+  extraCodes: string[] = [],
+) {
   return new Set(
-    [org.globalDim2, authUser.department, ...(authUser.permissionDepartments ?? [])]
+    [
+      org.globalDim2,
+      authUser.department,
+      authUser.district,
+      ...(authUser.permissionDepartments ?? []),
+      ...extraCodes,
+    ]
       .map((value) => String(value ?? '').trim().toLowerCase())
       .filter(Boolean),
   )
@@ -555,7 +741,7 @@ function workTicketFlight(row: ODataRecord | undefined) {
  * dist/portalApi.js is stale.
  */
 export const PORTAL_API_BUILD =
-  'v1.0.3.292 — 2026-08-21 (same-origin API: empty VITE ports; ignore stale ssp.apiBaseUrl)'
+  'v1.0.3.297 — 2026-09-01 (UAT surrender Job Group/Grade fallback; issued-rate snapshot)'
 
 interface LookupSpec {
   service: string
@@ -1367,6 +1553,7 @@ const frontendModules = [
   'gatePass',
   'assetTransfer',
   'leave',
+  'procurementPlan',
 ] as const satisfies readonly SupportedFrontendModule[]
 
 type SupportedFrontendModuleAlias = (typeof frontendModules)[number]
@@ -1548,6 +1735,14 @@ async function resolveApprovalReference(
   const trimmed = id.trim()
   try {
     const parsed = parseRequestId(trimmed)
+    if (parsed.module === 'procurementPlan') {
+      return {
+        requestId: `procurementPlan-${parsed.no}`,
+        module: 'procurementPlan',
+        no: parsed.no,
+        entryRows: [],
+      }
+    }
     const entryRows = await fetchApproverEntriesForDocument(parsed.no, authUser)
     const module =
       entryRows.length > 0
@@ -1596,6 +1791,7 @@ function approvalQueueItem(row: ODataRecord, resolvedModule?: SupportedFrontendM
     staffClaim: 'Staff Claim',
     maintenance: 'Maintenance Request',
     fuelRequest: 'Fuel Requisition',
+    procurementPlan: 'Individual Procurement Budget',
   }
   return {
     id: `${module}-${documentNo}`,
@@ -2267,6 +2463,30 @@ function mapPettyCashLine(row: ODataRecord, index: number) {
     'Transaction_Name',
     'Description',
   ])
+  const department =
+    text(row, [
+      'DepartmentName',
+      'Department_Name',
+      'ShortcutDimension2Name',
+      'Shortcut_Dimension_2_Name',
+      'ShortcutDimension2Code',
+      'Shortcut_Dimension_2_Code',
+      'GlobalDimension2Code',
+      'Global_Dimension_2_Code',
+      'Department',
+    ]) || ''
+  const branch =
+    text(row, [
+      'BranchName',
+      'Branch_Name',
+      'ShortcutDimension3Name',
+      'Shortcut_Dimension_3_Name',
+      'ShortcutDimension3Code',
+      'Shortcut_Dimension_3_Code',
+      'GlobalDimension3Code',
+      'Global_Dimension_3_Code',
+      'Branch',
+    ]) || ''
   return {
     id: lineNo,
     lineNo,
@@ -2275,6 +2495,10 @@ function mapPettyCashLine(row: ODataRecord, index: number) {
     name: name || type,
     accountNo: text(row, ['AccountNo', 'Account_No', 'Account No.']),
     amount: number(row, ['amount', 'Amount', 'NetAmount', 'Net_Amount']),
+    department,
+    departmentName: department,
+    branch,
+    branchName: branch,
   }
 }
 
@@ -2793,6 +3017,9 @@ async function mappedModuleRows(
   authUser: AuthUser,
   options: { gatePassSource?: ReturnType<typeof gatePassSourceFromQuery> } = {},
 ) {
+  if (module === 'procurementPlan') {
+    throw portalError('Procurement plans use /procurement-plans, not /requests', 501)
+  }
   const spec = findFrontendModuleSpec(module)
   if (!spec) throw portalError(`${module} is not implemented in the Business Central codeunit`, 501)
   const rows = await listPortalModuleRows(spec, authUser, {
@@ -3258,6 +3485,9 @@ async function requestDetail(
     }
     return detail
   }
+  if (module === 'procurementPlan') {
+    return resolveProcurementPlanDetail(no, authUser)
+  }
   const spec = findFrontendModuleSpec(module)
   if (!spec) throw portalError(`${module} is not supported`, 501)
 
@@ -3355,6 +3585,24 @@ async function requestDetail(
       Array.isArray(lines) ? (lines as Record<string, unknown>[]) : [],
     )
     payloadRow = headerForMapping
+    if (module === 'pettyCash') {
+      // UAT 27/08/2026: expense recognition needs Branch + Department on each line.
+      // BC copies header dims onto lines; fall back to enriched header when OData omits names.
+      const headerDepartment =
+        text(headerForMapping, ['DepartmentName', 'Department_Name', 'Department', 'DepartmentCode']) ||
+        ''
+      const headerBranch =
+        text(headerForMapping, ['BranchName', 'Branch_Name', 'Branch', 'BranchCode']) ||
+        text(headerForMapping, ['DistrictName', 'District_Name', 'District']) ||
+        ''
+      mappedLines = (mappedLines as Array<Record<string, unknown>>).map((line) => ({
+        ...line,
+        department: String(line.department || line.departmentName || headerDepartment || '').trim(),
+        departmentName: String(line.departmentName || line.department || headerDepartment || '').trim(),
+        branch: String(line.branch || line.branchName || headerBranch || '').trim(),
+        branchName: String(line.branchName || line.branch || headerBranch || '').trim(),
+      }))
+    }
     if (module === 'pettyCashReplenishment') {
       const requesterNo =
         text(row, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No']) ||
@@ -3633,9 +3881,56 @@ function attendanceClockValue(row: ODataRecord, keys: string[]) {
   const normalized = raw.replace(/\.\d+$/, '')
   const parts = normalized.split(':').map((part) => Number(part))
   if (parts.length >= 2 && parts.every((part) => Number.isFinite(part) && part === 0)) return ''
-  const isoMatch = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)/.exec(normalized)
+  return formatAttendanceClockInCompanyTz(normalized)
+}
+
+/** Format ISO/UTC or plain BC time for company timezone (default Africa/Addis_Ababa). */
+function formatAttendanceClockInCompanyTz(value: string) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const tz = config.BC_COMPANY_TIMEZONE || 'Africa/Addis_Ababa'
+  // Plain BC Time fields (HH:MM[:SS]) — already company-local; keep as-is.
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(raw)) return raw.length === 5 ? `${raw}:00` : raw
+  const asDate = new Date(raw.includes('T') || /Z|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z')
+  if (!Number.isNaN(asDate.getTime()) && (/[TZ]/i.test(raw) || raw.includes('-'))) {
+    try {
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(asDate)
+    } catch {
+      /* fall through */
+    }
+  }
+  const isoMatch = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)/.exec(raw)
   if (isoMatch) return isoMatch[2]
   return raw
+}
+
+function companyTodayIsoDate() {
+  const tz = config.BC_COMPANY_TIMEZONE || 'Africa/Addis_Ababa'
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date())
+    const y = parts.find((p) => p.type === 'year')?.value
+    const m = parts.find((p) => p.type === 'month')?.value
+    const d = parts.find((p) => p.type === 'day')?.value
+    if (y && m && d) return `${y}-${m}-${d}`
+  } catch {
+    /* fall through */
+  }
+  return new Date().toISOString().slice(0, 10)
+}
+
+function companyNowClock() {
+  return formatAttendanceClockInCompanyTz(new Date().toISOString())
 }
 
 function employeeDisplayName(row: ODataRecord) {
@@ -4712,11 +5007,14 @@ export function buildPortalApiRouter() {
         })) as ODataRecord[] | null) ?? [],
       )
       const liveRows = await filterApprovalEntriesWithExistingSource(rows)
-      res.json({
-        rows: (await enrichApprovalQueueAmounts(await approvalQueueItems(liveRows))).filter(
-          (item) => item.requestNo,
-        ),
-      })
+      const queueType =
+        type === 'approved' ? 'approved' : type === 'rejected' ? 'rejected' : 'pending'
+      const procurementRows = await listProcurementPlansForApproverQueue(authUser, queueType)
+      const merged = [
+        ...(await enrichApprovalQueueAmounts(await approvalQueueItems(liveRows))),
+        ...procurementRows,
+      ].filter((item) => item.requestNo)
+      res.json({ rows: merged })
     }),
   )
 
@@ -4726,6 +5024,10 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const rawId = String(req.params.id)
       const { requestId, module, no, entryRows } = await resolveApprovalReference(rawId, authUser)
+      if (module === 'procurementPlan') {
+        res.json(await resolveProcurementPlanDetail(no, authUser))
+        return
+      }
       const entry = entryRows[0]
       if (!entry) throw portalError('Approval entry not found', 404)
 
@@ -4814,6 +5116,47 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const rawId = String(req.params.id)
       const { requestId, module, no } = await resolveApprovalReference(rawId, authUser)
+      const decision = req.body?.decision === 'Rejected' ? 'Rejected' : 'Approved'
+      const comment = String(req.body?.comment ?? '').trim()
+      if (decision === 'Rejected' && comment.length < 3) {
+        throw portalError('A rejection reason of at least 3 characters is required', 422)
+      }
+
+      if (module === 'procurementPlan') {
+        if (!authUser.canApprove && !authUser.HOD && !authUser.CEO) {
+          throw portalError('Only an authorized approver can decide a procurement budget plan', 403)
+        }
+        const key = decodeProcurementPlanKey(no)
+        if (!key) throw portalError('Procurement plan reference is invalid', 400)
+        try {
+          const result = await callSoapMethod(
+            'DecideProcurementPlan',
+            {
+              budgetName: key.BudgetName,
+              globalDim1: key.GlobalDimension1,
+              globalDim2: key.GlobalDimension2,
+              planPeriod: key.ProcurementPlanPeriod,
+              approved: decision === 'Approved',
+            },
+            facilitySoapEndpoint,
+          )
+          if (!soapReturnedTrue(result.returnValue)) {
+            throw portalError(
+              `Business Central did not mark procurement plan ${key.BudgetName} as ${decision.toLowerCase()}`,
+              502,
+            )
+          }
+        } catch (error) {
+          if ((error as { status?: number }).status) throw error
+          throw portalError(procurementSoapMessage('DecideProcurementPlan', error), 502)
+        }
+        res.json({
+          ...(await resolveProcurementPlanDetail(no, authUser)),
+          status: decision,
+        })
+        return
+      }
+
       const clause = approverIdFilterClause(await approverIdCandidates(authUser))
       let entries =
         ((await fetchOData('QyApprovalEntry', {
@@ -4839,11 +5182,6 @@ export function buildPortalApiRouter() {
       const entry = pickLowestSequenceOpenApprovalEntry(entries)
       if (!entry) throw portalError('Open approval entry not found', 404)
 
-      const decision = req.body?.decision === 'Rejected' ? 'Rejected' : 'Approved'
-      const comment = String(req.body?.comment ?? '').trim()
-      if (decision === 'Rejected' && comment.length < 3) {
-        throw portalError('A rejection reason of at least 3 characters is required', 422)
-      }
       // Approve/reject as the identity BC actually recorded on the entry — it can
       // differ from the login User ID (see approverIdCandidates), and BC rejects
       // the action if the userID does not own the open entry.
@@ -5167,7 +5505,7 @@ export function buildPortalApiRouter() {
   const attendanceAction = (type: 'checkin' | 'checkout') =>
     safe(async (req, res) => {
       const authUser = user(req)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = companyTodayIsoDate()
       const macAddress = await resolveAttendanceMacForAction(req, authUser, req.body ?? {})
       const deviceId = String(req.body?.deviceId ?? '')
       if (macAddress) {
@@ -5185,14 +5523,43 @@ export function buildPortalApiRouter() {
       if (!message || message.toLowerCase() === 'false') {
         throw portalError(`Business Central ${type} failed`, 502)
       }
+      // Prefer BC ledger clock after write; fall back to company-local now (not UTC ISO).
+      let timeIn = ''
+      let timeOut = ''
+      let hoursWorked = ''
+      try {
+        const rows = (await fetchOData('QyAttendanceLedger', {
+          $filter: `EmployeeNo eq '${odataString(authUser.employeeNo)}'`,
+          $top: '50',
+        })) as ODataRecord[]
+        const todayRow = (Array.isArray(rows) ? rows : []).find((row) => {
+          const date = text(row, ['Date', 'AttendanceDate', 'Attendance_Date']).slice(0, 10)
+          return date === today || date.replaceAll('-', '') === today.replaceAll('-', '')
+        })
+        if (todayRow) {
+          timeIn = attendanceClockValue(todayRow, ['TimeIn', 'Time_In', 'SignInTime', 'Sign_In_Time'])
+          timeOut = attendanceClockValue(todayRow, [
+            'TimeOut',
+            'Time_Out',
+            'SignOutTime',
+            'Sign_Out_Time',
+          ])
+          hoursWorked = text(todayRow, ['HoursWorked', 'Hours_Worked', 'TotalHours'])
+        }
+      } catch {
+        /* keep fallbacks */
+      }
+      const nowClock = companyNowClock()
+      if (type === 'checkin' && !timeIn) timeIn = nowClock
+      if (type === 'checkout' && !timeOut) timeOut = nowClock
       res.json({
         id: `${authUser.employeeNo}-${Date.now()}`,
         date: today,
         staffName: authUser.displayName,
         employeeNo: authUser.employeeNo,
-        timeIn: type === 'checkin' ? new Date().toISOString() : '',
-        timeOut: type === 'checkout' ? new Date().toISOString() : '',
-        hoursWorked: '',
+        timeIn: type === 'checkin' ? timeIn : timeIn,
+        timeOut: type === 'checkout' ? timeOut : timeOut,
+        hoursWorked,
         macAddress,
         location: macAddress,
         comments: String(result.returnValue),
@@ -5908,15 +6275,30 @@ export function buildPortalApiRouter() {
       const leaveType = String(req.query.leaveType ?? '')
       if (!leaveType) throw portalError('Leave type is required', 422)
       const fileName = `${authUser.employeeNo.replaceAll('/', '_')}_leave.pdf`
-      const result = await callSoapMethod('GenerateLeaveStatement', {
-        employeeNo: authUser.employeeNo,
-        leaveType,
-        filenameFromApp: fileName,
-      })
-      if (!result.returnValue) throw portalError('Business Central did not generate the leave statement', 502)
-      res.setHeader('Content-Type', 'application/pdf')
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
-      res.send(Buffer.from(result.returnValue, 'base64'))
+      try {
+        const result = await callSoapMethod('GenerateLeaveStatement', {
+          employeeNo: authUser.employeeNo,
+          leaveType,
+          filenameFromApp: fileName,
+        })
+        if (!result.returnValue) {
+          throw portalError('Business Central did not generate the leave statement', 502)
+        }
+        res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+        res.send(Buffer.from(result.returnValue, 'base64'))
+      } catch (error) {
+        if ((error as { status?: number }).status) throw error
+        const message = error instanceof Error ? error.message : String(error)
+        if (/no data found/i.test(message)) {
+          throw portalError(
+            `No HR Leave Allocation found for leave type ${leaveType}. Ask HR to create an allocation on the employee card, then try Generate PDF again.`,
+            422,
+            'LEAVE_ALLOCATION_MISSING',
+          )
+        }
+        throw portalError(message || 'Could not generate leave statement', 422)
+      }
     }),
   )
 
@@ -6398,9 +6780,9 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       const org = await resolveProcurementPlanOrg(authUser)
-      const allowed = procurementPlanAllowedOrgCodes(authUser, org)
       const budgetName = String(req.query.budgetName ?? '').trim()
       const planPeriod = String(req.query.planPeriod ?? '').trim()
+      const requestedDim2 = String(req.query.globalDim2 ?? '').trim()
       let headerRows: ODataRecord[] = []
       let lineRows: ODataRecord[] = []
       try {
@@ -6413,9 +6795,29 @@ export function buildPortalApiRouter() {
       }
       try {
         lineRows = (await fetchOData('QyProcurementPlanLines')) as ODataRecord[]
-      } catch {
-        lineRows = []
+      } catch (error) {
+        throw portalError(
+          procurementSoapMessage('QyProcurementPlanLines', error),
+          502,
+        )
       }
+      const mappedHeaders = (Array.isArray(headerRows) ? headerRows : []).map(mapProcurementPlanHeader)
+      // When opening a specific plan, include that header's org code so lines saved
+      // under the template Department (e.g. DEPT-011) remain visible to district staff.
+      const planOrgCodes =
+        budgetName && planPeriod
+          ? mappedHeaders
+              .filter(
+                (row) =>
+                  row.BudgetName === budgetName &&
+                  row.ProcurementPlanPeriod === planPeriod,
+              )
+              .map((row) => row.GlobalDimension2)
+          : []
+      const allowed = procurementPlanAllowedOrgCodes(authUser, org, [
+        requestedDim2,
+        ...planOrgCodes,
+      ])
       const matchHeader = (row: ReturnType<typeof mapProcurementPlanHeader>) => {
         if (budgetName && row.BudgetName !== budgetName) return false
         if (planPeriod && row.ProcurementPlanPeriod !== planPeriod) return false
@@ -6426,13 +6828,28 @@ export function buildPortalApiRouter() {
         if (budgetName && row.BudgetName !== budgetName) return false
         if (planPeriod && row.ProcurementPlanPeriod !== planPeriod) return false
         if (!allowed.size) return false
-        return allowed.has(row.Department.trim().toLowerCase())
+        const dept = row.Department.trim().toLowerCase()
+        if (allowed.has(dept)) return true
+        // Lines for the open plan: if any matching header is visible, show its lines
+        // even when Department was stamped with an alternate org alias.
+        if (budgetName && planPeriod) {
+          return mappedHeaders.some(
+            (header) =>
+              header.BudgetName === budgetName &&
+              header.ProcurementPlanPeriod === planPeriod &&
+              allowed.has(header.GlobalDimension2.trim().toLowerCase()) &&
+              (!header.GlobalDimension2 ||
+                header.GlobalDimension2.trim().toLowerCase() === dept ||
+                !dept),
+          )
+        }
+        return false
       }
       res.json({
         orgKind: org.orgKind,
         globalDim1: org.globalDim1,
         globalDim2: org.globalDim2,
-        headers: (Array.isArray(headerRows) ? headerRows : []).map(mapProcurementPlanHeader).filter(matchHeader),
+        headers: mappedHeaders.filter(matchHeader),
         lines: (Array.isArray(lineRows) ? lineRows : []).map(mapProcurementPlanLine).filter(matchLine),
       })
     }),

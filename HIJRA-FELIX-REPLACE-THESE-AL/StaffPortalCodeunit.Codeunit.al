@@ -810,27 +810,61 @@ codeunit 50049 "Staff Portal Codeunit"
     // UAT HB 06/08/2026: Actual Return Date is required so Actual Travel Days
     // are calculated before Actual Spent (per-diem / taxable travel).
     local procedure EnsureImprestSurrenderTravelStartDate(var SurrenderHeader: Record "Imprest Surrender Header"; FallbackDate: Date)
+    var
+        SourceStart: Date;
     begin
-        // PrepareSurrender / source imprest sometimes leave Travel Start Date blank.
-        // Actual Return Date validate and Actual Spent both require it.
-        if SurrenderHeader."Travel Start Date" <> 0D then
-            exit;
+        // PrepareSurrender / source imprest sometimes leave Travel Start Date blank
+        // or equal/after Actual Return Date (1-day stamp). Re-sync from source imprest.
+        SourceStart := 0D;
         if SurrenderHeader."Imprest Issue Doc. No" <> '' then begin
             TbImprestRequisitionHeader.Reset;
             TbImprestRequisitionHeader.SetRange("No.", SurrenderHeader."Imprest Issue Doc. No");
             if TbImprestRequisitionHeader.FindFirst() then begin
                 if TbImprestRequisitionHeader."Travel Start Date" <> 0D then
-                    SurrenderHeader."Travel Start Date" := TbImprestRequisitionHeader."Travel Start Date"
+                    SourceStart := TbImprestRequisitionHeader."Travel Start Date"
                 else if TbImprestRequisitionHeader."Date Required" <> 0D then
-                    SurrenderHeader."Travel Start Date" := TbImprestRequisitionHeader."Date Required"
+                    SourceStart := TbImprestRequisitionHeader."Date Required"
                 else if TbImprestRequisitionHeader.Date <> 0D then
-                    SurrenderHeader."Travel Start Date" := TbImprestRequisitionHeader.Date;
+                    SourceStart := TbImprestRequisitionHeader.Date;
             end;
         end;
-        // UAT 10/08/2026: portal drafts must not hard-block when the source imprest
-        // never stored Travel Start Date — use Actual Return Date so Validate succeeds.
-        if (SurrenderHeader."Travel Start Date" = 0D) and (FallbackDate <> 0D) then
-            SurrenderHeader."Travel Start Date" := FallbackDate;
+
+        if SurrenderHeader."Travel Start Date" = 0D then begin
+            if SourceStart <> 0D then
+                SurrenderHeader."Travel Start Date" := SourceStart
+            else if FallbackDate <> 0D then
+                SurrenderHeader."Travel Start Date" := FallbackDate;
+            exit;
+        end;
+
+        // Correct 1-day / inverted stamps when source imprest has a real start.
+        if (SourceStart <> 0D) and
+           ((SurrenderHeader."Travel Start Date" = FallbackDate) or
+            ((FallbackDate <> 0D) and (SurrenderHeader."Travel Start Date" > FallbackDate)) or
+            (SurrenderHeader."Travel Start Date" <> SourceStart))
+        then
+            if (FallbackDate = 0D) or (SourceStart <= FallbackDate) then
+                SurrenderHeader."Travel Start Date" := SourceStart;
+    end;
+
+    // UAT 01/09/2026: some employee cards use Grade while Job Group is blank.
+    // The surrender rate lookup reads Job Grade from the BC header, so carry the
+    // same Job Group -> Grade fallback already used by imprest requisition lines.
+    local procedure EnsureImprestSurrenderJobGrade(var SurrenderHeader: Record "Imprest Surrender Header"; EmployeeNo: Code[40])
+    var
+        Employee: Record "HR-Employee";
+    begin
+        if SurrenderHeader."Job Grade" <> '' then
+            exit;
+
+        if EmployeeNo = '' then
+            EmployeeNo := SurrenderHeader."Employee No";
+
+        if (EmployeeNo <> '') and Employee.Get(EmployeeNo) then begin
+            SurrenderHeader."Job Grade" := Employee."Job Group";
+            if SurrenderHeader."Job Grade" = '' then
+                SurrenderHeader."Job Grade" := Employee.Grade;
+        end;
     end;
 
     // UAT 10/08/2026: Validate("Imprest Issue Doc. No") and PrepareSurrender both insert
@@ -890,6 +924,7 @@ codeunit 50049 "Staff Portal Codeunit"
             TbImprestSurrenderHeader."Surrender Date" := Today;
             TbImprestSurrenderHeader."User ID" := myUserID;
             TbImprestSurrenderHeader.Validate("Employee No", employeeNo);
+            EnsureImprestSurrenderJobGrade(TbImprestSurrenderHeader, employeeNo);
             TbImprestSurrenderHeader."Account No." := imprestNo;
             // Assign only — do NOT Validate Imprest Issue Doc. No (duplicates lines with PrepareSurrender).
             TbImprestSurrenderHeader."Imprest Issue Doc. No" := imprestIssueDocNo;
@@ -900,6 +935,7 @@ codeunit 50049 "Staff Portal Codeunit"
                 TbImprestSurrenderHeader.Reset;
                 TbImprestSurrenderHeader.SetRange(No, NextNo);
                 if TbImprestSurrenderHeader.FindFirst then begin
+                    EnsureImprestSurrenderJobGrade(TbImprestSurrenderHeader, employeeNo);
                     EnsureImprestSurrenderLinesPrepared(TbImprestSurrenderHeader);
                     DeduplicateImprestSurrenderLines(NextNo);
                     TbImprestSurrenderHeader.Validate("PV No");
@@ -923,6 +959,7 @@ codeunit 50049 "Staff Portal Codeunit"
                     TbImprestSurrenderHeader."Account No." := imprestNo;
                 if (imprestIssueDocNo <> '') and (TbImprestSurrenderHeader."Imprest Issue Doc. No" = '') then
                     TbImprestSurrenderHeader."Imprest Issue Doc. No" := imprestIssueDocNo;
+                EnsureImprestSurrenderJobGrade(TbImprestSurrenderHeader, employeeNo);
                 EnsureImprestSurrenderLinesPrepared(TbImprestSurrenderHeader);
                 DeduplicateImprestSurrenderLines(docNo);
                 EnsureImprestSurrenderTravelStartDate(TbImprestSurrenderHeader, actualReturnDate);
@@ -964,8 +1001,17 @@ codeunit 50049 "Staff Portal Codeunit"
         TbImprestSurrenderLines.SetRange("Surrender Doc No.", docNo);
         if TbImprestSurrenderLines.FindSet() then
             repeat
-                if TbImprestSurrenderLines.Amount > 0 then
+                if TbImprestSurrenderLines.Amount > 0 then begin
                     TbImprestSurrenderLines.CalculateSurrender();
+                    // UAT 27/08/2026: after Actual Return Date, auto-fill Actual Spent when still blank
+                    // so the portal shows a populated spend amount without a second manual save.
+                    if TbImprestSurrenderLines."Actual Spent" = 0 then begin
+                        TbImprestSurrenderLines."Actual Spent" := TbImprestSurrenderLines.Amount;
+                        TbImprestSurrenderLines.Validate("Actual Spent");
+                        ApplyImprestSurrenderLineSettlement(TbImprestSurrenderLines);
+                        TbImprestSurrenderLines.Modify(true);
+                    end;
+                end;
             until TbImprestSurrenderLines.Next() = 0;
     end;
 
@@ -1225,16 +1271,17 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     procedure RequestImprestSurrenderApproval(docNo: Code[100]) return_value: Boolean
-    var
-        blnparam: Boolean;
     begin
         return_value := false;
         TbImprestSurrenderHeader.Reset;
         TbImprestSurrenderHeader.SetRange(No, docNo);
         if TbImprestSurrenderHeader.FindFirst() then begin
             VarVariant := TbImprestSurrenderHeader;
-            if CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
-                CuCustomApprovals.OnSendDocForApproval(VarVariant);
+            // Must require an enabled workflow — previously returned true even when
+            // OnSendDocForApproval was skipped, so SSP showed Pending/Approved while ERP stayed Draft.
+            if not CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
+                Error('No approval workflow is enabled for Imprest Surrender. Ask the BC administrator to enable the Imprest Surrender approval workflow.');
+            CuCustomApprovals.OnSendDocForApproval(VarVariant);
             return_value := true;
         end else begin
             Error('Imprest Surrender cannot be sent for approval or was not found');
@@ -1242,17 +1289,13 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     procedure CancelImprestSurrender(employeeNo: Code[100]; requisitionNo: Code[100]) return_value: Boolean
-    var
-        blnparam: Boolean;
     begin
         return_value := false;
         TbImprestSurrenderHeader.Reset;
         TbImprestSurrenderHeader.SetRange(No, requisitionNo);
-        TbImprestRequisitionHeader.SetRange(TbImprestRequisitionHeader.Status, TbImprestRequisitionHeader.Status::"Pending Approval");
         if TbImprestSurrenderHeader.FindFirst() then begin
             VarVariant := TbImprestSurrenderHeader;
-            if CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
-                CuCustomApprovals.OnCancelDocApprovalRequest(VarVariant);
+            CuCustomApprovals.OnCancelDocApprovalRequest(VarVariant);
             return_value := true;
         end else begin
             Error('Imprest Surrender cannot be cancelled or was not found');
@@ -1466,6 +1509,7 @@ codeunit 50049 "Staff Portal Codeunit"
                         TbRec.VALIDATE(Type);
                         TbRec."Global Dimension 1 Code" := TbHeader."Global Dimension 1 Code";
                         TbRec."Shortcut Dimension 2 Code" := TbHeader."Shortcut Dimension 2 Code";
+                        TbRec."Shortcut Dimension 3 Code" := TbHeader."Shortcut Dimension 3 Code";
                         TbRec.Amount := amount;
                         TbRec.VALIDATE(Amount);
                         if TbRec.Modify(true) then
@@ -2864,8 +2908,10 @@ codeunit 50049 "Staff Portal Codeunit"
         TbStaffClaimHeader.SetRange("Employee No", employeeNo);
         if TbStaffClaimHeader.FindFirst() then begin
             VarVariant := TbStaffClaimHeader;
-            if CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
-                CuCustomApprovals.OnSendDocForApproval(VarVariant);
+            // Same as imprest surrender: never report success when the workflow was not invoked.
+            if not CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
+                Error('No approval workflow is enabled for Staff Claims. Ask the BC administrator to enable the workflow.');
+            CuCustomApprovals.OnSendDocForApproval(VarVariant);
             return_value := true;
         end else begin
             Error('Requisition is no longer editable or it does not exist.');

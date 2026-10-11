@@ -27,6 +27,8 @@ import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
 import {
   employeeAnnualLeaveBalance,
+  employeeEarnedLeaveDaysOnly,
+  employeeLeaveEntitlementDays,
   employeeLeaveMetrics,
   employeeCardLeaveBalances,
   leaveCardBalancesFromRecord,
@@ -1899,12 +1901,14 @@ export function buildStaffRouter() {
       const directBalances = mergeLeaveCardBalances(
         employeeCardLeaveBalances(employeeRow),
         parseEmployeeLeaveBalancesReturn(soapBalances?.returnValue),
-        ...applicationRows.map((row) => leaveCardBalancesFromRecord(row)),
       )
       const summary = parseBcLeaveSummary(summarySoap?.returnValue)
       const cardAnnualBalance = employeeAnnualLeaveBalance(employeeRow)
+      const cardEarnedOnly = employeeEarnedLeaveDaysOnly(employeeRow)
+      const cardEntitlement = employeeLeaveEntitlementDays(employeeRow)
       const ledgerNetDays = additions - deductions
       const earnedLeaveDays =
+        cardEarnedOnly ??
         summary?.earnedLeaveDays ??
         metrics.earnedLeaveDays ??
         directBalances.employeeEarnedLeaveDays ??
@@ -1926,7 +1930,14 @@ export function buildStaffRouter() {
         }),
       )
       const entitlement = roundLeaveValue(
-        isAnnual ? resolveAnnualLeaveEntitlement(metrics, leaveTypeDays) : leaveTypeDays,
+        isAnnual
+          ? resolveAnnualLeaveEntitlement(
+              metrics,
+              leaveTypeDays,
+              cardEntitlement,
+              summary?.setupDays ?? null,
+            )
+          : leaveTypeDays,
       )
       const unlimitedDays = summary?.unlimitedDays ?? leaveTypeUnlimitedDays
       const maximumDays = summary?.maximumApplicationDays ?? maximumApplicationDays

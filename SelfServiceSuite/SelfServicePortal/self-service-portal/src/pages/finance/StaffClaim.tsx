@@ -249,7 +249,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
         },
         {
           label: 'Per Diem End Date',
-          paths: ['payload.ExpenditureEndDate', 'payload.ReturnDate'],
+          paths: ['payload.ExpenditureEndDate'],
           format: 'date',
         },
         {

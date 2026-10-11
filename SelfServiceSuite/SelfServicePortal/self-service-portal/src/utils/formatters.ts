@@ -103,6 +103,25 @@ export function isRecordedAttendanceTime(value?: string | null) {
 export function formatAttendanceClock(value?: string | null) {
   if (!isRecordedAttendanceTime(value)) return '—'
   const raw = String(value).replace(/\.\d+$/, '').trim()
+  // Plain HH:MM[:SS] is already company-local from the API.
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(raw)) return raw.length === 5 ? `${raw}:00` : raw
+  // Convert UTC/ISO timestamps to Africa/Addis_Ababa (EAT, UTC+3).
+  const asDate = new Date(
+    raw.includes('T') || /Z|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw.includes('-') ? `${raw.replace(' ', 'T')}Z` : raw,
+  )
+  if (!Number.isNaN(asDate.getTime()) && (/[TZ]/i.test(raw) || /^\d{4}-\d{2}-\d{2}/.test(raw))) {
+    try {
+      return new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Africa/Addis_Ababa',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(asDate)
+    } catch {
+      /* fall through */
+    }
+  }
   const isoMatch = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)/.exec(raw)
   if (isoMatch) return isoMatch[2]
   return raw

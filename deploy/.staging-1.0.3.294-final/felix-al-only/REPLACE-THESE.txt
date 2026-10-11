@@ -1,0 +1,15 @@
+Overwrite these files in the Hijra AL project, then AL: Package and publish.
+Keep app version 1.0.5.173.
+
+StaffPortalCodeunit.Codeunit.al          -> src\...\NEWCHANGES\
+PortalFacilityMgt.Codeunit.al            -> src\staffPortal\facilityUat\
+PortalProcurementPlanHeader.Table.al     -> src\staffPortal\facilityUat\
+PortalProcurementPlanLine.Table.al       -> src\staffPortal\facilityUat\
+PortalAssetTransferMgt.Codeunit.al       -> src\staffPortal\facilityUat\
+QyProcurementPlanHeader.Query.al         -> src\staffPortal\query\   (NOT facilityUat)
+QyProcurementPlanLines.Query.al          -> src\staffPortal\query\   (NOT facilityUat)
+QyAssetTransfer.Query.al                 -> src\staffPortal\query\   (NOT facilityUat)
+
+DELETE if it exists (duplicate object 52166):
+  src\staffPortal\facilityUat\QyAssetTransfer.Query.al
+One QyAssetTransfer only. Put it in query, never in facilityUat.

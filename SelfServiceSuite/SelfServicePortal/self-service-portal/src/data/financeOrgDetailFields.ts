@@ -8,8 +8,8 @@ export const financeOrgDetailFields: DetailFieldConfig[] = [
       'payload.SectorName',
       'payload.Sector_Name',
       'payload.Sector',
-      'payload.GlobalDimension1Code',
-      'payload.Global_Dimension_1_Code',
+      // Do not fall back to GlobalDimension1Code — that often shows a short dim code
+      // (e.g. FIN) instead of the human-readable sector name.
     ],
   },
   {

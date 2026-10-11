@@ -1,0 +1,19 @@
+HIJRA Felix REPLACE files v1.0.3.297 — keep AL 1.0.5.173
+=======================================================================
+Overwrite the .al files at the ZIP ROOT (same file names). Then AL: Package.
+
+  StaffPortalCodeunit.Codeunit.al
+  ImprestSurrenderHeader.Table.al
+  PortalFacilityMgt.Codeunit.al
+  PortalProcurementPlanHeader.Table.al
+  PortalProcurementPlanLine.Table.al
+  PortalAssetTransferMgt.Codeunit.al
+  QyProcurementPlanHeader.Query.al
+  QyProcurementPlanLines.Query.al
+  QyAssetTransfer.Query.al
+
+For the table file, use APPLY-HIJRA-PATCH.ps1 so the existing project path is
+resolved safely and backed up before replacement.
+
+See REPLACE-THESE.txt for the Hijra project paths.
+Publish BEFORE the portal zip 1.0.3.297.

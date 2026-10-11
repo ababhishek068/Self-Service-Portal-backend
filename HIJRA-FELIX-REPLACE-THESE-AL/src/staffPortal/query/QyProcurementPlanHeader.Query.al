@@ -16,6 +16,8 @@ query 52169 "QyProcurementPlanHeader"
             column(GlobalDimension2; "Global Dimension 2") { }
             column(ProcurementPlanPeriod; "Plan Period") { }
             column(Status; Status) { }
+            column(CreatedBy; "Created By") { }
+            column(SubmittedOn; "Submitted On") { }
         }
     }
 }

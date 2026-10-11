@@ -523,10 +523,6 @@ export const approvalDetailFields: Record<string, DetailFieldConfig[]> = {
       label: 'Employee Account No.',
       paths: ['payload.EmployeeAccountNo', 'payload.CustomerNo', 'payload.AccountNo'],
     },
-    {
-      label: 'Pay Mode',
-      paths: ['payload.PayMode', 'payload.Pay_Mode', 'payload.PaymentMethod'],
-    },
     ...financeOrgDetailFields,
     {
       label: 'Responsibility Center',
@@ -562,12 +558,17 @@ export const approvalDetailFields: Record<string, DetailFieldConfig[]> = {
       format: 'date',
     },
     {
-      label: 'Employee No.',
-      paths: ['payload.EmployeeNo', 'payload.Employee_No', 'request.makerEmployeeNo'],
+      label: 'Employee Name',
+      paths: [
+        'payload.EmployeeName',
+        'payload.Employee_Name',
+        'payload.Payee',
+        'request.makerName',
+      ],
     },
     {
-      label: 'Payee / Employee Name',
-      paths: ['payload.EmployeeName', 'payload.Employee_Name', 'request.makerName'],
+      label: 'Employee No.',
+      paths: ['payload.EmployeeNo', 'payload.Employee_No', 'request.makerEmployeeNo'],
     },
     {
       label: 'Employee Account No.',
@@ -628,7 +629,7 @@ export const approvalDetailFields: Record<string, DetailFieldConfig[]> = {
     },
     {
       label: 'Per Diem End Date',
-      paths: ['payload.ExpenditureEndDate', 'payload.ReturnDate'],
+      paths: ['payload.ExpenditureEndDate'],
       format: 'date',
     },
     {
@@ -673,6 +674,34 @@ export const approvalDetailFields: Record<string, DetailFieldConfig[]> = {
         'payload.Comment',
         'payload.Comments',
       ],
+    },
+  ],
+  procurementPlan: [
+    {
+      label: 'Budget reference number',
+      paths: ['payload.BudgetReferenceNo', 'payload.BudgetName', 'request.requestNo'],
+    },
+    {
+      label: 'Plan period',
+      paths: ['payload.ProcurementPlanPeriod', 'payload.PlanPeriod'],
+    },
+    {
+      label: 'Sector',
+      paths: ['payload.SectorName', 'payload.GlobalDimension1', 'payload.Sector'],
+    },
+    {
+      label: 'Department / District',
+      paths: ['payload.DepartmentName', 'payload.GlobalDimension2', 'payload.Department'],
+    },
+    {
+      label: 'Status',
+      paths: ['request.status', 'payload.Status'],
+      format: 'status',
+    },
+    {
+      label: 'Total amount',
+      paths: ['request.amount'],
+      format: 'currency',
     },
   ],
 }

@@ -157,10 +157,11 @@ export function PettyCashReplenishment() {
           format: 'date',
         },
         {
-          label: 'Employee',
+          label: 'Employee Name',
           paths: [
             'payload.EmployeeName',
             'payload.Employee_Name',
+            'payload.Payee',
             'request.makerName',
             'payload.RequestedBy',
             'payload.Requested_By',
@@ -185,18 +186,6 @@ export function PettyCashReplenishment() {
         {
           label: 'Place of Duty',
           paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'],
-        },
-        {
-          label: 'Sector',
-          paths: [
-            'payload.SectorName',
-            'payload.Sector_Name',
-            'payload.Sector',
-            'payload.GlobalDimension1Code',
-            'payload.Global_Dimension_1_Code',
-            'payload.SourceDepotCode',
-            'payload.Source_Depot_Code',
-          ],
         },
         ...financeOrgDetailFields,
         {

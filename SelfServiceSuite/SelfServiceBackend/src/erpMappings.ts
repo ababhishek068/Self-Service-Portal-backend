@@ -229,6 +229,13 @@ const OPEN_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
   'gatePass',
   'assetTransfer',
   'workTickets',
+  // Finance headers can stay Open/Draft while QyApprovalEntry is already pending —
+  // promote so SSP and ERP status stay aligned after Request*Approval.
+  'imprest',
+  'imprestSurrender',
+  'staffClaim',
+  'pettyCash',
+  'pettyCashReplenishment',
 ])
 
 function approvalEntryStatus(entry: ODataRecord) {

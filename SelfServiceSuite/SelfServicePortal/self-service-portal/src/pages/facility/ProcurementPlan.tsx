@@ -183,11 +183,12 @@ export function ProcurementPlan() {
   })
 
   const detailQuery = useQuery({
-    queryKey: ['facility', 'procurement-plans', budgetName, planPeriod],
+    queryKey: ['facility', 'procurement-plans', budgetName, planPeriod, globalDim2],
     queryFn: () =>
       listProcurementPlans({
         budgetName: budgetName || undefined,
         planPeriod: planPeriod || undefined,
+        globalDim2: globalDim2 || department || undefined,
       }),
     enabled: mode === 'edit' && Boolean(budgetName && planPeriod),
   })
@@ -376,7 +377,7 @@ export function ProcurementPlan() {
   }
 
   const listColumns: DataTableColumn<PlanListRow>[] = [
-    { id: 'budget', header: 'Budget name', cell: (row) => row.BudgetName || '—' },
+    { id: 'budget', header: 'Budget reference no.', cell: (row) => row.BudgetName || '—' },
     { id: 'period', header: 'Plan period', cell: (row) => row.ProcurementPlanPeriod || '—' },
     { id: 'sector', header: 'Sector', cell: (row) => lookupLabel(String(row.GlobalDimension1 ?? '')) || '—' },
     {
@@ -515,12 +516,12 @@ export function ProcurementPlan() {
         <div>
           <h3 className="text-sm font-semibold text-[var(--portal-navy)]">1. Open budget template</h3>
           <p className="mt-0.5 text-xs text-slate-600">
-            {orgUnitLabel} staff enter their own template. Use the same budget name and period as in Business
-            Central (e.g. both <span className="font-medium">2026</span>).
+            {orgUnitLabel} staff enter their own template. Use the same budget reference number and period as in
+            Business Central (e.g. both <span className="font-medium">2026</span>).
           </p>
         </div>
         <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-4">
-          <Field label="Budget name" htmlFor="budgetName">
+          <Field label="Budget reference number" htmlFor="budgetName" hint="Same as Budget Name in Business Central">
             <Input
               id="budgetName"
               value={budgetName}
@@ -528,7 +529,7 @@ export function ProcurementPlan() {
                 setBudgetName(e.target.value)
                 setHeaderReady(false)
               }}
-              placeholder="e.g. 2026"
+              placeholder="e.g. STATIONERY"
               autoComplete="off"
             />
           </Field>
@@ -602,7 +603,7 @@ export function ProcurementPlan() {
             {createMutation.isPending ? 'Saving…' : canAddLines ? 'Update / reopen header' : 'Save plan header'}
           </Button>
           {!budgetName.trim() || !planPeriod.trim() ? (
-            <p className="text-xs text-slate-500">Budget name and plan period are required.</p>
+            <p className="text-xs text-slate-500">Budget reference number and plan period are required.</p>
           ) : !(globalDim2 || profileOrgUnitCode) ? (
             <p className="text-xs text-amber-700">
               Your {orgUnitLabel.toLowerCase()} is missing on the employee card — HR must set Department or District

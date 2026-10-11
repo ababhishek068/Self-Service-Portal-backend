@@ -152,6 +152,7 @@ foreach ($relative in $regularFiles) {
 Install-Unique-Hr-File 'HRLeaveApplication.Table.al' 'HR-DEEP\HRLeaveApplication.Table.al'
 Install-Unique-Hr-File 'StaffPortalCodeunit.Codeunit.al' 'HR-DEEP\StaffPortalCodeunit.Codeunit.al'
 Install-Unique-Hr-File 'GatePass.Table.al' 'BASE-DEEP\GatePass.Table.al'
+Install-Unique-Hr-File 'ImprestSurrenderHeader.Table.al' 'BASE-DEEP\ImprestSurrenderHeader.Table.al'
 
 if (-not $SkipVersionBump) {
     $raw = Get-Content -Raw -Path $appJson
@@ -224,6 +225,7 @@ Assert-Object-Count 'permissionset' 52110 1
 Assert-Object-Count 'query' 52133 0
 Assert-Object-Count 'tableextension' 52133 1
 Assert-Object-Count 'query' 52134 1
+Assert-Object-Count 'table' 50884 1
 foreach ($id in 52160..52161) { Assert-Object-Count 'codeunit' $id 1 }
 foreach ($id in 52162..52165) { Assert-Object-Count 'table' $id 1 }
 foreach ($id in 52166..52170) { Assert-Object-Count 'query' $id 1 }

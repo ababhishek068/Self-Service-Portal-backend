@@ -21,6 +21,7 @@ type SurrenderLine = {
   cashReceiptNo: string
   cashReceiptAmount: number
   outstandingAmount: number
+  approvedDailyRate: number
   editable: boolean
 }
 
@@ -46,8 +47,23 @@ function allLinesFromRequest(request: PortalRequest): SurrenderLine[] {
       cashReceiptNo: String(line.cashReceiptNo ?? ''),
       cashReceiptAmount,
       outstandingAmount,
+      approvedDailyRate: Number(line.approvedDailyRate ?? line.dailyRate ?? 0),
       editable: amount > 0,
     }
+  })
+}
+
+/** After Actual Return Date is saved, pre-fill Actual Spent when BC left it blank. */
+function withSuggestedActualSpent(lines: SurrenderLine[], travelDays: number): SurrenderLine[] {
+  return lines.map((line) => {
+    if (!line.editable || line.actualSpent > 0) return line
+    const fromRate =
+      line.approvedDailyRate > 0 && travelDays > 0
+        ? Math.round(line.approvedDailyRate * travelDays * 100) / 100
+        : 0
+    const suggested = fromRate > 0 ? Math.min(line.amount, fromRate) : line.amount
+    if (!(suggested > 0)) return line
+    return { ...line, actualSpent: suggested }
   })
 }
 
@@ -160,8 +176,57 @@ export function ImprestSurrenderLinesEditor({
           firstPayloadValue(payload, ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo']) ||
           undefined,
       }),
-    onSuccess: () => {
-      toast.success('Actual Return Date saved')
+    onSuccess: async (updated) => {
+      const travelStart = firstPayloadValue((updated.payload ?? {}) as Record<string, unknown>, [
+        'TravelStartDate',
+        'Travel_Start_Date',
+        'TravelDate',
+        'Travel_Date',
+        'DateRequired',
+      ])
+      const returned = firstPayloadValue((updated.payload ?? {}) as Record<string, unknown>, [
+        'ActualReturnDate',
+        'Actual_Return_Date',
+        'actualReturnDate',
+      ]) || returnDateDraft
+      const days =
+        travelStart && returned ? inclusiveTravelDays(travelStart, returned) : travelDays
+      let next = withSuggestedActualSpent(allLinesFromRequest(updated), days)
+      setLines(next)
+      const needsPersist = next.some((line) => {
+        const prior = allLinesFromRequest(updated).find(
+          (row) => row.lineNo === line.lineNo && row.accountNo === line.accountNo,
+        )
+        return line.editable && line.actualSpent > 0 && !(Number(prior?.actualSpent ?? 0) > 0)
+      })
+      if (needsPersist && canEditSpend) {
+        try {
+          const saved = await setRequestLines(
+            request.id,
+            next.map((line, index) => ({
+              lineNo: line.lineNo,
+              accountNo: line.accountNo,
+              amount: line.amount,
+              actualSpent: line.actualSpent,
+              cashReceiptNo: line.cashReceiptNo,
+              cashReceiptAmount: line.cashReceiptAmount,
+              ...(index === 0
+                ? {
+                    actualReturnDate: returnDateDraft || returned || undefined,
+                    ActualReturnDate: returnDateDraft || returned || undefined,
+                  }
+                : {}),
+            })),
+          )
+          next = allLinesFromRequest(saved)
+          setLines(next)
+          toast.success('Actual Return Date saved — Actual Spent filled from travel days')
+        } catch {
+          toast.success('Actual Return Date saved — review Actual Spent before approval')
+        }
+      } else {
+        toast.success('Actual Return Date saved')
+      }
       onChanged()
     },
     onError: (error) =>
@@ -175,13 +240,19 @@ export function ImprestSurrenderLinesEditor({
     mutationFn: (next: SurrenderLine[]) =>
       setRequestLines(
         request.id,
-        next.map((line) => ({
+        next.map((line, index) => ({
           lineNo: line.lineNo,
           accountNo: line.accountNo,
           amount: line.amount,
           actualSpent: line.actualSpent,
           cashReceiptNo: line.cashReceiptNo,
           cashReceiptAmount: line.cashReceiptAmount,
+          ...(index === 0
+            ? {
+                actualReturnDate: returnDateDraft || savedReturnDate || undefined,
+                ActualReturnDate: returnDateDraft || savedReturnDate || undefined,
+              }
+            : {}),
         })),
       ),
     onSuccess: (updated) => {

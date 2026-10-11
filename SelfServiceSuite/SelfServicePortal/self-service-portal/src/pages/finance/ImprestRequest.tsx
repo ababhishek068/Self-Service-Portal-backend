@@ -1,4 +1,4 @@
-import { addDays, differenceInCalendarDays, formatISO, parseISO, isValid, format } from 'date-fns'
+import { differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
 import { useCallback, useRef } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
@@ -15,14 +15,7 @@ import type { PortalRequest } from '@/types/erp.types'
 import type { LookupOption } from '@/api/endpoints/lookups'
 
 const today = formatISO(new Date(), { representation: 'date' })
-const tomorrow = formatISO(addDays(new Date(), 1), { representation: 'date' })
 const module = { module: 'imprest', entity: 'selfServiceImprestRequests' } as const
-
-function bumpReturnAfterTravel(travelDate: string) {
-  const next = parseISO(travelDate)
-  if (!isValid(next)) return ''
-  return format(addDays(next, 1), 'yyyy-MM-dd')
-}
 
 function documentNoFromRequestId(requestId: string) {
   const separator = requestId.indexOf('-')
@@ -249,8 +242,9 @@ export function ImprestRequest() {
   const buildHeaderPayload = useCallback((values: FieldValues) => {
     const travelDate = String(values.travelDate ?? '')
     let returnDate = String(values.returnDate ?? '')
-    if (travelDate && (!returnDate || returnDate <= travelDate)) {
-      returnDate = bumpReturnAfterTravel(travelDate)
+    // UAT 27/08/2026: return may equal travel start; only default when blank or earlier.
+    if (travelDate && (!returnDate || returnDate < travelDate)) {
+      returnDate = returnDate && returnDate < travelDate ? travelDate : travelDate
     }
     return {
       ...values,
@@ -266,25 +260,19 @@ export function ImprestRequest() {
     const returnDate = String(values.returnDate ?? '').trim()
     const prev = prevTravelRef.current
     const travelChanged = travelDate !== prev.travel
-    const returnChanged = returnDate !== prev.ret
     prevTravelRef.current = { travel: travelDate, ret: returnDate }
 
     if (travelChanged && !travelDate) {
       if (returnDate) form.setValue('returnDate', '', { shouldValidate: false, shouldDirty: true })
       return
     }
-    if (travelChanged && travelDate && (!returnDate || returnDate <= travelDate)) {
-      const bumped = bumpReturnAfterTravel(travelDate)
-      if (bumped && bumped !== returnDate) {
-        form.setValue('returnDate', bumped, { shouldValidate: true, shouldDirty: true })
-      }
+    // When travel moves forward of return, snap return up to travel (same day OK).
+    if (travelDate && returnDate && returnDate < travelDate) {
+      form.setValue('returnDate', travelDate, { shouldValidate: true, shouldDirty: true })
       return
     }
-    if (returnChanged && returnDate && travelDate && returnDate <= travelDate) {
-      const bumped = bumpReturnAfterTravel(travelDate)
-      if (bumped !== returnDate) {
-        form.setValue('returnDate', bumped, { shouldValidate: true, shouldDirty: true })
-      }
+    if (travelChanged && travelDate && !returnDate) {
+      form.setValue('returnDate', travelDate, { shouldValidate: true, shouldDirty: true })
     }
   }, [])
 
@@ -301,7 +289,7 @@ export function ImprestRequest() {
       listSearchExtra={imprestListSearchExtra}
       newButtonLabel="New Imprest Requisition"
       headerSchema={imprestHeaderSchema}
-      headerDefaults={{ dateRequired: today, purpose: '', travelDestination: '', travelDate: today, returnDate: tomorrow }}
+      headerDefaults={{ dateRequired: today, purpose: '', travelDestination: '', travelDate: today, returnDate: today }}
       headerSupplement={() => <FinanceEmployeeOrgBanner />}
       buildHeaderPayload={buildHeaderPayload}
       headerOnValuesChange={headerOnValuesChange}
