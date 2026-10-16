@@ -73,8 +73,31 @@ $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'deploy\windows\install-startup-task.ps1')
 PSEOF
 
-# BC_SOURCE_ONLY=1 ships AL source without a compiled .app (compile + publish on the Windows AL machine).
+# BC_PACKAGE_DIR=<released BusinessCentral folder> ships that folder unchanged (the .app the
+# server actually runs, e.g. the 1.0.3.310 folder from ABH-Portal-COMPLETE-1.0.3.382) and adds
+# not-yet-published AL changes beside it. Otherwise the folder is assembled from the AL project.
 BC_SOURCE_ONLY="${BC_SOURCE_ONLY:-0}"
+AL_ROOT="${ABH_AL_PROJECT:-/Users/abhishekbehera/ABH_UAT_LIVE_V2}"
+if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
+  rsync -a --exclude .DS_Store "$BC_PACKAGE_DIR/" "$OUT_DIR/BusinessCentral/"
+  BC_APP_NAME="$(cd "$OUT_DIR/BusinessCentral" && ls *.app | head -1)"
+  AL_SRC_DIR="$(ls -d "$OUT_DIR"/BusinessCentral/AL-Source-* | head -1)"
+  AL_APP_VERSION="${AL_SRC_DIR##*AL-Source-}"
+  PENDING_AL_DIR="$OUT_DIR/BusinessCentral/LocalPurchase-AL-NOT-YET-PUBLISHED"
+  mkdir -p "$PENDING_AL_DIR"
+  AL_NEW="$AL_ROOT/src/src/src/src/src/src/src/src/src/src/NEWCHANGES"
+  cp "$AL_NEW/ProcurementProcess/PortalProcurementMgt.Codeunit.al" "$PENDING_AL_DIR/"
+  cp "$AL_NEW/StaffPortalCodeunit.Codeunit.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Store/ABHLocalProcurement.Codeunit.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Store/ABHVendorQuote.Table.al" "$PENDING_AL_DIR/"
+  cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
+NOT PUBLISHED YET — keep running the BC app in the parent folder.
+These AL files add the Local Purchase portal actions (PortalLocalPurchaseAction,
+PortalLocalPurchaseChain, PortalAttachVendorQuoteFile, Post Receive, send-back).
+Merge into the AL project, compile and test in UAT first. Until then the portal
+keeps the existing purchase/store behaviour (Local Purchase panel falls back).
+PENDEOF
+else
 if [[ -f "$BC_APP" ]]; then
   cp "$BC_APP" "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
 elif [[ "$BC_SOURCE_ONLY" == "1" ]]; then
@@ -87,7 +110,6 @@ fi
 cp "$BC_ASSET_DIR/ABH-PUBLISH-BC.ps1" "$OUT_DIR/BusinessCentral/ABH-PUBLISH-BC.ps1"
 cp "$BC_ASSET_DIR/ABH-PRODUCTION-SETUP.txt" "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
 
-AL_ROOT="${ABH_AL_PROJECT:-/Users/abhishekbehera/ABH_UAT_LIVE_V2}"
 if [[ -f "$AL_ROOT/app.json" ]]; then
   AL_APP_VERSION="${AL_APP_VERSION:-$(python3 -c "import json; print(json.load(open('$AL_ROOT/app.json'))['version'])")}"
 elif [[ -z "${AL_APP_VERSION:-}" ]]; then
@@ -191,6 +213,7 @@ Key fixes:
 - HOD Department Staff and Staff on Leave are live, department-scoped functions
 - HR Policies & Forms supports Business Central-backed upload/delete only for authenticated HR employees
 ALEOF
+fi
 
 if [[ ! -d "$BC_WORKFLOW_DIR" ]]; then
   echo "FATAL: Business Central workflow definitions not found: $BC_WORKFLOW_DIR"
@@ -311,7 +334,6 @@ REQUIRED=(
   "$OUT_DIR/INSTALL-AUTOSTART.ps1"
   "$OUT_DIR/AUDIT-NOTES.txt"
   "$OUT_DIR/LOCAL-PURCHASE-LPR-RUNBOOK.md"
-  "$AL_SRC_DIR/ABHLocalProcurement.Codeunit.al"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/dist/server.js"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/public/index.html"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/package.json"
@@ -344,6 +366,11 @@ REQUIRED=(
 )
 
 if [[ "$BC_SOURCE_ONLY" != "1" ]]; then REQUIRED+=("$OUT_DIR/BusinessCentral/$BC_APP_NAME"); fi
+if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
+  REQUIRED+=("$PENDING_AL_DIR/PortalProcurementMgt.Codeunit.al")
+else
+  REQUIRED+=("$AL_SRC_DIR/ABHLocalProcurement.Codeunit.al")
+fi
 
 echo "==> Validating required files"
 for f in "${REQUIRED[@]}"; do

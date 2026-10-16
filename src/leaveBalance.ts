@@ -264,16 +264,13 @@ export function approvedLeaveDaysNotPosted(rows: Array<Record<string, unknown>>)
 export function applyUnpostedApprovedLeave(
   breakdown: LeaveBalanceBreakdown,
   unpostedApprovedDays: number,
-  isAnnual = true,
 ): LeaveBalanceBreakdown {
   if (!Number.isFinite(unpostedApprovedDays) || unpostedApprovedDays <= 0) return breakdown
   const totalLeaveTakenToDate = roundedLeaveValue(
     breakdown.totalLeaveTakenToDate + unpostedApprovedDays,
   )
-  // Non-annual types: BC's per-type balance already nets posted days only.
-  const availableLeaveBalance = !isAnnual
-    ? roundedLeaveValue(Math.max(0, breakdown.availableLeaveBalance - unpostedApprovedDays))
-    : breakdown.leaveAccruedToDate === null
+  const availableLeaveBalance =
+    breakdown.leaveAccruedToDate === null
       ? breakdown.availableLeaveBalance
       : roundedLeaveValue(Math.max(0, breakdown.leaveAccruedToDate - totalLeaveTakenToDate))
   return {
@@ -298,11 +295,8 @@ export function resolveLeaveBalanceBreakdown(input: {
   leaveAccruedToDate: number | null
   totalLeaveTakenToDate: number
   availableLeaveBalance: number
-  /** Omitted = annual (unchanged behaviour). */
-  isAnnual?: boolean
 }): LeaveBalanceBreakdown {
   const summary = input.summary
-  if (input.isAnnual === false) return nonAnnualLeaveBreakdown(input)
   const leaveEntitlement = roundedLeaveValue(
     summary?.leaveEntitlement ?? summary?.allocatedDays ?? input.entitlement,
   )
@@ -359,53 +353,26 @@ export function resolveLeaveBalanceBreakdown(input: {
   }
 }
 
-/**
- * Sick / Paternity / Mourning / other non-annual types. BC GetLeaveBalance returns the
- * type's own Allocated + Reimbursed + Carry Forward − Taken; it also carries the annual
- * card figures (accruedDays, totalAvailableLeaveBalance), which must never feed a
- * non-annual balance — doing so showed annual accrued − type taken for every type.
+/** BC also includes annual-card fields in responses for other leave types.
+ * Keep those fields out of non-annual figures and preserve BC's live ledger net.
+ * A missing balance is unavailable, never the full setup entitlement or annual balance.
  */
-function nonAnnualLeaveBreakdown(input: {
-  summary: BcLeaveSummary | null
-  entitlement: number
-  carryForward: number | null
-  totalLeaveTakenToDate: number
-  availableLeaveBalance: number
-}): LeaveBalanceBreakdown {
-  const summary = input.summary
-  const leaveEntitlement = roundedLeaveValue(summary?.allocatedDays ?? input.entitlement)
-  const carryForward = roundedLeaveValue(summary?.carryForwardBalanceForType ?? input.carryForward ?? 0)
+export function resolveNonAnnualLeaveBalanceBreakdown(
+  summary: BcLeaveSummary | null,
+): LeaveBalanceBreakdown | null {
+  const balance = summary?.currentLeaveBalance
+  if (balance === null || balance === undefined || !Number.isFinite(balance)) return null
+  const entitlement = summary?.allocatedDays ?? summary?.leaveEntitlement ?? summary?.setupDays ?? 0
+  const carryForward = summary?.carryForwardBalanceForType ?? summary?.carryForward ?? 0
   const reimbursements = summary?.reimbursedDays ?? 0
-  const totalLeaveTakenToDate = roundedLeaveValue(
-    Math.abs(summary?.currentTotalLeaveTaken ?? input.totalLeaveTakenToDate),
-  )
   return {
-    leaveEntitlement,
-    carryForward,
-    totalAvailableLeaveBalance: roundedLeaveValue(
-      Math.max(0, leaveEntitlement + carryForward + reimbursements),
-    ),
+    leaveEntitlement: roundedLeaveValue(entitlement),
+    carryForward: roundedLeaveValue(carryForward),
+    totalAvailableLeaveBalance: roundedLeaveValue(entitlement + carryForward + reimbursements),
     leaveAccruedToDate: null,
-    totalLeaveTakenToDate,
-    availableLeaveBalance: roundedLeaveValue(Math.max(0, input.availableLeaveBalance)),
+    totalLeaveTakenToDate: roundedLeaveValue(Math.abs(summary?.currentTotalLeaveTaken ?? summary?.totalLeaveTakenToDate ?? 0)),
+    availableLeaveBalance: roundedLeaveValue(balance),
   }
-}
-
-/**
- * Server-side application limit for a non-annual leave type. BC "Unlimited Days" types
- * (Sick Leave) have no balance limit — their per-type balance is Days 0 minus taken, i.e.
- * negative — so only a configured Maximum Application Days caps them. null = no limit.
- */
-export function nonAnnualApplicationLimit(input: {
-  unlimitedDays: boolean
-  maximumApplicationDays: number | null | undefined
-  availableLeaveBalance: number | null | undefined
-}): number | null {
-  if (input.unlimitedDays) {
-    const max = input.maximumApplicationDays
-    return max !== null && max !== undefined && Number.isFinite(max) && max > 0 ? max : null
-  }
-  return input.availableLeaveBalance ?? 0
 }
 
 export function leaveApplicationExceedsAvailableBalance(
@@ -626,4 +593,21 @@ export function mergeLeaveCardBalances(...sets: LeaveCardBalances[]): LeaveCardB
     annualLeaveBalance: pick('annualLeaveBalance'),
     employeeEarnedLeaveDays: pick('employeeEarnedLeaveDays'),
   }
+}
+
+/**
+ * Server-side application limit for a non-annual leave type. BC "Unlimited Days" types
+ * (Sick Leave) have no balance limit — their per-type balance is Days 0 minus taken, i.e.
+ * negative — so only a configured Maximum Application Days caps them. null = no limit.
+ */
+export function nonAnnualApplicationLimit(input: {
+  unlimitedDays: boolean
+  maximumApplicationDays: number | null | undefined
+  availableLeaveBalance: number | null | undefined
+}): number | null {
+  if (input.unlimitedDays) {
+    const max = input.maximumApplicationDays
+    return max !== null && max !== undefined && Number.isFinite(max) && max > 0 ? max : null
+  }
+  return input.availableLeaveBalance ?? 0
 }

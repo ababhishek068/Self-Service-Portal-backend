@@ -206,9 +206,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
                 ? 'Item declined. The storekeeper can offer another item.'
                 : actionCode === 'CONFIRM_RECEIPT'
                   ? 'Receipt confirmed.'
-                  : actionCode === 'ISSUE_AFTER_LPR'
-                    ? 'Issued after LPR receive — the goods issue voucher is posted to the requester.'
-                    : 'Purchase Requisition (LPR) created — Issue Stage: LPR Started. Next: FAD opens Pending LPR and uses Approve (FAD), not Requests to Approve.',
+                  : 'Linked Purchase Request created from this store requisition.',
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', title)
@@ -378,13 +376,13 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             }
             onClick={() =>
               void run(
-                'REQUEST_FOR_LPR',
-                'Request for LPR',
-                'Confirm stock is unavailable and create the linked Purchase Requisition (LPR). FAD approves it next with Approve (FAD).',
+                'STOCK_UNAVAILABLE',
+                'Create Purchase Request',
+                'Confirm stock is unavailable and create the linked Purchase Request.',
               )
             }
           >
-            Request for LPR
+            Stock not available — Purchase Request
           </Button>
         </div>
       ) : null}
@@ -417,28 +415,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
       {atProcurement ? (
         <p className="mt-2 text-xs text-slate-600">
-          Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Approve (FAD) → Convert to
-          RFQ → Vendor Quotes → Approve Winner (FAD Final) → Create PO → Approve Local PO → Post Receive. After the
-          GRN is posted into the issuing store, use Issue after LPR receive.
+          Purchase is continuing in the portal / Business Central{lprNo ? ` (${lprNo})` : ''}. After the
+          GRV is posted into the issuing store, reopen this requisition — stage returns to stock check
+          for GIV.
         </p>
-      ) : null}
-      {atProcurement && canManageStock && !processQuery.isError ? (
-        <div className="mt-3">
-          <Button
-            type="button"
-            variant="gradient"
-            disabled={mutation.isPending}
-            onClick={() =>
-              void run(
-                'ISSUE_AFTER_LPR',
-                'Issue after LPR receive',
-                'Issue the goods received on the Local Purchase GRN to the requester (GIV).',
-              )
-            }
-          >
-            Issue after LPR receive
-          </Button>
-        </div>
       ) : null}
       {stage === 'COMPLETED' ? (
         <p className="mt-2 text-teal-800">GIV posted — inventory reduced and requisition closed.</p>
