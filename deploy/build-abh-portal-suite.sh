@@ -38,7 +38,13 @@ printf '%s\n' "$BUILD_STAMP" > "$ROOT/dist/BUILD_ID.txt"
 echo "==> Stage suite backend"
 rm -rf "$SUITE_BC/dist" "$SUITE_BC/public"
 rsync -a "$ROOT/dist/" "$SUITE_BC/dist/"
-rsync -a "$ROOT/public/" "$SUITE_BC/public/"
+# PORTAL_UI_DIR=<released public folder> ships that compiled UI unchanged (e.g. the 1.0.3.382
+# UI, whose Windows-only source was never committed). Otherwise the fresh React build is used.
+if [[ -n "${PORTAL_UI_DIR:-}" ]]; then
+  rsync -a "$PORTAL_UI_DIR/" "$SUITE_BC/public/"
+else
+  rsync -a "$ROOT/public/" "$SUITE_BC/public/"
+fi
 rsync -a "$ROOT/src/" "$SUITE_BC/src/"
 
 echo "==> Production node_modules"
