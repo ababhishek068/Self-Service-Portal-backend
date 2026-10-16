@@ -4955,6 +4955,25 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(ProcurementMgt.UpdateStoreProcess(requestNo, actionCode, linkedDocumentNo, actionComment, actorUserID, actorJobTitle));
     end;
 
+    /// <summary>
+    /// Local Purchase (LPR→RFQ→PO→pay) actions for the Self-Service Portal.
+    /// Mirror of ABH-LIVE-AL StaffPortal PortalLocalPurchaseAction / ListVendorQuotes.
+    /// Publish after deploying Portal Procurement Mgt. RunLocalPurchaseAction.
+    /// </summary>
+    procedure PortalLocalPurchaseAction(documentNo: Code[50]; actionCode: Text[50]; linkedDocumentNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; payloadJson: Text) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.RunLocalPurchaseAction(documentNo, actionCode, linkedDocumentNo, actionComment, actorUserID, payloadJson));
+    end;
+
+    procedure PortalListVendorQuotes(rfqNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListVendorQuotes(rfqNo));
+    end;
+
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
     var
         portalReturn: Date;

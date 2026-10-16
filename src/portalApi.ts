@@ -47,6 +47,11 @@ import {
   updateIctHelpdeskTicket,
 } from './ictHelpdesk.js'
 import {
+  assertLocalPurchaseActionAllowed,
+  localPurchaseRoles,
+  parseSoapJson,
+} from './localPurchaseFlow.js'
+import {
   enrichLeaveApprovalEntries,
   fallbackApprovalStepsFromHeader,
   leaveDocumentNoCandidates,
@@ -1297,6 +1302,18 @@ const STORE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRu
   STOCK_CHECK: {
     STOCK_AVAILABLE: { roles: ['operations'] },
     STOCK_UNAVAILABLE: { roles: ['operations'] },
+    /** BC caption from UAT recording — same as STOCK_UNAVAILABLE. */
+    REQUEST_FOR_LPR: { roles: ['operations'] },
+  },
+  /** After LPR/GRN, Store Keeper issues GIV from received stock. */
+  PROCUREMENT_REQUEST: {
+    ISSUE_AFTER_LPR: { roles: ['operations'] },
+  },
+  STOCK_RECHECK: {
+    ISSUE_AFTER_LPR: { roles: ['operations'] },
+    STOCK_AVAILABLE: { roles: ['operations'] },
+    STOCK_UNAVAILABLE: { roles: ['operations'] },
+    REQUEST_FOR_LPR: { roles: ['operations'] },
   },
 }
 
@@ -4474,7 +4491,11 @@ export function buildPortalApiRouter() {
         detail.payload as ODataRecord,
         requestDetailLines(detail as Record<string, unknown>),
       )
-      if (stockCheck.needsBcPrep) {
+      const skipStockGate =
+        actionCode === 'ISSUE_AFTER_LPR' ||
+        actionCode === 'REQUEST_FOR_LPR' ||
+        actionCode === 'STOCK_UNAVAILABLE'
+      if (!skipStockGate && stockCheck.needsBcPrep) {
         throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_BC_PREP_REQUIRED')
       }
       if (actionCode === 'STOCK_AVAILABLE' && !stockCheck.allAvailable) {
@@ -4492,6 +4513,123 @@ export function buildPortalApiRouter() {
       res.json({
         process: { ...process, stockCheck },
         request: await requestDetail(requestId, authUser),
+      })
+    }),
+  )
+
+  /**
+   * Local Purchase executable actions (FAD approve LPR, Convert to RFQ, vendor quotes,
+   * winner/technical/FAD final, Create PO, PO approvals, receive, invoice, CEO pay, close).
+   * Requires BC StaffPortal PortalLocalPurchaseAction after AL deploy.
+   */
+  router.post(
+    '/requests/:id/local-purchase',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition' && module !== 'storeRequisition') {
+        throw portalError(
+          'Local Purchase actions apply to Purchase Requisition (LPR/RFQ/PO) or Store Requisition.',
+          422,
+        )
+      }
+      await requestDetail(requestId, authUser)
+      const actionComment = String(req.body?.actionComment ?? req.body?.comment ?? '').trim()
+      const payload =
+        req.body?.payload && typeof req.body.payload === 'object'
+          ? req.body.payload
+          : undefined
+      const payloadJson =
+        typeof req.body?.payloadJson === 'string'
+          ? req.body.payloadJson
+          : payload
+            ? JSON.stringify(payload)
+            : ''
+      const documentNo = String(req.body?.documentNo ?? no).trim()
+      if (!documentNo) {
+        throw portalError('documentNo is required.', 422, 'LPR_DOCUMENT_REQUIRED')
+      }
+      let actionCode: string
+      try {
+        actionCode = assertLocalPurchaseActionAllowed(
+          authUser,
+          String(req.body?.actionCode ?? ''),
+          actionComment,
+          Boolean(payloadJson),
+        )
+      } catch (error) {
+        const err = error as { status?: number; code?: string; message?: string }
+        throw portalError(err.message || String(error), err.status ?? 400, err.code)
+      }
+      const result = await callSoapMethod('PortalLocalPurchaseAction', {
+        documentNo,
+        actionCode,
+        linkedDocumentNo: String(req.body?.linkedDocumentNo ?? ''),
+        actionComment,
+        actorUserID: authUser.userID,
+        payloadJson,
+      })
+      res.json({
+        result: parseSoapJson(result.returnValue),
+        roles: localPurchaseRoles(authUser),
+        request: await requestDetail(requestId, authUser).catch(() => null),
+      })
+    }),
+  )
+
+  router.get(
+    '/requests/:id/vendor-quotes',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
+      }
+      await requestDetail(requestId, authUser)
+      const rfqNo = String(req.query.rfqNo ?? req.query.documentNo ?? no).trim()
+      const result = await callSoapMethod('PortalListVendorQuotes', { rfqNo })
+      res.json(parseSoapJson(result.returnValue))
+    }),
+  )
+
+  router.post(
+    '/requests/:id/vendor-quotes',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
+      }
+      await requestDetail(requestId, authUser)
+      try {
+        assertLocalPurchaseActionAllowed(authUser, 'UPSERT_VENDOR_QUOTE', '', true)
+      } catch (error) {
+        const err = error as { status?: number; code?: string; message?: string }
+        throw portalError(err.message || String(error), err.status ?? 400, err.code)
+      }
+      const rfqNo = String(req.body?.rfqNo ?? req.body?.documentNo ?? no).trim()
+      const payload = {
+        vendorNo: String(req.body?.vendorNo ?? ''),
+        quotedAmount: req.body?.quotedAmount ?? req.body?.amount ?? 0,
+        leadTimeDays: req.body?.leadTimeDays ?? req.body?.leadTime ?? 0,
+        notes: String(req.body?.notes ?? ''),
+        lineNo: req.body?.lineNo ?? undefined,
+      }
+      const result = await callSoapMethod('PortalLocalPurchaseAction', {
+        documentNo: rfqNo,
+        actionCode: 'UPSERT_VENDOR_QUOTE',
+        linkedDocumentNo: String(req.body?.lineNo ?? ''),
+        actionComment: '',
+        actorUserID: authUser.userID,
+        payloadJson: JSON.stringify(payload),
+      })
+      const list = await callSoapMethod('PortalListVendorQuotes', { rfqNo })
+      res.json({
+        result: parseSoapJson(result.returnValue),
+        quotes: parseSoapJson(list.returnValue),
       })
     }),
   )
