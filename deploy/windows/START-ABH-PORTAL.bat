@@ -25,16 +25,11 @@ if not exist "%BACKEND%\public\index.html" (
 pushd "%BACKEND%"
 
 if not exist ".env" (
-  if exist "%ENV_TEMPLATE%" (
-    echo [SETUP] Creating .env from ABH UAT template...
-    copy /Y "%ENV_TEMPLATE%" ".env" >nul
-    echo [SETUP] Edit BC_NAV_PASSWORD in .env if BC login fails.
-  ) else (
-    echo [ERROR] .env missing and no template at deploy\windows\host.env.abh-uat-ip.example
-    popd
-    pause
-    exit /b 1
-  )
+  echo [ERROR] Copy the existing server .env into this backend folder first.
+  echo For a new server, configure .env for its BC instance and company.
+  popd
+  pause
+  exit /b 1
 )
 
 if not exist "node_modules\express\package.json" (

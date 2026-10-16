@@ -1,0 +1,61 @@
+ABH STORE UAT GO-LIVE CHECKLIST — BC 1.0.3.308 / PORTAL 1.0.3.352
+=====================================================================
+
+STATUS
+------
+Code build: PASS (local)
+Backend automated tests: PASS (168/168)
+Business Central AL compile: REQUIRED before publish (build-abh-bc-app.sh)
+Live Business Central UAT: REQUIRED before production sign-off
+
+DEPLOYMENT ORDER
+----------------
+1. Publish and upgrade BC24_TA App 1.0.3.308.
+2. Restart BC240.
+3. Import/verify Store Requisition Approval Workflow.
+4. Confirm its cancel event has these responses in this order:
+   - Cancel all approval requests
+   - Allow record usage
+   - Open the document
+5. Deploy portal 1.0.3.352 and restart the Node service.
+6. Confirm /api/portal-build displays v201 and 1.0.3.352.
+
+UAT 1 — STORE AND ITEM MASTER
+-----------------------------
+[ ] Location and ABH Store records exist and are linked 1:1.
+[ ] Store is Active, permits Issue, and the intended default store is selected.
+[ ] Category/subcategory master imports without duplicate identifiers.
+[ ] Item opens again with the same category, subcategory, UOM and posting data.
+[ ] Unauthorized users cannot maintain Store/Item master records.
+[ ] Creating/changing master data does not change stock.
+
+UAT 2 — REQUISITION AND APPROVAL
+--------------------------------
+[ ] Create a fresh portal requisition with two different free-text lines.
+[ ] Reference number, requester, required date, store, purpose and lines match BC.
+[ ] Missing mandatory data is blocked before approval submission.
+[ ] Submit once: header becomes Pending Approval in portal and BC.
+[ ] Step 1 approves: Step 2 becomes the only active approver.
+[ ] Reject with a reason: requester sees Rejected plus the same reason.
+[ ] Resubmit a corrected draft: a new clean approval cycle is displayed.
+[ ] Cancel a pending request: all active approval entries become Canceled and the
+    requisition returns to Open/Draft in both portal and BC.
+[ ] Retrying Cancel is idempotent and does not create duplicate entries.
+[ ] Unauthorized users cannot approve, reject, cancel or issue the requisition.
+[ ] Email notification is received by each configured approver/requester.
+
+UAT 3 — INVENTORY ISSUE
+-----------------------
+[ ] Post opening stock of 4 to the exact issuing Location.
+[ ] Approval alone leaves inventory at 4.
+[ ] Issue 2: inventory becomes 2 and issue history records user/date/reference.
+[ ] Partial issue leaves the requisition available only for its remaining quantity.
+[ ] Issuing more than requested or more than available stock is blocked.
+[ ] A different Location's inventory is unchanged.
+[ ] Cancel/void before issue does not change inventory.
+[ ] Final issue completes the requisition and no duplicate posting is possible.
+
+GO-LIVE RULE
+------------
+Do not sign off from old requisitions. Run the checks above with one fresh request
+created after both BC 1.0.3.308 and portal 1.0.3.352 are deployed.

@@ -1,3 +1,4 @@
+import { runStoreApprovalOnce, storeApprovalSubmissionComplete } from './storeApprovalSubmission.js'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import {
@@ -12,7 +13,12 @@ import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
 import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap, resolveRequestingDepartmentCode } from './employeeProfile.js'
 import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
-import { documentSentForApproval, resolveModuleRequestStatus, type PortalModuleKey } from './erpMappings.js'
+import {
+  approvalCancellationComplete,
+  documentSentForApproval,
+  resolveModuleRequestStatus,
+  type PortalModuleKey,
+} from './erpMappings.js'
 import { sortNewestFirst } from './sortNewestFirst.js'
 import {
   canRequestApprovalForSpec,
@@ -78,7 +84,7 @@ export interface ModuleSpec {
     saveHeader?: string
     saveLine?: string
     deleteLine?: string
-    /** Permanently delete an Open/Pending/New draft header (DeletePortalDraftDocument). */
+    /** Permanently delete a module-approved draft status via DeletePortalDraftDocument. */
     deleteDocument?: string
     submit?: string
     cancel?: string
@@ -1016,9 +1022,26 @@ const storeRequisition: ModuleSpec = {
           $top: 1,
         })) as ODataRecord[] | null
         if (Array.isArray(rows) && rows[0]) {
+          const headerStatus = fieldText(rows[0], ['Status', 'DocumentStatus'])
+          if (headerStatus && headerStatus !== 'Open') {
+            throw Object.assign(
+              new Error(
+                `Store requisition lines can only be changed while Business Central status is Open (current: ${headerStatus}).`,
+              ),
+              { status: 422, code: 'STORE_REQUISITION_NOT_EDITABLE' },
+            )
+          }
           headerStore = fieldText(rows[0], ['IssuingStore', 'Issuing_Store'])
         }
-      } catch {
+      } catch (error) {
+        if (
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          error.code === 'STORE_REQUISITION_NOT_EDITABLE'
+        ) {
+          throw error
+        }
         // Keep the line unassigned until Operations selects the store in BC.
       }
       return {
@@ -1969,6 +1992,7 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       const user = authUser(req)
       const no = String(req.params.no ?? '')
       await requireProtectedOwner(user, no)
+      await assertStoreRequisitionHeaderEditable(spec, user, no)
       const body = SCHEMAS.saveHeader.parse(req.body ?? {})
       // Pull through validated body for the param builder (re-attach reference).
       ;(req as Request).body = body
@@ -2079,10 +2103,57 @@ async function listDocumentAttachmentsForTable(no: string, tableIds: number[]) {
   return Array.isArray(rows) ? rows : []
 }
 
+export function portalAttachmentRequiredForModule(module: string) {
+  // ABH's current policy makes attachments optional for purchase and store
+  // requisitions. Claims retain their supporting-document requirement.
+  return module === 'claim'
+}
+
+/**
+ * Server-side whole-document delete gate. Store mirrors Leave: cancellation
+ * must reopen the BC header before permanent deletion is offered/accepted.
+ */
+export function portalDraftDeleteAllowed(module: string, status: unknown) {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  const editableDraft = normalized === 'draft' || normalized === 'open'
+  if (module === 'store-requisition' || module === 'storeRequisition' || module === 'leave') {
+    return editableDraft
+  }
+  return (
+    editableDraft ||
+    normalized === 'cancelled' ||
+    normalized === 'canceled' ||
+    normalized === 'rejected' ||
+    (module === 'training' && normalized === 'new')
+  )
+}
+
+async function assertStoreRequisitionHeaderEditable(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+) {
+  if (spec.module !== 'store-requisition' || !no) return
+  const header = await getPortalModuleDocument(spec, user, no, false)
+  if (!header) {
+    throw Object.assign(new Error(`Business Central document ${no} was not found`), {
+      status: 404,
+      code: 'STORE_REQUISITION_NOT_FOUND',
+    })
+  }
+  const status = fieldText(header, ['Status', 'DocumentStatus'])
+  if (status && status !== 'Open' && status !== 'Draft') {
+    throw Object.assign(
+      new Error(
+        `Store requisition ${no} can only be edited while Business Central status is Open (current: ${status}).`,
+      ),
+      { status: 422, code: 'STORE_REQUISITION_NOT_EDITABLE' },
+    )
+  }
+}
+
 async function assertRequiredPortalAttachment(spec: ModuleSpec, no: string) {
-  // Purchase and store requisitions treat a specification as optional.
-  // Claims still require a supporting document before approval.
-  if (spec.module === 'purchase-requisition' || spec.module === 'store-requisition') return
+  if (!portalAttachmentRequiredForModule(spec.module)) return
 
   const tableIds =
     spec.headerTableId === 52121800 ? [52121800, 38] : [spec.headerTableId]
@@ -2949,10 +3020,70 @@ export async function cancelPortalModuleRequest(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.cancel, params)
+  const portalModule = MODULE_APPROVAL_KEYS[spec.module]
+  let result: SoapResult
+  try {
+    result = await callSoapMethod(spec.soap.cancel, params)
+  } catch (error) {
+    if (
+      portalModule &&
+      (await portalModuleApprovalCancellationCompleted(
+        spec,
+        user,
+        no,
+        portalModule as PortalModuleKey,
+      ))
+    ) {
+      return
+    }
+    throw error
+  }
   if (!soapActionOk(spec, result)) {
+    if (
+      portalModule &&
+      (await portalModuleApprovalCancellationCompleted(
+        spec,
+        user,
+        no,
+        portalModule as PortalModuleKey,
+      ))
+    ) {
+      return
+    }
     throw Object.assign(new Error(`Business Central did not cancel ${no}`), { status: 502 })
   }
+  if (
+    portalModule &&
+    !(await portalModuleApprovalCancellationCompleted(
+      spec,
+      user,
+      no,
+      portalModule as PortalModuleKey,
+    ))
+  ) {
+    throw Object.assign(
+      new Error(
+        `Business Central accepted the cancellation for ${no}, but the document is not Open or an active approval entry still exists.`,
+      ),
+      { status: 502, code: 'APPROVAL_CANCELLATION_INCOMPLETE' },
+    )
+  }
+}
+
+async function portalModuleApprovalCancellationCompleted(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  portalModule: PortalModuleKey,
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const refreshed = await getPortalModuleDocument(spec, user, no, false)
+    if (!refreshed) break
+    const approvers = await fetchPortalApprovalEntries(spec, no, refreshed)
+    if (approvalCancellationComplete(refreshed, portalModule, approvers)) return true
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  return false
 }
 
 export async function deletePortalModuleDocument(
@@ -2995,6 +3126,13 @@ export async function submitPortalModuleRequest(
   user: AuthUser,
   no: string,
 ) {
+  if (spec.module === 'store-requisition') {
+    return runStoreApprovalOnce(`${user.employeeNo}:${no}`, () => submitPortalModuleRequestOnce(spec, user, no))
+  }
+  return submitPortalModuleRequestOnce(spec, user, no)
+}
+
+async function submitPortalModuleRequestOnce(spec: ModuleSpec, user: AuthUser, no: string) {
   if (!spec.soap.submit || !spec.params?.submit) {
     throw Object.assign(new Error(`${spec.module} submission is not supported`), {
       status: 501,
@@ -3003,6 +3141,10 @@ export async function submitPortalModuleRequest(
   const header = await getPortalModuleDocument(spec, user, no, false)
   if (!header) {
     throw Object.assign(new Error(`Business Central document ${no} was not found`), { status: 404 })
+  }
+  if (spec.module === 'store-requisition') {
+    const entries = await fetchPortalApprovalEntries(spec, no, header)
+    if (storeApprovalSubmissionComplete(header, entries)) return
   }
   await assertRequiredPortalAttachment(spec, no)
   if (!canRequestApprovalForSpec(spec.module, header)) {
@@ -3069,8 +3211,34 @@ export async function submitPortalModuleRequest(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.submit, params)
+  const portalModule = MODULE_APPROVAL_KEYS[spec.module]
+  let result: SoapResult
+  try {
+    result = await callSoapMethod(spec.soap.submit, params)
+  } catch (error) {
+    // A SOAP response can be lost after BC commits. Confirm the authoritative
+    // header/approval-entry state before telling the requester that submission
+    // failed, preventing a retry against an already-pending requisition.
+    if (
+      portalModule &&
+      (await portalModuleApprovalStarted(spec, user, no, portalModule as PortalModuleKey).catch(() => false))
+    ) {
+      return
+    }
+    if (spec.module === 'store-requisition' && error instanceof Error && /cannot modify a pending approval requisition/i.test(error.message)) {
+      throw Object.assign(new Error(
+        `Business Central could not complete approval submission for ${no}. Approval has not been confirmed. Contact your administrator to resolve the Store approval error before retrying.`,
+      ), { status: 409, code: 'STORE_APPROVAL_BC_UPDATE_REQUIRED', cause: error })
+    }
+    throw error
+  }
   if (!soapActionOk(spec, result)) {
+    if (
+      portalModule &&
+      (await portalModuleApprovalStarted(spec, user, no, portalModule as PortalModuleKey))
+    ) {
+      return
+    }
     if (spec.module === 'fuel' || spec.module === 'maintenance') {
       const docType = fieldText(header, ['DocumentType', 'Document_Type'])
       const hint = docType
@@ -3081,30 +3249,13 @@ export async function submitPortalModuleRequest(
     throw Object.assign(new Error(`Business Central did not submit ${no}`), { status: 502 })
   }
 
-  const portalModule = MODULE_APPROVAL_KEYS[spec.module]
   if (portalModule) {
-    let verified = false
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const refreshed = await getPortalModuleDocument(spec, user, no, false)
-      if (!refreshed) break
-      const approvers = await fetchPortalApprovalEntries(spec, no, refreshed)
-      const resolved = resolveModuleRequestStatus(
-        refreshed,
-        portalModule as PortalModuleKey,
-        approvers,
-      )
-      if (
-        (resolved !== 'Open' && resolved !== 'Draft') ||
-        approvers.length > 0 ||
-        documentSentForApproval(refreshed)
-      ) {
-        verified = true
-        break
-      }
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 400))
-      }
-    }
+    const verified = await portalModuleApprovalStarted(
+      spec,
+      user,
+      no,
+      portalModule as PortalModuleKey,
+    )
     if (!verified) {
       const facilityHint =
         spec.module === 'store-requisition' || spec.module === 'purchase-requisition'
@@ -3116,6 +3267,34 @@ export async function submitPortalModuleRequest(
       )
     }
   }
+}
+
+async function portalModuleApprovalStarted(
+  spec: ModuleSpec,
+  user: AuthUser,
+  no: string,
+  portalModule: PortalModuleKey,
+) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const refreshed = await getPortalModuleDocument(spec, user, no, false)
+    if (!refreshed) break
+    const approvers = await fetchPortalApprovalEntries(spec, no, refreshed)
+    if (spec.module === 'store-requisition') {
+      if (storeApprovalSubmissionComplete(refreshed, approvers)) return true
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400))
+      continue
+    }
+    const resolved = resolveModuleRequestStatus(refreshed, portalModule, approvers)
+    if (
+      (resolved !== 'Open' && resolved !== 'Draft') ||
+      approvers.length > 0 ||
+      documentSentForApproval(refreshed)
+    ) {
+      return true
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  return false
 }
 
 /**
@@ -3134,6 +3313,7 @@ export async function updatePortalModuleHeader(
       status: 501,
     })
   }
+  await assertStoreRequisitionHeaderEditable(spec, user, no)
   let methodName = spec.soap.saveHeader
   if (spec.module === 'inter-bank-transfer') {
     methodName = 'FnUpdateInterBankTransfer'
