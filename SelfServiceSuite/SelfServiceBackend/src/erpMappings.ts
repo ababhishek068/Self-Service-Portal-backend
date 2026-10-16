@@ -491,7 +491,19 @@ function leaveHeaderSignalsPending(row: ODataRecord) {
  * DateTimeSentforApproval / Sent_for_approval often remain set, which must NOT
  * keep the list stuck on "Pending Approval".
  */
+function leaveApplicationIsPosted(row: ODataRecord) {
+  const posted = row.Posted ?? row.posted
+  if (posted === true || ['true', 'yes', '1'].includes(String(posted ?? '').trim().toLowerCase())) {
+    return true
+  }
+  return text(row, ['Status']).trim().toLowerCase() === 'posted'
+}
+
 export function resolveLeaveStatus(row: ODataRecord, approvalEntries: ODataRecord[] = []) {
+  // Posted wins over the approval entries. Those entries stay Approved after
+  // the leave is written to the ledger, and the balance only changes once posted.
+  if (leaveApplicationIsPosted(row)) return 'Posted'
+
   const entryStatuses = approvalEntries.map((entry) =>
     statusFromBc(text(entry, ['Status'], '')),
   )

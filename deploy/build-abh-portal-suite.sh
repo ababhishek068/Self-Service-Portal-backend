@@ -73,19 +73,32 @@ $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'deploy\windows\install-startup-task.ps1')
 PSEOF
 
-if [[ ! -f "$BC_APP" ]]; then
-  echo "FATAL: Business Central app not found: $BC_APP"
+# BC_SOURCE_ONLY=1 ships AL source without a compiled .app (compile + publish on the Windows AL machine).
+BC_SOURCE_ONLY="${BC_SOURCE_ONLY:-0}"
+if [[ -f "$BC_APP" ]]; then
+  cp "$BC_APP" "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
+elif [[ "$BC_SOURCE_ONLY" == "1" ]]; then
+  echo "WARN: no compiled Business Central app — packaging AL source only."
+  BC_APP_NAME="(compile from AL source — no .app in this package)"
+else
+  echo "FATAL: Business Central app not found: $BC_APP (set BC_SOURCE_ONLY=1 to ship AL source only)"
   exit 1
 fi
-cp "$BC_APP" "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
 cp "$BC_ASSET_DIR/ABH-PUBLISH-BC.ps1" "$OUT_DIR/BusinessCentral/ABH-PUBLISH-BC.ps1"
 cp "$BC_ASSET_DIR/ABH-PRODUCTION-SETUP.txt" "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
 
 AL_ROOT="${ABH_AL_PROJECT:-/Users/abhishekbehera/ABH_UAT_LIVE_V2}"
-AL_APP_VERSION="$(python3 -c "import json; print(json.load(open('$AL_ROOT/app.json'))['version'])")"
+if [[ -f "$AL_ROOT/app.json" ]]; then
+  AL_APP_VERSION="${AL_APP_VERSION:-$(python3 -c "import json; print(json.load(open('$AL_ROOT/app.json'))['version'])")}"
+elif [[ -z "${AL_APP_VERSION:-}" ]]; then
+  echo "FATAL: $AL_ROOT/app.json not found — set AL_APP_VERSION"
+  exit 1
+fi
 AL_SRC_DIR="$OUT_DIR/BusinessCentral/AL-Source-$AL_APP_VERSION"
 mkdir -p "$AL_SRC_DIR"
-cp "$AL_ROOT/app.json" "$AL_SRC_DIR/app.json"
+if [[ -f "$AL_ROOT/app.json" ]]; then cp "$AL_ROOT/app.json" "$AL_SRC_DIR/app.json"; fi
+cp "$AL_ROOT/src/src/Store/ABHLocalProcurement.Codeunit.al" "$AL_SRC_DIR/"
+cp "$AL_ROOT/src/src/Store/ABHVendorQuote.Table.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/tableextension/PurchaseHeaderExtension.TableExt.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/tableextension/PurchaseLineExt.TableExt.al" "$AL_SRC_DIR/"
 cp "$AL_ROOT/src/src/Query/PurchaseHeader2.Query.al" "$AL_SRC_DIR/"
@@ -131,6 +144,11 @@ ABH AL source — production portal/ERP sync
 Publish this .app (or merge sources) on Windows BC, then restart.
 
 Key fixes:
+- Local Purchase (LPR -> RFQ -> PO -> pay) runs from the portal: Request for LPR, Approve (FAD),
+  Convert to RFQ, Vendor Quotes + attachments, Auto Select Winner, optional Technical review,
+  Approve Winner (FAD Final), Create PO, Finance Checker + FAD PO approval, Prepare/Post Local
+  Receive (GRN), Issue after LPR receive, Local Invoice, Verify, CEO Approve Payment, Close LPR
+  (ProcurementProcess/PortalProcurementMgt + StaffPortal PortalLocalPurchaseAction/Chain/AttachVendorQuoteFile)
 - Purchase and Store Requisition fields/lines follow the approved ABH templates
 - Portal approval decisions use Business Central's native workflow responses; hierarchy is never advanced in portal code
 - Rejection notes are entered separately from the request reason and remain visible to the requester
@@ -194,6 +212,10 @@ ABH SMART ESSP ENTERPRISE HUB — ${VERSION}
 
 4) Double-click START-ABH-PORTAL.bat
 
+   Local Purchase roles: add LOCAL_PURCHASE_ROLE_USERS (e.g. ADMIN:fad,LPR_PROCURE:procurement,
+   IT_KEEPER:operations,LPR_TECH:technical,LPR_FINCHECK:financeChecker,LPR_CEO:ceo) to .env
+   when job titles do not name the role. See LOCAL-PURCHASE-LPR-RUNBOOK.md.
+
 5) Confirm: http://127.0.0.1:4000/api/portal-build
    Expected: ${BUILD_STAMP}
 
@@ -232,6 +254,8 @@ You can also open http://127.0.0.1:4000/api/bc-diagnostics directly
 in a browser on the server - no login needed.
 EOF
 
+cp "$ROOT/LOCAL-PURCHASE-LPR-RUNBOOK.md" "$OUT_DIR/LOCAL-PURCHASE-LPR-RUNBOOK.md"
+
 cat > "$OUT_DIR/AUDIT-NOTES.txt" <<'EOF'
 ABH REFERENCE AUDIT — SIMPLE RESULT
 ===================================
@@ -249,6 +273,10 @@ ABH REFERENCE AUDIT — SIMPLE RESULT
 - Store requesters state the required item/asset in free text; inventory masters and stock balances are not exposed.
 - Operations/Store assigns the fulfillment location internally after approval.
 - Store, Procurement, Finance, and Auditor actions are role protected.
+- Local Purchase: each LPR/RFQ/PO step is offered only to its owner (Store Keeper, FAD, Procurement,
+  Technical, Finance Checker, CEO); BC re-checks stage and ABH Local Proc Setup user on every call.
+- Local PO Currency Code stays blank; min quotes + one attachment per vendor before Auto Select Winner;
+  FAD Final before Create PO; Finance Checker + FAD before Post Receive.
 - Requested By shows the employee name; Employee No remains a separate field.
 - Annual leave shows Leave Entitlement, Carry Forward, Total Available Leave Balance,
   Leave Accrued To-Date, Total Leave Taken To-Date, and Available Leave Balance.
@@ -282,12 +310,13 @@ REQUIRED=(
   "$OUT_DIR/ABH-DIAGNOSE.bat"
   "$OUT_DIR/INSTALL-AUTOSTART.ps1"
   "$OUT_DIR/AUDIT-NOTES.txt"
+  "$OUT_DIR/LOCAL-PURCHASE-LPR-RUNBOOK.md"
+  "$AL_SRC_DIR/ABHLocalProcurement.Codeunit.al"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/dist/server.js"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/public/index.html"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/package.json"
   "$OUT_DIR/SelfServiceSuite/SelfServiceBackend/node_modules/express/package.json"
   "$OUT_DIR/deploy/windows/host.env.abh-uat-ip.example"
-  "$OUT_DIR/BusinessCentral/$BC_APP_NAME"
   "$OUT_DIR/BusinessCentral/ABH-PUBLISH-BC.ps1"
   "$OUT_DIR/BusinessCentral/ABH-PRODUCTION-SETUP.txt"
   "$OUT_DIR/BusinessCentral/Workflows/Staff-Medical-Claim-Approval-Workflow.xml"
@@ -314,6 +343,8 @@ REQUIRED=(
   "$AL_SRC_DIR/ProcurementProcess/PortalProcurementProcesses.Page.al"
 )
 
+if [[ "$BC_SOURCE_ONLY" != "1" ]]; then REQUIRED+=("$OUT_DIR/BusinessCentral/$BC_APP_NAME"); fi
+
 echo "==> Validating required files"
 for f in "${REQUIRED[@]}"; do
   if [[ ! -f "$f" ]]; then
@@ -330,7 +361,9 @@ rm -f "$DESKTOP_ZIP"
 )
 
 BYTES="$(wc -c < "$DESKTOP_ZIP" | tr -d ' ')"
-if [[ "$BYTES" -lt 5000000 ]]; then
+MIN_ZIP_BYTES=5000000
+if [[ "$BC_SOURCE_ONLY" == "1" ]]; then MIN_ZIP_BYTES=2000000; fi
+if [[ "$BYTES" -lt "$MIN_ZIP_BYTES" ]]; then
   echo "FATAL: zip too small (${BYTES} bytes) — likely incomplete."
   exit 1
 fi

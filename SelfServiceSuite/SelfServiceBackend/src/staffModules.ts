@@ -989,25 +989,20 @@ const storeRequisition: ModuleSpec = {
       }
     },
     saveLine: async ({ req, user, no }) => {
-      // Requesters describe the need; Operations/Store maps it to a BC item.
-      const itemNo = ''
-      const itemName = String(req.body?.itemName ?? '').trim()
-      const lineDescription = String(req.body?.lineDescription ?? req.body?.description ?? '').trim()
-      const unitOfMeasure = String(req.body?.uom ?? req.body?.unitOfMeasure ?? '').trim()
-      const quantity =
-        storeLineTypeCode(req.body?.type) === 1
-          ? Number(req.body?.quantity ?? 0)
-          : 0
-      if (!itemName || !lineDescription || !unitOfMeasure || Number(req.body?.quantity ?? 0) <= 0) {
+      const requestedItem = String(req.body?.itemName ?? req.body?.description ?? '').trim()
+      const lineDescription = String(req.body?.lineDescription ?? '').trim()
+      const unitOfMeasure = String(req.body?.uom ?? req.body?.unitOfMeasure ?? '').trim() || 'PCS'
+      const quantity = Number(req.body?.quantity ?? 0)
+      if (!requestedItem || quantity <= 0) {
         throw Object.assign(
-          new Error('Item / asset name, description, UOM, and a positive quantity are required.'),
+          new Error('Describe the item or asset you need and enter a positive quantity.'),
           { status: 422 },
         )
       }
       await assertNoDuplicateStoreLine(
         user,
         no,
-        itemNo,
+        '',
         quantity,
         '',
       )
@@ -1031,19 +1026,12 @@ const storeRequisition: ModuleSpec = {
         reqNo: no,
         lineNo: Number(req.body?.lineNo ?? 0),
         type: storeLineTypeCode(req.body?.type),
-        itemNo,
-        quantity:
-          storeLineTypeCode(req.body?.type) === 1
-            ? Number(req.body?.quantity ?? 0)
-            : Number(req.body?.quantity ?? 1),
-        // Use only a store already assigned internally on the BC header.
+        // Staff describe the need. The store maps a real Item No. before issue.
+        itemNo: '',
+        quantity,
         location: headerStore,
-        description: itemName.slice(0, 70),
-        remarks: (() => {
-          const name = itemName
-          const extra = lineDescription
-          return extra && extra !== name ? extra.slice(0, 200) : ''
-        })(),
+        description: requestedItem.slice(0, 70),
+        remarks: lineDescription && lineDescription !== requestedItem ? lineDescription.slice(0, 200) : '',
         unitOfMeasure: unitOfMeasure.slice(0, 20),
         preferredBrandModel: String(
           req.body?.preferredBrandModel ?? req.body?.preferredBrand ?? req.body?.brandModel ?? '',
@@ -2549,19 +2537,52 @@ export async function listPortalModuleRows(
   if (FUEL_MAINTENANCE_MODULES.has(spec.module)) {
     return sortNewestFirst(await fetchFuelMaintenanceRows(spec, user))
   }
+  if (spec.module === 'gate-pass') {
+    return sortNewestFirst(await fetchGatePassRows(spec, user, options.gatePassSource ?? 'storeIssue'))
+  }
   const filterParts =
-    spec.module === 'gate-pass'
-      ? gatePassListFilterParts(options.gatePassSource ?? 'storeIssue', user)
-      : spec.unscopedList || options.includeAll
-        ? []
-        : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
-  if (spec.extraListFilter && spec.module !== 'gate-pass') filterParts.push(spec.extraListFilter)
+    spec.unscopedList || options.includeAll
+      ? []
+      : [`${spec.ownerField} eq '${odataString(ownerValue(spec, user))}'`]
+  if (spec.extraListFilter) filterParts.push(spec.extraListFilter)
   const fetched = await fetchOData(spec.headerService, {
     ...(filterParts.length ? { $filter: filterParts.join(' and ') } : {}),
   })
   let rows = Array.isArray(fetched) ? fetched : []
   if (spec.postListFilter) rows = rows.filter(spec.postListFilter)
   return sortNewestFirst(rows)
+}
+
+function oDataMiss(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /OData 404\b|No HTTP resource|does not exist|could not find|property/i.test(message)
+}
+
+async function fetchGatePassRows(spec: ModuleSpec, user: AuthUser, source: GatePassSourceKey) {
+  const sourceSpec = GATE_PASS_SOURCE_SPECS[source]
+  const attempts = [
+    gatePassListFilterParts(source, user),
+    sourceSpec.scopeToEmployee ? [`EmployeeNo eq '${odataString(user.employeeNo)}'`] : [],
+    [],
+  ]
+  for (const parts of attempts) {
+    try {
+      const fetched = await fetchOData(spec.headerService, {
+        ...(parts.length ? { $filter: parts.join(' and ') } : {}),
+      })
+      let rows = Array.isArray(fetched) ? fetched : []
+      const filtered = parts.some((part) => part.startsWith('Linkto '))
+        ? rows
+        : rows.filter((row) => {
+            const link = fieldText(row, ['Linkto', 'LinkTo', 'Link_To'])
+            return !link || link.toLowerCase() === sourceSpec.linkTo.toLowerCase()
+          })
+      return filtered
+    } catch (error) {
+      if (!oDataMiss(error)) throw error
+    }
+  }
+  return [] as ODataRecord[]
 }
 
 export async function getPortalModuleDocument(
@@ -3227,11 +3248,8 @@ export function moduleSpecSupportsAttachments(spec: ModuleSpec) {
   return spec.supportsAttachments === true
 }
 
-export async function uploadPortalAttachment(
-  tableID: number,
-  no: string,
-  attachment: Record<string, unknown>,
-) {
+/** Shared portal attachment checks: content, description, allowed type, 10 MB limit. */
+export function validatePortalAttachment(attachment: Record<string, unknown>) {
   const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
   if (!contentBase64) {
     throw Object.assign(new Error('Attachment content is required'), { status: 422 })
@@ -3252,13 +3270,22 @@ export async function uploadPortalAttachment(
       status: 422,
     })
   }
+  return { contentBase64, description, fileName: attachmentFileName(attachment) }
+}
+
+export async function uploadPortalAttachment(
+  tableID: number,
+  no: string,
+  attachment: Record<string, unknown>,
+) {
+  const { contentBase64, description, fileName } = validatePortalAttachment(attachment)
   const result = await callSoapMethod('UploadDocumentAttachment', {
     docNo: no,
     docNo2: no,
     description,
     tableID,
     file: contentBase64,
-    fileName: attachmentFileName(attachment),
+    fileName,
   })
   if (!attachmentOk(result)) {
     throw Object.assign(new Error('Business Central did not store the attachment'), {

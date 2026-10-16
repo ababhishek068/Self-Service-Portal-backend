@@ -50,6 +50,8 @@ import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
 import { fetchEmployeeRecordWithCardFields } from './employeeProfile.js'
 import {
+  applyUnpostedApprovedLeave,
+  approvedLeaveDaysNotPosted,
   employeeAnnualLeaveBalance,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
@@ -1240,6 +1242,94 @@ async function deleteLeaveApplicationInBc(
   )
 }
 
+function leaveRowBelongsToUser(row: ODataRecord, user: ReturnType<typeof authUser>) {
+  const employeeNo = fieldText(row, ['EmployeeNo', 'Employee_No'])
+  const userId = fieldText(row, ['UserID', 'User_ID'])
+  if (employeeNo && employeeNo === user.employeeNo) return true
+  if (userId && userId.toUpperCase() === user.userID.toUpperCase()) return true
+  return false
+}
+
+async function postApprovedLeaveForRequester(user: ReturnType<typeof authUser>, no: string) {
+  const row = await fetchOwnedLeaveRow(user, no)
+  if (!row || !leaveRowBelongsToUser(row, user)) {
+    return { statusCode: 404, body: { ok: false, message: 'Leave application not found.' } }
+  }
+
+  const applicationCode = fieldText(row, ['ApplicationCode', 'Application_Code', 'No'], no)
+  const approvalEntries = leaveApprovalEntriesForDocument(
+    await fetchLeaveApprovalEntriesByDocumentNos([applicationCode]),
+    applicationCode,
+  )
+  const status = resolveLeaveStatus(row, approvalEntries)
+  if (status === 'Posted') {
+    return {
+      statusCode: 200,
+      body: {
+        ok: true,
+        status: 'Posted',
+        message: `Leave ${applicationCode} is already posted.`,
+      },
+    }
+  }
+  if (status !== 'Approved') {
+    return {
+      statusCode: 422,
+      body: {
+        ok: false,
+        message: 'Leave can be posted only after it is fully approved.',
+        code: 'LEAVE_NOT_APPROVED',
+      },
+    }
+  }
+
+  try {
+    const result = await callSoapMethod('PostApprovedPortalLeave', {
+      employeeNo: user.employeeNo,
+      applicationCode,
+    })
+    if (!soapTruthy(result.returnValue)) {
+      return {
+        statusCode: 422,
+        body: {
+          ok: false,
+          message: `Business Central did not post leave ${applicationCode}.`,
+          code: 'LEAVE_POST_FAILED',
+        },
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Leave posting failed.'
+    if (/already been posted/i.test(message)) {
+      return {
+        statusCode: 200,
+        body: {
+          ok: true,
+          status: 'Posted',
+          message: `Leave ${applicationCode} is already posted.`,
+        },
+      }
+    }
+    const statusCode =
+      typeof error === 'object' && error && 'status' in error && typeof error.status === 'number'
+        ? error.status
+        : 422
+    return {
+      statusCode,
+      body: { ok: false, message, code: 'LEAVE_POST_FAILED' },
+    }
+  }
+
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      status: 'Posted',
+      message: `Leave ${applicationCode} posted. Your leave balance has been reduced.`,
+    },
+  }
+}
+
 async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string) {
   const filters = [
     `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
@@ -2227,14 +2317,17 @@ export function buildStaffRouter() {
         openNet,
         ledgerNetDays: ledgerNet,
       }))
-      const breakdown = resolveLeaveBalanceBreakdown({
-        summary: exactSummary,
-        entitlement,
-        carryForward: carryForwardBalance,
-        leaveAccruedToDate,
-        totalLeaveTakenToDate,
-        availableLeaveBalance: balance,
-      })
+      const breakdown = applyUnpostedApprovedLeave(
+        resolveLeaveBalanceBreakdown({
+          summary: exactSummary,
+          entitlement,
+          carryForward: carryForwardBalance,
+          leaveAccruedToDate,
+          totalLeaveTakenToDate,
+          availableLeaveBalance: balance,
+        }),
+        approvedLeaveDaysNotPosted(applicationRows),
+      )
       const balanceSource = isAnnual
         ? exactSummary?.availableLeaveBalance !== null &&
           exactSummary?.availableLeaveBalance !== undefined
@@ -2449,6 +2542,16 @@ export function buildStaffRouter() {
         ok: true,
         attachments: mapLeaveAttachmentsSimple(Array.isArray(attachments) ? attachments : []),
       })
+    }),
+  )
+
+  router.post(
+    '/leave/:no/post',
+    safe(async (req, res) => {
+      const user = authUser(req)
+      const no = String(req.params.no ?? '').trim()
+      const result = await postApprovedLeaveForRequester(user, no)
+      res.status(result.statusCode).json(result.body)
     }),
   )
 
