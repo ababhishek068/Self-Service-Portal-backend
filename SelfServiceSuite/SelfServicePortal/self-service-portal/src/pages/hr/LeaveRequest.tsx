@@ -76,11 +76,14 @@ function LeaveMetric({
   value,
   loading = false,
   emphasized = false,
+  text,
 }: {
   label: string
   value: number | null
   loading?: boolean
   emphasized?: boolean
+  /** Shown instead of the day count (e.g. "Unlimited"). */
+  text?: string
 }) {
   return (
     <div
@@ -99,7 +102,7 @@ function LeaveMetric({
             emphasized ? 'text-emerald-800' : 'text-slate-800'
           }`}
         >
-          {value !== null ? `${formatDays(value)} days` : DASH}
+          {text ?? (value !== null ? `${formatDays(value)} days` : DASH)}
         </p>
       )}
     </div>
@@ -1230,6 +1233,13 @@ export function LeaveRequest() {
                 value={balance}
                 loading={balanceLoading}
                 emphasized
+                text={
+                  unlimitedDays && !isMaternityLeave
+                    ? maximumApplicationDays !== null && maximumApplicationDays > 0
+                      ? `Unlimited (max ${formatDays(maximumApplicationDays)} days per application)`
+                      : 'Unlimited'
+                    : undefined
+                }
               />
             </div>
           ) : null}

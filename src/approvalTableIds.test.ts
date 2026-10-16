@@ -142,6 +142,7 @@ import {
   approvedLeaveDaysNotPosted,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
+  nonAnnualApplicationLimit,
   resolveAnnualAvailableLeaveBalance,
   resolveBcLeaveBalance,
   resolveLeaveBalanceBreakdown,
@@ -2887,5 +2888,27 @@ describe('non-annual leave balance', () => {
     const shown = applyUnpostedApprovedLeave(fields, 2, false)
     assert.equal(shown.availableLeaveBalance, 7)
     assert.equal(shown.totalLeaveTakenToDate, 3)
+  })
+})
+
+describe('unlimited non-annual leave (Sick Leave: Days 0, Unlimited Days)', () => {
+  it('does not cap an unlimited type by its negative per-type balance', () => {
+    // BC: 0 days − 2 taken = −2; Unlimited Days is ticked.
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: true, maximumApplicationDays: null, availableLeaveBalance: -2 })
+    assert.equal(limit, null)
+  })
+
+  it('still applies Maximum Application Days when HR sets one', () => {
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: true, maximumApplicationDays: 5, availableLeaveBalance: -2 })
+    assert.equal(limit, 5)
+    assert.equal(leaveApplicationExceedsAvailableBalance(6, limit), true)
+    assert.equal(leaveApplicationExceedsAvailableBalance(5, limit), false)
+  })
+
+  it('keeps the per-type balance limit for limited types (Paternity 3 − 1 taken)', () => {
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: false, maximumApplicationDays: null, availableLeaveBalance: 2 })
+    assert.equal(limit, 2)
+    assert.equal(leaveApplicationExceedsAvailableBalance(3, limit), true)
+    assert.equal(leaveApplicationExceedsAvailableBalance(2, limit), false)
   })
 })

@@ -50,6 +50,7 @@ import { logDiagnostic } from './requestLogger.js'
 import { config } from './config.js'
 import { fetchEmployeeRecordWithCardFields } from './employeeProfile.js'
 import {
+  nonAnnualApplicationLimit,
   applyUnpostedApprovedLeave,
   approvedLeaveDaysNotPosted,
   employeeAnnualLeaveBalance,
@@ -2725,13 +2726,29 @@ export function buildStaffRouter() {
             totalLeaveTakenToDate:
               employeeTakenRaw === null ? null : Math.abs(employeeTakenRaw),
           })
-        : balanceSummary?.availableLeaveBalance ?? balanceSummary?.currentLeaveBalance ?? 0
+        : nonAnnualApplicationLimit({
+            unlimitedDays:
+              balanceSummary?.unlimitedDays ??
+              fieldBoolean(leaveTypeRow ?? {}, ['UnlimitedDays', 'Unlimited_Days']) ??
+              false,
+            maximumApplicationDays:
+              balanceSummary?.maximumApplicationDays ??
+              fieldNumber(leaveTypeRow ?? {}, [
+                'MaximumApplicationDays',
+                'Maximum_Application_Days',
+                'MaxApplicationDays',
+                'Max_Application_Days',
+              ]),
+            availableLeaveBalance:
+              balanceSummary?.availableLeaveBalance ?? balanceSummary?.currentLeaveBalance ?? 0,
+          })
       const requestedBalanceDays = body.deliveryDate
         ? 1
         : isHalfDaySelection(body.isHalfDayLeave)
           ? 0.5
           : body.appliedDays
       if (
+        availableLeaveBalance !== null &&
         leaveApplicationExceedsAvailableBalance(
           requestedBalanceDays,
           availableLeaveBalance,

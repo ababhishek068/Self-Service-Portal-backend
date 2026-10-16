@@ -391,6 +391,23 @@ function nonAnnualLeaveBreakdown(input: {
   }
 }
 
+/**
+ * Server-side application limit for a non-annual leave type. BC "Unlimited Days" types
+ * (Sick Leave) have no balance limit — their per-type balance is Days 0 minus taken, i.e.
+ * negative — so only a configured Maximum Application Days caps them. null = no limit.
+ */
+export function nonAnnualApplicationLimit(input: {
+  unlimitedDays: boolean
+  maximumApplicationDays: number | null | undefined
+  availableLeaveBalance: number | null | undefined
+}): number | null {
+  if (input.unlimitedDays) {
+    const max = input.maximumApplicationDays
+    return max !== null && max !== undefined && Number.isFinite(max) && max > 0 ? max : null
+  }
+  return input.availableLeaveBalance ?? 0
+}
+
 export function leaveApplicationExceedsAvailableBalance(
   appliedDays: number,
   availableLeaveBalance: number | null,
