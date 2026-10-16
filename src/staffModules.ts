@@ -3248,11 +3248,8 @@ export function moduleSpecSupportsAttachments(spec: ModuleSpec) {
   return spec.supportsAttachments === true
 }
 
-export async function uploadPortalAttachment(
-  tableID: number,
-  no: string,
-  attachment: Record<string, unknown>,
-) {
+/** Shared portal attachment checks: content, description, allowed type, 10 MB limit. */
+export function validatePortalAttachment(attachment: Record<string, unknown>) {
   const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
   if (!contentBase64) {
     throw Object.assign(new Error('Attachment content is required'), { status: 422 })
@@ -3273,13 +3270,22 @@ export async function uploadPortalAttachment(
       status: 422,
     })
   }
+  return { contentBase64, description, fileName: attachmentFileName(attachment) }
+}
+
+export async function uploadPortalAttachment(
+  tableID: number,
+  no: string,
+  attachment: Record<string, unknown>,
+) {
+  const { contentBase64, description, fileName } = validatePortalAttachment(attachment)
   const result = await callSoapMethod('UploadDocumentAttachment', {
     docNo: no,
     docNo2: no,
     description,
     tableID,
     file: contentBase64,
-    fileName: attachmentFileName(attachment),
+    fileName,
   })
   if (!attachmentOk(result)) {
     throw Object.assign(new Error('Business Central did not store the attachment'), {

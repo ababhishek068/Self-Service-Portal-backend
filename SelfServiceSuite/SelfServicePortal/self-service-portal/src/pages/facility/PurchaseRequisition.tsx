@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { PurchaseOperationsPanel } from '@/components/facility/PurchaseOperationsPanel'
+import { LocalPurchasePanel } from '@/components/facility/LocalPurchasePanel'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
@@ -111,7 +112,9 @@ export function PurchaseRequisition() {
       }}
       attachmentCategoryOptions={purchaseAttachmentCategories}
       attachmentCategoryHint="Supporting documents are optional. Add a Technical Specification, TOR / Scope of Work, BOQ, drawing, photo, or quotation when it helps Procurement. Enter a description for every uploaded file."
-      detailSupplement={({ request }) => <PurchaseOperationsPanel request={request} />}
+      detailSupplement={({ request }) => (
+        <LocalPurchasePanel request={request} fallback={<PurchaseOperationsPanel request={request} />} />
+      )}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={purchaseHeaderSchema}
       headerDefaults={{

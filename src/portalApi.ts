@@ -48,8 +48,11 @@ import {
 } from './ictHelpdesk.js'
 import {
   assertLocalPurchaseActionAllowed,
+  localPurchaseChainDocumentNos,
+  localPurchaseNextActions,
   localPurchaseRoles,
   parseSoapJson,
+  type LocalPurchaseChain,
 } from './localPurchaseFlow.js'
 import {
   enrichLeaveApprovalEntries,
@@ -94,6 +97,7 @@ import {
   submitPortalModuleRequest,
   updatePortalModuleHeader,
   uploadPortalAttachment,
+  validatePortalAttachment,
   uploadPortalModuleAttachment,
   moduleSpecSupportsAttachments,
   hospitalCategoryCode,
@@ -1241,8 +1245,13 @@ export function canManagePurchaseStock(authUser: FacilityAuth) {
   return facilityProcessRoles(authUser).includes('operations')
 }
 
-export function canViewPurchaseProcess(authUser: FacilityAuth) {
-  return facilityProcessRoles(authUser).length > 0
+export function canViewPurchaseProcess(authUser: FacilityAuth & { userID?: string }) {
+  return facilityProcessRoles(authUser).length > 0 || localPurchaseRoles(authUser).length > 0
+}
+
+/** Store-originated LPRs: Store/Procurement plus every Local Purchase role (FAD, Technical, Finance Checker, CEO). */
+function canViewLocalPurchase(authUser: FacilityAuth & { userID?: string }) {
+  return canViewStoreProcess(authUser) || localPurchaseRoles(authUser).length > 0
 }
 
 function canViewStoreProcess(authUser: FacilityAuth) {
@@ -2278,7 +2287,7 @@ async function mappedModuleRows(
   const rows = includeOperationalQueue
     ? fetchedRows.filter((row) => {
         if (portalModuleDocumentOwnedByUser(row, spec, authUser)) return true
-        if (storeOriginatedPurchaseVisible(row, spec, canViewStoreProcess(authUser))) return true
+        if (storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser))) return true
         const status = statusFromBc(documentStatusFromBc(row, module as PortalModuleKey))
         return ['Approved', 'Released', 'Posted'].includes(status)
       })
@@ -2745,7 +2754,7 @@ async function requestDetail(
   const mayView =
     options.forApproval ||
     portalModuleDocumentOwnedByUser(row, spec, authUser) ||
-    storeOriginatedPurchaseVisible(row, spec, canViewStoreProcess(authUser)) ||
+    storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser)) ||
     (await operationalViewAllowed(module, authUser, row, approvers)) ||
     (await approvalEntriesViewableByUser(approvers, authUser))
   if (!mayView) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
@@ -4134,7 +4143,7 @@ export function buildPortalApiRouter() {
     if (portalModuleDocumentOwnedByUser(row, spec, authUser)) return row
     if (
       spec.module === 'purchase-requisition' &&
-      storeOriginatedPurchaseVisible(row, spec, canViewStoreProcess(authUser))
+      storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser))
     ) {
       return row
     }
@@ -4522,6 +4531,50 @@ export function buildPortalApiRouter() {
    * winner/technical/FAD final, Create PO, PO approvals, receive, invoice, CEO pay, close).
    * Requires BC StaffPortal PortalLocalPurchaseAction after AL deploy.
    */
+  async function loadLocalPurchaseChain(documentNo: string) {
+    const result = await callSoapMethod('PortalLocalPurchaseChain', { documentNo })
+    return parseSoapJson(result.returnValue) as LocalPurchaseChain
+  }
+
+  /** RFQ No. for vendor-quote calls: the chain's Local RFQ (or the requested one, if it belongs to the chain). */
+  async function requireChainRfqNo(requestNo: string, requested: unknown) {
+    const chain = await loadLocalPurchaseChain(requestNo)
+    const chainRfqNo = String(chain.rfq?.no ?? chain.lpr?.createdRfqNo ?? '').trim()
+    const rfqNo = String(requested ?? '').trim() || chainRfqNo || requestNo
+    if (rfqNo.toUpperCase() !== requestNo.toUpperCase() && rfqNo.toUpperCase() !== chainRfqNo.toUpperCase()) {
+      throw portalError(
+        `${rfqNo} is not the Local RFQ for ${requestNo}.`,
+        422,
+        'LPR_DOCUMENT_NOT_IN_CHAIN',
+      )
+    }
+    return rfqNo
+  }
+
+  /**
+   * Local Purchase chain for one LPR / Local RFQ / Local PO: Store Req ↔ LPR ↔ RFQ ↔ Vendor Quotes ↔
+   * PO ↔ GRN ↔ Invoice, plus the next BC step(s) and whether the signed-in role owns them.
+   */
+  router.get(
+    '/requests/:id/local-purchase',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Local Purchase chain applies to Purchase Requisition (LPR/RFQ/PO) only.', 422)
+      }
+      await requestDetail(requestId, authUser)
+      const chain = await loadLocalPurchaseChain(String(req.query.documentNo ?? no).trim() || no)
+      const roles = localPurchaseRoles(authUser)
+      const rfqNo = String(chain.rfq?.no ?? '').trim()
+      const quotes = rfqNo
+        ? parseSoapJson((await callSoapMethod('PortalListVendorQuotes', { rfqNo })).returnValue)
+        : { rfqNo: '', quotes: [] }
+      res.json({ chain, quotes, roles, nextActions: localPurchaseNextActions(chain, roles) })
+    }),
+  )
+
   router.post(
     '/requests/:id/local-purchase',
     safe(async (req, res) => {
@@ -4549,6 +4602,16 @@ export function buildPortalApiRouter() {
       const documentNo = String(req.body?.documentNo ?? no).trim()
       if (!documentNo) {
         throw portalError('documentNo is required.', 422, 'LPR_DOCUMENT_REQUIRED')
+      }
+      if (module === 'purchaseRequisition' && documentNo.toUpperCase() !== no.toUpperCase()) {
+        const chainNos = localPurchaseChainDocumentNos(await loadLocalPurchaseChain(no))
+        if (!chainNos.includes(documentNo.toUpperCase())) {
+          throw portalError(
+            `${documentNo} is not part of the Local Purchase chain for ${no}.`,
+            422,
+            'LPR_DOCUMENT_NOT_IN_CHAIN',
+          )
+        }
       }
       let actionCode: string
       try {
@@ -4588,9 +4651,53 @@ export function buildPortalApiRouter() {
         throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
       }
       await requestDetail(requestId, authUser)
-      const rfqNo = String(req.query.rfqNo ?? req.query.documentNo ?? no).trim()
+      const rfqNo = await requireChainRfqNo(no, req.query.rfqNo ?? req.query.documentNo)
       const result = await callSoapMethod('PortalListVendorQuotes', { rfqNo })
       res.json(parseSoapJson(result.returnValue))
+    }),
+  )
+
+  /** Vendor Quotes (Local RFQ) → Attachments: quote file per vendor (required before Auto Select Winner). */
+  router.post(
+    '/requests/:id/vendor-quotes/:lineNo/attachments',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
+      }
+      await requestDetail(requestId, authUser)
+      try {
+        assertLocalPurchaseActionAllowed(authUser, 'UPSERT_VENDOR_QUOTE', '', true)
+      } catch (error) {
+        const err = error as { status?: number; code?: string; message?: string }
+        throw portalError(err.message || String(error), err.status ?? 400, err.code)
+      }
+      const lineNo = Number(req.params.lineNo)
+      if (!Number.isInteger(lineNo) || lineNo <= 0) {
+        throw portalError('Vendor quote line number is required.', 422, 'LPR_QUOTE_LINE_REQUIRED')
+      }
+      const rfqNo = await requireChainRfqNo(no, req.body?.rfqNo)
+      let attachment: ReturnType<typeof validatePortalAttachment>
+      try {
+        attachment = validatePortalAttachment(req.body ?? {})
+      } catch (error) {
+        const err = error as { status?: number; message?: string }
+        throw portalError(err.message || String(error), err.status ?? 422, 'ATTACHMENT_INVALID')
+      }
+      const result = await callSoapMethod('PortalAttachVendorQuoteFile', {
+        rfqNo,
+        lineNo,
+        fileName: attachment.fileName,
+        fileBase64: attachment.contentBase64,
+        description: attachment.description,
+      })
+      const list = await callSoapMethod('PortalListVendorQuotes', { rfqNo })
+      res.status(201).json({
+        result: parseSoapJson(result.returnValue),
+        quotes: parseSoapJson(list.returnValue),
+      })
     }),
   )
 
@@ -4610,11 +4717,12 @@ export function buildPortalApiRouter() {
         const err = error as { status?: number; code?: string; message?: string }
         throw portalError(err.message || String(error), err.status ?? 400, err.code)
       }
-      const rfqNo = String(req.body?.rfqNo ?? req.body?.documentNo ?? no).trim()
+      const rfqNo = await requireChainRfqNo(no, req.body?.rfqNo ?? req.body?.documentNo)
       const payload = {
         vendorNo: String(req.body?.vendorNo ?? ''),
         quotedAmount: req.body?.quotedAmount ?? req.body?.amount ?? 0,
         leadTimeDays: req.body?.leadTimeDays ?? req.body?.leadTime ?? 0,
+        quoteDate: String(req.body?.quoteDate ?? ''),
         notes: String(req.body?.notes ?? ''),
         lineNo: req.body?.lineNo ?? undefined,
       }

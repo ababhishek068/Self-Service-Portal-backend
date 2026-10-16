@@ -4974,6 +4974,22 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(ProcurementMgt.ListVendorQuotes(rfqNo));
     end;
 
+    procedure PortalLocalPurchaseChain(documentNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.GetLocalPurchaseChain(documentNo));
+    end;
+
+    procedure PortalAttachVendorQuoteFile(rfqNo: Code[50]; lineNo: Integer; fileName: Text[250]; fileBase64: BigText; description: Text[250]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+        ContentText: Text;
+    begin
+        fileBase64.GetSubText(ContentText, 1);
+        exit(ProcurementMgt.AttachVendorQuoteFile(rfqNo, lineNo, fileName, ContentText, description));
+    end;
+
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
     var
         portalReturn: Date;
