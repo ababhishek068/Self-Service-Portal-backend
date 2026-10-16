@@ -2325,8 +2325,10 @@ export function buildStaffRouter() {
           leaveAccruedToDate,
           totalLeaveTakenToDate,
           availableLeaveBalance: balance,
+          isAnnual,
         }),
         approvedLeaveDaysNotPosted(applicationRows),
+        isAnnual,
       )
       const balanceSource = isAnnual
         ? exactSummary?.availableLeaveBalance !== null &&

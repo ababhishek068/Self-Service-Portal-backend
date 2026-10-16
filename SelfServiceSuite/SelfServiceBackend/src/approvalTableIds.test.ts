@@ -2833,3 +2833,59 @@ describe('HOD role resolution', () => {
     assert.equal(merged?.FirstName, 'Hermon')
   })
 })
+
+describe('non-annual leave balance', () => {
+  // BC GetLeaveBalance for Sick (10 days, 1 taken). The payload also carries the
+  // annual card figures (accruedDays 4.7) that previously leaked into every type.
+  const sickSummary = parseBcLeaveSummary(
+    JSON.stringify({
+      isAnnualLeave: false,
+      allocatedDays: 10,
+      reimbursedDays: 0,
+      carryForwardBalanceForType: 0,
+      currentTotalLeaveTaken: 1,
+      currentLeaveBalance: 9,
+      availableLeaveBalance: 9,
+      accruedDays: 4.7,
+      leaveAccruedToDate: 4.7,
+      totalAvailableLeaveBalance: 23.8,
+      leaveEntitlement: 10,
+      totalLeaveTakenToDate: 1,
+    }),
+  )
+
+  it('shows the type balance from BC, not annual accrued minus type taken', () => {
+    const fields = resolveLeaveBalanceBreakdown({
+      summary: sickSummary,
+      entitlement: 10,
+      carryForward: null,
+      leaveAccruedToDate: null,
+      totalLeaveTakenToDate: 1,
+      availableLeaveBalance: 9,
+      isAnnual: false,
+    })
+    assert.deepEqual(fields, {
+      leaveEntitlement: 10,
+      carryForward: 0,
+      totalAvailableLeaveBalance: 10,
+      leaveAccruedToDate: null,
+      totalLeaveTakenToDate: 1,
+      availableLeaveBalance: 9,
+    })
+  })
+
+  it('still deducts approved-but-unposted days for non-annual types', () => {
+    const fields = resolveLeaveBalanceBreakdown({
+      summary: sickSummary,
+      entitlement: 10,
+      carryForward: null,
+      leaveAccruedToDate: null,
+      totalLeaveTakenToDate: 1,
+      availableLeaveBalance: 9,
+      isAnnual: false,
+    })
+    const shown = applyUnpostedApprovedLeave(fields, 2, false)
+    assert.equal(shown.availableLeaveBalance, 7)
+    assert.equal(shown.totalLeaveTakenToDate, 3)
+  })
+})

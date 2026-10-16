@@ -264,13 +264,16 @@ export function approvedLeaveDaysNotPosted(rows: Array<Record<string, unknown>>)
 export function applyUnpostedApprovedLeave(
   breakdown: LeaveBalanceBreakdown,
   unpostedApprovedDays: number,
+  isAnnual = true,
 ): LeaveBalanceBreakdown {
   if (!Number.isFinite(unpostedApprovedDays) || unpostedApprovedDays <= 0) return breakdown
   const totalLeaveTakenToDate = roundedLeaveValue(
     breakdown.totalLeaveTakenToDate + unpostedApprovedDays,
   )
-  const availableLeaveBalance =
-    breakdown.leaveAccruedToDate === null
+  // Non-annual types: BC's per-type balance already nets posted days only.
+  const availableLeaveBalance = !isAnnual
+    ? roundedLeaveValue(Math.max(0, breakdown.availableLeaveBalance - unpostedApprovedDays))
+    : breakdown.leaveAccruedToDate === null
       ? breakdown.availableLeaveBalance
       : roundedLeaveValue(Math.max(0, breakdown.leaveAccruedToDate - totalLeaveTakenToDate))
   return {
@@ -295,8 +298,11 @@ export function resolveLeaveBalanceBreakdown(input: {
   leaveAccruedToDate: number | null
   totalLeaveTakenToDate: number
   availableLeaveBalance: number
+  /** Omitted = annual (unchanged behaviour). */
+  isAnnual?: boolean
 }): LeaveBalanceBreakdown {
   const summary = input.summary
+  if (input.isAnnual === false) return nonAnnualLeaveBreakdown(input)
   const leaveEntitlement = roundedLeaveValue(
     summary?.leaveEntitlement ?? summary?.allocatedDays ?? input.entitlement,
   )
@@ -350,6 +356,38 @@ export function resolveLeaveBalanceBreakdown(input: {
     leaveAccruedToDate,
     totalLeaveTakenToDate,
     availableLeaveBalance,
+  }
+}
+
+/**
+ * Sick / Paternity / Mourning / other non-annual types. BC GetLeaveBalance returns the
+ * type's own Allocated + Reimbursed + Carry Forward − Taken; it also carries the annual
+ * card figures (accruedDays, totalAvailableLeaveBalance), which must never feed a
+ * non-annual balance — doing so showed annual accrued − type taken for every type.
+ */
+function nonAnnualLeaveBreakdown(input: {
+  summary: BcLeaveSummary | null
+  entitlement: number
+  carryForward: number | null
+  totalLeaveTakenToDate: number
+  availableLeaveBalance: number
+}): LeaveBalanceBreakdown {
+  const summary = input.summary
+  const leaveEntitlement = roundedLeaveValue(summary?.allocatedDays ?? input.entitlement)
+  const carryForward = roundedLeaveValue(summary?.carryForwardBalanceForType ?? input.carryForward ?? 0)
+  const reimbursements = summary?.reimbursedDays ?? 0
+  const totalLeaveTakenToDate = roundedLeaveValue(
+    Math.abs(summary?.currentTotalLeaveTaken ?? input.totalLeaveTakenToDate),
+  )
+  return {
+    leaveEntitlement,
+    carryForward,
+    totalAvailableLeaveBalance: roundedLeaveValue(
+      Math.max(0, leaveEntitlement + carryForward + reimbursements),
+    ),
+    leaveAccruedToDate: null,
+    totalLeaveTakenToDate,
+    availableLeaveBalance: roundedLeaveValue(Math.max(0, input.availableLeaveBalance)),
   }
 }
 
