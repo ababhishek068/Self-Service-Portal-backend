@@ -3021,7 +3021,7 @@ codeunit 50049 "Staff Portal Codeunit"
         end;
     end;
 
-    procedure SendEmail(receiver: Text[250]; subject: Text[50]; message: Text[1000]) returnValue: Boolean
+    procedure SendEmail(receiver: Text[250]; subject: Text[250]; message: Text) returnValue: Boolean
     var
         CuEmail: Codeunit Email;
         CuEmailMessage: Codeunit "Email Message";

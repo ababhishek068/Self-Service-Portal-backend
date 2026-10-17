@@ -3279,3 +3279,20 @@ describe('unlimited non-annual leave (Sick Leave: Days 0, Unlimited Days)', () =
     assert.equal(leaveApplicationExceedsAvailableBalance(2, limit), false)
   })
 })
+
+describe('password reset email', () => {
+  it('fits the StaffPortal SendEmail limits and greets the employee by first name', async () => {
+    const { passwordResetEmail } = await import('./auth.js')
+    const mail = passwordResetEmail('Zerihun', '33735')
+    assert.ok(mail.subject.length <= 50)
+    assert.ok(mail.message.length <= 1000)
+    assert.match(mail.message, /Dear Zerihun,/)
+    assert.match(mail.message, /<b[^>]*>33735<\/b>/)
+  })
+
+  it('escapes names and falls back to a neutral greeting', async () => {
+    const { passwordResetEmail } = await import('./auth.js')
+    assert.match(passwordResetEmail('<b>x</b>', '1').message, /&lt;b&gt;x&lt;\/b&gt;/)
+    assert.match(passwordResetEmail('  ', '1').message, /Dear Colleague,/)
+  })
+})

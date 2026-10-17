@@ -275,6 +275,30 @@ function normalizeStaffNo(staffNo: string) {
 const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000
 const passwordResetTokenCache = new Map<string, { token: string; expiresAt: number }>()
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
+}
+
+/**
+ * Password reset email sent through BC SendEmail (HTML). Kept within the 50-character subject and
+ * 1000-character message limits of older StaffPortal builds. BC expires the code once it is used
+ * (UpdatePassword) or replaced by a newer request (UpdatePasswordToken).
+ */
+export function passwordResetEmail(firstName: string, token: string) {
+  const name = escapeHtml(firstName.trim()) || 'Colleague'
+  return {
+    subject: 'ABH Smart ESSP - Password reset code',
+    message:
+      `<p>Dear ${name},</p>` +
+      `<p>We received a request to reset your Smart ESSP password.</p>` +
+      `<p>Your password reset code is: <b style="font-size:18px;letter-spacing:2px">${escapeHtml(token)}</b></p>` +
+      `<p>Enter this code on the Reset Password page together with your new password. ` +
+      `The code works only once, and only the most recent code you requested is valid.</p>` +
+      `<p>If you did not request a password reset, please ignore this email. Your password will not change.</p>` +
+      `<p>Regards,<br>ABH Partners - Smart ESSP<br><span style="color:#888">This is an automated message; please do not reply.</span></p>`,
+  }
+}
+
 export function cachePasswordResetToken(staffNo: string, token: string, now = Date.now()) {
   const normalizedStaffNo = normalizeStaffNo(staffNo)
   const normalizedToken = token.trim()
@@ -856,10 +880,11 @@ export function buildAuthRouter() {
         return
       }
 
+      const resetEmail = passwordResetEmail(String(employee.FirstName ?? ''), resetToken)
       const emailResult = await callSoapMethod('SendEmail', {
         receiver: email,
-        subject: 'Password Reset Token',
-        message: `Your new password reset token is ${resetToken}`,
+        subject: resetEmail.subject,
+        message: resetEmail.message,
       })
       if (!soapSucceeded(emailResult.returnValue)) {
         res.status(502).json({ message: 'The reset token was created, but the email could not be sent.' })
