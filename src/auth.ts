@@ -275,6 +275,11 @@ function normalizeStaffNo(staffNo: string) {
 const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000
 const passwordResetTokenCache = new Map<string, { token: string; expiresAt: number }>()
 
+/** 6-digit password reset code (100000–999999); BC stores it in HR Employee "Reset Token" (Text[20]). */
+export function newPasswordResetToken() {
+  return String(randomInt(100000, 1000000))
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
 }
@@ -870,7 +875,7 @@ export function buildAuthRouter() {
         return
       }
 
-      const resetToken = String(randomInt(10000, 100000))
+      const resetToken = newPasswordResetToken()
       const tokenResult = await callSoapMethod('UpdatePasswordToken', {
         password_token: resetToken,
         staffNo,

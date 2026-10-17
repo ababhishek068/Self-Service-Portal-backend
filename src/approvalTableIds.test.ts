@@ -3290,6 +3290,11 @@ describe('password reset email', () => {
     assert.match(mail.message, /<b[^>]*>33735<\/b>/)
   })
 
+  it('generates 6-digit reset codes', async () => {
+    const { newPasswordResetToken } = await import('./auth.js')
+    for (let i = 0; i < 200; i += 1) assert.match(newPasswordResetToken(), /^[1-9]\d{5}$/)
+  })
+
   it('escapes names and falls back to a neutral greeting', async () => {
     const { passwordResetEmail } = await import('./auth.js')
     assert.match(passwordResetEmail('<b>x</b>', '1').message, /&lt;b&gt;x&lt;\/b&gt;/)
