@@ -96,12 +96,21 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cp "$AL_NEW/StaffPortalCodeunit.Codeunit.al" "$PENDING_AL_DIR/"
   cp "$AL_ROOT/src/src/Store/ABHLocalProcurement.Codeunit.al" "$PENDING_AL_DIR/"
   cp "$AL_ROOT/src/src/Store/ABHVendorQuote.Table.al" "$PENDING_AL_DIR/"
+  # LPR Role Center menus (Nitish, ABH-LIVE-AL c613aa8) and setup/RC caption updates.
+  for f in ABHCeoLprRC.PageExt.al ABHFundsMgmtLprRC.PageExt.al ABHPayrollFundsLprRC.PageExt.al \
+           ABHLocalProcSetup.Page.al ABHLocalProcurementRC.Page.al; do
+    cp "$AL_ROOT/src/src/Store/$f" "$PENDING_AL_DIR/"
+  done
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
-These AL files add the Local Purchase portal actions (PortalLocalPurchaseAction,
-PortalLocalPurchaseChain, PortalAttachVendorQuoteFile, Post Receive, send-back).
-Merge into the AL project, compile and test in UAT first. Until then the portal
-keeps the existing purchase/store behaviour (Local Purchase panel falls back).
+These are the Local Purchase files changed for the portal; the full source is the
+ABH-LIVE-AL branch cursor/lpr-portal-soap-wrappers-e873 (= main incl. Nitish's LPR
+Role Center menus + portal wrappers). Compile THAT branch, test in UAT, publish.
+Adds: PortalLocalPurchaseAction / Chain / Roles / AttachVendorQuoteFile, Post
+Receive, send-back, and the portal-actor fix in ABH Local Procurement.
+The portal turns Local Purchase on by itself once these methods exist in BC;
+until then purchase/store behave exactly as in 1.0.3.382.
+After publish: fill ABH Local Proc Setup user IDs, turn OFF Using Temporary Users.
 PENDEOF
 else
 if [[ -f "$BC_APP" ]]; then
