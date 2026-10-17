@@ -14,6 +14,7 @@ import {
   type LocalPurchaseNextAction,
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
+import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
@@ -69,7 +70,8 @@ function DocCard({ title, children }: { title: string; children: ReactNode }) {
 
 /**
  * Local Purchase (LPR -> RFQ -> PO) on the Purchase Requisition card: mirrors the BC Local RFQ
- * steps ribbon. Falls back to the generic purchase panel when the document is not a Local LPR.
+ * steps ribbon. Renders the 1.0.3.382 purchase panel (`fallback`) unchanged when Local Purchase
+ * is not live in BC yet, or when the document is not a Local LPR.
  */
 export function LocalPurchasePanel({ request, fallback }: { request: PortalRequest; fallback: ReactNode }) {
   const toast = useToast()
@@ -84,9 +86,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     quoteDate: todayIsoDate(),
     notes: '',
   })
+  const access = useLocalPurchaseAccess()
   const stateQuery = useQuery({
     queryKey: ['local-purchase', request.id],
     queryFn: () => getLocalPurchaseState(request.id),
+    enabled: access.enabled,
     retry: false,
   })
   const refresh = async () => {
@@ -115,6 +119,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     onSuccess: refresh,
   })
 
+  if (!access.enabled) return <>{fallback}</>
   if (stateQuery.isLoading) {
     return <p className="text-sm text-slate-600">Loading Local Purchase status…</p>
   }

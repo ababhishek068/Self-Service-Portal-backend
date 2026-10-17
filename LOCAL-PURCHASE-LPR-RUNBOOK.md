@@ -13,11 +13,12 @@ Example line: SPEAKERS / Sony / EACH.
    `NEWCHANGES/StaffPortalCodeunit.Codeunit.al` (SOAP: `PortalLocalPurchaseAction`, `PortalListVendorQuotes`,
    `PortalLocalPurchaseChain`, `PortalAttachVendorQuoteFile`). `deploy/StaffPortalCodeunit.Codeunit.al` here is the
    same wrapper set.
-2. **ABH Local Proc Setup** in BC: FAD User ID, Procurement, Technical, Finance Checker, CEO user IDs. BC enforces
-   these on every action (`TestIsFad`, `TestIsProcurement`, …) using the portal actor.
-3. **SSP `.env`**: when a BC user's job title does not name its role (demo FAD is `ADMIN`), map it:
-   `LOCAL_PURCHASE_ROLE_USERS=ADMIN:fad,LPR_PROCURE:procurement,IT_KEEPER:operations,LPR_TECH:technical,LPR_FINCHECK:financeChecker,LPR_CEO:ceo`
-   (BC user ID or employee no.; repeat a user for several roles).
+2. **ABH Local Proc Setup** in BC: FAD User ID, Procurement, Technical, Finance Checker, CEO user IDs, with
+   **Using Temporary Users** off. This is the only role source: the portal asks BC (`PortalLocalPurchaseRoles`)
+   which LPR roles the signed-in user's BC User ID holds, and BC re-checks it on every action. Store Keepers are
+   detected as for store requisitions (Operations / Store assignment).
+3. **No portal switch needed.** Local Purchase turns on by itself once BC has the LPR portal methods; on an
+   older BC app (e.g. 1.0.3.310) the portal behaves exactly like 1.0.3.382.
 
 ## Who does what in SSP
 

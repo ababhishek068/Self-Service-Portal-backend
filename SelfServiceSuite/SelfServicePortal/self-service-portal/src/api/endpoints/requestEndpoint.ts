@@ -269,3 +269,15 @@ export async function uploadLocalPurchaseQuoteAttachment(
     { timeout: 60000 } as Parameters<typeof authPost>[2],
   )
 }
+
+export interface LocalPurchaseAccess {
+  /** False until BC has the Local Purchase portal methods; then 382 behaviour applies. */
+  enabled: boolean
+  roles: string[]
+}
+
+/** BC-driven Local Purchase availability and the signed-in user's LPR roles (ABH Local Proc Setup). */
+export async function getLocalPurchaseAccess() {
+  requireAuthApiUrl()
+  return authGet<LocalPurchaseAccess>('/api/local-purchase/access')
+}

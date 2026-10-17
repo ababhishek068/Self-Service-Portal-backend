@@ -252,9 +252,8 @@ ABH SMART ESSP ENTERPRISE HUB — ${VERSION}
 
 4) Double-click START-ABH-PORTAL.bat
 
-   Local Purchase roles: add LOCAL_PURCHASE_ROLE_USERS (e.g. ADMIN:fad,LPR_PROCURE:procurement,
-   IT_KEEPER:operations,LPR_TECH:technical,LPR_FINCHECK:financeChecker,LPR_CEO:ceo) to .env
-   when job titles do not name the role. See LOCAL-PURCHASE-LPR-RUNBOOK.md.
+   Local Purchase roles come from BC ABH Local Proc Setup (no .env setting). Local Purchase
+   turns on automatically once BC has the LPR portal methods. See LOCAL-PURCHASE-LPR-RUNBOOK.md.
 
 5) Confirm: http://127.0.0.1:4000/api/portal-build
    Expected: ${BUILD_STAMP}

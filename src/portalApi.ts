@@ -49,11 +49,14 @@ import {
 } from './ictHelpdesk.js'
 import {
   assertLocalPurchaseActionAllowed,
+  cachedLocalPurchaseAccess,
+  hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
   localPurchaseNextActions,
-  localPurchaseRoles,
   parseSoapJson,
+  resolveLocalPurchaseAccess,
   type LocalPurchaseChain,
+  type LocalPurchaseRole,
 } from './localPurchaseFlow.js'
 import {
   enrichLeaveApprovalEntries,
@@ -437,7 +440,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v230 — 1.0.3.389 (382 UI + 382 backend + Sick unlimited; BC app 1.0.3.310)'
+export const PORTAL_API_BUILD = 'v231 — 1.0.3.390 (382 + Local Purchase auto-enabled by BC; BC app 1.0.3.310 until LPR app is published)'
 
 interface LookupSpec {
   service: string
@@ -1216,12 +1219,23 @@ export function canManagePurchaseStock(authUser: FacilityAuth) {
 }
 
 export function canViewPurchaseProcess(authUser: FacilityAuth & { userID?: string }) {
-  return facilityProcessRoles(authUser).length > 0 || localPurchaseRoles(authUser).length > 0
+  return (
+    facilityProcessRoles(authUser).length > 0 ||
+    hasBcLocalPurchaseRole(cachedLocalPurchaseAccess(authUser))
+  )
 }
 
-/** Store-originated LPRs: Store/Procurement plus every Local Purchase role (FAD, Technical, Finance Checker, CEO). */
+/**
+ * Store-originated LPRs: Store/Procurement (as in 1.0.3.382) plus the users BC's ABH Local Proc
+ * Setup names (FAD, Technical, Finance Checker, CEO) — only once Local Purchase is live in BC.
+ */
 function canViewLocalPurchase(authUser: FacilityAuth & { userID?: string }) {
-  return canViewStoreProcess(authUser) || localPurchaseRoles(authUser).length > 0
+  return canViewStoreProcess(authUser) || hasBcLocalPurchaseRole(cachedLocalPurchaseAccess(authUser))
+}
+
+/** Resolve (and cache) BC Local Purchase access before purchase-requisition visibility checks. */
+async function warmLocalPurchaseAccess(module: string, authUser: AuthUser) {
+  if (module === 'purchaseRequisition') await resolveLocalPurchaseAccess(authUser, callSoapMethod)
 }
 
 function canViewStoreProcess(authUser: FacilityAuth) {
@@ -2249,6 +2263,7 @@ async function mappedModuleRows(
 ) {
   const spec = findFrontendModuleSpec(module)
   if (!spec) throw portalError(`${module} is not implemented in the Business Central codeunit`, 501)
+  await warmLocalPurchaseAccess(module, authUser)
   const includeOperationalQueue =
     module === 'purchaseRequisition'
       ? canViewPurchaseProcess(authUser)
@@ -2723,6 +2738,7 @@ async function requestDetail(
   // ESS showHeader / approval viewDocument load by document number only (no owner filter).
   const row = await getPortalModuleDocument(spec, authUser, no, false)
   if (!row) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
+  await warmLocalPurchaseAccess(module, authUser)
   const approvers = await enrichLeaveApprovalEntries(
     await fetchPortalApprovalEntries(spec, no, row),
   )
@@ -4118,6 +4134,7 @@ export function buildPortalApiRouter() {
       throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
     }
     if (portalModuleDocumentOwnedByUser(row, spec, authUser)) return row
+    await warmLocalPurchaseAccess(module, authUser)
     if (
       spec.module === 'purchase-requisition' &&
       storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser))
@@ -4464,6 +4481,10 @@ export function buildPortalApiRouter() {
         })
         return
       }
+      if (requestedAction === 'REQUEST_FOR_LPR' || requestedAction === 'ISSUE_AFTER_LPR') {
+        // Local Purchase store actions need the BC app with the LPR portal methods.
+        await requireLocalPurchaseAccess(authUser)
+      }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)
       const actionComment = String(req.body?.actionComment ?? '').trim()
@@ -4507,6 +4528,42 @@ export function buildPortalApiRouter() {
    * winner/technical/FAD final, Create PO, PO approvals, receive, invoice, CEO pay, close).
    * Requires BC StaffPortal PortalLocalPurchaseAction after AL deploy.
    */
+  /** Local Purchase must be live in BC (PortalLocalPurchase* methods); otherwise 382 behaviour applies. */
+  async function requireLocalPurchaseAccess(authUser: AuthUser) {
+    const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+    if (!access.enabled) {
+      throw portalError(
+        'Local Purchase is not enabled in Business Central yet. Publish the BC app with the Local Purchase portal methods first.',
+        409,
+        'LPR_NOT_ENABLED',
+      )
+    }
+    return access
+  }
+
+  function assertLprAction(
+    roles: LocalPurchaseRole[],
+    actionCode: string,
+    actionComment = '',
+    hasPayload = false,
+  ) {
+    try {
+      return assertLocalPurchaseActionAllowed(roles, actionCode, actionComment, hasPayload)
+    } catch (error) {
+      const err = error as { status?: number; code?: string; message?: string }
+      throw portalError(err.message || String(error), err.status ?? 400, err.code)
+    }
+  }
+
+  router.get(
+    '/local-purchase/access',
+    safe(async (req, res) => {
+      const access = await resolveLocalPurchaseAccess(user(req), callSoapMethod)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ enabled: access.enabled, roles: access.roles })
+    }),
+  )
+
   async function loadLocalPurchaseChain(documentNo: string) {
     const result = await callSoapMethod('PortalLocalPurchaseChain', { documentNo })
     return parseSoapJson(result.returnValue) as LocalPurchaseChain
@@ -4540,9 +4597,9 @@ export function buildPortalApiRouter() {
       if (module !== 'purchaseRequisition') {
         throw portalError('Local Purchase chain applies to Purchase Requisition (LPR/RFQ/PO) only.', 422)
       }
+      const { roles } = await requireLocalPurchaseAccess(authUser)
       await requestDetail(requestId, authUser)
       const chain = await loadLocalPurchaseChain(String(req.query.documentNo ?? no).trim() || no)
-      const roles = localPurchaseRoles(authUser)
       const rfqNo = String(chain.rfq?.no ?? '').trim()
       const quotes = rfqNo
         ? parseSoapJson((await callSoapMethod('PortalListVendorQuotes', { rfqNo })).returnValue)
@@ -4563,6 +4620,7 @@ export function buildPortalApiRouter() {
           422,
         )
       }
+      const { roles } = await requireLocalPurchaseAccess(authUser)
       await requestDetail(requestId, authUser)
       const actionComment = String(req.body?.actionComment ?? req.body?.comment ?? '').trim()
       const payload =
@@ -4589,18 +4647,12 @@ export function buildPortalApiRouter() {
           )
         }
       }
-      let actionCode: string
-      try {
-        actionCode = assertLocalPurchaseActionAllowed(
-          authUser,
-          String(req.body?.actionCode ?? ''),
-          actionComment,
-          Boolean(payloadJson),
-        )
-      } catch (error) {
-        const err = error as { status?: number; code?: string; message?: string }
-        throw portalError(err.message || String(error), err.status ?? 400, err.code)
-      }
+      const actionCode = assertLprAction(
+        roles,
+        String(req.body?.actionCode ?? ''),
+        actionComment,
+        Boolean(payloadJson),
+      )
       const result = await callSoapMethod('PortalLocalPurchaseAction', {
         documentNo,
         actionCode,
@@ -4611,7 +4663,7 @@ export function buildPortalApiRouter() {
       })
       res.json({
         result: parseSoapJson(result.returnValue),
-        roles: localPurchaseRoles(authUser),
+        roles,
         request: await requestDetail(requestId, authUser).catch(() => null),
       })
     }),
@@ -4626,6 +4678,7 @@ export function buildPortalApiRouter() {
       if (module !== 'purchaseRequisition') {
         throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
       }
+      await requireLocalPurchaseAccess(authUser)
       await requestDetail(requestId, authUser)
       const rfqNo = await requireChainRfqNo(no, req.query.rfqNo ?? req.query.documentNo)
       const result = await callSoapMethod('PortalListVendorQuotes', { rfqNo })
@@ -4643,13 +4696,9 @@ export function buildPortalApiRouter() {
       if (module !== 'purchaseRequisition') {
         throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
       }
+      const { roles } = await requireLocalPurchaseAccess(authUser)
       await requestDetail(requestId, authUser)
-      try {
-        assertLocalPurchaseActionAllowed(authUser, 'UPSERT_VENDOR_QUOTE', '', true)
-      } catch (error) {
-        const err = error as { status?: number; code?: string; message?: string }
-        throw portalError(err.message || String(error), err.status ?? 400, err.code)
-      }
+      assertLprAction(roles, 'UPSERT_VENDOR_QUOTE', '', true)
       const lineNo = Number(req.params.lineNo)
       if (!Number.isInteger(lineNo) || lineNo <= 0) {
         throw portalError('Vendor quote line number is required.', 422, 'LPR_QUOTE_LINE_REQUIRED')
@@ -4686,13 +4735,9 @@ export function buildPortalApiRouter() {
       if (module !== 'purchaseRequisition') {
         throw portalError('Vendor quotes apply to Purchase Requisition / Local RFQ only.', 422)
       }
+      const { roles } = await requireLocalPurchaseAccess(authUser)
       await requestDetail(requestId, authUser)
-      try {
-        assertLocalPurchaseActionAllowed(authUser, 'UPSERT_VENDOR_QUOTE', '', true)
-      } catch (error) {
-        const err = error as { status?: number; code?: string; message?: string }
-        throw portalError(err.message || String(error), err.status ?? 400, err.code)
-      }
+      assertLprAction(roles, 'UPSERT_VENDOR_QUOTE', '', true)
       const rfqNo = await requireChainRfqNo(no, req.body?.rfqNo ?? req.body?.documentNo)
       const payload = {
         vendorNo: String(req.body?.vendorNo ?? ''),

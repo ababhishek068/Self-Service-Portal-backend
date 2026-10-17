@@ -1,71 +1,40 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { beforeEach, describe, it } from 'node:test'
 import {
   assertLocalPurchaseActionAllowed,
+  cachedLocalPurchaseAccess,
+  clearLocalPurchaseAccessCache,
+  hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
   localPurchaseNextActions,
-  localPurchaseRoles,
-  parseLocalPurchaseRoleUsers,
+  parseBcLocalPurchaseRoles,
+  resolveLocalPurchaseAccess,
   LOCAL_PURCHASE_ACTIONS,
   type LocalPurchaseChain,
   type LocalPurchaseRole,
 } from './localPurchaseFlow.js'
 
-describe('localPurchaseRoles', () => {
-  it('maps FAD / procurement / finance checker / technical / CEO from titles and user IDs', () => {
-    assert.deepEqual(
-      localPurchaseRoles({ roles: [], jobTitle: 'Finance and Admin Director', department: '', departmentName: '' }),
-      ['fad', 'finance'],
-    )
-    assert.ok(localPurchaseRoles({ roles: [], jobTitle: '', department: '', departmentName: '', userID: 'LPR_PROCURE' }).includes('procurement'))
-    assert.ok(localPurchaseRoles({ roles: [], jobTitle: 'Finance Checker', department: '', departmentName: '' }).includes('financeChecker'))
-    assert.ok(localPurchaseRoles({ roles: [], jobTitle: '', department: '', departmentName: '', userID: 'LPR_TECH' }).includes('technical'))
-    assert.ok(localPurchaseRoles({ roles: ['ceo'], jobTitle: '', department: '', departmentName: '' }).includes('ceo'))
-  })
-})
-
 describe('assertLocalPurchaseActionAllowed', () => {
-  it('allows the video-flow actions for the owning roles', () => {
-    const fad = { roles: [], jobTitle: 'FAD', department: 'Finance & Administration', departmentName: '' }
-    const procure = { roles: ['procurement'], jobTitle: '', department: '', departmentName: '' }
-    const tech = { roles: [], jobTitle: '', department: '', departmentName: '', userID: 'LPR_TECH' }
-    const finCheck = { roles: [], jobTitle: 'Finance Checker', department: '', departmentName: '' }
-    const ceo = { roles: ['ceo'], jobTitle: '', department: '', departmentName: '' }
-
-    assert.equal(assertLocalPurchaseActionAllowed(fad, 'APPROVE_LPR_FAD'), 'APPROVE_LPR_FAD')
-    assert.equal(assertLocalPurchaseActionAllowed(procure, 'CONVERT_TO_RFQ'), 'CONVERT_TO_RFQ')
-    assert.equal(
-      assertLocalPurchaseActionAllowed(procure, 'UPSERT_VENDOR_QUOTE', '', true),
-      'UPSERT_VENDOR_QUOTE',
-    )
-    assert.equal(assertLocalPurchaseActionAllowed(procure, 'AUTO_SELECT_WINNER'), 'AUTO_SELECT_WINNER')
-    assert.equal(
-      assertLocalPurchaseActionAllowed(tech, 'SUBMIT_TECHNICAL_REVIEW', 'change vendor'),
-      'SUBMIT_TECHNICAL_REVIEW',
-    )
-    assert.equal(assertLocalPurchaseActionAllowed(fad, 'APPROVE_WINNER_FAD_FINAL'), 'APPROVE_WINNER_FAD_FINAL')
-    assert.equal(assertLocalPurchaseActionAllowed(procure, 'CREATE_PO'), 'CREATE_PO')
-    assert.equal(assertLocalPurchaseActionAllowed(finCheck, 'APPROVE_PO_FINANCE_CHECKER'), 'APPROVE_PO_FINANCE_CHECKER')
-    assert.equal(assertLocalPurchaseActionAllowed(fad, 'APPROVE_PO_FAD'), 'APPROVE_PO_FAD')
-    assert.equal(assertLocalPurchaseActionAllowed(ceo, 'APPROVE_PAYMENT_CEO'), 'APPROVE_PAYMENT_CEO')
+  it('allows the video-flow actions for the BC setup role that owns them', () => {
+    assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_LPR_FAD'), 'APPROVE_LPR_FAD')
+    assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'CONVERT_TO_RFQ'), 'CONVERT_TO_RFQ')
+    assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'UPSERT_VENDOR_QUOTE', '', true), 'UPSERT_VENDOR_QUOTE')
+    assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'AUTO_SELECT_WINNER'), 'AUTO_SELECT_WINNER')
+    assert.equal(assertLocalPurchaseActionAllowed(['technical'], 'SUBMIT_TECHNICAL_REVIEW', 'change vendor'), 'SUBMIT_TECHNICAL_REVIEW')
+    assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_WINNER_FAD_FINAL'), 'APPROVE_WINNER_FAD_FINAL')
+    assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'CREATE_PO'), 'CREATE_PO')
+    assert.equal(assertLocalPurchaseActionAllowed(['financeChecker'], 'APPROVE_PO_FINANCE_CHECKER'), 'APPROVE_PO_FINANCE_CHECKER')
+    assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_PO_FAD'), 'APPROVE_PO_FAD')
+    assert.equal(assertLocalPurchaseActionAllowed(['ceo'], 'APPROVE_PAYMENT_CEO'), 'APPROVE_PAYMENT_CEO')
   })
 
-  it('rejects cross-role and missing comment/payload', () => {
-    const procure = { roles: ['procurement'], jobTitle: '', department: '', departmentName: '' }
-    assert.throws(() => assertLocalPurchaseActionAllowed(procure, 'APPROVE_LPR_FAD'), /not authorized/i)
-    assert.throws(
-      () => assertLocalPurchaseActionAllowed(procure, 'UPSERT_VENDOR_QUOTE', '', false),
-      /payload/i,
-    )
-    assert.throws(
-      () =>
-        assertLocalPurchaseActionAllowed(
-          { roles: [], jobTitle: '', department: '', departmentName: '', userID: 'LPR_TECH' },
-          'SUBMIT_TECHNICAL_REVIEW',
-          '',
-        ),
-      /comment/i,
-    )
+  it('rejects cross-role, a generic finance title, and missing comment/payload', () => {
+    assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'APPROVE_LPR_FAD'), /not authorized/i)
+    // A "finance" job title is not a BC setup role — it can no longer approve as FAD or pay as CEO.
+    assert.throws(() => assertLocalPurchaseActionAllowed(['finance'], 'APPROVE_LPR_FAD'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['finance'], 'APPROVE_PAYMENT_CEO'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'UPSERT_VENDOR_QUOTE', '', false), /payload/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['technical'], 'SUBMIT_TECHNICAL_REVIEW', ''), /comment/i)
   })
 
   it('covers every documented Local Purchase SOAP action', () => {
@@ -228,24 +197,57 @@ describe('localPurchaseNextActions — full recording path', () => {
   })
 })
 
-describe('LOCAL_PURCHASE_ROLE_USERS', () => {
-  it('parses USER:role pairs and ignores unknown roles', () => {
-    const map = parseLocalPurchaseRoleUsers('ADMIN:fad, admin:financeChecker,LPR_PROCURE:procurement,X:boss,bad')
-    assert.deepEqual([...(map.get('ADMIN') ?? [])], ['fad', 'financeChecker'])
-    assert.deepEqual([...(map.get('LPR_PROCURE') ?? [])], ['procurement'])
-    assert.equal(map.has('X'), false)
+describe('Local Purchase access from Business Central', () => {
+  beforeEach(() => clearLocalPurchaseAccessCache())
+  const fadUser = { userID: 'ADMIN', jobTitle: 'Director' }
+  const keeper = { userID: 'IT_KEEPER', jobTitle: 'Store Keeper' }
+
+  it('parses the BC roles response and drops unknown names', () => {
+    assert.deepEqual(parseBcLocalPurchaseRoles('{"roles":["fad","FinanceChecker","boss"]}'), ['fad', 'financeChecker'])
+    assert.throws(() => parseBcLocalPurchaseRoles('{"nope":1}'), /invalid/i)
   })
 
-  it('grants configured roles to BC users whose titles do not name the role', () => {
-    const previous = process.env.LOCAL_PURCHASE_ROLE_USERS
-    process.env.LOCAL_PURCHASE_ROLE_USERS = 'ADMIN:fad,ABH-010:operations'
-    try {
-      assert.ok(localPurchaseRoles({ roles: [], userID: 'admin' }).includes('fad'))
-      assert.ok(localPurchaseRoles({ roles: [], userID: 'ZERIHUN_SISAY', employeeNo: 'ABH-010' }).includes('operations'))
-      assert.equal(assertLocalPurchaseActionAllowed({ roles: [], userID: 'ADMIN' }, 'APPROVE_LPR_FAD'), 'APPROVE_LPR_FAD')
-    } finally {
-      if (previous === undefined) delete process.env.LOCAL_PURCHASE_ROLE_USERS
-      else process.env.LOCAL_PURCHASE_ROLE_USERS = previous
+  it('is enabled with BC setup roles when BC has PortalLocalPurchaseRoles', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const soap = async (_method: string, params: Record<string, unknown>) => {
+      calls.push(params)
+      return { returnValue: '{"roles":["fad"]}' }
     }
+    const access = await resolveLocalPurchaseAccess(fadUser, soap, 1_000)
+    assert.deepEqual(access, { enabled: true, roles: ['fad'] })
+    assert.deepEqual(calls, [{ actorUserID: 'ADMIN' }])
+    assert.equal(hasBcLocalPurchaseRole(cachedLocalPurchaseAccess(fadUser, 2_000)), true)
+  })
+
+  it('stays off (382 behaviour) when BC 1.0.3.310 lacks the method, and caches for a minute', async () => {
+    let calls = 0
+    const soap = async () => {
+      calls += 1
+      throw new Error('Business Central SOAP fault: method PortalLocalPurchaseRoles not found')
+    }
+    const first = await resolveLocalPurchaseAccess(fadUser, soap, 1_000)
+    assert.equal(first.enabled, false)
+    assert.deepEqual(first.roles, [])
+    await resolveLocalPurchaseAccess(fadUser, soap, 30_000)
+    assert.equal(calls, 1)
+    await resolveLocalPurchaseAccess(fadUser, soap, 70_000)
+    assert.equal(calls, 2)
+    assert.equal(hasBcLocalPurchaseRole(cachedLocalPurchaseAccess(fadUser, 70_500)), false)
+  })
+
+  it('adds the Store Keeper role only while Local Purchase is enabled', async () => {
+    const on = await resolveLocalPurchaseAccess(keeper, async () => ({ returnValue: '{"roles":[]}' }), 1_000)
+    assert.deepEqual(on.roles, ['operations'])
+    assert.equal(hasBcLocalPurchaseRole(on), false)
+    clearLocalPurchaseAccessCache()
+    const off = await resolveLocalPurchaseAccess(keeper, async () => { throw new Error('missing') }, 1_000)
+    assert.deepEqual(off.roles, [])
+  })
+
+  it('never asks BC without a linked BC user id', async () => {
+    let called = false
+    const access = await resolveLocalPurchaseAccess({ userID: '' }, async () => { called = true; return {} }, 1_000)
+    assert.equal(access.enabled, false)
+    assert.equal(called, false)
   })
 })
