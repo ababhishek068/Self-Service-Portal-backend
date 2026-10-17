@@ -140,7 +140,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const canViewProcess =
     canManageStock ||
     Boolean(employee?.roles?.includes('procurement')) ||
-    /\b(procurement|proc)\b/.test(assignment)
+    /\b(procurement|proc|purchase|purchasing|buyer)\b/.test(assignment)
   const toast = useToast()
   const confirm = useConfirm()
   const queryClient = useQueryClient()

@@ -1,0 +1,21 @@
+---
+description: How Cursor/Codex should reach ABH UAT portal and Business Central over Tailscale
+alwaysApply: true
+---
+
+# ABH UAT debug access
+
+Keep Tailscale connected on this Mac (`abh-erp-m1` must show `active`). Do not use AnyDesk for API/browser debug.
+
+Use Tailscale addresses, not the public IP `146.161.102.7` (OData/SOAP time out from this Mac):
+
+- Portal: `http://100.124.82.121:4000` (also `http://abh-erp-m1.tail6540de.ts.net:4000`)
+- BC web: `http://100.124.82.121:8080/BC240/Default?company=ABH_UAT_LIVE`
+- OData: `http://100.124.82.121:7048/BC240/ODataV4/Company('ABH_UAT_LIVE')/`
+- SOAP: `http://100.124.82.121:7047/BC240/WS/ABH_UAT_LIVE/`
+
+Live UAT is portal API **1.0.3.352** / BC app **1.0.3.307**. Unauthenticated checks: `GET /api/health` and `GET /api/bc-health`. Profile footer reads `/api/portal-build` — if it still shows 351, hard-refresh. Cursor browser needs Application User login (e.g. ABH-010 / Zerihun); password is not in repo.
+
+Local Purchase lists `QyPurchaseHeader` with `DocApprovalType eq 'Requisition'`. It will not show Store Requisition rows (`QyStoreRequisitionHeader`, e.g. `ABH-SR*`). Those are a different BC document.
+
+BC service credentials live only in gitignored `.env`. Never print, commit, or paste them.

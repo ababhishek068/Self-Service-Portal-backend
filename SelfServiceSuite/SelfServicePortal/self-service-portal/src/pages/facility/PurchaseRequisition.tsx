@@ -111,7 +111,7 @@ export function PurchaseRequisition() {
         cell: (row) => (row.amount > 0 ? formatCurrency(row.amount) : 'Not costed'),
       }}
       attachmentCategoryOptions={purchaseAttachmentCategories}
-      attachmentCategoryHint="Supporting documents are optional. Add a Technical Specification, TOR / Scope of Work, BOQ, drawing, photo, or quotation when it helps Procurement. Enter a description for every uploaded file."
+      attachmentCategoryHint="Supporting documents are optional. Add a Technical Specification, TOR / Scope of Work, BOQ, drawing, photo, or quotation when it helps Purchase. Enter a description for every uploaded file."
       detailSupplement={({ request }) => (
         <LocalPurchasePanel request={request} fallback={<PurchaseOperationsPanel request={request} />} />
       )}

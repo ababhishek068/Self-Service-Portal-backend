@@ -7,13 +7,13 @@ export type ProcurementProcessStep = {
   erp?: boolean
 }
 
-/** Official Local Purchase Request Workflow. */
-export const ABH_PURCHASE_REQUEST_PROCESS_TITLE = 'Local Purchase Request Workflow'
+/** Official ABH Purchase Request Process (Purchase Request Template). */
+export const ABH_PURCHASE_REQUEST_PROCESS_TITLE = 'ABH Purchase & Receiving Process'
 
 export const ABH_PURCHASE_REQUEST_PROCESS_NOTE =
-  'Price and vendor information stay hidden from the technical team. A GIN is issued only when the goods are distributed internally.'
+  'Purchase is sourcing only: request and approval → sourcing/RFQ → purchase order or other source document → goods receiving and verification → GRV → inventory. A Purchase Request never issues stock to an employee. Department/user issue is performed separately through an approved Store Requisition and GIV.'
 
-/** Five phases from the Local Purchase Request Workflow. */
+/** ABH Purchase Request Process — purchase ends when the GRV updates inventory. */
 export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '1',
@@ -34,32 +34,36 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   },
   {
     phase: '3',
-    heading: 'Ordering & Fulfillment',
-    owner: 'Finance & Administration → Operations / Procurement → Finance',
+    heading: 'Purchase / Source Documents',
+    owner: 'Purchase',
     action:
-      'Finance & Administration gives final approval. Operations / Procurement prepares the Purchase Order. Finance checks the Purchase Order. Finance & Administration approves the Purchase Order and sends it back to Operations.',
+      'Purchase completes the approved sourcing route (local, foreign, or saleable), obtains quotations/evaluation where required, and links the purchase order, import document, contract/agreement, or supplier document in Business Central.',
+    portal: true,
     erp: true,
   },
   {
     phase: '4',
-    heading: 'Invoicing & Payment',
-    owner: 'Operations → Finance → Finance & Administration → CEO',
+    heading: 'Goods Receiving & GRV',
+    owner: 'Purchase → Store / Inventory',
     action:
-      'Operations requests the invoice. Finance checks it. Finance & Administration approves the invoice. Finance processes the payment voucher. The CEO approves the payment. Finance prepares the payment documents for online payment or cheque.',
+      'Receive against the approved source document, verify quantities and inspection requirements, record supplier/store details, generate the sequential GRV, approve it where configured, and post it to inventory.',
+    portal: true,
     erp: true,
   },
   {
     phase: '5',
-    heading: 'Post-Delivery',
-    owner: 'Operations / Store',
+    heading: 'Inventory Available',
+    owner: 'Inventory / Store',
     action:
-      'Operations receives the purchased item. The store processes the GRN. The store processes the GIN when the goods are issued for internal distribution.',
+      'The posted GRV increases stock at the receiving store or sub-store. Issue to a requesting department/user is a separate approved Store Requisition and GIV transaction.',
+    portal: true,
     erp: true,
   },
 ]
 
 export const ABH_PURCHASE_REQUEST_PROCESS_FLOWS = [
-  'Purchase Request → Department Approval → Finance & Admin Approval → RFQ → Supplier Responses → Automatic Winner Selection → Technical Recommendation → Final Approval → PO → Finance Check → Finance & Admin Approval → Invoice → Invoice Check & Approval → Payment Voucher → CEO Approval → Payment Documentation → Goods Received → GRN → GIN',
+  'Purchase Request → Review & Approval → Purchase/Sourcing → Source Document → Goods Receiving → GRV → Inventory',
+  'Inventory → Approved Store Requisition → GIV → Requesting Department / User',
 ] as const
 
 /** Official ABH Store Requisition Process (Store Requisition Template). */
