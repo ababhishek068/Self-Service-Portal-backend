@@ -3032,8 +3032,9 @@ codeunit 50049 "Staff Portal Codeunit"
         returnValue := FALSE;
         EmailRecipients := receiver.Split(';');
         CuEmailMessage.Create(EmailRecipients, subject, message, true);
-        CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Default);
-        returnValue := true;
+        // Same account as BC approval notifications (leave approvals reach approvers this way).
+        // BC falls back to the Default account when no account is assigned to Notification.
+        returnValue := CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Notification);
     end;
 
     procedure RequestDocumentApproval(docNo: Code[100]; docNoFieldId: Integer; tableID: Integer) return_value: Boolean
