@@ -353,6 +353,28 @@ export function resolveLeaveBalanceBreakdown(input: {
   }
 }
 
+/** BC also includes annual-card fields in responses for other leave types.
+ * Keep those fields out of non-annual figures and preserve BC's live ledger net.
+ * A missing balance is unavailable, never the full setup entitlement or annual balance.
+ */
+export function resolveNonAnnualLeaveBalanceBreakdown(
+  summary: BcLeaveSummary | null,
+): LeaveBalanceBreakdown | null {
+  const balance = summary?.currentLeaveBalance
+  if (balance === null || balance === undefined || !Number.isFinite(balance)) return null
+  const entitlement = summary?.allocatedDays ?? summary?.leaveEntitlement ?? summary?.setupDays ?? 0
+  const carryForward = summary?.carryForwardBalanceForType ?? summary?.carryForward ?? 0
+  const reimbursements = summary?.reimbursedDays ?? 0
+  return {
+    leaveEntitlement: roundedLeaveValue(entitlement),
+    carryForward: roundedLeaveValue(carryForward),
+    totalAvailableLeaveBalance: roundedLeaveValue(entitlement + carryForward + reimbursements),
+    leaveAccruedToDate: null,
+    totalLeaveTakenToDate: roundedLeaveValue(Math.abs(summary?.currentTotalLeaveTaken ?? summary?.totalLeaveTakenToDate ?? 0)),
+    availableLeaveBalance: roundedLeaveValue(balance),
+  }
+}
+
 export function leaveApplicationExceedsAvailableBalance(
   appliedDays: number,
   availableLeaveBalance: number | null,
@@ -571,4 +593,21 @@ export function mergeLeaveCardBalances(...sets: LeaveCardBalances[]): LeaveCardB
     annualLeaveBalance: pick('annualLeaveBalance'),
     employeeEarnedLeaveDays: pick('employeeEarnedLeaveDays'),
   }
+}
+
+/**
+ * Server-side application limit for a non-annual leave type. BC "Unlimited Days" types
+ * (Sick Leave) have no balance limit — their per-type balance is Days 0 minus taken, i.e.
+ * negative — so only a configured Maximum Application Days caps them. null = no limit.
+ */
+export function nonAnnualApplicationLimit(input: {
+  unlimitedDays: boolean
+  maximumApplicationDays: number | null | undefined
+  availableLeaveBalance: number | null | undefined
+}): number | null {
+  if (input.unlimitedDays) {
+    const max = input.maximumApplicationDays
+    return max !== null && max !== undefined && Number.isFinite(max) && max > 0 ? max : null
+  }
+  return input.availableLeaveBalance ?? 0
 }

@@ -3021,7 +3021,7 @@ codeunit 50049 "Staff Portal Codeunit"
         end;
     end;
 
-    procedure SendEmail(receiver: Text[250]; subject: Text[50]; message: Text[1000]) returnValue: Boolean
+    procedure SendEmail(receiver: Text[250]; subject: Text[250]; message: Text) returnValue: Boolean
     var
         CuEmail: Codeunit Email;
         CuEmailMessage: Codeunit "Email Message";
@@ -3032,8 +3032,9 @@ codeunit 50049 "Staff Portal Codeunit"
         returnValue := FALSE;
         EmailRecipients := receiver.Split(';');
         CuEmailMessage.Create(EmailRecipients, subject, message, true);
-        CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Default);
-        returnValue := true;
+        // Same account as BC approval notifications (leave approvals reach approvers this way).
+        // BC falls back to the Default account when no account is assigned to Notification.
+        returnValue := CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Notification);
     end;
 
     procedure RequestDocumentApproval(docNo: Code[100]; docNoFieldId: Integer; tableID: Integer) return_value: Boolean
@@ -4953,6 +4954,48 @@ codeunit 50049 "Staff Portal Codeunit"
         ProcurementMgt: Codeunit "Portal Procurement Mgt.";
     begin
         exit(ProcurementMgt.UpdateStoreProcess(requestNo, actionCode, linkedDocumentNo, actionComment, actorUserID, actorJobTitle));
+    end;
+
+    /// <summary>
+    /// Local Purchase (LPR→RFQ→PO→pay) actions for the Self-Service Portal.
+    /// Mirror of ABH-LIVE-AL StaffPortal PortalLocalPurchaseAction / ListVendorQuotes.
+    /// Publish after deploying Portal Procurement Mgt. RunLocalPurchaseAction.
+    /// </summary>
+    procedure PortalLocalPurchaseAction(documentNo: Code[50]; actionCode: Text[50]; linkedDocumentNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; payloadJson: Text) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.RunLocalPurchaseAction(documentNo, actionCode, linkedDocumentNo, actionComment, actorUserID, payloadJson));
+    end;
+
+    procedure PortalListVendorQuotes(rfqNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListVendorQuotes(rfqNo));
+    end;
+
+    procedure PortalLocalPurchaseChain(documentNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.GetLocalPurchaseChain(documentNo));
+    end;
+
+    procedure PortalLocalPurchaseRoles(actorUserID: Code[100]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.GetLocalPurchaseRoles(actorUserID));
+    end;
+
+    procedure PortalAttachVendorQuoteFile(rfqNo: Code[50]; lineNo: Integer; fileName: Text[250]; fileBase64: BigText; description: Text[250]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+        ContentText: Text;
+    begin
+        fileBase64.GetSubText(ContentText, 1);
+        exit(ProcurementMgt.AttachVendorQuoteFile(rfqNo, lineNo, fileName, ContentText, description));
     end;
 
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)

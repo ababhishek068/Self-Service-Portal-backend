@@ -175,3 +175,109 @@ export async function downloadRequestAttachment(
   link.remove()
   URL.revokeObjectURL(url)
 }
+
+export interface LocalPurchaseNextAction {
+  actionCode: string
+  label: string
+  target: 'lpr' | 'rfq' | 'po' | 'storeRequisition'
+  documentNo: string
+  allowed: boolean
+  ownerRoles: string[]
+  commentRequired?: boolean
+}
+
+export interface LocalPurchaseVendorQuote {
+  rfqNo: string
+  lineNo: number
+  vendorNo: string
+  vendorName: string
+  quotedAmount: number
+  leadTimeDays: number
+  quoteDate: string
+  rank: number
+  selected: boolean
+  notes: string
+  attachments: number
+}
+
+export interface LocalPurchaseState {
+  chain: {
+    documentNo?: string
+    storeRequisitionNo?: string
+    lpr?: Record<string, unknown>
+    rfq?: Record<string, unknown>
+    po?: Record<string, unknown>
+    receipts?: Array<Record<string, unknown>>
+  }
+  quotes: { rfqNo?: string; quotes?: LocalPurchaseVendorQuote[] }
+  roles: string[]
+  nextActions: LocalPurchaseNextAction[]
+}
+
+/** Local Purchase chain: Store Req ↔ LPR ↔ Local RFQ ↔ Vendor Quotes ↔ PO ↔ GRN ↔ Invoice. */
+export async function getLocalPurchaseState(id: string) {
+  requireAuthApiUrl()
+  return authGet<LocalPurchaseState>(`/api/requests/${encodeURIComponent(id)}/local-purchase`)
+}
+
+export async function runLocalPurchaseAction(
+  id: string,
+  body: {
+    actionCode: string
+    documentNo: string
+    linkedDocumentNo?: string
+    actionComment?: string
+    payload?: Record<string, unknown>
+  },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; request: PortalRequest | null }>(
+    `/api/requests/${encodeURIComponent(id)}/local-purchase`,
+    body,
+    { timeout: 90000 } as Parameters<typeof authPost>[2],
+  )
+}
+
+export async function upsertLocalPurchaseVendorQuote(
+  id: string,
+  quote: {
+    rfqNo: string
+    vendorNo: string
+    quotedAmount: number
+    leadTimeDays: number
+    quoteDate?: string
+    notes?: string
+    lineNo?: number
+  },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; quotes: LocalPurchaseState['quotes'] }>(
+    `/api/requests/${encodeURIComponent(id)}/vendor-quotes`,
+    quote,
+  )
+}
+
+export async function uploadLocalPurchaseQuoteAttachment(
+  id: string,
+  lineNo: number,
+  attachment: { rfqNo: string; fileName: string; contentBase64: string; description: string },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; quotes: LocalPurchaseState['quotes'] }>(
+    `/api/requests/${encodeURIComponent(id)}/vendor-quotes/${lineNo}/attachments`,
+    attachment,
+    { timeout: 60000 } as Parameters<typeof authPost>[2],
+  )
+}
+
+export interface LocalPurchaseAccess {
+  /** False until BC has the Local Purchase portal methods; then 382 behaviour applies. */
+  enabled: boolean
+  roles: string[]
+}
+
+/** BC-driven Local Purchase availability and the signed-in user's LPR roles (ABH Local Proc Setup). */
+export async function getLocalPurchaseAccess() {
+  requireAuthApiUrl()
+  return authGet<LocalPurchaseAccess>('/api/local-purchase/access')
+}

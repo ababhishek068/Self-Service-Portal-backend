@@ -76,11 +76,14 @@ function LeaveMetric({
   value,
   loading = false,
   emphasized = false,
+  text,
 }: {
   label: string
   value: number | null
   loading?: boolean
   emphasized?: boolean
+  /** Shown instead of the day count (e.g. "Unlimited"). */
+  text?: string
 }) {
   return (
     <div
@@ -99,7 +102,7 @@ function LeaveMetric({
             emphasized ? 'text-emerald-800' : 'text-slate-800'
           }`}
         >
-          {value !== null ? `${formatDays(value)} days` : DASH}
+          {text ?? (value !== null ? `${formatDays(value)} days` : DASH)}
         </p>
       )}
     </div>
@@ -122,6 +125,13 @@ function payloadValue(payload: Record<string, unknown>, keys: string[], fallback
 function formatPayloadDate(value: string) {
   if (!value || value.startsWith('0001-01-01') || value === DASH) return DASH
   return formatPretty(value) || value
+}
+
+function formatReturnDate(returnValue: string, endValue: string) {
+  const formatted = formatPayloadDate(returnValue)
+  if (formatted === DASH) return DASH
+  const sameDate = returnValue.slice(0, 10) === endValue.slice(0, 10)
+  return `${formatted}${sameDate ? ' (Afternoon)' : ''}`
 }
 
 function normalizeLeaveTypeCode(value: unknown) {
@@ -1230,6 +1240,13 @@ export function LeaveRequest() {
                 value={balance}
                 loading={balanceLoading}
                 emphasized
+                text={
+                  unlimitedDays && !isMaternityLeave
+                    ? maximumApplicationDays !== null && maximumApplicationDays > 0
+                      ? `Unlimited (max ${formatDays(maximumApplicationDays)} days per application)`
+                      : 'Unlimited'
+                    : undefined
+                }
               />
             </div>
           ) : null}
@@ -1346,7 +1363,11 @@ export function LeaveRequest() {
                     <div className="space-y-1.5">
                       <Label>Return Date</Label>
                       <p className="flex h-10 items-center text-sm font-semibold text-slate-700">
-                        {datesLoading ? <Skeleton className="h-5 w-32" /> : returnDate ? formatPretty(returnDate) : DASH}
+                        {datesLoading ? (
+                          <Skeleton className="h-5 w-32" />
+                        ) : returnDate ? (
+                          `${formatPretty(returnDate)}${returnDate === endDate ? ' (Afternoon)' : ''}`
+                        ) : DASH}
                       </p>
                     </div>
                   </>
@@ -1552,7 +1573,7 @@ export function LeaveRequest() {
                   <div>
                     <dt className="text-xs text-slate-500">Return Date</dt>
                     <dd className="text-sm font-medium">
-                      {formatPayloadDate(
+                      {formatReturnDate(
                         payloadValue(selectedPayload, [
                           'ReturnDate',
                           'Return_Date',
@@ -1560,6 +1581,7 @@ export function LeaveRequest() {
                           'Expected_Return_Date',
                           'returnDate',
                         ]),
+                        payloadValue(selectedPayload, ['EndDate', 'End_Date', 'endDate']),
                       )}
                     </dd>
                   </div>

@@ -1,0 +1,84 @@
+ABH STORE + PURCHASE — DEMO DAY SCRIPT (tomorrow)
+=================================================
+Aligned to: Procurement & Inventory flow diagram + UAT-1/2/3 docs.
+Live UAT currently reports portal API 1.0.3.352 / BC 307. Profile footer must show 352 after hard refresh; BC 308 is optional (AL source only until packaged).
+
+WHAT IS PRODUCTION-READY FOR DEMO
+---------------------------------
+UAT-2 Store Request (ESSP + BC create/submit/approve): YES
+UAT-3 Issue via GIV after BC prep: YES (with checklist below)
+Local Purchase create/approve: YES
+Store → Purchase when stock unavailable: YES (after BC Issuing Store + item map)
+Requester portal "receive": DISABLED (GIV is the delivery document)
+
+DO NOT DEMO
+-----------
+- Post to receive / Receive Items (would 502; now blocked with clear message)
+- Store usage report
+- Full GRV→PO supplier chain unless pre-staged BC docs exist
+
+MORNING PREP (30–45 min on abh-erp-m1)
+--------------------------------------
+1) Confirm Tailscale + portal: http://100.124.82.121:4000/api/health
+2) Confirm BC: http://100.124.82.121:8080/BC240/Default?company=ABH_UAT_LIVE
+3) UAT-1 data:
+   - Active Store with Issue allowed (e.g. IT)
+   - Item "Laptop" (or demo item) with UOM, category
+   - Post opening stock of 4 at that Location (Item Journal / store receipt)
+4) Store approval workflow STORE-REQ-WF imported; cancel responses ordered:
+   Cancel all approval requests → Allow record usage → Open the document
+5) Two users ready:
+   - Requester (staff portal login)
+   - Approver (in User Setup / approval user)
+   - Operations/Store user (job title or role matching store/operations) for GIV buttons
+
+DEMO A — STORE HAPPY PATH (primary — 8 min)
+-------------------------------------------
+1. ESSP → Store Requisition → New
+2. Purpose/justification + required date + 2 free-text item lines (qty 1 and 1)
+3. Submit for approval → status Pending Approval in portal AND BC
+4. Approver Approves (all steps)
+5. **BC (critical):** open Store Requisition
+   - Set Issuing Store = location with stock
+   - On each line replace PORTAL-* with real Item No.
+6. ESSP as Operations → open same SR → Store status panel
+   - Should show Available >= Requested (not amber "map in BC")
+7. Click "Stock available — GIV & Issue"
+8. Show GIV number on panel; in BC Item Ledger / stock = opening − issued
+9. Optional: reopen SR as requester — see issued notice (no receive button)
+
+DEMO B — STORE → PURCHASE (stock unavailable — 6 min)
+----------------------------------------------------
+1. Fresh SR, approve, BC: Issuing Store + map items BUT stock = 0 (or qty > available)
+2. Operations → "Stock not available — Purchase Request"
+3. Panel shows linked LPR No.
+4. Local Purchase / Approvals: open that PR (store-originated)
+5. Narrative: after GRV posts into issuing store, SR returns to stock check for GIV
+   (do not need full procurement stages unless time allows)
+
+DEMO C — LOCAL PURCHASE STANDALONE (5 min)
+------------------------------------------
+1. ESSP → Local Purchase → New Local Purchase
+2. Goods + department + justification + one line with price
+3. Submit → approve
+4. Show Purchase Operations panel stages (start purchase / link RFQ or GRV if docs exist)
+5. Confirm list is purchase requisitions only (not Store ABH-SR* rows)
+
+UAT CHECKBOX MAPPING
+--------------------
+UAT-2 SR-ESSP-001..009 + approval: Demo A steps 1–4
+UAT-3 INV-001..008 (issue + remaining balance): Demo A steps 5–8
+Diagram GIV → Requesting Dept: GIV post = issue (no separate portal receive)
+Diagram Stock unavailable → Purchase: Demo B
+Diagram GRV → Inventory: BC GRV then Demo B recheck (narrate if short on time)
+
+CODE FIXES SHIPPED IN THIS SESSION (deploy before demo if not live yet)
+-----------------------------------------------------------------------
+- Stock check reports needsBcPrep + prepHints (Issuing Store / PORTAL map)
+- Store Operations panel blocks GIV until BC prep done; clearer flow text
+- Requester receive UI disabled; API returns 501 with clear message
+- Files: src/portalApi.ts, StoreOperationsPanel.tsx, MultiStepRequestPage.tsx
+
+If live is still 351, either:
+  A) Demo on current live after BC data prep only, OR
+  B) Rebuild/redeploy portal with these UX fixes before the meeting

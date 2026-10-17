@@ -1,8 +1,8 @@
-ABH SELF SERVICE PORTAL — INSTALL v1.0.3.345 / API v194
+ABH SELF SERVICE PORTAL — INSTALL v1.0.3.351 / API v200
 ======================================================
 
 This is the paired ABH UAT release. It includes Business Central app
-1.0.3.273, workflow-driven ERP approvals and requester-visible rejection notes,
+1.0.3.307, workflow-driven ERP approvals and requester-visible rejection notes,
 requester-visible mandatory rejection reasons, audited Purchase and Store Requisitions, production Employee Exit
 Supervisor/HR routing, Imprest Surrender, mandatory claim/sick-leave
 attachments, attendance grace
@@ -14,13 +14,13 @@ PORTAL INSTALL
 ==============
 
 1) Keep the old portal folder as a rollback copy.
-2) Extract ABH-Portal-COMPLETE-1.0.3.345.zip to C:\TA\
+2) Extract ABH-Portal-COMPLETE-1.0.3.351.zip to C:\TA\
 3) Copy the working .env into:
    SelfServiceSuite\SelfServiceBackend\.env
 4) Run VERIFY-SUITE.bat. It must say ALL CHECKS PASSED.
 5) Run START-ABH-PORTAL.bat.
 6) Open http://146.161.102.7:4000/api/portal-build
-   Expected: v194 — 1.0.3.345 (Idempotent Leave approval submission)
+   Expected: v200 — 1.0.3.351 (Store UAT lifecycle and cancellation sync; BC 307)
 7) Log in and press Ctrl+Shift+R once to clear the old browser bundle.
 8) In Administrator PowerShell, run INSTALL-AUTOSTART.ps1 once to start the
    portal automatically after every Windows server restart.
@@ -29,11 +29,11 @@ BUSINESS CENTRAL APP
 ====================
 
 1) Open the extracted BusinessCentral folder.
-2) Copy "Technology Associates EA Ltd_BC24_TA App_1.0.3.273.app" to
+2) Copy "Technology Associates EA Ltd_BC24_TA App_1.0.3.307.app" to
    C:\TA\publish\ on the Business Central server.
 3) Run ABH-PUBLISH-BC.ps1 as Administrator in the Business Central
    Administration Shell.
-4) Confirm BC24_TA App 1.0.3.273 is installed. The StaffPortal codeunit
+4) Confirm BC24_TA App 1.0.3.307 is installed. The StaffPortal codeunit
    includes the HR policy create/delete operations; its existing SOAP endpoint
    remains the same, so no web-service refresh is required.
    CuPortalEmployeeExit is published automatically by app install/upgrade.

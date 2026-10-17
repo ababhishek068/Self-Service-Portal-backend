@@ -118,7 +118,7 @@ export const roleCapabilitySummary: Partial<Record<PortalRole, string>> = {
   hod: 'Manager access plus department team views, attendance, and HR reports.',
   finance: 'Staff self-service plus finance approval authority on pending documents.',
   hr: 'Staff self-service plus HR reports such as leave balances.',
-  procurement: 'Staff self-service plus store usage and gate pass reports.',
+  procurement: 'Staff self-service plus Purchase processing, store usage, and gate pass reports.',
   ictAdmin: 'Staff self-service plus ERP connector tools.',
   audit: 'Staff self-service plus read-only audit reports.',
   ceo: 'Full executive access including payroll master roll and all reports.',

@@ -80,6 +80,7 @@ export function StoreRequisition() {
       processBanner={storeProcessBanner}
       showProcessBannerOnList={false}
       detailActionsPlacement="bottom"
+      cancelStatuses={['Pending Approval']}
       module={module}
       queryKey={['facility', 'store-requisition']}
       listRequests={() => listModuleRequests(module)}
@@ -90,7 +91,8 @@ export function StoreRequisition() {
         cell: (row) => row.amount > 0 ? formatCurrency(row.amount) : 'Not costed',
       }}
       attachmentCategoryOptions={storeAttachmentCategories}
-      attachmentCategoryHint="An extra specification is optional. Attach it when the item needs a drawing, photo, or note, and describe the file."
+      attachmentCategoryHint="Supporting documents are optional. Add a specification, drawing, or reference when useful, and describe each uploaded file."
+      requiresAttachmentBeforeSubmit={false}
       detailSupplement={({ request }) => <StoreOperationsPanel request={request} />}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={storeHeaderSchema}
