@@ -175,6 +175,7 @@ if ($Package -and $failures.Count -eq 0) {
     Copy-Item (Join-Path $Root 'deploy\windows\VERIFY-SUITE.bat') (Join-Path $out 'VERIFY-SUITE.bat')
     Copy-Item (Join-Path $Root 'deploy\windows\INSTALL-AUTOSTART.bat') (Join-Path $out 'INSTALL-AUTOSTART.bat')
     Copy-Item (Join-Path $Root 'deploy\windows\INSTALL-AUTOSTART.ps1') (Join-Path $out 'INSTALL-AUTOSTART.ps1')
+    Copy-Item (Join-Path $Root 'deploy\windows\UNINSTALL-AUTOSTART.bat') (Join-Path $out 'UNINSTALL-AUTOSTART.bat')
     $zip = Join-Path $ssp "$name.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     tar.exe -a -c -f $zip -C $ssp $name
