@@ -28,28 +28,29 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   string,
   { roles: LocalPurchaseRole[]; needsPayload?: boolean; commentRequired?: boolean }
 > = {
-  APPROVE_LPR_FAD: { roles: ['fad', 'finance'] },
-  REJECT_LPR: { roles: ['fad', 'finance'], commentRequired: true },
+  // Owners mirror ABH Local Procurement's TestIs* checks (ABH Local Proc Setup user IDs).
+  APPROVE_LPR_FAD: { roles: ['fad'] },
+  REJECT_LPR: { roles: ['fad'], commentRequired: true },
   CONVERT_TO_RFQ: { roles: ['procurement'] },
   UPSERT_VENDOR_QUOTE: { roles: ['procurement'], needsPayload: true },
   AUTO_SELECT_WINNER: { roles: ['procurement'] },
   SEND_TO_TECHNICAL: { roles: ['procurement'] },
   SEND_FOR_FAD_APPROVAL: { roles: ['procurement'] },
   SUBMIT_TECHNICAL_REVIEW: { roles: ['technical'], commentRequired: true },
-  SELECT_WINNER_FAD: { roles: ['fad', 'finance'] },
-  APPROVE_WINNER_FAD_FINAL: { roles: ['fad', 'finance'] },
+  SELECT_WINNER_FAD: { roles: ['fad'] },
+  APPROVE_WINNER_FAD_FINAL: { roles: ['fad'] },
   CREATE_PO: { roles: ['procurement'] },
-  APPROVE_PO_FINANCE_CHECKER: { roles: ['financeChecker', 'finance'] },
-  APPROVE_PO_FAD: { roles: ['fad', 'finance'] },
+  APPROVE_PO_FINANCE_CHECKER: { roles: ['financeChecker'] },
+  APPROVE_PO_FAD: { roles: ['fad'] },
   PREPARE_LOCAL_RECEIVE: { roles: ['procurement'] },
   CREATE_LOCAL_INVOICE: { roles: ['procurement'] },
-  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker', 'finance'] },
-  APPROVE_PAYMENT_CEO: { roles: ['ceo', 'finance'] },
-  CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker', 'finance'] },
-  FIX_LOCAL_CURRENCY: { roles: ['procurement', 'financeChecker', 'finance'] },
+  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'] },
+  APPROVE_PAYMENT_CEO: { roles: ['ceo'] },
+  CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'] },
+  FIX_LOCAL_CURRENCY: { roles: ['procurement', 'financeChecker'] },
   POST_LOCAL_RECEIVE: { roles: ['procurement'] },
-  SEND_BACK_RFQ: { roles: ['fad', 'finance'], commentRequired: true },
-  SEND_BACK_PO: { roles: ['financeChecker', 'fad', 'finance'], commentRequired: true },
+  SEND_BACK_RFQ: { roles: ['fad'], commentRequired: true },
+  SEND_BACK_PO: { roles: ['financeChecker', 'fad'], commentRequired: true },
   RESUBMIT_PO: { roles: ['procurement'] },
 }
 
@@ -211,10 +212,8 @@ export const LOCAL_PURCHASE_STORE_ACTIONS = {
   ISSUE_AFTER_LPR: { roles: ['operations'] as LocalPurchaseRole[] },
 }
 
-const ROLE_NAMES = new Set<LocalPurchaseRole>([
-  'operations',
+const BC_ROLE_NAMES = new Set<LocalPurchaseRole>([
   'procurement',
-  'finance',
   'fad',
   'technical',
   'financeChecker',
@@ -222,84 +221,99 @@ const ROLE_NAMES = new Set<LocalPurchaseRole>([
   'auditor',
 ])
 
-/**
- * LOCAL_PURCHASE_ROLE_USERS="ADMIN:fad,LPR_PROCURE:procurement,IT_KEEPER:operations" — mirror the
- * user IDs in BC ABH Local Proc Setup (FAD User ID, Finance Checker User ID, …) when job titles do not say it.
- */
-export function parseLocalPurchaseRoleUsers(raw: string | undefined) {
-  const map = new Map<string, Set<LocalPurchaseRole>>()
-  for (const part of String(raw ?? '').split(',')) {
-    const separator = part.lastIndexOf(':')
-    if (separator <= 0) continue
-    const userId = part.slice(0, separator).trim().toUpperCase()
-    const roleText = part.slice(separator + 1).trim()
-    const role = [...ROLE_NAMES].find((name) => name.toLowerCase() === roleText.toLowerCase())
-    if (!userId || !role) continue
-    if (!map.has(userId)) map.set(userId, new Set())
-    map.get(userId)!.add(role)
-  }
-  return map
-}
-
-let cachedRoleUsersRaw: string | undefined
-let cachedRoleUsers = new Map<string, Set<LocalPurchaseRole>>()
-
-function configuredRoleUsers() {
-  const raw = process.env.LOCAL_PURCHASE_ROLE_USERS
-  if (raw !== cachedRoleUsersRaw) {
-    cachedRoleUsersRaw = raw
-    cachedRoleUsers = parseLocalPurchaseRoleUsers(raw)
-  }
-  return cachedRoleUsers
-}
-
-export function localPurchaseRoles(authUser: LocalPurchaseAuth): LocalPurchaseRole[] {
-  const roleText = (authUser.roles ?? [])
-    .map((role) => String(role).trim().toLowerCase())
-    .filter(Boolean)
-  const assignment = [authUser.jobTitle, authUser.department, authUser.departmentName]
+/** Store Keeper detection — the same rule 382 uses for store-process actions. */
+export function isStoreOperator(authUser: LocalPurchaseAuth) {
+  const text = [...(authUser.roles ?? []), authUser.jobTitle, authUser.department, authUser.departmentName]
     .map((value) => String(value ?? '').trim().toLowerCase())
     .filter(Boolean)
     .join(' ')
-  const allText = [...roleText, assignment, String(authUser.userID ?? '').toLowerCase()].join(' ')
-  const resolved = new Set<LocalPurchaseRole>()
+  return /(^|[^a-z])(operations?|ops|store|storekeeper|warehouse|inventory)([^a-z]|$)/.test(text)
+}
 
-  if (/(^|[^a-z])(operations?|ops|store|storekeeper|warehouse|inventory)([^a-z]|$)/.test(allText)) {
-    resolved.add('operations')
+/** Parse BC PortalLocalPurchaseRoles: {"roles":["fad",...]} — unknown names are dropped. */
+export function parseBcLocalPurchaseRoles(returnValue: unknown): LocalPurchaseRole[] {
+  const roles = parseSoapJson(returnValue).roles
+  if (!Array.isArray(roles)) {
+    throw Object.assign(new Error('Business Central returned an invalid Local Purchase roles response.'), {
+      status: 502,
+      code: 'LPR_ROLES_INVALID',
+    })
   }
-  if (/(^|[^a-z])(procurement|proc|purchasing|lpr_procure)([^a-z]|$)/.test(allText)) {
-    resolved.add('procurement')
+  const known = [...BC_ROLE_NAMES]
+  return [...new Set(roles.map((role) => known.find((name) => name.toLowerCase() === String(role).trim().toLowerCase())))].filter(
+    (role): role is LocalPurchaseRole => Boolean(role),
+  )
+}
+
+export type LocalPurchaseAccess = {
+  /** False when the installed BC app has no Local Purchase portal methods (e.g. 1.0.3.310). */
+  enabled: boolean
+  /** BC ABH Local Proc Setup roles + 'operations' for Store Keepers. */
+  roles: LocalPurchaseRole[]
+  reason?: string
+}
+
+type SoapCall = (method: string, params: Record<string, unknown>) => Promise<{ returnValue?: unknown }>
+
+const ACCESS_TTL_MS = 60_000
+const accessCache = new Map<string, { at: number; access: LocalPurchaseAccess }>()
+
+/**
+ * Whether Local Purchase is live in BC and which LPR roles BC grants this user. BC is the
+ * authority (ABH Local Proc Setup); the portal never infers LPR roles from job titles.
+ * Any failure keeps Local Purchase off, so the portal behaves exactly as 1.0.3.382.
+ */
+export async function resolveLocalPurchaseAccess(
+  authUser: LocalPurchaseAuth,
+  soap: SoapCall,
+  now = Date.now(),
+): Promise<LocalPurchaseAccess> {
+  const userId = String(authUser.userID ?? '').trim()
+  const key = userId.toUpperCase()
+  const cached = accessCache.get(key)
+  if (cached && now - cached.at < ACCESS_TTL_MS) return withStoreRole(cached.access, authUser)
+  let access: LocalPurchaseAccess
+  if (!userId) {
+    access = { enabled: false, roles: [], reason: 'No Business Central user is linked to this employee.' }
+  } else {
+    try {
+      const result = await soap('PortalLocalPurchaseRoles', { actorUserID: userId })
+      access = { enabled: true, roles: parseBcLocalPurchaseRoles(result.returnValue) }
+    } catch (error) {
+      access = {
+        enabled: false,
+        roles: [],
+        reason: error instanceof Error ? error.message : String(error),
+      }
+    }
   }
-  if (
-    /(^|[^a-z])(fad|finance\s*&?\s*admin|finance and admin|lpr_fad)([^a-z]|$)/.test(allText) ||
-    /finance and administration/.test(allText)
-  ) {
-    resolved.add('fad')
-  }
-  if (/(^|[^a-z])(finance checker|fincheck|lpr_fincheck)([^a-z]|$)/.test(allText)) {
-    resolved.add('financeChecker')
-  }
-  if (/(^|[^a-z])(finance|administration|accounts?|accounting|accountant)([^a-z]|$)/.test(allText)) {
-    resolved.add('finance')
-  }
-  if (/(^|[^a-z])(technical|lpr_tech)([^a-z]|$)/.test(allText)) {
-    resolved.add('technical')
-  }
-  if (/(^|[^a-z])(ceo|coo|lpr_ceo)([^a-z]|$)/.test(allText)) {
-    resolved.add('ceo')
-  }
-  if (/(^|[^a-z])(auditor|audit)([^a-z]|$)/.test(allText)) {
-    resolved.add('auditor')
-  }
-  const roleUsers = configuredRoleUsers()
-  for (const id of [authUser.userID, authUser.employeeNo]) {
-    for (const role of roleUsers.get(String(id ?? '').trim().toUpperCase()) ?? []) resolved.add(role)
-  }
-  return [...resolved]
+  accessCache.set(key, { at: now, access })
+  return withStoreRole(access, authUser)
+}
+
+/** Last resolved access without calling BC (list filters); null when not resolved yet. */
+export function cachedLocalPurchaseAccess(authUser: LocalPurchaseAuth, now = Date.now()) {
+  const cached = accessCache.get(String(authUser.userID ?? '').trim().toUpperCase())
+  if (!cached || now - cached.at >= ACCESS_TTL_MS) return null
+  return withStoreRole(cached.access, authUser)
+}
+
+export function clearLocalPurchaseAccessCache() {
+  accessCache.clear()
+}
+
+function withStoreRole(access: LocalPurchaseAccess, authUser: LocalPurchaseAuth): LocalPurchaseAccess {
+  if (!access.enabled || !isStoreOperator(authUser) || access.roles.includes('operations')) return access
+  return { ...access, roles: [...access.roles, 'operations'] }
+}
+
+/** True when BC grants this user any LPR role (FAD, Procurement, Technical, Finance Checker, CEO, Auditor). */
+export function hasBcLocalPurchaseRole(access: LocalPurchaseAccess | null) {
+  return Boolean(access?.enabled && access.roles.some((role) => BC_ROLE_NAMES.has(role)))
 }
 
 export function assertLocalPurchaseActionAllowed(
-  authUser: LocalPurchaseAuth,
+  roles: LocalPurchaseRole[],
   actionCode: string,
   actionComment = '',
   hasPayload = false,
@@ -312,7 +326,6 @@ export function assertLocalPurchaseActionAllowed(
       code: 'UNKNOWN_LPR_ACTION',
     })
   }
-  const roles = localPurchaseRoles(authUser)
   if (!rule.roles.some((role) => roles.includes(role))) {
     throw Object.assign(
       new Error(`Your role is not authorized to perform ${action}.`),
