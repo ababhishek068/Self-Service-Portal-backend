@@ -3,10 +3,12 @@ import { useState } from 'react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
 import { useAuth } from '@/hooks/useAuth'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import {
   downloadStoreBorrowingForm,
+  getLocalPurchaseProjects,
   getStoreRequisitionProcess,
   updateStoreRequisitionProcess,
 } from '@/api/endpoints/requestEndpoint'
@@ -147,13 +149,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const queryClient = useQueryClient()
   // Local Purchase store actions (BC recording) appear only once BC has the LPR portal methods.
   const localPurchase = useLocalPurchaseAccess()
+  // Meeting 18 Oct: project first (blank = non-project); BC then assigns the procurement officer.
+  const [lprProjectNo, setLprProjectNo] = useState('')
   const processQuery = useQuery({
     queryKey: ['store-process', request.id],
     queryFn: () => getStoreRequisitionProcess(request.id),
     enabled: approved && canViewProcess && !assetRequest,
   })
   const mutation = useMutation({
-    mutationFn: (actionCode: string) => updateStoreRequisitionProcess(request.id, actionCode),
+    mutationFn: (actionCode: string) =>
+      updateStoreRequisitionProcess(request.id, actionCode, actionCode === 'START_LPR' ? lprProjectNo : ''),
     onSuccess: async (data) => {
       queryClient.setQueryData(['facility', 'store-requisition', 'detail', request.id], data.request)
       await queryClient.invalidateQueries({ queryKey: ['store-process', request.id] })
@@ -184,10 +189,12 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const stockCheck = stockCheckFromProcess(processQuery.data)
   const atStockCheck = stage === 'STOCK_CHECK'
   const atProcurement = stage === 'PROCUREMENT_REQUEST'
+  const atLprRequested = stage === 'LPR_REQUESTED'
   const stockReady = stockCheck?.allAvailable === true
   const needsBcPrep = stockCheck?.needsBcPrep === true
   const stockBlocked = stockCheck?.allAvailable === false && !needsBcPrep
   const prepHints = stockCheck?.prepHints?.length ? stockCheck.prepHints : DEFAULT_PREP_HINTS
+  const canStartLpr = localPurchase.enabled && atLprRequested && storeManager && !processQuery.isError
 
   const run = async (actionCode: string, title: string, message: string) => {
     const yes = await confirm({ title, message, confirmLabel: title })
@@ -212,8 +219,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
                   : actionCode === 'ISSUE_AFTER_LPR'
                     ? 'Issued after LPR receive — the goods issue voucher is posted to the requester.'
                     : actionCode === 'REQUEST_FOR_LPR'
-                      ? 'Purchase Requisition (LPR) created — Issue Stage: LPR Started. FAD approves it next with Approve (FAD).'
-                      : 'Linked Purchase Request created from this store requisition.',
+                      ? 'Stock confirmed unavailable — Issue Stage: LPR Requested. The Store Manager starts the LPR next.'
+                      : actionCode === 'START_LPR'
+                        ? 'Purchase Requisition (LPR) created — Issue Stage: LPR Started. The assigned Procurement Officer prepares it and submits it to the Operations Manager.'
+                        : 'Linked Purchase Request created from this store requisition.',
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', title)
@@ -386,7 +395,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
                 ? void run(
                     'REQUEST_FOR_LPR',
                     'Request for LPR',
-                    'Confirm stock is unavailable and create the linked Purchase Requisition (LPR). FAD approves it next with Approve (FAD).',
+                    'Confirm the requested item is unavailable in the store. The Store Manager then starts the Local Purchase Requisition (LPR).',
                   )
                 : void run(
                     'STOCK_UNAVAILABLE',
@@ -396,6 +405,39 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             }
           >
             {localPurchase.enabled ? 'Request for LPR' : 'Stock not available — Purchase Request'}
+          </Button>
+        </div>
+      ) : null}
+      {atLprRequested && localPurchase.enabled && !storeManager ? (
+        <p className="mt-2 text-xs text-slate-600">
+          Stock confirmed unavailable. Waiting for the Store Manager to start the LPR (project, then procurement officer).
+        </p>
+      ) : null}
+      {canStartLpr ? (
+        <div className="mt-3 space-y-2">
+          <LprProjectPicker
+            id={`lpr-project-${request.id}`}
+            value={lprProjectNo}
+            onChange={setLprProjectNo}
+            disabled={mutation.isPending}
+          />
+          <Button
+            type="button"
+            variant="gradient"
+            disabled={mutation.isPending}
+            onClick={() =>
+              void run(
+                'START_LPR',
+                'Start LPR',
+                'Create the Local Purchase Requisition (LPR) from this store requisition — ' +
+                  (lprProjectNo
+                    ? `project ${lprProjectNo}, assigned to the Project Procurement Officer.`
+                    : 'non-project, assigned to the Procurement Officer.') +
+                  ' The officer prepares it and submits it to the Operations Manager.',
+              )
+            }
+          >
+            Start LPR
           </Button>
         </div>
       ) : null}
@@ -435,9 +477,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
       {atProcurement && localPurchase.enabled ? (
         <p className="mt-2 text-xs text-slate-600">
-          Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Approve (FAD) → Convert to
-          RFQ → Vendor Quotes → Approve Winner (FAD Final) → Create PO → Approve Local PO → Post Receive. After the
-          GRN is posted into the issuing store, use Issue after LPR receive.
+          Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Procurement Officer submits →
+          Operations Manager → FAD → RFQ (Operations Manager) → quotes → evaluation → FAD final supplier → PO
+          (Operations Manager, FAD) → Store Keeper receives (GRN). After the GRN is posted into the issuing store, use
+          Issue after LPR receive.
         </p>
       ) : null}
       {atProcurement && localPurchase.enabled && canManageStock && !processQuery.isError ? (
@@ -462,5 +505,50 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         <p className="mt-2 text-teal-800">GIV posted — inventory reduced and requisition closed.</p>
       ) : null}
     </section>
+  )
+}
+
+/** Project for the new LPR, chosen before the procurement officer (blank = non-project). */
+function LprProjectPicker({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  const projectsQuery = useQuery({
+    queryKey: ['local-purchase', 'projects'],
+    queryFn: getLocalPurchaseProjects,
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+  const options = [
+    { value: '', label: 'Non-project purchase (Procurement Officer)' },
+    ...(projectsQuery.data?.projects ?? []).map((project) => ({
+      value: project.no,
+      label: project.description ? `${project.no} — ${project.description}` : project.no,
+    })),
+  ]
+  return (
+    <div className="mt-3 max-w-md space-y-1">
+      <label htmlFor={id} className="text-xs font-medium text-slate-700">
+        Project for the LPR (project purchases go to the Project Procurement Officer)
+      </label>
+      <Select
+        id={id}
+        options={options}
+        value={value}
+        placeholder={projectsQuery.isLoading ? 'Loading projects…' : 'Non-project purchase'}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled || projectsQuery.isLoading}
+      />
+      {projectsQuery.isError ? (
+        <p className="text-xs text-red-700">Could not load projects from Business Central.</p>
+      ) : null}
+    </div>
   )
 }

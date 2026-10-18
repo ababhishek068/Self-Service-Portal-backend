@@ -15,47 +15,72 @@ import {
 } from './localPurchaseFlow.js'
 
 describe('assertLocalPurchaseActionAllowed', () => {
-  it('allows the video-flow actions for the BC setup role that owns them', () => {
+  it('allows each workflow action for the BC setup role that owns it', () => {
+    assert.equal(assertLocalPurchaseActionAllowed(['projectProcurement'], 'SUBMIT_LPR_OPS'), 'SUBMIT_LPR_OPS')
+    assert.equal(assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_LPR_OPS'), 'APPROVE_LPR_OPS')
     assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_LPR_FAD'), 'APPROVE_LPR_FAD')
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'CONVERT_TO_RFQ'), 'CONVERT_TO_RFQ')
+    assert.equal(assertLocalPurchaseActionAllowed(['projectProcurement'], 'CONVERT_TO_RFQ'), 'CONVERT_TO_RFQ')
+    assert.equal(assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_RFQ_OPS'), 'APPROVE_RFQ_OPS')
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'UPSERT_VENDOR_QUOTE', '', true), 'UPSERT_VENDOR_QUOTE')
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'AUTO_SELECT_WINNER'), 'AUTO_SELECT_WINNER')
+    assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'SEND_FOR_OPS_REVIEW'), 'SEND_FOR_OPS_REVIEW')
+    assert.equal(assertLocalPurchaseActionAllowed(['operationsManager'], 'SEND_TO_TECHNICAL'), 'SEND_TO_TECHNICAL')
     assert.equal(assertLocalPurchaseActionAllowed(['technical'], 'SUBMIT_TECHNICAL_REVIEW', 'change vendor'), 'SUBMIT_TECHNICAL_REVIEW')
     assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_WINNER_FAD_FINAL'), 'APPROVE_WINNER_FAD_FINAL')
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'CREATE_PO'), 'CREATE_PO')
-    assert.equal(assertLocalPurchaseActionAllowed(['financeChecker'], 'APPROVE_PO_FINANCE_CHECKER'), 'APPROVE_PO_FINANCE_CHECKER')
+    assert.equal(assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_PO_OPS'), 'APPROVE_PO_OPS')
     assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_PO_FAD'), 'APPROVE_PO_FAD')
-    assert.equal(assertLocalPurchaseActionAllowed(['ceo'], 'APPROVE_PAYMENT_CEO'), 'APPROVE_PAYMENT_CEO')
+    assert.equal(assertLocalPurchaseActionAllowed(['operations'], 'POST_LOCAL_RECEIVE'), 'POST_LOCAL_RECEIVE')
+    assert.equal(assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_INVOICE_OPS'), 'APPROVE_INVOICE_OPS')
+    assert.equal(assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_PAYMENT_FAD'), 'APPROVE_PAYMENT_FAD')
+    assert.equal(
+      assertLocalPurchaseActionAllowed(['financeChecker'], 'CLOSE_LPR_AFTER_PAYMENT', '', true),
+      'CLOSE_LPR_AFTER_PAYMENT',
+    )
   })
 
   it('rejects cross-role, a generic finance title, and missing comment/payload', () => {
     assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'APPROVE_LPR_FAD'), /not authorized/i)
-    // A "finance" job title is not a BC setup role — it can no longer approve as FAD or pay as CEO.
+    // A "finance" job title is not a BC setup role.
     assert.throws(() => assertLocalPurchaseActionAllowed(['finance'], 'APPROVE_LPR_FAD'), /not authorized/i)
-    assert.throws(() => assertLocalPurchaseActionAllowed(['finance'], 'APPROVE_PAYMENT_CEO'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['finance'], 'APPROVE_PAYMENT_FAD'), /not authorized/i)
+    // Meeting 18 Oct: the PO and payment approvals moved off Finance Checker / CEO.
+    assert.throws(() => assertLocalPurchaseActionAllowed(['financeChecker'], 'APPROVE_PO_OPS'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['ceo'], 'APPROVE_PAYMENT_FAD'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'SEND_TO_TECHNICAL'), /not authorized/i)
+    // Steps 20–21: the Store Keeper receives — Procurement no longer posts the GRN.
+    assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'POST_LOCAL_RECEIVE'), /not authorized/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['operationsManager'], 'SUBMIT_LPR_OPS'), /not authorized/i)
     assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'UPSERT_VENDOR_QUOTE', '', false), /payload/i)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['financeChecker'], 'CLOSE_LPR_AFTER_PAYMENT', '', false), /payload/i)
     assert.throws(() => assertLocalPurchaseActionAllowed(['technical'], 'SUBMIT_TECHNICAL_REVIEW', ''), /comment/i)
   })
 
   it('covers every documented Local Purchase SOAP action', () => {
     const expected = [
+      'SUBMIT_LPR_OPS',
+      'APPROVE_LPR_OPS',
       'APPROVE_LPR_FAD',
       'REJECT_LPR',
       'CONVERT_TO_RFQ',
+      'APPROVE_RFQ_OPS',
       'UPSERT_VENDOR_QUOTE',
       'AUTO_SELECT_WINNER',
+      'SEND_FOR_OPS_REVIEW',
       'SEND_TO_TECHNICAL',
       'SEND_FOR_FAD_APPROVAL',
       'SUBMIT_TECHNICAL_REVIEW',
       'SELECT_WINNER_FAD',
       'APPROVE_WINNER_FAD_FINAL',
       'CREATE_PO',
-      'APPROVE_PO_FINANCE_CHECKER',
+      'APPROVE_PO_OPS',
       'APPROVE_PO_FAD',
       'PREPARE_LOCAL_RECEIVE',
       'CREATE_LOCAL_INVOICE',
+      'APPROVE_INVOICE_OPS',
       'VERIFY_PO_GRN_INVOICE',
-      'APPROVE_PAYMENT_CEO',
+      'APPROVE_PAYMENT_FAD',
       'CLOSE_LPR_AFTER_PAYMENT',
       'FIX_LOCAL_CURRENCY',
       'POST_LOCAL_RECEIVE',
@@ -98,6 +123,7 @@ function demoChain(stage: {
 
 const ALL_ROLES: LocalPurchaseRole[] = [
   'operations',
+  'operationsManager',
   'procurement',
   'fad',
   'technical',
@@ -116,66 +142,110 @@ function step(chain: LocalPurchaseChain, role: LocalPurchaseRole) {
   return { mine, others }
 }
 
-describe('localPurchaseNextActions — full recording path', () => {
-  it('walks SR → LPR → RFQ → quotes → winner → FAD Final → PO → receive → issue → invoice → pay → close', () => {
-    // 9–10 FAD: Pending LPR → Approve (FAD)
-    let s = step(demoChain({ lprStatus: 'Pending Finance & Admin', lprStage: 'Pending FAD' }), 'fad')
+describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () => {
+  // Stage names are the BC captions (PortalLocalPurchaseChain sends Format(Flow Stage)).
+  it('walks SR → LPR (Ops, FAD) → RFQ (Ops) → quotes → evaluation (Ops) → FAD Final → PO (Ops, FAD) → GRN → invoice (Ops, Finance) → F&A pay → close', () => {
+    // 7 Procurement Officer prepares the LPR (Draft) and submits it to the Operations Manager
+    let s = step(demoChain({ lprStatus: 'Draft', lprStage: 'LPR Draft' }), 'procurement')
+    assert.deepEqual(s.mine, ['SUBMIT_LPR_OPS@ABH-PQ000092'])
+    assert.deepEqual(s.others, [])
+    assert.deepEqual(step(demoChain({ lprStatus: 'Draft', lprStage: 'LPR Draft' }), 'operationsManager').mine, [])
+
+    // 8 Operations Manager approves the LPR
+    s = step(demoChain({ lprStatus: 'Pending Operations Manager', lprStage: 'Pending Operations Manager' }), 'operationsManager')
+    assert.deepEqual(s.mine, ['APPROVE_LPR_OPS@ABH-PQ000092', 'REJECT_LPR@ABH-PQ000092'])
+    assert.deepEqual(s.others, [])
+    assert.deepEqual(
+      step(demoChain({ lprStatus: 'Pending Operations Manager', lprStage: 'Pending Operations Manager' }), 'fad').mine,
+      [],
+    )
+
+    // 9 F&A approves the LPR
+    s = step(demoChain({ lprStatus: 'Pending Finance & Admin', lprStage: 'Pending FAD' }), 'fad')
     assert.deepEqual(s.mine, ['APPROVE_LPR_FAD@ABH-PQ000092', 'REJECT_LPR@ABH-PQ000092'])
     assert.deepEqual(s.others, [])
 
-    // 11 Procurement: Convert to RFQ
+    // 10 Procurement prepares the RFQ
     s = step(demoChain({ lprStatus: 'Approved', lprStage: 'Ready for RFQ' }), 'procurement')
     assert.deepEqual(s.mine, ['CONVERT_TO_RFQ@ABH-PQ000092'])
 
-    // 12–13 Procurement: quotes + Auto Select Winner on the RFQ, never on the LPR
+    // 11 Operations Manager approves the RFQ before quotations
+    s = step(demoChain({ rfqStage: 'Pending Operations Manager RFQ' }), 'operationsManager')
+    assert.deepEqual(s.mine, ['APPROVE_RFQ_OPS@ABH-PQ000093'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'Pending Operations Manager RFQ' }), 'procurement').mine, [])
+
+    // 12–13 Procurement: quotes, evaluation (winner), send for Ops review
     s = step(demoChain({ rfqStage: 'RFQ Open' }), 'procurement')
     assert.deepEqual(s.mine, ['UPSERT_VENDOR_QUOTE@ABH-PQ000093', 'AUTO_SELECT_WINNER@ABH-PQ000093'])
     s = step(demoChain({ rfqStage: 'Winner Selected' }), 'procurement')
-    assert.ok(s.mine.includes('SEND_TO_TECHNICAL@ABH-PQ000093'))
-    assert.ok(s.mine.includes('SEND_FOR_FAD_APPROVAL@ABH-PQ000093'))
+    assert.ok(s.mine.includes('SEND_FOR_OPS_REVIEW@ABH-PQ000093'))
+    assert.ok(!s.mine.some((code) => code.startsWith('SEND_TO_TECHNICAL')), 'Technical routing is the Ops Manager')
     assert.ok(!s.mine.some((code) => code.startsWith('CREATE_PO')), 'no Create PO before FAD Final')
 
-    // 14 Technical (optional)
+    // 14 Operations Manager: Technical if required, else FAD; or send back
+    s = step(demoChain({ rfqStage: 'Pending Operations Manager Evaluation' }), 'operationsManager')
+    assert.deepEqual(s.mine, [
+      'SEND_TO_TECHNICAL@ABH-PQ000093',
+      'SEND_FOR_FAD_APPROVAL@ABH-PQ000093',
+      'SEND_BACK_RFQ@ABH-PQ000093',
+    ])
+    assert.deepEqual(step(demoChain({ rfqStage: 'Pending Operations Manager Evaluation' }), 'fad').mine, [])
+
+    // 15 Technical (optional)
     s = step(demoChain({ rfqStage: 'Pending Technical' }), 'technical')
     assert.deepEqual(s.mine, ['SUBMIT_TECHNICAL_REVIEW@ABH-PQ000093'])
-    assert.deepEqual(step(demoChain({ rfqStage: 'Pending Technical' }), 'fad').mine, [])
 
-    // 15 FAD: Change Winner (FAD) / Approve Winner (FAD Final)
+    // 16 FAD final supplier approval
     s = step(demoChain({ rfqStage: 'Pending FAD Final' }), 'fad')
     assert.ok(s.mine.includes('SELECT_WINNER_FAD@ABH-PQ000093'))
     assert.ok(s.mine.includes('APPROVE_WINNER_FAD_FINAL@ABH-PQ000093'))
-    assert.deepEqual(step(demoChain({ rfqStage: 'Pending FAD Final' }), 'procurement').mine, [])
+    assert.ok(s.mine.includes('SEND_BACK_RFQ@ABH-PQ000093'))
+    assert.deepEqual(step(demoChain({ rfqStage: 'Pending FAD Final' }), 'operationsManager').mine, [])
 
-    // 16 Procurement: Create Purchase Order (from winner)
-    s = step(demoChain({ rfqStage: 'Ready for PO' }), 'procurement')
+    // 17 Procurement prepares the PO
+    s = step(demoChain({ rfqStage: 'Ready for PO' }), 'projectProcurement')
     assert.deepEqual(s.mine, ['CREATE_PO@ABH-PQ000093'])
 
-    // 17–18 Finance Checker first, then FAD (BC order)
-    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance PO' }), 'financeChecker')
-    assert.ok(s.mine.includes('APPROVE_PO_FINANCE_CHECKER@ABH-PO000008'))
-    assert.ok(!step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance PO' }), 'fad').mine.includes('APPROVE_PO_FAD@ABH-PO000008'))
+    // 18 Operations Manager approves the PO, 19 then FAD
+    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'operationsManager')
+    assert.deepEqual(s.mine, ['APPROVE_PO_OPS@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance PO' }), 'financeChecker').mine, [])
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending FAD PO' }), 'fad')
-    assert.ok(s.mine.includes('APPROVE_PO_FAD@ABH-PO000008'))
+    assert.deepEqual(s.mine, ['APPROVE_PO_FAD@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending FAD PO' }), 'operationsManager').mine, [])
 
-    // 19 Procurement: Prepare Local Receive → Post Receive
-    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' }), 'procurement')
-    assert.ok(s.mine.includes('PREPARE_LOCAL_RECEIVE@ABH-PO000008'))
-    assert.ok(s.mine.includes('POST_LOCAL_RECEIVE@ABH-PO000008'))
+    // 20–21 Store Keeper receives and records the GRN
+    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' }), 'operations')
+    assert.deepEqual(s.mine, ['PREPARE_LOCAL_RECEIVE@ABH-PO000008', 'POST_LOCAL_RECEIVE@ABH-PO000008'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' }), 'procurement').mine, [
+      'FIX_LOCAL_CURRENCY@ABH-PO000008',
+    ])
 
-    // 20 Store Keeper: Issue after LPR receive (on the original Store Req) + 21 invoice
+    // Issue after LPR receive (Store Keeper) + 22 Procurement prepares the invoice
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Goods Received' }), 'operations')
     assert.deepEqual(s.mine, ['ISSUE_AFTER_LPR@ABH-SR000159'])
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Goods Received' }), 'procurement').mine, [
       'CREATE_LOCAL_INVOICE@ABH-PO000008',
     ])
 
-    // 21 Finance Checker verify → CEO Approve Payment → Finance Checker Payment Voucher / Close LPR
+    // 23 Operations Manager checks the invoice, 24 Finance verifies PO + GRN + Invoice
+    assert.deepEqual(
+      step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager Invoice' }), 'operationsManager').mine,
+      ['APPROVE_INVOICE_OPS@ABH-PO000008'],
+    )
+    assert.deepEqual(
+      step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager Invoice' }), 'financeChecker').mine,
+      [],
+    )
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Invoice Check' }), 'financeChecker').mine, [
       'VERIFY_PO_GRN_INVOICE@ABH-PO000008',
     ])
-    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending CEO Payment' }), 'ceo').mine, [
-      'APPROVE_PAYMENT_CEO@ABH-PO000008',
+
+    // 25 F&A approves payment, 26 Finance pays and closes
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending F&A Payment Approval' }), 'fad').mine, [
+      'APPROVE_PAYMENT_FAD@ABH-PO000008',
     ])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending F&A Payment Approval' }), 'ceo').mine, [])
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Payment Approved' }), 'financeChecker').mine, [
       'CLOSE_LPR_AFTER_PAYMENT@ABH-PO000008',
     ])
@@ -183,11 +253,25 @@ describe('localPurchaseNextActions — full recording path', () => {
     assert.deepEqual(closed.map((action) => action.actionCode), ['ISSUE_AFTER_LPR'])
   })
 
-  it('never lets the CEO, Technical or Store Keeper run PO / winner steps', () => {
-    for (const poStage of ['Pending Finance PO', 'Pending FAD PO', 'PO Released']) {
-      for (const role of ['ceo', 'technical', 'operations'] as LocalPurchaseRole[]) {
+  it('still maps BC member names (older captions) to the same steps', () => {
+    assert.deepEqual(step(demoChain({ rfqStage: 'Pending Ops RFQ' }), 'operationsManager').mine, ['APPROVE_RFQ_OPS@ABH-PQ000093'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending CEO Payment' }), 'fad').mine, [
+      'APPROVE_PAYMENT_FAD@ABH-PO000008',
+    ])
+    assert.deepEqual(step(demoChain({ lprStatus: 'Pending Operations', lprStage: 'Pending Operations' }), 'operationsManager').mine, [
+      'APPROVE_LPR_OPS@ABH-PQ000092',
+      'REJECT_LPR@ABH-PQ000092',
+    ])
+  })
+
+  it('never lets the CEO or Technical run PO steps, nor the Store Keeper approve', () => {
+    for (const poStage of ['Pending Operations Manager PO', 'Pending FAD PO', 'PO Released']) {
+      for (const role of ['ceo', 'technical'] as LocalPurchaseRole[]) {
         assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage }), role).mine, [])
       }
+    }
+    for (const poStage of ['Pending Operations Manager PO', 'Pending FAD PO']) {
+      assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage }), 'operations').mine, [])
     }
   })
 
@@ -204,6 +288,10 @@ describe('Local Purchase access from Business Central', () => {
 
   it('parses the BC roles response and drops unknown names', () => {
     assert.deepEqual(parseBcLocalPurchaseRoles('{"roles":["fad","FinanceChecker","boss"]}'), ['fad', 'financeChecker'])
+    assert.deepEqual(parseBcLocalPurchaseRoles('{"roles":["operationsManager","projectProcurement"]}'), [
+      'operationsManager',
+      'projectProcurement',
+    ])
     assert.throws(() => parseBcLocalPurchaseRoles('{"nope":1}'), /invalid/i)
   })
 

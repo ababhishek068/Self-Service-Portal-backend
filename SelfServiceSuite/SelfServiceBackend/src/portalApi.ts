@@ -440,7 +440,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v233 — 1.0.3.392 (6-digit password reset code; professional reset email; Local Purchase)'
+export const PORTAL_API_BUILD = 'v234 — 1.0.3.393 (Local Purchase per 18 Oct workflow: Operations Manager checks; Store Manager start LPR; F&A payment)'
 
 interface LookupSpec {
   service: string
@@ -1296,8 +1296,12 @@ const STORE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRu
   STOCK_CHECK: {
     STOCK_AVAILABLE: { roles: ['operations'] },
     STOCK_UNAVAILABLE: { roles: ['operations'] },
-    /** BC caption from UAT recording — same as STOCK_UNAVAILABLE. */
+    /** Local Purchase step 5: Store Keeper confirms the item is unavailable (Store Manager starts the LPR). */
     REQUEST_FOR_LPR: { roles: ['operations'] },
+  },
+  /** Local Purchase step 6: Store Manager starts the LPR — project first, then BC assigns the officer. */
+  LPR_REQUESTED: {
+    START_LPR: { roles: ['operations'] },
   },
   /** After LPR/GRN, Store Keeper issues GIV from received stock. */
   PROCUREMENT_REQUEST: {
@@ -4481,9 +4485,12 @@ export function buildPortalApiRouter() {
         })
         return
       }
-      if (requestedAction === 'REQUEST_FOR_LPR' || requestedAction === 'ISSUE_AFTER_LPR') {
+      if (requestedAction === 'REQUEST_FOR_LPR' || requestedAction === 'START_LPR' || requestedAction === 'ISSUE_AFTER_LPR') {
         // Local Purchase store actions need the BC app with the LPR portal methods.
         await requireLocalPurchaseAccess(authUser)
+      }
+      if (requestedAction === 'START_LPR' && !portalUserIsStoreManager(authUser)) {
+        throw portalError('Only the store manager can start the Local Purchase Requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)
@@ -4500,7 +4507,8 @@ export function buildPortalApiRouter() {
       )
       // 382 behaviour for every existing action (incl. STOCK_UNAVAILABLE); only the
       // Local Purchase codes, which need the newer BC app, bypass the prep gate.
-      const skipStockGate = actionCode === 'ISSUE_AFTER_LPR' || actionCode === 'REQUEST_FOR_LPR'
+      const skipStockGate =
+        actionCode === 'ISSUE_AFTER_LPR' || actionCode === 'REQUEST_FOR_LPR' || actionCode === 'START_LPR'
       if (!skipStockGate && stockCheck.needsBcPrep) {
         throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_BC_PREP_REQUIRED')
       }
@@ -4561,6 +4569,36 @@ export function buildPortalApiRouter() {
       const access = await resolveLocalPurchaseAccess(user(req), callSoapMethod)
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({ enabled: access.enabled, roles: access.roles })
+    }),
+  )
+
+  /** BC projects (Job) for Start LPR: project first, then BC assigns the Project Procurement Officer. */
+  router.get(
+    '/local-purchase/projects',
+    safe(async (req, res) => {
+      const { roles } = await requireLocalPurchaseAccess(user(req))
+      if (!roles.length) {
+        throw portalError('Only Store / Local Purchase users can list projects.', 403, 'LPR_ACTION_FORBIDDEN')
+      }
+      const result = await callSoapMethod('PortalLprProjects', {})
+      const projects = parseSoapJson(result.returnValue).projects
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ projects: Array.isArray(projects) ? projects : [] })
+    }),
+  )
+
+  /** BC bank accounts for Pay Vendor & Close LPR (Finance Checker picks the bank each time). */
+  router.get(
+    '/local-purchase/bank-accounts',
+    safe(async (req, res) => {
+      const { roles } = await requireLocalPurchaseAccess(user(req))
+      if (!roles.includes('financeChecker')) {
+        throw portalError('Only the Finance Checker can list bank accounts for LPR payment.', 403, 'LPR_ACTION_FORBIDDEN')
+      }
+      const result = await callSoapMethod('PortalLprBankAccounts', {})
+      const bankAccounts = parseSoapJson(result.returnValue).bankAccounts
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ bankAccounts: Array.isArray(bankAccounts) ? bankAccounts : [] })
     }),
   )
 

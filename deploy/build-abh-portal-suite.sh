@@ -98,16 +98,24 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cp "$AL_ROOT/src/src/Store/ABHVendorQuote.Table.al" "$PENDING_AL_DIR/"
   # LPR Role Center menus (Nitish, ABH-LIVE-AL c613aa8) and setup/RC caption updates.
   for f in ABHCeoLprRC.PageExt.al ABHFundsMgmtLprRC.PageExt.al ABHPayrollFundsLprRC.PageExt.al \
-           ABHLocalProcSetup.Page.al ABHLocalProcurementRC.Page.al; do
+           ABHLocalProcSetup.Page.al ABHLocalProcurementRC.Page.al ABHLocalRfqCard.PageExt.al \
+           ABHLPROpsRfqQueue.Page.al ABHLPROpsPoQueue.Page.al ABHLPRFadPoQueue.Page.al ABHLPRPendingList.Page.al; do
     cp "$AL_ROOT/src/src/Store/$f" "$PENDING_AL_DIR/"
   done
+  # 18 Oct workflow: Flow Stage / Ops fields, LPR card, Store Manager project-first prompt.
+  cp "$AL_ROOT/src/src/tableextension/PurchaseHeaderExtension.TableExt.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Page/InternalRequisitionsU.Page.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Page/StoreReqHeaderApproved.Page.al" "$PENDING_AL_DIR/"
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
-These are the Local Purchase files changed for the portal; the full source is the
-ABH-LIVE-AL branch cursor/lpr-portal-soap-wrappers-e873 (= main incl. Nitish's LPR
-Role Center menus + portal wrappers). Compile THAT branch, test in UAT, publish.
-Adds: PortalLocalPurchaseAction / Chain / Roles / AttachVendorQuoteFile, Post
-Receive, send-back, and the portal-actor fix in ABH Local Procurement.
+These are the Local Purchase files changed for the portal; the full source is
+ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.543.app,
+publish with docs/ERP-Publish-1.0.3.543.ps1). Workflow = "ERP & BC – Staff Item/Asset
+Request to Payment Workflow" (meeting 18 Oct): Store Keeper Request for LPR -> Store
+Manager Start LPR (project, then officer) -> Procurement Officer submits -> Operations
+Manager -> FAD -> RFQ (Operations Manager) -> quotes -> evaluation (Operations Manager,
+Technical if required) -> FAD final -> PO (Operations Manager, FAD) -> Store Keeper GRN ->
+invoice (Operations Manager, Finance verify) -> F&A payment -> Finance pays and closes.
 The portal turns Local Purchase on by itself once these methods exist in BC;
 until then purchase/store behave exactly as in 1.0.3.382.
 After publish: fill ABH Local Proc Setup user IDs, turn OFF Using Temporary Users.

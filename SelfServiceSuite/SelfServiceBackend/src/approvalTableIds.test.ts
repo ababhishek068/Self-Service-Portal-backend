@@ -311,6 +311,13 @@ describe('purchase stock decision authorization', () => {
       () => assertStoreProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_UNAVAILABLE'),
       /not authorized/i,
     )
+    // Local Purchase: Store Keeper confirms unavailability (step 5), Store Manager starts the LPR (step 6).
+    assert.equal(assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'REQUEST_FOR_LPR'), 'REQUEST_FOR_LPR')
+    assert.equal(assertStoreProcessActionAllowed(operations, 'LPR_REQUESTED', 'START_LPR'), 'START_LPR')
+    assert.throws(() => assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'START_LPR'), /not valid/i)
+    assert.throws(() => assertStoreProcessActionAllowed(procurement, 'LPR_REQUESTED', 'START_LPR'), /not authorized/i)
+    assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Manager' }), true)
+    assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Keeper' }), false)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)

@@ -4989,6 +4989,20 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(ProcurementMgt.GetLocalPurchaseRoles(actorUserID));
     end;
 
+    procedure PortalLprProjects() return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListLprProjects());
+    end;
+
+    procedure PortalLprBankAccounts() return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListLprBankAccounts());
+    end;
+
     procedure PortalAttachVendorQuoteFile(rfqNo: Code[50]; lineNo: Integer; fileName: Text[250]; fileBase64: BigText; description: Text[250]) return_value: Text
     var
         ProcurementMgt: Codeunit "Portal Procurement Mgt.";

@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /**
- * Local Purchase smoke path against a running SSP backend + BC UAT (steps 8–21 of the recording).
+ * Local Purchase smoke path against a running SSP backend + BC UAT (steps 5–26 of the
+ * "Staff Item-Asset Request to Payment Workflow", meeting 18 Oct).
  *
  *   LPR_SMOKE_BASE=http://localhost:4000 \
- *   LPR_SMOKE_USERS='{"keeper":{"staffNo":"IT_KEEPER","password":"…"},"fad":{…},"procurement":{…},
- *                     "financeChecker":{…},"ceo":{…},"technical":{…}}' \
- *   node scripts/lpr-smoke.mjs --store-req ABH-SR000159 \
+ *   LPR_SMOKE_USERS='{"keeper":{"staffNo":"IT_KEEPER","password":"…"},"storeManager":{…},"opsManager":{…},"fad":{…},
+ *                     "procurement":{…},"financeChecker":{…},"technical":{…}}' \
+ *   node scripts/lpr-smoke.mjs --store-req ABH-SR000159 --bank BANK001 [--project JOB00010] \
  *     --vendors ABH-VEN000001:5000:9,ABH-VEN000002:6000:5 --vendor-invoice INV-2026-001 [--technical] [--resume]
  *
  * --lpr ABH-PQ000092 starts from an existing LPR instead of Request for LPR.
  * --resume skips steps whose action is no longer offered (the chain is already past them).
- * "technical" is optional; with --technical the RFQ goes Send to Technical → Submit Technical Review.
+ * "technical" is optional; with --technical the Operations Manager sends the RFQ to Technical.
+ * --project assigns the Project Procurement Officer — log in "procurement" as that officer.
+ * "storeManager" defaults to "keeper" when one user is both Store Keeper and Store Manager.
  * Steps 1–7 (Store Requisition Header UP, Send Approval Request, Requests to Approve) use the existing
  * portal screens — see LOCAL-PURCHASE-LPR-RUNBOOK.md.
  */
@@ -120,11 +123,12 @@ async function act(n, role, actionCode, extra = {}) {
   return after
 }
 
-async function storeAction(n, actionCode) {
-  const data = await api('keeper', 'POST', `/requests/${encodeURIComponent(`storeRequisition-${storeReqNo}`)}/store-process`, {
+async function storeAction(n, actionCode, linkedDocumentNo = '', role = 'keeper') {
+  const data = await api(role, 'POST', `/requests/${encodeURIComponent(`storeRequisition-${storeReqNo}`)}/store-process`, {
     actionCode,
+    ...(linkedDocumentNo ? { linkedDocumentNo } : {}),
   })
-  console.log(`✔ ${n}. ${actionCode} [keeper] on ${storeReqNo} · stage: ${data.process?.stageLabel ?? data.process?.stageCode ?? '?'}`)
+  console.log(`✔ ${n}. ${actionCode} [${role}] on ${storeReqNo} · stage: ${data.process?.stageLabel ?? data.process?.stageCode ?? '?'}`)
   return data
 }
 
@@ -133,16 +137,24 @@ async function main() {
   console.log(`Local Purchase smoke · ${base}`)
 
   if (!lprNo) {
-    const data = await storeAction(8, 'REQUEST_FOR_LPR')
+    await storeAction(5, 'REQUEST_FOR_LPR')
+    const managerRole = users.storeManager ? 'storeManager' : 'keeper'
+    const data = await storeAction(6, 'START_LPR', option('project') ?? '', managerRole)
     lprNo = data.process?.links?.lprNo
-    if (!lprNo) fail('Request for LPR did not return the created LPR No.')
+    if (!lprNo) fail('Start LPR did not return the created LPR No.')
     console.log(`  LPR ${lprNo} created from ${storeReqNo} (Issue Stage: LPR Started)`)
   }
+  await act(7, 'procurement', 'SUBMIT_LPR_OPS')
 
-  await act(10, 'fad', 'APPROVE_LPR_FAD')
-  let current = await act(11, 'procurement', 'CONVERT_TO_RFQ')
+  const bankNo = option('bank')
+  if (!bankNo && !resume) fail('Pass --bank <Bank Account No.> for Pay Vendor & Close LPR.')
+
+  await act(8, 'opsManager', 'APPROVE_LPR_OPS')
+  await act(9, 'fad', 'APPROVE_LPR_FAD')
+  let current = await act(10, 'procurement', 'CONVERT_TO_RFQ')
   const rfqNo = current.chain.rfq?.no
   if (!rfqNo) fail('Convert to RFQ did not populate Created RFQ No.')
+  await act(11, 'opsManager', 'APPROVE_RFQ_OPS')
 
   if (vendors.length === 0 && !resume) fail('Pass --vendors VENDOR:amount:leadDays,… (at least Minimum Quotes Required).')
   for (const vendor of vendors) {
@@ -167,36 +179,39 @@ async function main() {
 
   current = await act(13, 'procurement', 'AUTO_SELECT_WINNER')
   console.log(`  Winner: ${current.chain.rfq?.selectedVendorNo ?? '?'}`)
+  await act(13, 'procurement', 'SEND_FOR_OPS_REVIEW')
   if (useTechnical) {
-    await act(13, 'procurement', 'SEND_TO_TECHNICAL')
-    await act(14, 'technical', 'SUBMIT_TECHNICAL_REVIEW', { actionComment: 'SSP smoke: quotes reviewed, winner acceptable.' })
+    await act(14, 'opsManager', 'SEND_TO_TECHNICAL')
+    await act(15, 'technical', 'SUBMIT_TECHNICAL_REVIEW', { actionComment: 'SSP smoke: quotes reviewed, winner acceptable.' })
   } else {
-    await act(13, 'procurement', 'SEND_FOR_FAD_APPROVAL')
+    await act(14, 'opsManager', 'SEND_FOR_FAD_APPROVAL')
   }
-  await act(15, 'fad', 'APPROVE_WINNER_FAD_FINAL')
-  current = await act(16, 'procurement', 'CREATE_PO')
+  await act(16, 'fad', 'APPROVE_WINNER_FAD_FINAL')
+  current = await act(17, 'procurement', 'CREATE_PO')
   if (current.chain.po?.currencyCode) fail(`Local PO ${current.chain.po.no} has Currency Code ${current.chain.po.currencyCode}; it must be blank.`)
+  if (!(Number(current.chain.po?.amountIncludingVat ?? 0) > 0)) fail(`Local PO ${current.chain.po?.no} amount is 0.00.`)
 
-  await act(17, 'financeChecker', 'APPROVE_PO_FINANCE_CHECKER')
-  await act(18, 'fad', 'APPROVE_PO_FAD')
-  await act(19, 'procurement', 'PREPARE_LOCAL_RECEIVE')
-  current = await act(19, 'procurement', 'POST_LOCAL_RECEIVE')
+  await act(18, 'opsManager', 'APPROVE_PO_OPS')
+  await act(19, 'fad', 'APPROVE_PO_FAD')
+  await act(20, 'keeper', 'PREPARE_LOCAL_RECEIVE')
+  current = await act(21, 'keeper', 'POST_LOCAL_RECEIVE')
   console.log(`  GRN: ${(current.chain.receipts ?? []).map((row) => row.no).join(', ') || '?'}`)
 
   const chainStoreReq = current.chain.storeRequisitionNo
   if (storeReqNo || chainStoreReq) {
     storeReqNo = storeReqNo || chainStoreReq
-    await storeAction(20, 'ISSUE_AFTER_LPR').catch((error) => {
+    await storeAction(21, 'ISSUE_AFTER_LPR').catch((error) => {
       if (!resume) throw error
-      console.log(`  20. ISSUE_AFTER_LPR — skipped (${error.message})`)
+      console.log(`  21. ISSUE_AFTER_LPR — skipped (${error.message})`)
     })
   }
 
   if (!vendorInvoiceNo && !resume) fail('Pass --vendor-invoice <real Vendor Invoice No.> for Create Local Invoice.')
-  await act(21, 'procurement', 'CREATE_LOCAL_INVOICE', { payload: { vendorInvoiceNo } })
-  await act(21, 'financeChecker', 'VERIFY_PO_GRN_INVOICE')
-  await act(21, 'ceo', 'APPROVE_PAYMENT_CEO')
-  current = await act(21, 'financeChecker', 'CLOSE_LPR_AFTER_PAYMENT')
+  await act(22, 'procurement', 'CREATE_LOCAL_INVOICE', { payload: { vendorInvoiceNo } })
+  await act(23, 'opsManager', 'APPROVE_INVOICE_OPS')
+  await act(24, 'financeChecker', 'VERIFY_PO_GRN_INVOICE')
+  await act(25, 'fad', 'APPROVE_PAYMENT_FAD')
+  current = await act(26, 'financeChecker', 'CLOSE_LPR_AFTER_PAYMENT', { payload: { bankAccountNo: bankNo } })
   console.log(
     `\nDone · ${storeReqNo ?? chainStoreReq ?? '-'} → ${lprNo} → ${rfqNo} → ${current.chain.po?.no ?? '?'}` +
       ` · Payment ${current.chain.po?.paymentDocNo ?? '?'} · LPR Closed: ${current.chain.po?.lprClosed ? 'yes' : 'no'}`,

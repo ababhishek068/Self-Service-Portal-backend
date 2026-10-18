@@ -5,8 +5,10 @@ import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  getLocalPurchaseBankAccounts,
   getLocalPurchaseState,
   runLocalPurchaseAction,
   uploadLocalPurchaseQuoteAttachment,
@@ -26,7 +28,9 @@ const RETURN_ACTIONS = new Set(['REJECT_LPR', 'SEND_BACK_RFQ', 'SEND_BACK_PO'])
 
 const ROLE_LABELS: Record<string, string> = {
   operations: 'Store Keeper',
+  operationsManager: 'Operations Manager',
   procurement: 'Procurement',
+  projectProcurement: 'Project Procurement',
   fad: 'FAD',
   finance: 'Finance',
   financeChecker: 'Finance Checker',
@@ -79,6 +83,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const queryClient = useQueryClient()
   const [actionComment, setActionComment] = useState('')
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
+  const [bankAccountNo, setBankAccountNo] = useState('')
   const [quoteForm, setQuoteForm] = useState({
     vendorNo: '',
     quotedAmount: '',
@@ -92,6 +97,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     queryFn: () => getLocalPurchaseState(request.id),
     enabled: access.enabled,
     retry: false,
+  })
+  const isFinanceChecker = access.roles.includes('financeChecker')
+  const bankQuery = useQuery({
+    queryKey: ['local-purchase', 'bank-accounts'],
+    queryFn: getLocalPurchaseBankAccounts,
+    enabled: access.enabled && isFinanceChecker,
+    retry: false,
+    staleTime: 5 * 60_000,
   })
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['local-purchase', request.id] })
@@ -142,6 +155,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     (action) => action.commentRequired || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW',
   )
   const needsVendorInvoiceNo = ribbon.some((action) => action.actionCode === 'CREATE_LOCAL_INVOICE')
+  const needsBank = ribbon.some((action) => action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT')
+  const bankOptions = (bankQuery.data?.bankAccounts ?? []).map((bank) => ({
+    value: bank.no,
+    label: [bank.no, bank.name, bank.currencyCode].filter(Boolean).join(' — '),
+  }))
   const quotes: LocalPurchaseVendorQuote[] = state.quotes.quotes ?? []
   const rfqNo = text(rfq?.no)
   const minQuotes = Number(rfq?.minQuotesRequired ?? 0) || 0
@@ -166,9 +184,16 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       toast.error('Enter the real Vendor Invoice No. from the supplier invoice.', 'Vendor Invoice No. required')
       return
     }
+    if (action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT' && !bankAccountNo) {
+      toast.error('Choose the bank account this payment is made from.', 'Bank account required')
+      return
+    }
     const yes = await confirm({
       title: action.label,
-      message: `${action.label} on ${action.documentNo}?`,
+      message:
+        action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT'
+          ? `${action.label} on ${action.documentNo} from bank ${bankAccountNo}?`
+          : `${action.label} on ${action.documentNo}?`,
       confirmLabel: action.label,
     })
     if (!yes) return
@@ -183,10 +208,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             ? { vendorInvoiceNo: vendorInvoiceNo.trim() }
             : action.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
               ? { technicalComment: comment }
-              : undefined,
+              : action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT'
+                ? { bankAccountNo }
+                : undefined,
       })
       setActionComment('')
       setVendorInvoiceNo('')
+      setBankAccountNo('')
       const resultNo = text(response.result?.resultNo)
       toast.success(resultNo && resultNo !== action.documentNo ? `${action.label} — ${resultNo}` : `${action.label} completed.`)
     } catch (error) {
@@ -255,6 +283,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             <Field label="From Store Req" value={text(state.chain.storeRequisitionNo)} />
             <Field label="LPR Status" value={text(lpr.lprStatus)} />
             <Field label="Status" value={text(lpr.status)} />
+            <Field label="Project" value={text(lpr.projectNo)} />
+            <Field
+              label="Procurement Officer"
+              value={[text(lpr.assignedProcUserId), text(lpr.procOfficerType)].filter(Boolean).join(' · ')}
+            />
+            <Field label="Operations Manager Approved By" value={text(lpr.opsApprovedBy)} />
             <Field label="FAD Approved By" value={text(lpr.fadApprovedBy)} />
             <Field label="FAD Approval Date" value={bcDate(lpr.fadApprovalDate)} />
             <Field label="Created RFQ No." value={text(lpr.createdRfqNo)} />
@@ -265,10 +299,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           <DocCard title={`Local RFQ ${rfqNo}`}>
             <Field label="From LPR No." value={text(rfq.fromLprNo)} />
             <Field label="Full Flow Stage" value={text(rfq.flowStage)} />
+            <Field label="RFQ Approved By (Operations Manager)" value={text(rfq.opsRfqApprovedBy)} />
             <Field label="Quote Due Date" value={bcDate(rfq.quoteDueDate)} />
             <Field label="Minimum Quotes Required" value={minQuotes || ''} />
             <Field label="Selected Vendor" value={text(rfq.selectedVendorNo)} />
             <Field label="Vendor Selection Reason" value={text(rfq.selectionReason)} />
+            <Field label="Evaluation Reviewed By (Operations Manager)" value={text(rfq.opsEvalReviewedBy)} />
             <Field label="FAD Final Approved By" value={text(rfq.fadFinalBy)} />
             <Field label="Created PO No." value={text(rfq.createdPoNo)} />
           </DocCard>
@@ -283,12 +319,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             />
             <Field label="Currency Code" value={poCurrency || 'Blank (local ETB)'} />
             <Field label="Location" value={text(po.locationCode) || text(po.destinationStore)} />
-            <Field label="Finance Checker" value={text(po.financeStatus)} />
+            <Field label="Operations Manager Approved PO" value={text(po.opsApprovedBy)} />
             <Field label="FAD Approved PO" value={po.fadPoApproved ? 'Yes' : ''} />
             <Field label="GRN" value={receipts.map((row) => text(row.no)).filter(Boolean).join(', ')} />
             <Field label="Invoice" value={text(po.postedInvoiceNo) || text(po.createdInvoiceNo)} />
-            <Field label="Invoice Verified" value={po.invoiceVerified ? 'Yes' : ''} />
-            <Field label="CEO Payment Approved" value={po.ceoPayApproved ? 'Yes' : ''} />
+            <Field label="Invoice Checked By (Operations Manager)" value={text(po.opsInvoiceCheckedBy)} />
+            <Field label="Invoice Verified (Finance)" value={po.invoiceVerified ? 'Yes' : ''} />
+            <Field label="Payment Approved (F&A)" value={po.ceoPayApproved ? 'Yes' : ''} />
+            <Field label="Paid From Bank" value={text(po.paymentBankNo)} />
             <Field label="Payment Voucher" value={text(po.paymentDocNo)} />
             <Field label="LPR Closed" value={po.lprClosed ? 'Yes' : ''} />
           </DocCard>
@@ -483,6 +521,22 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                 placeholder="Number printed on the supplier invoice"
                 disabled={busy}
               />
+            </div>
+          ) : null}
+          {needsBank ? (
+            <div className="max-w-md space-y-1.5">
+              <Label htmlFor={`lpr-bank-${request.id}`}>Pay from bank account</Label>
+              <Select
+                id={`lpr-bank-${request.id}`}
+                options={bankOptions}
+                placeholder={bankQuery.isLoading ? 'Loading bank accounts…' : 'Choose the bank account'}
+                value={bankAccountNo}
+                onChange={(event) => setBankAccountNo(event.target.value)}
+                disabled={busy || bankQuery.isLoading}
+              />
+              {bankQuery.isError ? (
+                <p className="text-xs text-red-700">Could not load bank accounts from Business Central.</p>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2">

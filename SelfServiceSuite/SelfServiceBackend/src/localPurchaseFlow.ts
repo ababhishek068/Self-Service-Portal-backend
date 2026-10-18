@@ -6,7 +6,9 @@
 
 export type LocalPurchaseRole =
   | 'operations'
+  | 'operationsManager'
   | 'procurement'
+  | 'projectProcurement'
   | 'finance'
   | 'fad'
   | 'technical'
@@ -23,62 +25,76 @@ export type LocalPurchaseAuth = {
   employeeNo?: string
 }
 
+const PROCUREMENT: LocalPurchaseRole[] = ['procurement', 'projectProcurement']
+
 /** Actions that call PortalLocalPurchaseAction in Business Central. */
 export const LOCAL_PURCHASE_ACTIONS: Record<
   string,
   { roles: LocalPurchaseRole[]; needsPayload?: boolean; commentRequired?: boolean }
 > = {
   // Owners mirror ABH Local Procurement's TestIs* checks (ABH Local Proc Setup user IDs).
+  // Workflow per "ERP & BC – Staff Item-Asset Request to Payment Workflow" (meeting 18 Oct).
+  SUBMIT_LPR_OPS: { roles: PROCUREMENT },
+  APPROVE_LPR_OPS: { roles: ['operationsManager'] },
   APPROVE_LPR_FAD: { roles: ['fad'] },
-  REJECT_LPR: { roles: ['fad'], commentRequired: true },
-  CONVERT_TO_RFQ: { roles: ['procurement'] },
-  UPSERT_VENDOR_QUOTE: { roles: ['procurement'], needsPayload: true },
-  AUTO_SELECT_WINNER: { roles: ['procurement'] },
-  SEND_TO_TECHNICAL: { roles: ['procurement'] },
-  SEND_FOR_FAD_APPROVAL: { roles: ['procurement'] },
+  REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  CONVERT_TO_RFQ: { roles: PROCUREMENT },
+  APPROVE_RFQ_OPS: { roles: ['operationsManager'] },
+  UPSERT_VENDOR_QUOTE: { roles: PROCUREMENT, needsPayload: true },
+  AUTO_SELECT_WINNER: { roles: PROCUREMENT },
+  SEND_FOR_OPS_REVIEW: { roles: PROCUREMENT },
+  SEND_TO_TECHNICAL: { roles: ['operationsManager'] },
+  SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'] },
   SUBMIT_TECHNICAL_REVIEW: { roles: ['technical'], commentRequired: true },
   SELECT_WINNER_FAD: { roles: ['fad'] },
   APPROVE_WINNER_FAD_FINAL: { roles: ['fad'] },
-  CREATE_PO: { roles: ['procurement'] },
-  APPROVE_PO_FINANCE_CHECKER: { roles: ['financeChecker'] },
+  CREATE_PO: { roles: PROCUREMENT },
+  APPROVE_PO_OPS: { roles: ['operationsManager'] },
   APPROVE_PO_FAD: { roles: ['fad'] },
-  PREPARE_LOCAL_RECEIVE: { roles: ['procurement'] },
-  CREATE_LOCAL_INVOICE: { roles: ['procurement'] },
+  // Steps 20–21: the Store Keeper receives the goods and records the GRN.
+  PREPARE_LOCAL_RECEIVE: { roles: ['operations'] },
+  POST_LOCAL_RECEIVE: { roles: ['operations'] },
+  CREATE_LOCAL_INVOICE: { roles: PROCUREMENT },
+  APPROVE_INVOICE_OPS: { roles: ['operationsManager'] },
   VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'] },
-  APPROVE_PAYMENT_CEO: { roles: ['ceo'] },
-  CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'] },
-  FIX_LOCAL_CURRENCY: { roles: ['procurement', 'financeChecker'] },
-  POST_LOCAL_RECEIVE: { roles: ['procurement'] },
-  SEND_BACK_RFQ: { roles: ['fad'], commentRequired: true },
-  SEND_BACK_PO: { roles: ['financeChecker', 'fad'], commentRequired: true },
-  RESUBMIT_PO: { roles: ['procurement'] },
+  APPROVE_PAYMENT_FAD: { roles: ['fad'] },
+  CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'], needsPayload: true },
+  FIX_LOCAL_CURRENCY: { roles: [...PROCUREMENT, 'financeChecker'] },
+  SEND_BACK_RFQ: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  SEND_BACK_PO: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  RESUBMIT_PO: { roles: PROCUREMENT },
 }
 
-/** BC captions from the UAT recording / Local RFQ steps ribbon. */
+/** BC captions from the Local RFQ / Purchase Order ribbons. */
 export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
+  SUBMIT_LPR_OPS: 'Submit to Operations Manager',
+  APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
   CONVERT_TO_RFQ: 'Convert to RFQ',
+  APPROVE_RFQ_OPS: 'Approve RFQ (Operations Manager)',
   UPSERT_VENDOR_QUOTE: 'Vendor Quotes (Local RFQ)',
   AUTO_SELECT_WINNER: 'Auto Select Winner',
-  SEND_TO_TECHNICAL: 'Send to Technical (optional)',
-  SEND_FOR_FAD_APPROVAL: 'Send for FAD Approval (skip Technical)',
+  SEND_FOR_OPS_REVIEW: 'Send for Operations Manager Review',
+  SEND_TO_TECHNICAL: 'Send to Technical (Operations Manager)',
+  SEND_FOR_FAD_APPROVAL: 'Send for FAD Approval (no Technical)',
   SUBMIT_TECHNICAL_REVIEW: 'Submit Technical Review',
   SELECT_WINNER_FAD: 'Change Winner (FAD)',
   APPROVE_WINNER_FAD_FINAL: 'Approve Winner (FAD Final)',
   SEND_BACK_RFQ: 'Send back to Procurement',
   CREATE_PO: 'Create Purchase Order',
-  APPROVE_PO_FINANCE_CHECKER: 'Approve Local PO (Finance Checker)',
+  APPROVE_PO_OPS: 'Approve Local PO (Operations Manager)',
   APPROVE_PO_FAD: 'Approve Local PO (FAD)',
   SEND_BACK_PO: 'Send back PO to Procurement',
-  RESUBMIT_PO: 'Resubmit PO to Finance Checker',
+  RESUBMIT_PO: 'Resubmit PO to Operations Manager',
   PREPARE_LOCAL_RECEIVE: 'Prepare Local Receive',
   POST_LOCAL_RECEIVE: 'Post Receive (GRN)',
   FIX_LOCAL_CURRENCY: 'Fix Local Currency',
   CREATE_LOCAL_INVOICE: 'Create Local Invoice',
+  APPROVE_INVOICE_OPS: 'Approve Invoice (Operations Manager)',
   VERIFY_PO_GRN_INVOICE: 'Verify PO + GRN + Invoice',
-  APPROVE_PAYMENT_CEO: 'Approve Payment (CEO)',
-  CLOSE_LPR_AFTER_PAYMENT: 'Payment Voucher & Close LPR',
+  APPROVE_PAYMENT_FAD: 'Approve Payment (F&A)',
+  CLOSE_LPR_AFTER_PAYMENT: 'Pay Vendor & Close LPR',
   ISSUE_AFTER_LPR: 'Issue after LPR receive',
 }
 
@@ -106,35 +122,59 @@ export type LocalPurchaseNextAction = {
   commentRequired?: boolean
 }
 
-const RFQ_STAGE_ACTIONS: Record<string, string[]> = {
+type StageAction = string | { code: string; roles: LocalPurchaseRole[] }
+
+/**
+ * Keyed by BC Flow Stage. BC sends the caption (Format), so both the member name and the
+ * caption are listed (e.g. "Pending Ops RFQ" / "Pending Operations Manager RFQ").
+ */
+const RFQ_STAGE_ACTIONS: Record<string, StageAction[]> = {
+  'PENDING OPS RFQ': ['APPROVE_RFQ_OPS'],
+  'PENDING OPERATIONS MANAGER RFQ': ['APPROVE_RFQ_OPS'],
   'RFQ OPEN': ['UPSERT_VENDOR_QUOTE', 'AUTO_SELECT_WINNER'],
-  'WINNER SELECTED': ['UPSERT_VENDOR_QUOTE', 'AUTO_SELECT_WINNER', 'SEND_TO_TECHNICAL', 'SEND_FOR_FAD_APPROVAL'],
+  'WINNER SELECTED': ['UPSERT_VENDOR_QUOTE', 'AUTO_SELECT_WINNER', 'SEND_FOR_OPS_REVIEW'],
+  'PENDING OPS EVALUATION': [
+    'SEND_TO_TECHNICAL',
+    'SEND_FOR_FAD_APPROVAL',
+    { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
+  ],
+  'PENDING OPERATIONS MANAGER EVALUATION': [
+    'SEND_TO_TECHNICAL',
+    'SEND_FOR_FAD_APPROVAL',
+    { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
+  ],
   'PENDING TECHNICAL': ['SUBMIT_TECHNICAL_REVIEW'],
-  'PENDING FAD FINAL': ['SELECT_WINNER_FAD', 'APPROVE_WINNER_FAD_FINAL', 'SEND_BACK_RFQ'],
-  'READY FOR PO': ['CREATE_PO', 'SEND_BACK_RFQ'],
+  'PENDING FAD FINAL': ['SELECT_WINNER_FAD', 'APPROVE_WINNER_FAD_FINAL', { code: 'SEND_BACK_RFQ', roles: ['fad'] }],
+  'READY FOR PO': ['CREATE_PO', { code: 'SEND_BACK_RFQ', roles: ['fad'] }],
 }
 
-/** Finance Checker approves first, then FAD (BC ApproveLocalPurchaseOrder → ApprovePOAsFad). */
-const PO_STAGE_ACTIONS: Record<string, string[]> = {
-  'PO CREATED': ['APPROVE_PO_FINANCE_CHECKER', 'SEND_BACK_PO'],
-  'PENDING FINANCE PO': ['APPROVE_PO_FINANCE_CHECKER', 'SEND_BACK_PO'],
-  'PENDING FAD PO': ['APPROVE_PO_FAD', 'SEND_BACK_PO'],
+/** Operations Manager approves first, then FAD (BC ApproveLocalPurchaseOrder → ApprovePOAsFad). */
+const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
+  'PO CREATED': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
+  'PENDING FINANCE PO': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
+  'PENDING OPERATIONS MANAGER PO': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
+  'PENDING FAD PO': ['APPROVE_PO_FAD', { code: 'SEND_BACK_PO', roles: ['fad'] }],
   'RETURNED TO PROCUREMENT': ['RESUBMIT_PO', 'FIX_LOCAL_CURRENCY'],
   'PO RELEASED': ['PREPARE_LOCAL_RECEIVE', 'POST_LOCAL_RECEIVE', 'FIX_LOCAL_CURRENCY'],
   'GOODS RECEIVED': ['CREATE_LOCAL_INVOICE'],
-  'INVOICE CREATED': ['VERIFY_PO_GRN_INVOICE'],
+  'PENDING OPS INVOICE': ['APPROVE_INVOICE_OPS'],
+  'PENDING OPERATIONS MANAGER INVOICE': ['APPROVE_INVOICE_OPS'],
   'PENDING INVOICE CHECK': ['VERIFY_PO_GRN_INVOICE'],
-  'PENDING CEO PAYMENT': ['APPROVE_PAYMENT_CEO'],
+  'PENDING CEO PAYMENT': ['APPROVE_PAYMENT_FAD'],
+  'PENDING F&A PAYMENT APPROVAL': ['APPROVE_PAYMENT_FAD'],
   'PAYMENT APPROVED': ['CLOSE_LPR_AFTER_PAYMENT'],
 }
 
 /** PO stages at which received stock exists for Store Keeper "Issue after LPR receive". */
 const RECEIVED_PO_STAGES = new Set([
   'GOODS RECEIVED',
+  'PENDING OPS INVOICE',
+  'PENDING OPERATIONS MANAGER INVOICE',
   'INVOICE CREATED',
   'PENDING INVOICE CHECK',
   'INVOICE VERIFIED',
   'PENDING CEO PAYMENT',
+  'PENDING F&A PAYMENT APPROVAL',
   'PAYMENT APPROVED',
   'LPR CLOSED',
 ])
@@ -155,24 +195,40 @@ export function localPurchaseNextActions(
   chain: LocalPurchaseChain,
   roles: LocalPurchaseRole[],
 ): LocalPurchaseNextAction[] {
-  const codes: Array<{ code: string; target: LocalPurchaseNextAction['target']; documentNo: string }> = []
+  const codes: Array<{
+    code: string
+    target: LocalPurchaseNextAction['target']
+    documentNo: string
+    roles?: LocalPurchaseRole[]
+  }> = []
+  const push = (action: StageAction, target: LocalPurchaseNextAction['target'], documentNo: string) =>
+    codes.push(typeof action === 'string' ? { code: action, target, documentNo } : { ...action, target, documentNo })
   const lprNo = chainText(chain.lpr?.no)
   const rfqNo = chainText(chain.rfq?.no) || chainText(chain.lpr?.createdRfqNo)
   const poNo = chainText(chain.po?.no) || chainText(chain.rfq?.createdPoNo)
   const poStage = stageKey(chain.po?.flowStage)
 
   if (poNo && chain.po) {
-    for (const code of PO_STAGE_ACTIONS[poStage] ?? []) codes.push({ code, target: 'po', documentNo: poNo })
+    for (const action of PO_STAGE_ACTIONS[poStage] ?? []) push(action, 'po', poNo)
   } else if (rfqNo && chain.rfq) {
-    for (const code of RFQ_STAGE_ACTIONS[stageKey(chain.rfq.flowStage)] ?? []) {
-      codes.push({ code, target: 'rfq', documentNo: rfqNo })
-    }
+    for (const action of RFQ_STAGE_ACTIONS[stageKey(chain.rfq.flowStage)] ?? []) push(action, 'rfq', rfqNo)
   } else if (lprNo && chain.lpr) {
     const lprStatus = stageKey(chain.lpr.lprStatus)
     const lprStage = stageKey(chain.lpr.flowStage)
-    if (lprStatus === 'PENDING FINANCE' || lprStatus === 'PENDING FINANCE & ADMIN' || lprStage === 'PENDING FAD') {
-      codes.push({ code: 'APPROVE_LPR_FAD', target: 'lpr', documentNo: lprNo })
-      codes.push({ code: 'REJECT_LPR', target: 'lpr', documentNo: lprNo })
+    if (lprStatus === 'DRAFT' || lprStage === 'LPR DRAFT') {
+      // Step 7: the assigned Procurement Officer prepares the LPR, then sends it to the Operations Manager.
+      push('SUBMIT_LPR_OPS', 'lpr', lprNo)
+    } else if (
+      lprStatus === 'PENDING OPERATIONS' ||
+      lprStatus === 'PENDING OPERATIONS MANAGER' ||
+      lprStage === 'PENDING OPERATIONS' ||
+      lprStage === 'PENDING OPERATIONS MANAGER'
+    ) {
+      push('APPROVE_LPR_OPS', 'lpr', lprNo)
+      push({ code: 'REJECT_LPR', roles: ['operationsManager'] }, 'lpr', lprNo)
+    } else if (lprStatus === 'PENDING FINANCE' || lprStatus === 'PENDING FINANCE & ADMIN' || lprStage === 'PENDING FAD') {
+      push('APPROVE_LPR_FAD', 'lpr', lprNo)
+      push({ code: 'REJECT_LPR', roles: ['fad'] }, 'lpr', lprNo)
     } else if (!rfqNo && (lprStatus === 'APPROVED' || lprStage === 'READY FOR RFQ')) {
       codes.push({ code: 'CONVERT_TO_RFQ', target: 'lpr', documentNo: lprNo })
     }
@@ -183,10 +239,10 @@ export function localPurchaseNextActions(
     codes.push({ code: 'ISSUE_AFTER_LPR', target: 'storeRequisition', documentNo: storeReqNo })
   }
 
-  return codes.map(({ code, target, documentNo }) => {
+  return codes.map(({ code, target, documentNo, roles: stageRoles }) => {
     const rule =
       code === 'ISSUE_AFTER_LPR' ? LOCAL_PURCHASE_STORE_ACTIONS.ISSUE_AFTER_LPR : LOCAL_PURCHASE_ACTIONS[code]
-    const ownerRoles = rule?.roles ?? []
+    const ownerRoles = stageRoles ?? rule?.roles ?? []
     return {
       actionCode: code,
       label: LOCAL_PURCHASE_ACTION_LABELS[code] ?? code,
@@ -206,14 +262,20 @@ export function localPurchaseChainDocumentNos(chain: LocalPurchaseChain): string
     .filter(Boolean)
 }
 
-/** Store-requisition process actions added for the Local Purchase video flow. */
+/**
+ * Store-requisition process actions for Local Purchase: the Store Keeper confirms the item is
+ * unavailable (step 5), the Store Manager starts the LPR with the project (step 6).
+ */
 export const LOCAL_PURCHASE_STORE_ACTIONS = {
   REQUEST_FOR_LPR: { roles: ['operations'] as LocalPurchaseRole[] },
+  START_LPR: { roles: ['operations'] as LocalPurchaseRole[] },
   ISSUE_AFTER_LPR: { roles: ['operations'] as LocalPurchaseRole[] },
 }
 
 const BC_ROLE_NAMES = new Set<LocalPurchaseRole>([
+  'operationsManager',
   'procurement',
+  'projectProcurement',
   'fad',
   'technical',
   'financeChecker',
@@ -307,7 +369,7 @@ function withStoreRole(access: LocalPurchaseAccess, authUser: LocalPurchaseAuth)
   return { ...access, roles: [...access.roles, 'operations'] }
 }
 
-/** True when BC grants this user any LPR role (FAD, Procurement, Technical, Finance Checker, CEO, Auditor). */
+/** True when BC grants this user any LPR role (Operations Manager, Procurement, FAD, Technical, Finance Checker, CEO, Auditor). */
 export function hasBcLocalPurchaseRole(access: LocalPurchaseAccess | null) {
   return Boolean(access?.enabled && access.roles.some((role) => BC_ROLE_NAMES.has(role)))
 }

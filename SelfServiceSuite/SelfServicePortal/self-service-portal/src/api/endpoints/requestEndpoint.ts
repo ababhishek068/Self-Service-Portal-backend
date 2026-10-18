@@ -115,11 +115,12 @@ export async function downloadStoreBorrowingForm(id: string, requestNo: string) 
   return downloadRequestPdf(id, 'borrowing-form', `Item-Borrowing-Form-${requestNo}.pdf`)
 }
 
-export async function updateStoreRequisitionProcess(id: string, actionCode: string) {
+/** `linkedDocumentNo` on REQUEST_FOR_LPR is the BC project No. (blank = non-project purchase). */
+export async function updateStoreRequisitionProcess(id: string, actionCode: string, linkedDocumentNo = '') {
   requireAuthApiUrl()
   return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(
     `/api/requests/${encodeURIComponent(id)}/store-process`,
-    { actionCode },
+    linkedDocumentNo ? { actionCode, linkedDocumentNo } : { actionCode },
   )
 }
 
@@ -280,4 +281,27 @@ export interface LocalPurchaseAccess {
 export async function getLocalPurchaseAccess() {
   requireAuthApiUrl()
   return authGet<LocalPurchaseAccess>('/api/local-purchase/access')
+}
+
+export interface LocalPurchaseProject {
+  no: string
+  description?: string
+}
+
+export interface LocalPurchaseBankAccount {
+  no: string
+  name?: string
+  currencyCode?: string
+}
+
+/** BC projects (Job) for Start LPR — project first, then BC assigns the officer. */
+export async function getLocalPurchaseProjects() {
+  requireAuthApiUrl()
+  return authGet<{ projects: LocalPurchaseProject[] }>('/api/local-purchase/projects')
+}
+
+/** BC bank accounts for Pay Vendor & Close LPR (Finance Checker). */
+export async function getLocalPurchaseBankAccounts() {
+  requireAuthApiUrl()
+  return authGet<{ bankAccounts: LocalPurchaseBankAccount[] }>('/api/local-purchase/bank-accounts')
 }
