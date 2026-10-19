@@ -3,7 +3,9 @@
 Follows **ERP & BC – Staff Item-Asset Request to Payment Workflow** (26 steps, meeting 18 Oct 2026):
 the Operations Manager checks the LPR, the RFQ, the quote evaluation, the PO and the invoice; F&A (FAD)
 approves the LPR, the final supplier, the PO and the payment; Finance verifies PO + GRN + invoice and pays.
-BC app **1.0.3.543** or later is required for this flow (ABH-LIVE-AL main).
+BC app **1.0.3.544** or later is required for this flow (ABH-LIVE-AL main); 1.0.3.544 adds the store
+requisition steps from the 20 Oct meeting (store, project and UOM lists, Store Manager accept, borrowing form,
+GIV and Confirm Receipt from the portal, and the Start LPR source/officer prompts).
 
 ## Deploy prerequisites
 
@@ -23,9 +25,9 @@ BC app **1.0.3.543** or later is required for this flow (ABH-LIVE-AL main).
 
 | # | Role | SSP screen | Action | API `actionCode` |
 |---|------|-----------|--------|------------------|
-| 1–4 | Employee | Store → Store Requisition → New, Send Approval Request | header + lines | `POST /api/requests`, `…/submit` |
-| 5 | Store Keeper | approved Store Requisition → Store status | **Request for LPR** (confirms the item is unavailable; Issue Stage LPR Requested) | `store-process` `REQUEST_FOR_LPR` |
-| 6 | Store Manager | same Store Requisition | pick **Project** (or non-project) → **Start LPR**; BC assigns the Project Procurement Officer for a project, else the Procurement Officer (Issue Stage LPR Started) | `store-process` `START_LPR` (`linkedDocumentNo` = project No.) |
+| 1–4 | Employee | Store → Store Requisition → New, Send Approval Request | header (**Store** from the BC store list, **Is Project** + **Project Code**) + lines (item, **UOM** from BC, **Quantity**, brand) | `POST /api/requests`, `…/submit` |
+| 5 | Store Keeper | approved Store Requisition → Store status | no item / no similar item: **Request for LPR** ("…Send Request for LPR to the Store Manager with the employee details?"; Issue Stage LPR Requested) | `store-process` `REQUEST_FOR_LPR` |
+| 6 | Store Manager | same Store Requisition | **Start Local Purchase (LPR)**: source **Local / Foreign** → **Project** (or non-project) → **officer** (defaults to the Project Procurement Officer for a project, else the Procurement Officer; Issue Stage LPR Started) | `store-process` `START_LPR` (`linkedDocumentNo` = project No., `procurementSource`, `officerType`) |
 | 7 | Procurement Officer | LPR card | review need / quantity / specs / justification (lines in BC while Draft) → **Submit to Operations Manager** | `SUBMIT_LPR_OPS` |
 | 8 | Operations Manager | LPR card | **Approve (Operations Manager)** / Reject | `APPROVE_LPR_OPS`, `REJECT_LPR` |
 | 9 | FAD | LPR card | **Approve (FAD)** / Reject | `APPROVE_LPR_FAD`, `REJECT_LPR` |
@@ -48,6 +50,19 @@ BC app **1.0.3.543** or later is required for this flow (ABH-LIVE-AL main).
 
 The panel shows only the buttons the signed-in role owns at the current Full Flow Stage; everyone else
 sees "Waiting for …".
+
+## Store requisition when the item IS in stock (meeting 20 Oct)
+
+| Role | SSP screen | Action | API |
+|------|-----------|--------|-----|
+| Store Keeper | BC Store Req Header Approved | **Add Item to Issue** (store offer line), then **Submit to Store Manager** (BC or portal) | `store-process` `PREPARE_ISSUE` |
+| Store Manager | Store Requisition → Store status | **Accept Item (Store Manager)** — no voucher yet | `store-process` `ACCEPT_ISSUE` |
+| Requester | Store Requisition → Store status | **Item Borrowing Form** opens in the page (the BC report) → **Accept Item** (GIV created, In Transit) or **Decline Item** | `ACCEPT_ITEM`, `DECLINE_ITEM`, `GET …/borrowing-form` |
+| Requester | same | **Confirm Receipt** when the item arrives; **Item Borrowing Form** and **Store Issuance Voucher (GIV)** stay downloadable | `CONFIRM_RECEIPT`, `GET …/store-issue-voucher` |
+
+Confirm Receipt is only offered once the request is In Transit (after Accept Item). Lists come from
+`GET /api/store-requisition/options` (BC `PortalStoreList`, `PortalUnitsOfMeasure`, `PortalLprProjects`,
+`PortalLprOfficers`).
 
 ## Status machine (BC Full Flow Stage caption → next action)
 

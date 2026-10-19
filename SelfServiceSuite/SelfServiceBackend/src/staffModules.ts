@@ -24,6 +24,14 @@ import {
   canRequestApprovalForSpec,
   requestApprovalBlockedMessage,
 } from './requestWorkflow.js'
+import {
+  listStoreProjects,
+  listStoreRequisitionStores,
+  listStoreUnitsOfMeasure,
+  resolveStoreLineUnitOfMeasure,
+  storeHeaderDetailsError,
+  storeHeaderDetailsFromBody,
+} from './storeLookups.js'
 
 /* -------------------------------------------------------------------------- */
 /* Module spec                                                                */
@@ -99,6 +107,9 @@ export interface ModuleSpec {
     submit?: ParamBuilder
     cancel?: ParamBuilder
   }
+
+  /** Runs after the header SOAP saved the document (create and edit), e.g. extra BC fields. */
+  afterSaveHeader?: (input: { req: Request; user: AuthUser; no: string }) => Promise<void>
 
   /** Some modules (Transfer Order) reuse one SOAP for both submit and cancel. */
   decideMode?: 'submitCancelOnSameMethod'
@@ -966,7 +977,7 @@ const storeRequisition: ModuleSpec = {
   },
   params: {
     deleteDocument: draftDeleteParams('store-requisition'),
-    saveHeader: ({ req, user, no }) => {
+    saveHeader: async ({ req, user, no }) => {
       const justification = String(req.body?.justification ?? req.body?.purpose ?? '').trim()
       const requiredDate = String(req.body?.dateRequired ?? req.body?.requestDate ?? '').trim()
       if (!justification) {
@@ -974,6 +985,15 @@ const storeRequisition: ModuleSpec = {
       }
       if (!requiredDate) {
         throw Object.assign(new Error('Required Date is required.'), { status: 422 })
+      }
+      const details = storeHeaderDetailsFromBody(req.body ?? {})
+      if (details.provided) {
+        const [stores, projects] = await Promise.all([
+          listStoreRequisitionStores(callSoapMethod),
+          details.isProject ? listStoreProjects(callSoapMethod) : Promise.resolve(null),
+        ])
+        const detailsError = storeHeaderDetailsError(details, stores, projects)
+        if (detailsError) throw Object.assign(new Error(detailsError), { status: 422 })
       }
       return {
       myAction: no ? 'edit' : 'create',
@@ -986,8 +1006,9 @@ const storeRequisition: ModuleSpec = {
           '',
       ).slice(0, 150),
       requestDate: requiredDate,
-      // Store assignment is an internal fulfillment decision. Never accept a
-      // store/location selected or injected by the requester.
+      // Never pass a raw location from the requester. The chosen store is set
+      // afterwards through SetPortalStoreRequisitionDetails, which validates
+      // Store Code exactly like the Store lookup on the BC card.
       issuingStore: '',
       justification: justification.slice(0, 250),
       priority: storePriorityCode(req.body?.priority ?? 'normal'),
@@ -997,7 +1018,6 @@ const storeRequisition: ModuleSpec = {
     saveLine: async ({ req, user, no }) => {
       const requestedItem = String(req.body?.itemName ?? req.body?.description ?? '').trim()
       const lineDescription = String(req.body?.lineDescription ?? '').trim()
-      const unitOfMeasure = String(req.body?.uom ?? req.body?.unitOfMeasure ?? '').trim() || 'PCS'
       const quantity = Number(req.body?.quantity ?? 0)
       if (!requestedItem || quantity <= 0) {
         throw Object.assign(
@@ -1005,6 +1025,12 @@ const storeRequisition: ModuleSpec = {
           { status: 422 },
         )
       }
+      const uom = resolveStoreLineUnitOfMeasure(
+        req.body?.uom ?? req.body?.unitOfMeasure,
+        await listStoreUnitsOfMeasure(callSoapMethod),
+      )
+      if (uom.error) throw Object.assign(new Error(uom.error), { status: 422 })
+      const unitOfMeasure = uom.code
       await assertNoDuplicateStoreLine(
         user,
         no,
@@ -1075,6 +1101,27 @@ const storeRequisition: ModuleSpec = {
       employeeNo: user.employeeNo,
       tableID: 50575,
     }),
+  },
+  // Store, Is Project and Project Code (Store Requisition Header UP). BC validates
+  // Store Code and Project Code and fills Store Name, Issuing Store and Project Name.
+  afterSaveHeader: async ({ req, user, no }) => {
+    const details = storeHeaderDetailsFromBody(req.body ?? {})
+    if (!details.provided || !no) return
+    if (!(await listStoreRequisitionStores(callSoapMethod))) {
+      // Older BC app: no store list and no SetPortalStoreRequisitionDetails yet.
+      if (!details.storeCode && !details.isProject) return
+      throw Object.assign(
+        new Error('Publish Business Central 1.0.3.544 to save the store and project on a store requisition.'),
+        { status: 502, code: 'STORE_DETAILS_NOT_PUBLISHED' },
+      )
+    }
+    await callSoapMethod('SetPortalStoreRequisitionDetails', {
+      requestNo: no,
+      actorUserID: user.userID,
+      storeCode: details.storeCode,
+      isProject: details.isProject,
+      projectCode: details.projectCode,
+    })
   },
 }
 
@@ -2007,6 +2054,10 @@ function buildModuleRouter(spec: ModuleSpec): Router {
       ;(req as Request).body = editBody
       const params = await spec.params!.saveHeader!({ req, user, no })
       const result = await callSoapMethod(methodName, params)
+      const savedNo = no || String(result.returnValue ?? '').trim()
+      if (spec.afterSaveHeader && savedNo && ok(result)) {
+        await spec.afterSaveHeader({ req, user, no: savedNo })
+      }
       res.json({
         ok: ok(result),
         no: result.returnValue ?? null,
@@ -2922,6 +2973,13 @@ export async function createPortalModuleRequest(
       { status: 502 },
     )
   }
+  if (spec.afterSaveHeader) {
+    try {
+      await spec.afterSaveHeader({ req: headerRequest, user, no })
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { documentNo: no })
+    }
+  }
 
   if (spec.soap.saveLine && spec.params?.saveLine) {
     const lines = portalLineBodies(spec, body)
@@ -3327,6 +3385,9 @@ export async function updatePortalModuleHeader(
   const result = await callSoapMethod(methodName, params)
   if (!ok(result)) {
     throw Object.assign(new Error(`Business Central did not update ${no}`), { status: 502 })
+  }
+  if (spec.afterSaveHeader) {
+    await spec.afterSaveHeader({ req: requestWithBody(editBody), user, no })
   }
 }
 

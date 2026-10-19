@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -8,10 +8,14 @@ import { useAuth } from '@/hooks/useAuth'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import {
   downloadStoreBorrowingForm,
+  downloadStoreIssueVoucher,
   getLocalPurchaseProjects,
+  getStoreBorrowingFormUrl,
+  getStoreRequisitionOptions,
   getStoreRequisitionProcess,
   updateStoreRequisitionProcess,
 } from '@/api/endpoints/requestEndpoint'
+import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFormViewer'
 import type { PortalRequest } from '@/types/erp.types'
 
 function text(value: unknown) {
@@ -67,14 +71,40 @@ function linesHaveBeenIssued(request: PortalRequest) {
   return Array.isArray(lines) && lines.some((line) => Number((line as { quantityIssued?: unknown }).quantityIssued ?? 0) > 0)
 }
 
+function requesterDecision(request: PortalRequest) {
+  const raw = text(request.payload?.RequesterDecision ?? request.payload?.Requester_Decision).toLowerCase()
+  if (raw.includes('declin')) return 'DECLINED'
+  if (raw.includes('accept')) return 'ACCEPTED'
+  return ''
+}
+
+/** What the requester does next — the same steps as the BC Store Requisition card. */
+function requesterStatusText(stage: string, declined: boolean, lprPath: boolean, givNo: string) {
+  if (declined) return 'You declined the offered item. The storekeeper can offer another item, or close the request.'
+  switch (stage) {
+    case 'PREPARED':
+      return 'The store has prepared an item for you. Waiting for the store manager to accept it.'
+    case 'ACCEPTED':
+      return 'The store offered an item. Open the Item Borrowing Form and check it, then accept or decline the item. No voucher is created until you accept.'
+    case 'TRANSIT':
+      return `Goods issue voucher ${givNo || '(GIV)'} is with the storekeeper. Status is In Transit. Confirm receipt when you have the item.`
+    case 'RECEIVED':
+      return 'You confirmed receipt of this item.'
+    default:
+      return lprPath
+        ? 'The item is not in stock, so the store started a local purchase (LPR). You accept the item after it is received into the store.'
+        : 'The store is preparing the item for your request.'
+  }
+}
+
 function issueStageLabel(stage: string) {
   switch (stage) {
     case 'PREPARED':
       return 'Prepared by store — waiting for the store manager'
     case 'ACCEPTED':
-      return 'Store manager accepted the offered item — waiting for the requester'
+      return 'Store manager accepted the offered item — waiting for the requester to accept the borrowing form'
     case 'TRANSIT':
-      return 'In transit — waiting for the requester to confirm receipt'
+      return 'In transit — goods issue voucher created; waiting for the requester to confirm receipt'
     case 'RECEIVED':
       return 'Received by the requester'
     default:
@@ -121,9 +151,14 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const storedReceipt =
     typeof window !== 'undefined' && window.localStorage.getItem(receiptStorageKey(request.requestNo)) === 'received'
   const [receiptConfirmed, setReceiptConfirmed] = useState(storedReceipt)
-  const stageHandOff = receiptConfirmed
-    ? 'RECEIVED'
-    : issueStage(request) || (issued ? 'TRANSIT' : '')
+  const bcStage = issueStage(request)
+  // The browser-only receipt flag covers older BC apps without ConfirmPortalStoreReceipt.
+  // It never hides an earlier BC stage (e.g. Accept Item still to do).
+  const legacyIssued = bcStage === '' && (issued || status === 'posted')
+  const stageHandOff =
+    receiptConfirmed && (bcStage === 'TRANSIT' || legacyIssued)
+      ? 'RECEIVED'
+      : bcStage || (issued ? 'TRANSIT' : '')
   const actorIds = [employee?.employeeNo, employee?.userID]
     .map((value) => text(value).toUpperCase())
     .filter(Boolean)
@@ -151,6 +186,26 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const localPurchase = useLocalPurchaseAccess()
   // Meeting 18 Oct: project first (blank = non-project); BC then assigns the procurement officer.
   const [lprProjectNo, setLprProjectNo] = useState('')
+  // Start Local Purchase (LPR) prompts on the BC card: source, project, then the officer.
+  const [lprSource, setLprSource] = useState<'LOCAL' | 'FOREIGN'>('LOCAL')
+  const [lprOfficer, setLprOfficer] = useState<'' | 'PROCUREMENT' | 'PROJECT'>('')
+  const officersQuery = useQuery({
+    queryKey: ['store-requisition', 'options'],
+    queryFn: getStoreRequisitionOptions,
+    enabled: storeManager && localPurchase.enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const lprOfficers = officersQuery.data?.lprOfficers ?? null
+  const [borrowingFormUrl, setBorrowingFormUrl] = useState<string | null>(null)
+  const [borrowingFormLoading, setBorrowingFormLoading] = useState(false)
+  // Free the PDF blob when the viewer closes or the panel unmounts.
+  useEffect(
+    () => () => {
+      if (borrowingFormUrl) URL.revokeObjectURL(borrowingFormUrl)
+    },
+    [borrowingFormUrl],
+  )
   const processQuery = useQuery({
     queryKey: ['store-process', request.id],
     queryFn: () => getStoreRequisitionProcess(request.id),
@@ -158,7 +213,12 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   })
   const mutation = useMutation({
     mutationFn: (actionCode: string) =>
-      updateStoreRequisitionProcess(request.id, actionCode, actionCode === 'START_LPR' ? lprProjectNo : ''),
+      actionCode === 'START_LPR'
+        ? updateStoreRequisitionProcess(request.id, actionCode, lprProjectNo, {
+            procurementSource: lprSource,
+            officerType: lprOfficer,
+          })
+        : updateStoreRequisitionProcess(request.id, actionCode),
     onSuccess: async (data) => {
       queryClient.setQueryData(['facility', 'store-requisition', 'detail', request.id], data.request)
       await queryClient.invalidateQueries({ queryKey: ['store-process', request.id] })
@@ -196,62 +256,127 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const prepHints = stockCheck?.prepHints?.length ? stockCheck.prepHints : DEFAULT_PREP_HINTS
   const canStartLpr = localPurchase.enabled && atLprRequested && storeManager && !processQuery.isError
 
+  const requestNo = request.requestNo
+  const requesterId = text(request.payload?.RequesterID ?? request.payload?.UserID ?? request.payload?.User_ID)
+  const startLprOfficerKind = lprOfficer || (lprProjectNo ? 'PROJECT' : 'PROCUREMENT')
+  const startLprOfficerLabel =
+    startLprOfficerKind === 'PROJECT' ? 'the Project Procurement Officer' : 'the Procurement Officer'
+  const startLprOfficerId =
+    startLprOfficerKind === 'PROJECT' ? lprOfficers?.projectProcurementOfficer : lprOfficers?.procurementOfficer
+  const givNo = text(request.payload?.StoreIssueNo ?? request.payload?.Store_Issue_No)
+  const storeName = text(request.payload?.StoreName ?? request.payload?.StoreCode ?? request.payload?.IssuingStore)
+
   const run = async (actionCode: string, title: string, message: string) => {
     const yes = await confirm({ title, message, confirmLabel: title })
-    if (!yes) return
+    if (!yes) return false
     try {
-      await mutation.mutateAsync(actionCode)
+      const data = await mutation.mutateAsync(actionCode)
       if (actionCode === 'CONFIRM_RECEIPT') {
         window.localStorage.setItem(receiptStorageKey(request.requestNo), 'received')
         setReceiptConfirmed(true)
       }
+      const issuedGiv = text(data.request?.payload?.StoreIssueNo ?? data.request?.payload?.Store_Issue_No) || givNo
+      const createdLpr = text((data.process?.links as Record<string, unknown> | undefined)?.lprNo)
       toast.success(
         actionCode === 'PREPARE_ISSUE'
           ? 'Submitted to the store manager. Stock has not moved yet.'
           : actionCode === 'ACCEPT_ISSUE'
-            ? 'Store manager accepted the issue. Goods are in transit.'
+            ? `Store requisition ${requestNo} accepted. The requester must accept the borrowing form before the goods issue voucher is created.`
             : actionCode === 'ACCEPT_ITEM'
-              ? 'Item accepted. The goods issue voucher is created and the request is in transit.'
+              ? `Accepted. Goods issue voucher ${issuedGiv || '(GIV)'} is with the storekeeper for requisition ${requestNo}. Status is In Transit. Confirm receipt when you have the item.`
               : actionCode === 'DECLINE_ITEM'
-                ? 'Item declined. The storekeeper can offer another item.'
+                ? `Declined. Store requisition ${requestNo} is back with the storekeeper. They can offer another item, or close the request.`
                 : actionCode === 'CONFIRM_RECEIPT'
-                  ? 'Receipt confirmed.'
+                  ? `Store requisition ${requestNo} marked as received.`
                   : actionCode === 'ISSUE_AFTER_LPR'
                     ? 'Issued after LPR receive — the goods issue voucher is posted to the requester.'
                     : actionCode === 'REQUEST_FOR_LPR'
-                      ? 'Stock confirmed unavailable — Issue Stage: LPR Requested. The Store Manager starts the LPR next.'
+                      ? `Store requisition ${requestNo} is with the Store Manager for Local Purchase. Requester: ${requesterId || 'the employee'}. Store Manager: open this request and choose Start Local Purchase (LPR).`
                       : actionCode === 'START_LPR'
-                        ? 'Purchase Requisition (LPR) created — Issue Stage: LPR Started. The assigned Procurement Officer prepares it and submits it to the Operations Manager.'
+                        ? `Local Purchase Requisition ${createdLpr || '(LPR)'} created for store requisition ${requestNo}${requesterId ? ` (employee ${requesterId})` : ''}. Assigned procurement officer ${startLprOfficerId || startLprOfficerLabel} prepares it first. Project ${lprProjectNo || '(non-project)'}. Then ${lprOfficers?.operationsManager ? `Operations Manager ${lprOfficers.operationsManager}` : 'the Operations Manager'} approves, then FAD.`
                         : 'Linked Purchase Request created from this store requisition.',
       )
+      return true
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', title)
+      return false
     }
   }
+
+  const openBorrowingForm = () => {
+    if (borrowingFormLoading) return
+    setBorrowingFormLoading(true)
+    void getStoreBorrowingFormUrl(request.id)
+      .then(setBorrowingFormUrl)
+      .catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : 'Could not open the Item Borrowing Form')
+      })
+      .finally(() => setBorrowingFormLoading(false))
+  }
+
+  const downloadBorrowingForm = () => {
+    void downloadStoreBorrowingForm(request.id, requestNo).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Could not download the Item Borrowing Form')
+    })
+  }
+
+  const downloadGiv = () => {
+    void downloadStoreIssueVoucher(request.id, givNo || requestNo).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'Could not download the Store Issuance Voucher (GIV)')
+    })
+  }
+
+  const acceptItem = async () => {
+    const accepted = await run(
+      'ACCEPT_ITEM',
+      'Accept Item',
+      `Accept the item on the borrowing form for store requisition ${requestNo}? The storekeeper will receive the goods issue voucher.`,
+    )
+    if (accepted) setBorrowingFormUrl(null)
+  }
+
+  const declineItem = async () => {
+    const declined = await run(
+      'DECLINE_ITEM',
+      'Decline Item',
+      `Decline the offered item on store requisition ${requestNo}? No voucher will be created.`,
+    )
+    if (declined) setBorrowingFormUrl(null)
+  }
+
+  const awaitingRequester = stageHandOff === 'ACCEPTED'
+  const requesterDeclined = requesterDecision(request) === 'DECLINED' && stageHandOff === ''
+  const lprPath = /lpr/i.test(text(request.payload?.IssueStage ?? request.payload?.Issue_Stage))
 
   return (
     <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
       <p className="font-semibold text-[var(--portal-navy)]">Store status</p>
-      <p className="mt-1 text-slate-600">
-        Download the Item Borrowing Form, then confirm receipt.
-      </p>
-      {requesterHandoff && !receiptConfirmed ? (
+      {requesterHandoff ? (
+        <p className="mt-1 text-slate-600">
+          {requesterStatusText(stageHandOff, requesterDeclined, lprPath, givNo)}
+        </p>
+      ) : null}
+      {requesterHandoff && awaitingRequester ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" disabled={borrowingFormLoading} onClick={openBorrowingForm}>
+            {borrowingFormLoading ? 'Opening…' : 'Item Borrowing Form'}
+          </Button>
           <Button
             type="button"
-            variant="outline"
-            onClick={() => {
-              void downloadStoreBorrowingForm(request.id, request.requestNo)
-                .then(() => {
-                  toast.success('Item Borrowing Form downloaded.')
-                })
-                .catch((error: unknown) => {
-                  toast.error(error instanceof Error ? error.message : 'Could not download the Item Borrowing Form')
-                })
-            }}
+            variant="gradient"
+            disabled={mutation.isPending || borrowingFormLoading}
+            title="Opens the Item Borrowing Form first, then asks you to accept."
+            onClick={openBorrowingForm}
           >
-            Item Borrowing Form
+            Accept Item
           </Button>
+          <Button type="button" variant="outline" disabled={mutation.isPending} onClick={() => void declineItem()}>
+            Decline Item
+          </Button>
+        </div>
+      ) : null}
+      {requesterHandoff && stageHandOff === 'TRANSIT' ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="gradient"
@@ -260,28 +385,76 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
               void run(
                 'CONFIRM_RECEIPT',
                 'Confirm Receipt',
-                'Confirm that you have received this store request.',
+                `Confirm that you have received the item on store requisition ${requestNo}${givNo ? ` (GIV ${givNo})` : ''}.`,
               )
             }
           >
             Confirm Receipt
           </Button>
-        </div>
-      ) : null}
-      {requesterHandoff && receiptConfirmed ? (
-        <div className="mt-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              void downloadStoreBorrowingForm(request.id, request.requestNo).catch((error: unknown) => {
-                toast.error(error instanceof Error ? error.message : 'Could not download the Item Borrowing Form')
-              })
-            }}
-          >
+          <Button type="button" variant="outline" disabled={borrowingFormLoading} onClick={openBorrowingForm}>
             Item Borrowing Form
           </Button>
+          {givNo ? (
+            <Button type="button" variant="outline" onClick={downloadGiv}>
+              Store Issuance Voucher (GIV)
+            </Button>
+          ) : null}
         </div>
+      ) : null}
+      {requesterHandoff && stageHandOff === 'RECEIVED' ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" onClick={downloadBorrowingForm}>
+            Item Borrowing Form
+          </Button>
+          {givNo ? (
+            <Button type="button" variant="outline" onClick={downloadGiv}>
+              Store Issuance Voucher (GIV)
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {borrowingFormUrl ? (
+        <StoreBorrowingFormViewer
+          url={borrowingFormUrl}
+          requestNo={requestNo}
+          onClose={() => setBorrowingFormUrl(null)}
+          actions={
+            requesterHandoff && awaitingRequester ? (
+              <>
+                <Button type="button" variant="outline" className="rounded-full" onClick={() => setBorrowingFormUrl(null)}>
+                  Close
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-full"
+                  disabled={mutation.isPending}
+                  onClick={() => void declineItem()}
+                >
+                  Decline Item
+                </Button>
+                <Button
+                  type="button"
+                  variant="gradient"
+                  className="rounded-full"
+                  disabled={mutation.isPending}
+                  onClick={() => void acceptItem()}
+                >
+                  {mutation.isPending ? 'Saving…' : 'Accept Item'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" className="rounded-full" onClick={downloadBorrowingForm}>
+                  Download
+                </Button>
+                <Button type="button" className="rounded-full" onClick={() => setBorrowingFormUrl(null)}>
+                  Close
+                </Button>
+              </>
+            )
+          }
+        />
       ) : null}
       <p className="mt-2">
         Issue: <strong>{issueStageLabel(stageHandOff)}</strong>
@@ -383,19 +556,22 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </Button>
           <Button
             type="button"
-            variant={stockBlocked ? 'gradient' : 'outline'}
-            disabled={mutation.isPending || needsBcPrep}
+            variant={stockBlocked || localPurchase.enabled ? 'gradient' : 'outline'}
+            // No item / no similar item in store needs no item mapping (BC Request for LPR).
+            disabled={mutation.isPending || (!localPurchase.enabled && needsBcPrep)}
             title={
-              needsBcPrep
+              !localPurchase.enabled && needsBcPrep
                 ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
-                : undefined
+                : localPurchase.enabled
+                  ? 'No item / no similar item in store: send this request to the Store Manager with the employee details.'
+                  : undefined
             }
             onClick={() =>
               localPurchase.enabled
                 ? void run(
                     'REQUEST_FOR_LPR',
                     'Request for LPR',
-                    'Confirm the requested item is unavailable in the store. The Store Manager then starts the Local Purchase Requisition (LPR).',
+                    `No stock / no similar item for store requisition ${requestNo}? Send Request for LPR to the Store Manager with the employee details?`,
                   )
                 : void run(
                     'STOCK_UNAVAILABLE',
@@ -410,17 +586,61 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
       {atLprRequested && localPurchase.enabled && !storeManager ? (
         <p className="mt-2 text-xs text-slate-600">
-          Stock confirmed unavailable. Waiting for the Store Manager to start the LPR (project, then procurement officer).
+          Store requisition {requestNo} is with the Store Manager for Local Purchase
+          {requesterId ? ` (requester ${requesterId})` : ''}. Waiting for the Store Manager to choose Start Local Purchase (LPR).
         </p>
       ) : null}
       {canStartLpr ? (
         <div className="mt-3 space-y-2">
+          <p className="text-xs text-slate-700">
+            Store requisition {requestNo} is with you for Local Purchase{requesterId ? ` (requester ${requesterId})` : ''}.
+          </p>
+          <div className="max-w-md space-y-1">
+            <label htmlFor={`lpr-source-${request.id}`} className="text-xs font-medium text-slate-700">
+              Request procurement from which source?
+            </label>
+            <Select
+              id={`lpr-source-${request.id}`}
+              options={[
+                { value: 'LOCAL', label: 'Local (Inhouse Local)' },
+                { value: 'FOREIGN', label: 'Foreign (Inhouse / Salable Foreign)' },
+              ]}
+              value={lprSource}
+              onChange={(event) => setLprSource(event.target.value === 'FOREIGN' ? 'FOREIGN' : 'LOCAL')}
+              disabled={mutation.isPending}
+            />
+          </div>
           <LprProjectPicker
             id={`lpr-project-${request.id}`}
             value={lprProjectNo}
-            onChange={setLprProjectNo}
+            onChange={(value) => {
+              setLprProjectNo(value)
+              // The officer follows the project again unless the manager picks one.
+              setLprOfficer('')
+            }}
             disabled={mutation.isPending}
           />
+          <div className="max-w-md space-y-1">
+            <label htmlFor={`lpr-officer-${request.id}`} className="text-xs font-medium text-slate-700">
+              Procurement officer
+            </label>
+            <Select
+              id={`lpr-officer-${request.id}`}
+              options={(lprProjectNo ? (['PROJECT', 'PROCUREMENT'] as const) : (['PROCUREMENT'] as const)).map((kind) => ({
+                value: kind,
+                label:
+                  kind === 'PROJECT'
+                    ? `Project Procurement Officer${lprOfficers?.projectProcurementOfficer ? ` (${lprOfficers.projectProcurementOfficer})` : ''}`
+                    : `Procurement Officer${lprOfficers?.procurementOfficer ? ` (${lprOfficers.procurementOfficer})` : ''}`,
+              }))}
+              value={startLprOfficerKind}
+              onChange={(event) => setLprOfficer(event.target.value === 'PROJECT' ? 'PROJECT' : 'PROCUREMENT')}
+              disabled={mutation.isPending}
+            />
+            <p className="text-xs text-slate-500">
+              A project purchase defaults to the Project Procurement Officer. A project procurement officer needs a project.
+            </p>
+          </div>
           <Button
             type="button"
             variant="gradient"
@@ -428,16 +648,15 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             onClick={() =>
               void run(
                 'START_LPR',
-                'Start LPR',
-                'Create the Local Purchase Requisition (LPR) from this store requisition — ' +
-                  (lprProjectNo
-                    ? `project ${lprProjectNo}, assigned to the Project Procurement Officer.`
-                    : 'non-project, assigned to the Procurement Officer.') +
-                  ' The officer prepares it and submits it to the Operations Manager.',
+                'Start Local Purchase (LPR)',
+                `Create the ${lprSource === 'FOREIGN' ? 'Foreign' : 'Local'} Purchase Requisition (LPR) for store requisition ${requestNo}` +
+                  `${lprProjectNo ? ` — project ${lprProjectNo}` : ' — non-project'}` +
+                  `, assigned to ${startLprOfficerId ? `${startLprOfficerLabel} ${startLprOfficerId}` : startLprOfficerLabel}?` +
+                  ' The officer prepares it first, then the Operations Manager and FAD approve it on the LPR (not Requests to Approve).',
               )
             }
           >
-            Start LPR
+            Start Local Purchase (LPR)
           </Button>
         </div>
       ) : null}
@@ -450,17 +669,17 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             onClick={() =>
               void run(
                 'ACCEPT_ISSUE',
-                'Accept and Issue',
-                'Accept the item the storekeeper offered. The requester then accepts or declines the borrowing form.',
+                'Accept Item (Store Manager)',
+                `Accept the item offered on store requisition ${requestNo}${storeName ? ` from store ${storeName}` : ''}? The requester will get the borrowing form and can accept or decline it. No voucher is created yet.`,
               )
             }
           >
-            Accept and Issue
+            Accept Item (Store Manager)
           </Button>
         </div>
       ) : null}
-      {stageHandOff === 'PREPARED' && !storeManager ? (
-        <p className="mt-2 text-xs text-slate-600">Waiting for the store manager to accept and issue.</p>
+      {stageHandOff === 'PREPARED' && !storeManager && !requesterHandoff ? (
+        <p className="mt-2 text-xs text-slate-600">Waiting for the store manager to accept the offered item.</p>
       ) : null}
       {atStockCheck && stockReady ? (
         <p className="mt-2 text-xs text-teal-800">All requested quantities are available at the issuing store.</p>

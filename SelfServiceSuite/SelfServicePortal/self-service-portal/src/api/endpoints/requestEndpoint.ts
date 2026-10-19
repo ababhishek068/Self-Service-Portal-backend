@@ -115,12 +115,69 @@ export async function downloadStoreBorrowingForm(id: string, requestNo: string) 
   return downloadRequestPdf(id, 'borrowing-form', `Item-Borrowing-Form-${requestNo}.pdf`)
 }
 
-/** `linkedDocumentNo` on REQUEST_FOR_LPR is the BC project No. (blank = non-project purchase). */
-export async function updateStoreRequisitionProcess(id: string, actionCode: string, linkedDocumentNo = '') {
+/** Item Borrowing Form as a blob URL for the in-page viewer (revoke it when the viewer closes). */
+export async function getStoreBorrowingFormUrl(id: string) {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>(
+    `/api/requests/${encodeURIComponent(id)}/borrowing-form`,
+    { responseType: 'blob' },
+  )
+  return URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+}
+
+/** Store Issuance Voucher (GIV) — exists after the requester accepts the item. */
+export async function downloadStoreIssueVoucher(id: string, storeIssueNo: string) {
+  return downloadRequestPdf(id, 'store-issue-voucher', `Store-Issuance-Voucher-${storeIssueNo}.pdf`)
+}
+
+export interface StoreRequisitionStore {
+  code: string
+  name: string
+  locationCode: string
+  centralStore: boolean
+  defaultIssueStore: boolean
+}
+
+export interface StoreUnitOfMeasure {
+  code: string
+  description: string
+}
+
+/** Officer and approver user IDs from BC ABH Local Proc Setup. */
+export interface LprOfficers {
+  procurementOfficer: string
+  projectProcurementOfficer: string
+  operationsManager: string
+  fad: string
+}
+
+/** BC lookups for the store requisition form. A list is null when BC does not publish it yet. */
+export interface StoreRequisitionOptions {
+  stores: StoreRequisitionStore[] | null
+  unitsOfMeasure: StoreUnitOfMeasure[] | null
+  projects: LocalPurchaseProject[] | null
+  lprOfficers?: LprOfficers | null
+}
+
+export async function getStoreRequisitionOptions() {
+  requireAuthApiUrl()
+  return authGet<StoreRequisitionOptions>('/api/store-requisition/options')
+}
+
+/**
+ * `linkedDocumentNo` on START_LPR is the BC project No. (blank = non-project purchase);
+ * `options` carries the Start LPR source and officer (procurementSource, officerType).
+ */
+export async function updateStoreRequisitionProcess(
+  id: string,
+  actionCode: string,
+  linkedDocumentNo = '',
+  options: Record<string, string> = {},
+) {
   requireAuthApiUrl()
   return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(
     `/api/requests/${encodeURIComponent(id)}/store-process`,
-    linkedDocumentNo ? { actionCode, linkedDocumentNo } : { actionCode },
+    { actionCode, ...(linkedDocumentNo ? { linkedDocumentNo } : {}), ...options },
   )
 }
 

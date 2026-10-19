@@ -106,11 +106,19 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cp "$AL_ROOT/src/src/tableextension/PurchaseHeaderExtension.TableExt.al" "$PENDING_AL_DIR/"
   cp "$AL_ROOT/src/src/Page/InternalRequisitionsU.Page.al" "$PENDING_AL_DIR/"
   cp "$AL_ROOT/src/src/Page/StoreReqHeaderApproved.Page.al" "$PENDING_AL_DIR/"
+  # 20 Oct store requisition: store/project/UOM lists, store hand-off and BC forms for the portal.
+  cp "$AL_ROOT/src/src/Store/StoreMgmt.Codeunit.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Query/StoreRequisitionsHeader.Query.al" "$PENDING_AL_DIR/"
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
-These are the Local Purchase files changed for the portal; the full source is
-ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.543.app,
-publish with docs/ERP-Publish-1.0.3.543.ps1). Workflow = "ERP & BC – Staff Item/Asset
+These are the Local Purchase and Store Requisition files changed for the portal; the full
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.544.app,
+publish with docs/ERP-Publish-1.0.3.544.ps1).
+Store requisition (meeting 20 Oct): the requester picks the Store, Is Project / Project
+Code and the Unit of Measure from the BC lists; Store Keeper adds the item to issue and
+submits; Store Manager accepts the item; the requester opens the Item Borrowing Form and
+accepts (GIV created, In Transit) or declines; then Confirm Receipt.
+Workflow = "ERP & BC – Staff Item/Asset
 Request to Payment Workflow" (meeting 18 Oct): Store Keeper Request for LPR -> Store
 Manager Start LPR (project, then officer) -> Procurement Officer submits -> Operations
 Manager -> FAD -> RFQ (Operations Manager) -> quotes -> evaluation (Operations Manager,

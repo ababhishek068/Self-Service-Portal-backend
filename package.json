@@ -12,7 +12,7 @@
     "dry-run": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh",
     "dry-run:dev": "bash SelfServiceSuite/SelfServicePortal/deploy/run-local-suite.sh --dev",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/approvalTableIds.test.js dist/localPurchaseFlow.test.js",
+    "test": "npm run build && node --test dist/approvalTableIds.test.js dist/localPurchaseFlow.test.js dist/storeLookups.test.js",
     "smoke:lpr": "node scripts/lpr-smoke.mjs",
     "audit": "powershell -NoProfile -ExecutionPolicy Bypass -File ./deploy/windows/ABH-LOCAL-AUDIT.ps1",
     "package:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./deploy/windows/ABH-LOCAL-AUDIT.ps1 -Package"

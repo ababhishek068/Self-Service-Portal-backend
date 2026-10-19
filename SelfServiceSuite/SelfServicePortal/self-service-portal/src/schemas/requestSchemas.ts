@@ -217,16 +217,31 @@ export const imprestSurrenderHeaderSchema = z.object({
 /** Original document date from BC — read-only on edit; do not force ERP working date. */
 const documentDateField = dateField
 
-export const storeHeaderSchema = z.object({
-  requestDate: documentDateField,
-  dateRequired: needByDateField,
-  requestedBy: optionalText,
-  division: optionalText,
-  department: optionalText,
-  requestType: z.enum(['item', 'asset']).default('item'),
-  priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
-  justification: z.string().min(3, 'Purpose / justification is required'),
-})
+export const storeHeaderSchema = z
+  .object({
+    requestDate: documentDateField,
+    dateRequired: needByDateField,
+    requestedBy: optionalText,
+    division: optionalText,
+    department: optionalText,
+    requestType: z.enum(['item', 'asset']).default('item'),
+    priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
+    justification: z.string().min(3, 'Purpose / justification is required'),
+    // Store and project as on the BC Store Requisition card (Business Central checks them again).
+    storeCode: optionalText,
+    isProject: z.preprocess((value) => value === true || value === 'true', z.boolean()),
+    projectCode: optionalText,
+    projectName: optionalText,
+  })
+  .superRefine((data, ctx) => {
+    if (data.isProject && !String(data.projectCode ?? '').trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Select the project code, or untick Is Project',
+        path: ['projectCode'],
+      })
+    }
+  })
 
 export const storeLineSchema = z
   .object({

@@ -3,7 +3,11 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { StoreOperationsPanel } from '@/components/facility/StoreOperationsPanel'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
-import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
+import {
+  getStoreRequisitionOptions,
+  listModuleRequests,
+  type StoreRequisitionStore,
+} from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
 import { useQuery } from '@tanstack/react-query'
 import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
@@ -34,6 +38,18 @@ function hasText(value: unknown) {
 
 function hasPositiveNumber(value: unknown) {
   return Number(value ?? 0) > 0
+}
+
+function storeLabel(store: StoreRequisitionStore) {
+  const name = store.name && store.name !== store.code ? `${store.code} — ${store.name}` : store.code
+  return store.locationCode && store.locationCode !== store.code ? `${name} (location ${store.locationCode})` : name
+}
+
+function lineRoleLabel(value: unknown) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (text.includes('offer')) return 'Store offer'
+  if (text.includes('request')) return 'Your request'
+  return '—'
 }
 
 function isAssetRequestPayload(payload: Record<string, unknown> | undefined) {
@@ -71,6 +87,35 @@ export function StoreRequisition() {
   const department = String(
     profileQuery.data?.department || employee?.departmentName || employee?.departmentCode || '',
   ).trim()
+  // Store, project and unit-of-measure lists from Business Central (same lookups as the BC card).
+  const optionsQuery = useQuery({
+    queryKey: ['store-requisition', 'options'],
+    queryFn: getStoreRequisitionOptions,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const bcStores = optionsQuery.data?.stores
+  const bcProjects = optionsQuery.data?.projects
+  const bcUnits = optionsQuery.data?.unitsOfMeasure
+  // Older BC apps publish no store list: the store is then assigned in Business Central.
+  const showStoreDetails = optionsQuery.isLoading || Boolean(bcStores)
+  const showProject = showStoreDetails && (optionsQuery.isLoading || Boolean(bcProjects))
+  const storeOptions = (bcStores ?? []).map((store) => ({ value: store.code, label: storeLabel(store) }))
+  const projectOptions = (bcProjects ?? []).map((project) => ({
+    value: project.no,
+    label: project.description ? `${project.no} — ${project.description}` : project.no,
+  }))
+  const uomOptions = bcUnits?.length
+    ? bcUnits.map((unit) => ({
+        value: unit.code,
+        label: unit.description && unit.description.toUpperCase() !== unit.code ? `${unit.code} — ${unit.description}` : unit.code,
+      }))
+    : storeUomOptions
+  const defaultUom = bcUnits?.length
+    ? (bcUnits.find((unit) => unit.code === 'EACH') ?? bcUnits.find((unit) => unit.code === 'PCS') ?? bcUnits[0]).code
+    : optionsQuery.isLoading
+      ? ''
+      : 'PCS'
 
   return (
     <MultiStepRequestPage
@@ -105,16 +150,36 @@ export function StoreRequisition() {
         requestType: 'item',
         priority: 'normal',
         justification: '',
+        storeCode: '',
+        isProject: false,
+        projectCode: '',
+        projectName: '',
+      }}
+      headerOnValuesChange={(values, form) => {
+        const isProject = values.isProject === true
+        const projectCode = String(values.projectCode ?? '')
+        if (!isProject) {
+          if (projectCode) form.setValue('projectCode', '')
+          if (String(values.projectName ?? '')) form.setValue('projectName', '')
+          return
+        }
+        // BC fills Project Name from the project (Job) description.
+        const projectName = bcProjects?.find((project) => project.no === projectCode)?.description ?? ''
+        if (projectName && String(values.projectName ?? '') !== projectName) form.setValue('projectName', projectName)
       }}
       headerSupplement={() => <FinanceEmployeeOrgBanner showJobGradeAndDistrict={false} />}
       buildHeaderPayload={(values) => {
         const justification = String(values.justification ?? '').trim()
+        const isProject = values.isProject === true
         return {
           ...values,
           requestDate: values.dateRequired,
           requestDescription: justification.slice(0, 150),
           justification,
           title: justification.slice(0, 80) || 'Store Requisition',
+          storeCode: String(values.storeCode ?? '').trim(),
+          isProject,
+          projectCode: isProject ? String(values.projectCode ?? '').trim() : '',
         }
       }}
       headerFields={[
@@ -177,6 +242,45 @@ export function StoreRequisition() {
             urgent: 'urgent',
           },
         },
+        ...(showStoreDetails
+          ? [
+              {
+                name: 'storeCode',
+                label: 'Store',
+                type: 'select' as const,
+                options: storeOptions,
+                placeholder: optionsQuery.isLoading ? 'Loading stores…' : 'Select the store',
+                valuePaths: ['StoreCode', 'Store_Code'],
+              },
+            ]
+          : []),
+        ...(showProject
+          ? [
+              {
+                name: 'isProject',
+                label: 'Is Project',
+                type: 'checkbox' as const,
+                valuePaths: ['IsProject', 'Is_Project'],
+              },
+              {
+                name: 'projectCode',
+                label: 'Project Code',
+                type: 'select' as const,
+                options: projectOptions,
+                placeholder: optionsQuery.isLoading ? 'Loading projects…' : 'Select the project',
+                visibleWhen: (values: Record<string, unknown>) => values.isProject === true,
+                valuePaths: ['ProjectCode', 'Project_Code'],
+              },
+              {
+                name: 'projectName',
+                label: 'Project Name',
+                type: 'text' as const,
+                readOnly: true,
+                visibleWhen: (values: Record<string, unknown>) => values.isProject === true,
+                valuePaths: ['ProjectName', 'Project_Name'],
+              },
+            ]
+          : []),
         {
           name: 'justification',
           label: 'Purpose / Justification',
@@ -202,8 +306,23 @@ export function StoreRequisition() {
         { label: 'Division', paths: ['payload.FunctionName', 'payload.GlobalDimension1Code', 'payload.Global_Dimension_1_Code'] },
         { label: 'Department', paths: ['payload.BudgetCenterName', 'payload.DepartmentName', 'payload.ShortcutDimension2Code', 'payload.Shortcut_Dimension_2_Code'] },
         { label: 'Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
+        {
+          label: 'Is Project',
+          paths: [],
+          resolve: (request) => (request.payload?.IsProject === true ? 'Yes' : undefined),
+        },
+        { label: 'Project Code', paths: ['payload.ProjectCode', 'payload.Project_Code'] },
+        { label: 'Project Name', paths: ['payload.ProjectName', 'payload.Project_Name'] },
         { label: 'Issue Stage', paths: ['payload.IssueStage', 'payload.Issue_Stage'] },
-        { label: 'Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
+        {
+          label: 'Requester Decision',
+          paths: [],
+          resolve: (request) => {
+            const decision = String(request.payload?.RequesterDecision ?? '').trim()
+            return /accept|declin/i.test(decision) ? decision : undefined
+          },
+        },
+        { label: 'GIV / Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
         { label: 'Request Type', paths: ['payload.StoreRequisitionType', 'payload.Store_Requisition_Type'] },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
@@ -221,7 +340,7 @@ export function StoreRequisition() {
           itemNo: '',
           itemName: '',
           description: '',
-          uom: 'PCS',
+          uom: defaultUom,
           quantity: 1,
           preferredBrandModel: '',
         },
@@ -267,7 +386,8 @@ export function StoreRequisition() {
             name: 'uom',
             label: 'UOM',
             type: 'select',
-            options: storeUomOptions,
+            options: uomOptions,
+            placeholder: optionsQuery.isLoading ? 'Loading units…' : 'Select the unit of measure',
             valuePaths: ['uom', 'unitOfMeasure', 'UnitofMeasure'],
           },
           { name: 'quantity', label: 'Quantity', type: 'number' },
@@ -283,6 +403,17 @@ export function StoreRequisition() {
             key: 'type',
             header: 'Type',
             format: (value) => (String(value) === '2' || String(value).toLowerCase() === 'asset' ? 'Asset' : 'Item'),
+          },
+          {
+            key: 'lineRole',
+            header: 'Line Role',
+            format: (value) => lineRoleLabel(value),
+            visibleWhen: (lines) => lines.some((line) => /offer/i.test(String(line.lineRole ?? ''))),
+          },
+          {
+            key: 'itemNo',
+            header: 'Item / Asset No.',
+            visibleWhen: (lines) => lines.some((line) => hasText(line.itemNo)),
           },
           { key: 'itemName', header: 'Requested item' },
           {

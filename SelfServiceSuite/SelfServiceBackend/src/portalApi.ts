@@ -72,6 +72,13 @@ import {
 import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvanceAmount.js'
 import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import {
+  listLprOfficers,
+  listStoreProjects,
+  listStoreRequisitionStores,
+  listStoreUnitsOfMeasure,
+  startLprOptionsFromBody,
+} from './storeLookups.js'
+import {
   enrichFinanceHeaderFromEmployee,
   enrichFinanceHeaderRow,
   financeSessionHints,
@@ -440,7 +447,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v234 — 1.0.3.393 (Local Purchase per 18 Oct workflow: Operations Manager checks; Store Manager start LPR; F&A payment)'
+export const PORTAL_API_BUILD = 'v235 — 1.0.3.394 (Store requisition per BC: store, project and UOM lists; requester accepts the borrowing form, then confirms receipt)'
 
 interface LookupSpec {
   service: string
@@ -1074,6 +1081,20 @@ function sendPdf(res: Response, pdf: Buffer, fileName: string) {
   res.send(pdf)
 }
 
+/**
+ * The Business Central report itself (Item Borrowing Form or Store Issue / GIV), so the
+ * portal shows the same form as BC. `pdf` is null when BC could not produce it.
+ */
+async function storeRequisitionBcPdf(requestNo: string, documentKind: 'BORROWING' | 'GIV') {
+  try {
+    const { returnValue } = await callSoapMethod('PortalStoreRequisitionPdf', { requestNo, documentKind })
+    const pdf = Buffer.from(String(returnValue ?? '').trim(), 'base64')
+    return { pdf: pdf.subarray(0, 4).toString() === '%PDF' ? pdf : null, error: '' }
+  } catch (error) {
+    return { pdf: null, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 async function callStoreIssueHandoff(method: string, requestNo: string, actorUserID: string) {
   try {
     await callSoapMethod(method, { requestNo, actorUserID })
@@ -1081,7 +1102,7 @@ async function callStoreIssueHandoff(method: string, requestNo: string, actorUse
     const message = error instanceof Error ? error.message : String(error)
     if (/not found|unknown|not published|could not find|procedure|method/i.test(message)) {
       throw portalError(
-        'Publish the Business Central store issue hand-off before this step. The portal is calling PreparePortalStoreIssue, AcceptPortalStoreIssue, and ConfirmPortalStoreReceipt.',
+        'Publish Business Central 1.0.3.544 (store issue hand-off) before this step. The portal is calling PreparePortalStoreIssue, AcceptPortalStoreIssue, and ConfirmPortalStoreReceipt.',
         502,
         'STORE_HANDOFF_NOT_PUBLISHED',
       )
@@ -4324,8 +4345,56 @@ export function buildPortalApiRouter() {
       const requestId = String(req.params.id)
       const authUser = user(req)
       const detail = await approvedStoreDocument(requestId, authUser)
-      const pdf = buildStoreBorrowingFormPdf(storeDocumentInput(detail, 'borrowing'))
+      // Older BC apps have no PortalStoreRequisitionPdf: keep the portal-built form.
+      const pdf =
+        (await storeRequisitionBcPdf(detail.requestNo, 'BORROWING')).pdf ??
+        buildStoreBorrowingFormPdf(storeDocumentInput(detail, 'borrowing'))
       sendPdf(res, pdf, `Item-Borrowing-Form-${detail.requestNo}.pdf`)
+    }),
+  )
+
+  /** Store Issuance Voucher (GIV) — BC report Store Issue, after the requester accepted the item. */
+  router.get(
+    '/requests/:id/store-issue-voucher',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const detail = await approvedStoreDocument(requestId, authUser)
+      const issueNo = text(detail.payload as ODataRecord, ['StoreIssueNo', 'Store_Issue_No'])
+      if (!issueNo) {
+        throw portalError(
+          'The goods issue voucher (GIV) is created when you accept the item on the borrowing form.',
+          409,
+          'STORE_GIV_NOT_READY',
+        )
+      }
+      const { pdf, error } = await storeRequisitionBcPdf(detail.requestNo, 'GIV')
+      if (!pdf) {
+        throw /PortalStoreRequisitionPdf|no action|soapaction|not published|could not find/i.test(error) || !error
+          ? portalError(
+              'Publish Business Central 1.0.3.544 to download the Store Issuance Voucher (GIV) from the portal.',
+              502,
+              'STORE_DOCUMENT_NOT_PUBLISHED',
+            )
+          : portalError(error, 422, 'STORE_DOCUMENT_FAILED')
+      }
+      sendPdf(res, pdf, `Store-Issuance-Voucher-${issueNo}.pdf`)
+    }),
+  )
+
+  /** Store, Unit of Measure and Project lists for the store requisition form (null = not in this BC app). */
+  router.get(
+    '/store-requisition/options',
+    safe(async (req, res) => {
+      user(req)
+      const [stores, unitsOfMeasure, projects, lprOfficers] = await Promise.all([
+        listStoreRequisitionStores(callSoapMethod),
+        listStoreUnitsOfMeasure(callSoapMethod),
+        listStoreProjects(callSoapMethod),
+        listLprOfficers(callSoapMethod),
+      ])
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ stores, unitsOfMeasure, projects, lprOfficers })
     }),
   )
 
@@ -4439,9 +4508,22 @@ export function buildPortalApiRouter() {
             ...(Array.isArray(payload.lines) ? (payload.lines as Array<Record<string, unknown>>) : []),
           ]
           const issuedByManager = lineRows.some((line) => Number(line.quantityIssued ?? line.QuantityIssued ?? 0) > 0)
-          if (issueStage !== 'TRANSIT' && !issuedByManager && !['posted', 'approved', 'released'].includes(String(detail.status ?? '').trim().toLowerCase())) {
+          if (issueStage === 'RECEIVED') {
+            throw portalError('Receipt is already confirmed for this store requisition.', 409, 'INVALID_PROCESS_TRANSITION')
+          }
+          if (issueStage === 'PREPARED' || issueStage === 'ACCEPTED') {
             throw portalError(
-              'Confirm receipt after the store requisition is approved.',
+              'Open the Item Borrowing Form and accept the item first. That creates the goods issue voucher (GIV); confirm receipt once you have the item.',
+              409,
+              'INVALID_PROCESS_TRANSITION',
+            )
+          }
+          // GIVs posted before the hand-off flow have no issue stage; keep their portal-only receipt.
+          const legacyIssue =
+            !issueStage && (issuedByManager || String(detail.status ?? '').trim().toLowerCase() === 'posted')
+          if (issueStage !== 'TRANSIT' && !legacyIssue) {
+            throw portalError(
+              'Confirm receipt after the store issues the item (GIV) and the request is In Transit.',
               409,
               'INVALID_PROCESS_TRANSITION',
             )
@@ -4453,7 +4535,7 @@ export function buildPortalApiRouter() {
             const message = error instanceof Error ? error.message : ''
             const portalCanContinue =
               code === 'STORE_HANDOFF_NOT_PUBLISHED' ||
-              /in transit|issue stage|not been issued|not issued|must accept/i.test(message)
+              (legacyIssue && /in transit|issue stage|not been issued|not issued|must accept/i.test(message))
             if (!portalCanContinue) throw error
           }
         }
@@ -4515,14 +4597,42 @@ export function buildPortalApiRouter() {
       if (actionCode === 'STOCK_AVAILABLE' && !stockCheck.allAvailable) {
         throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_STOCK_UNAVAILABLE')
       }
-      const result = await callSoapMethod('UpdateStoreRequisitionProcess', {
+      const linkedDocumentNo = String(req.body?.linkedDocumentNo ?? '')
+      const updateParams = {
         requestNo: no,
         actionCode,
-        linkedDocumentNo: String(req.body?.linkedDocumentNo ?? ''),
+        linkedDocumentNo,
         actionComment,
         actorUserID: authUser.userID,
         actorJobTitle: String(authUser.jobTitle ?? ''),
-      })
+      }
+      let result: Awaited<ReturnType<typeof callSoapMethod>>
+      if (actionCode === 'START_LPR') {
+        // Start Local Purchase (LPR) like the BC card: source, project, then the officer.
+        const options = startLprOptionsFromBody(req.body ?? {}, linkedDocumentNo)
+        if (options.error) throw portalError(options.error, 422, 'INVALID_START_LPR')
+        if (await listLprOfficers(callSoapMethod)) {
+          result = await callSoapMethod('StartPortalStoreLpr', {
+            requestNo: no,
+            projectNo: linkedDocumentNo,
+            actionComment,
+            actorUserID: authUser.userID,
+            actorJobTitle: String(authUser.jobTitle ?? ''),
+            procurementSource: options.procurementSource,
+            officerType: options.officerType,
+          })
+        } else if (options.custom) {
+          throw portalError(
+            'Publish Business Central 1.0.3.544 to choose Foreign or the other procurement officer from the portal.',
+            502,
+            'START_LPR_OPTIONS_NOT_PUBLISHED',
+          )
+        } else {
+          result = await callSoapMethod('UpdateStoreRequisitionProcess', updateParams)
+        }
+      } else {
+        result = await callSoapMethod('UpdateStoreRequisitionProcess', updateParams)
+      }
       const process = parseProcurementProcess(result.returnValue)
       res.json({
         process: { ...process, stockCheck },
