@@ -252,3 +252,33 @@ export function startLprOptionsFromBody(body: Record<string, unknown>, projectNo
     error,
   }
 }
+
+export type StoreFeature =
+  | 'storeList'
+  | 'unitsOfMeasure'
+  | 'storeHandOff'
+  | 'storeOffers'
+  | 'startLprOptions'
+  | 'storeDocuments'
+
+/** BC 1.0.3.544 had these portal methods but no PortalStoreFeatures. */
+const FEATURES_1_0_3_544: StoreFeature[] = ['storeList', 'unitsOfMeasure', 'storeHandOff', 'startLprOptions', 'storeDocuments']
+
+export function normalizeStoreFeatures(returnValue: unknown): StoreFeature[] {
+  const features = parseSoapJson(returnValue).features
+  return Array.isArray(features) ? (features.map((value) => textOf(value)) as StoreFeature[]) : []
+}
+
+/**
+ * Store steps this BC app can run from the portal: from PortalStoreFeatures (1.0.3.545+),
+ * else 1.0.3.544 when the store list exists, else none (older apps keep the BC-only steps).
+ */
+export async function listStoreFeatures(soap: SoapCall, now = Date.now()): Promise<StoreFeature[]> {
+  const published = await cachedLookup(
+    'storeFeatures',
+    async () => normalizeStoreFeatures((await soap('PortalStoreFeatures', {})).returnValue),
+    now,
+  )
+  if (published) return published
+  return (await listStoreRequisitionStores(soap, now)) ? FEATURES_1_0_3_544 : []
+}

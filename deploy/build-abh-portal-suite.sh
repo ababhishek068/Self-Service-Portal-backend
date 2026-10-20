@@ -112,12 +112,14 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.544.app,
-publish with docs/ERP-Publish-1.0.3.544.ps1).
-Store requisition (meeting 20 Oct): the requester picks the Store, Is Project / Project
-Code and the Unit of Measure from the BC lists; Store Keeper adds the item to issue and
-submits; Store Manager accepts the item; the requester opens the Item Borrowing Form and
-accepts (GIV created, In Transit) or declines; then Confirm Receipt.
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.545.app,
+publish with docs/ERP-Publish-1.0.3.545.ps1).
+Store requisition (meeting 20 Oct), all in the portal: the requester picks the Issuing
+Store, Is Project / Project Code and the Unit of Measure; the Store Keeper adds the item
+to issue (in-stock list) and submits, or sends Request for LPR; the Store Manager accepts
+the item or starts the LPR; the requester opens the Item Borrowing Form and accepts (GIV,
+In Transit) or declines (Offer Another Item / Close Request); then Confirm Receipt.
+The Procurement Officer prepares the Draft LPR lines in the portal (step 7).
 Workflow = "ERP & BC – Staff Item/Asset
 Request to Payment Workflow" (meeting 18 Oct): Store Keeper Request for LPR -> Store
 Manager Start LPR (project, then officer) -> Procurement Officer submits -> Operations

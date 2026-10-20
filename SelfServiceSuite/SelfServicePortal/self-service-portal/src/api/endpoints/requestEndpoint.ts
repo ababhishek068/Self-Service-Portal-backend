@@ -159,6 +159,27 @@ export interface StoreRequisitionOptions {
   unitsOfMeasure: StoreUnitOfMeasure[] | null
   projects: LocalPurchaseProject[] | null
   lprOfficers?: LprOfficers | null
+  /** Store steps this BC app runs from the portal (storeHandOff, storeOffers, …). */
+  features?: string[]
+}
+
+/** In-stock item the Store Keeper can offer (Add Item to Issue). */
+export interface StoreOfferItem {
+  no: string
+  description: string
+  unitOfMeasure: string
+  available: number
+  brand?: string
+  model?: string
+  category?: string
+}
+
+export async function getStoreOfferItems(id: string, search: string) {
+  requireAuthApiUrl()
+  return authGet<{ issuingStore: string; items: StoreOfferItem[] }>(
+    `/api/requests/${encodeURIComponent(id)}/store-offer-items`,
+    { params: { search } },
+  )
 }
 
 export async function getStoreRequisitionOptions() {
@@ -174,7 +195,7 @@ export async function updateStoreRequisitionProcess(
   id: string,
   actionCode: string,
   linkedDocumentNo = '',
-  options: Record<string, string> = {},
+  options: Record<string, string | number> = {},
 ) {
   requireAuthApiUrl()
   return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(

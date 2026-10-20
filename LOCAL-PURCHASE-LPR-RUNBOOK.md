@@ -3,9 +3,11 @@
 Follows **ERP & BC – Staff Item-Asset Request to Payment Workflow** (26 steps, meeting 18 Oct 2026):
 the Operations Manager checks the LPR, the RFQ, the quote evaluation, the PO and the invoice; F&A (FAD)
 approves the LPR, the final supplier, the PO and the payment; Finance verifies PO + GRN + invoice and pays.
-BC app **1.0.3.544** or later is required for this flow (ABH-LIVE-AL main); 1.0.3.544 adds the store
+BC app **1.0.3.545** or later is required for this flow (ABH-LIVE-AL main). 1.0.3.544 added the store
 requisition steps from the 20 Oct meeting (store, project and UOM lists, Store Manager accept, borrowing form,
-GIV and Confirm Receipt from the portal, and the Start LPR source/officer prompts).
+GIV and Confirm Receipt, Start LPR source/officer); 1.0.3.545 adds the Store Keeper steps (Add Item to Issue,
+Offer Another Item, Close Request) and the Draft LPR line preparation, so no store or LPR step needs BC.
+The portal asks BC which steps it supports (`PortalStoreFeatures`) and shows only those.
 
 ## Deploy prerequisites
 
@@ -28,7 +30,7 @@ GIV and Confirm Receipt from the portal, and the Start LPR source/officer prompt
 | 1–4 | Employee | Store → Store Requisition → New, Send Approval Request | header (**Store** from the BC store list, **Is Project** + **Project Code**) + lines (item, **UOM** from BC, **Quantity**, brand) | `POST /api/requests`, `…/submit` |
 | 5 | Store Keeper | approved Store Requisition → Store status | no item / no similar item: **Request for LPR** ("…Send Request for LPR to the Store Manager with the employee details?"; Issue Stage LPR Requested) | `store-process` `REQUEST_FOR_LPR` |
 | 6 | Store Manager | same Store Requisition | **Start Local Purchase (LPR)**: source **Local / Foreign** → **Project** (or non-project) → **officer** (defaults to the Project Procurement Officer for a project, else the Procurement Officer; Issue Stage LPR Started) | `store-process` `START_LPR` (`linkedDocumentNo` = project No., `procurementSource`, `officerType`) |
-| 7 | Procurement Officer | LPR card | review need / quantity / specs / justification (lines in BC while Draft) → **Submit to Operations Manager** | `SUBMIT_LPR_OPS` |
+| 7 | Procurement Officer | LPR card | **Prepare the LPR lines** (need, quantity, specification) → **Submit to Operations Manager** | `UPDATE_LPR_LINE` (`payload` lineNo, quantity, description, specification), `SUBMIT_LPR_OPS` |
 | 8 | Operations Manager | LPR card | **Approve (Operations Manager)** / Reject | `APPROVE_LPR_OPS`, `REJECT_LPR` |
 | 9 | FAD | LPR card | **Approve (FAD)** / Reject | `APPROVE_LPR_FAD`, `REJECT_LPR` |
 | 10 | Procurement | LPR card | **Convert to RFQ** | `CONVERT_TO_RFQ` |
@@ -55,7 +57,8 @@ sees "Waiting for …".
 
 | Role | SSP screen | Action | API |
 |------|-----------|--------|-----|
-| Store Keeper | BC Store Req Header Approved | **Add Item to Issue** (store offer line), then **Submit to Store Manager** (BC or portal) | `store-process` `PREPARE_ISSUE` |
+| Store Keeper | Store Requisition → Store status → Items to issue | search the items in stock at the issuing store → **Add Item to Issue** (quantity to issue; Remove before the manager accepts) → **Submit to Store Manager** | `GET …/store-offer-items?search=`, `ADD_STORE_OFFER` (`itemNo`, `quantity`), `REMOVE_STORE_OFFER` (`lineNo`), `PREPARE_ISSUE` |
+| Store Keeper | same, after the requester declines | change the item → **Offer Another Item**, or **Close Request** (no GIV) | `OFFER_ANOTHER_ITEM`, `CLOSE_REQUEST` |
 | Store Manager | Store Requisition → Store status | **Accept Item (Store Manager)** — no voucher yet | `store-process` `ACCEPT_ISSUE` |
 | Requester | Store Requisition → Store status | **Item Borrowing Form** opens in the page (the BC report) → **Accept Item** (GIV created, In Transit) or **Decline Item** | `ACCEPT_ITEM`, `DECLINE_ITEM`, `GET …/borrowing-form` |
 | Requester | same | **Confirm Receipt** when the item arrives; **Item Borrowing Form** and **Store Issuance Voucher (GIV)** stay downloadable | `CONFIRM_RECEIPT`, `GET …/store-issue-voucher` |

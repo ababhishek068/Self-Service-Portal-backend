@@ -5225,4 +5225,92 @@ codeunit 50049 "Staff Portal Codeunit"
         Root.WriteTo(JsonText);
         return_value := JsonText;
     end;
+
+    /// <summary>
+    /// Store portal features in this BC app, so the portal shows only what BC can do.
+    /// </summary>
+    procedure PortalStoreFeatures() return_value: Text
+    var
+        Root: JsonObject;
+        Features: JsonArray;
+        JsonText: Text;
+    begin
+        Features.Add('storeList');
+        Features.Add('unitsOfMeasure');
+        Features.Add('storeHandOff');
+        Features.Add('storeOffers');
+        Features.Add('startLprOptions');
+        Features.Add('storeDocuments');
+        Root.Add('features', Features);
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Storekeeper: in-stock items at the issuing store for Add Item to Issue (search by No. or description).
+    /// </summary>
+    procedure PortalStoreOfferItems(requestNo: Code[20]; actorUserID: Code[50]; searchText: Text[50]) return_value: Text
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 50);
+    end;
+
+    /// <summary>
+    /// Storekeeper: Add Item to Issue (Store Offer line). Returns the new line number.
+    /// </summary>
+    procedure AddPortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; itemNo: Code[20]; quantity: Decimal) return_value: Integer
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.AddStoreOfferForPortal(ReqHeader, actorUserID, itemNo, quantity);
+    end;
+
+    /// <summary>
+    /// Storekeeper: remove a Store Offer line before the store manager accepts it.
+    /// </summary>
+    procedure RemovePortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; lineNo: Integer) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.RemoveStoreOfferForPortal(ReqHeader, actorUserID, lineNo);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Offer Another Item after the requester declined.
+    /// </summary>
+    procedure OfferAnotherPortalStoreItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.OfferAnotherItemForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Close Request after the requester declined (no GIV).
+    /// </summary>
+    procedure ClosePortalStoreRequest(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.CloseDeclinedRequestForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
 }

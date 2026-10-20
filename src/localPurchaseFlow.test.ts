@@ -60,6 +60,7 @@ describe('assertLocalPurchaseActionAllowed', () => {
   it('covers every documented Local Purchase SOAP action', () => {
     const expected = [
       'SUBMIT_LPR_OPS',
+      'UPDATE_LPR_LINE',
       'APPROVE_LPR_OPS',
       'APPROVE_LPR_FAD',
       'REJECT_LPR',
@@ -147,7 +148,7 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
   it('walks SR → LPR (Ops, FAD) → RFQ (Ops) → quotes → evaluation (Ops) → FAD Final → PO (Ops, FAD) → GRN → invoice (Ops, Finance) → F&A pay → close', () => {
     // 7 Procurement Officer prepares the LPR (Draft) and submits it to the Operations Manager
     let s = step(demoChain({ lprStatus: 'Draft', lprStage: 'LPR Draft' }), 'procurement')
-    assert.deepEqual(s.mine, ['SUBMIT_LPR_OPS@ABH-PQ000092'])
+    assert.deepEqual(s.mine, ['UPDATE_LPR_LINE@ABH-PQ000092', 'SUBMIT_LPR_OPS@ABH-PQ000092'])
     assert.deepEqual(s.others, [])
     assert.deepEqual(step(demoChain({ lprStatus: 'Draft', lprStage: 'LPR Draft' }), 'operationsManager').mine, [])
 

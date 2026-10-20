@@ -73,6 +73,7 @@ import { enrichSalaryAdvanceLines, salaryAdvanceLinesTotal } from './salaryAdvan
 import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import {
   listLprOfficers,
+  listStoreFeatures,
   listStoreProjects,
   listStoreUnitsOfMeasure,
   startLprOptionsFromBody,
@@ -448,7 +449,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v236 — 1.0.3.395 (Store requisition per the 20 Oct flow: Issuing Store, UOM, Request for LPR, Start LPR, accept borrowing form, confirm receipt)'
+export const PORTAL_API_BUILD = 'v237 — 1.0.3.396 (Store Keeper and Store Manager in the portal: Add Item to Issue, Offer Another Item, Close Request; LPR line prep)'
 
 interface LookupSpec {
   service: string
@@ -1076,6 +1077,9 @@ async function approvedStoreDocument(requestId: string, authUser: AuthUser) {
   return detail
 }
 
+/** Store Keeper actions on the Store Offer (BC 1.0.3.545 portal methods). */
+const STORE_KEEPER_OFFER_ACTIONS = ['ADD_STORE_OFFER', 'REMOVE_STORE_OFFER', 'OFFER_ANOTHER_ITEM', 'CLOSE_REQUEST']
+
 function sendPdf(res: Response, pdf: Buffer, fileName: string) {
   res.setHeader('Content-Type', 'application/pdf')
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
@@ -1096,14 +1100,19 @@ async function storeRequisitionBcPdf(requestNo: string, documentKind: 'BORROWING
   }
 }
 
-async function callStoreIssueHandoff(method: string, requestNo: string, actorUserID: string) {
+async function callStoreIssueHandoff(
+  method: string,
+  requestNo: string,
+  actorUserID: string,
+  extra: Record<string, unknown> = {},
+) {
   try {
-    await callSoapMethod(method, { requestNo, actorUserID })
+    return await callSoapMethod(method, { requestNo, actorUserID, ...extra })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/not found|unknown|not published|could not find|procedure|method/i.test(message)) {
       throw portalError(
-        'Publish Business Central 1.0.3.544 (store issue hand-off) before this step. The portal is calling PreparePortalStoreIssue, AcceptPortalStoreIssue, and ConfirmPortalStoreReceipt.',
+        `Publish Business Central 1.0.3.545 (store steps in the portal) before this step. The portal is calling ${method}.`,
         502,
         'STORE_HANDOFF_NOT_PUBLISHED',
       )
@@ -1144,7 +1153,9 @@ export async function buildStoreRequisitionStockCheck(
   lines: Array<Record<string, unknown>>,
 ): Promise<StoreStockCheckResult> {
   const issuingStore = text(payload, ['IssuingStore', 'Issuing_Store', 'issuingStore'])
-  const itemLines = lines.filter((line) => storeLineIsItem(line))
+  // As in BC: once the storekeeper added a Store Offer, only the offered items are issued.
+  const offerLines = lines.filter((line) => /offer/i.test(String(line.lineRole ?? line.ABHLineRole ?? '')))
+  const itemLines = (offerLines.length ? offerLines : lines).filter((line) => storeLineIsItem(line))
   const checks: StoreStockLineCheck[] = await Promise.all(
     itemLines.map(async (line) => {
       const itemNo = text(line as ODataRecord, ['itemNo', 'ItemNo', 'No'])
@@ -4383,16 +4394,43 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  /** Store Keeper: in-stock items at the issuing store for Add Item to Issue. */
+  router.get(
+    '/requests/:id/store-offer-items',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'storeRequisition') {
+        throw portalError('Store items apply to Store Requisition only', 422)
+      }
+      if (!canManagePurchaseStock(authUser)) {
+        throw portalError('Only the storekeeper can add the item to issue.', 403, 'PROCESS_ACTION_FORBIDDEN')
+      }
+      await requestDetail(requestId, authUser)
+      const result = await callStoreIssueHandoff('PortalStoreOfferItems', no, authUser.userID, {
+        searchText: String(req.query.search ?? '').trim().slice(0, 50),
+      })
+      const parsed = parseSoapJson(result?.returnValue)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({
+        issuingStore: String(parsed.issuingStore ?? ''),
+        items: Array.isArray(parsed.items) ? parsed.items : [],
+      })
+    }),
+  )
+
   /** Store, Unit of Measure and Project lists for the store requisition form (null = not in this BC app). */
   router.get(
     '/store-requisition/options',
     safe(async (req, res) => {
       user(req)
-      const [storeOptions, unitsOfMeasure, projects, lprOfficers] = await Promise.all([
+      const [storeOptions, unitsOfMeasure, projects, lprOfficers, features] = await Promise.all([
         storeRequisitionStoreOptions(callSoapMethod),
         listStoreUnitsOfMeasure(callSoapMethod),
         listStoreProjects(callSoapMethod),
         listLprOfficers(callSoapMethod),
+        listStoreFeatures(callSoapMethod),
       ])
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({
@@ -4403,6 +4441,7 @@ export function buildPortalApiRouter() {
         unitsFromBc: Boolean(unitsOfMeasure),
         projects,
         lprOfficers,
+        features,
       })
     }),
   )
@@ -4437,20 +4476,23 @@ export function buildPortalApiRouter() {
         throw portalError('Store process applies to Store Requisition only', 422)
       }
       const detail = await requestDetail(requestId, authUser)
-      if (storeRequisitionIsAsset(detail.payload as ODataRecord)) {
+      const requestedAction = String(req.body?.actionCode ?? '').trim().toUpperCase()
+      // Fixed Asset requests follow the same BC hand-off (store offer, borrowing form, GIV) and
+      // LPR path; only the old direct stock GIV shortcut is item-only.
+      if (requestedAction === 'STOCK_AVAILABLE' && storeRequisitionIsAsset(detail.payload as ODataRecord)) {
         throw portalError(
-          'Asset Store Requisitions must be handed over and recorded in Business Central; item-stock GIV actions are not available.',
+          'Asset Store Requisitions use the store offer: Add Item to Issue, then Submit to Store Manager.',
           422,
           'ASSET_STORE_PROCESS_NOT_SUPPORTED',
         )
       }
-      const requestedAction = String(req.body?.actionCode ?? '').trim().toUpperCase()
       if (
         requestedAction === 'PREPARE_ISSUE' ||
         requestedAction === 'ACCEPT_ISSUE' ||
         requestedAction === 'ACCEPT_ITEM' ||
         requestedAction === 'DECLINE_ITEM' ||
-        requestedAction === 'CONFIRM_RECEIPT'
+        requestedAction === 'CONFIRM_RECEIPT' ||
+        STORE_KEEPER_OFFER_ACTIONS.includes(requestedAction)
       ) {
         const issueStage = storeIssueStageCode(
           (detail.payload as ODataRecord).IssueStage ??
@@ -4464,6 +4506,35 @@ export function buildPortalApiRouter() {
             throw portalError('This requisition has already been handed to the store manager.', 409, 'INVALID_PROCESS_TRANSITION')
           }
           await callStoreIssueHandoff('PreparePortalStoreIssue', no, authUser.userID)
+        } else if (STORE_KEEPER_OFFER_ACTIONS.includes(requestedAction)) {
+          // Store Keeper on the approved request: Add Item to Issue, remove an offer,
+          // Offer Another Item or Close Request (BC checks the store roster and the stage).
+          if (!canManagePurchaseStock(authUser)) {
+            throw portalError(
+              'Only the storekeeper can change the item to issue or close the request.',
+              403,
+              'PROCESS_ACTION_FORBIDDEN',
+            )
+          }
+          if (requestedAction === 'ADD_STORE_OFFER') {
+            const itemNo = String(req.body?.itemNo ?? '').trim().toUpperCase().slice(0, 20)
+            const quantity = Number(req.body?.quantity ?? 0)
+            if (!itemNo) throw portalError('Select the item to issue.', 422, 'STORE_OFFER_INVALID')
+            if (!Number.isFinite(quantity) || quantity <= 0) {
+              throw portalError('Enter the quantity to issue.', 422, 'STORE_OFFER_INVALID')
+            }
+            await callStoreIssueHandoff('AddPortalStoreOffer', no, authUser.userID, { itemNo, quantity })
+          } else if (requestedAction === 'REMOVE_STORE_OFFER') {
+            const lineNo = Number(req.body?.lineNo ?? 0)
+            if (!Number.isInteger(lineNo) || lineNo <= 0) {
+              throw portalError('Choose the store offer line to remove.', 422, 'STORE_OFFER_INVALID')
+            }
+            await callStoreIssueHandoff('RemovePortalStoreOffer', no, authUser.userID, { lineNo })
+          } else if (requestedAction === 'OFFER_ANOTHER_ITEM') {
+            await callStoreIssueHandoff('OfferAnotherPortalStoreItem', no, authUser.userID)
+          } else {
+            await callStoreIssueHandoff('ClosePortalStoreRequest', no, authUser.userID)
+          }
         } else if (requestedAction === 'ACCEPT_ISSUE') {
           if (!portalUserIsStoreManager(authUser)) {
             throw portalError('Only the store manager can accept and issue this requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
@@ -4549,23 +4620,25 @@ export function buildPortalApiRouter() {
           }
         }
         const refreshed = await requestDetail(requestId, authUser)
-        const issueStageLabel =
-          requestedAction === 'PREPARE_ISSUE'
-            ? 'Prepared by Store'
-            : requestedAction === 'ACCEPT_ISSUE'
-              ? 'Accepted by Manager'
-              : requestedAction === 'ACCEPT_ITEM'
-                ? 'In Transit'
-                : requestedAction === 'DECLINE_ITEM'
-                  ? ''
-                  : 'Received'
-        const requestWithStage = {
-          ...refreshed,
-          payload: {
-            ...(refreshed.payload ?? {}),
-            IssueStage: issueStageLabel,
-          },
+        // Stage after the action; offer add/remove keep Business Central's own value.
+        const issueStageAfter: Record<string, string> = {
+          PREPARE_ISSUE: 'Prepared by Store',
+          OFFER_ANOTHER_ITEM: 'Prepared by Store',
+          ACCEPT_ISSUE: 'Accepted by Manager',
+          ACCEPT_ITEM: 'In Transit',
+          DECLINE_ITEM: '',
+          CONFIRM_RECEIPT: 'Received',
         }
+        const requestWithStage =
+          requestedAction in issueStageAfter
+            ? {
+                ...refreshed,
+                payload: {
+                  ...(refreshed.payload ?? {}),
+                  IssueStage: issueStageAfter[requestedAction],
+                },
+              }
+            : refreshed
         const stockCheck = await buildStoreRequisitionStockCheck(
           requestWithStage.payload as ODataRecord,
           requestDetailLines(requestWithStage as Record<string, unknown>),

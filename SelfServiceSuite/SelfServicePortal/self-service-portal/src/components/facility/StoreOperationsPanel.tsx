@@ -16,6 +16,7 @@ import {
   updateStoreRequisitionProcess,
 } from '@/api/endpoints/requestEndpoint'
 import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFormViewer'
+import { StoreKeeperOfferSection } from '@/components/facility/StoreKeeperOfferSection'
 import type { PortalRequest } from '@/types/erp.types'
 
 function text(value: unknown) {
@@ -119,16 +120,6 @@ function userIsStoreManager(employee: ReturnType<typeof useAuth>['employee']) {
   return /\bstore\s*manager\b|\bstores\s*manager\b|\bmain\s*store\b|\bstoremanager\b/.test(assignment)
 }
 
-function isAssetRequest(request: PortalRequest) {
-  const payload = request.payload ?? {}
-  const value = text(
-    payload.StoreRequisitionType ??
-      payload.Store_Requisition_Type ??
-      payload.requestType,
-  ).toLowerCase()
-  return value === '1' || value === 'asset' || value === 'minor asset'
-}
-
 function stockCheckFromProcess(data: Record<string, unknown> | undefined): StoreStockCheck | null {
   const raw = data?.stockCheck
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -139,7 +130,6 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const { employee } = useAuth()
   const status = request.status.trim().toLowerCase()
   const approved = ['approved', 'released', 'posted'].includes(status)
-  const assetRequest = isAssetRequest(request)
   const assignment = [employee?.jobTitle, employee?.departmentCode, employee?.departmentName]
     .map((value) => String(value ?? '').trim().toLowerCase())
     .join(' ')
@@ -199,6 +189,8 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const lprOfficers = storeOptionsQuery.data?.lprOfficers ?? null
   // BC 1.0.3.544 has the store hand-off methods (Submit to Store Manager, Accept Item) for the portal.
   const bcStoreHandOff = storeOptionsQuery.data?.storesFromBc === true
+  // BC 1.0.3.545: Add Item to Issue, Offer Another Item and Close Request from the portal.
+  const storeOffers = storeOptionsQuery.data?.features?.includes('storeOffers') === true
   const [borrowingFormUrl, setBorrowingFormUrl] = useState<string | null>(null)
   const [borrowingFormLoading, setBorrowingFormLoading] = useState(false)
   // Free the PDF blob when the viewer closes or the panel unmounts.
@@ -211,16 +203,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const processQuery = useQuery({
     queryKey: ['store-process', request.id],
     queryFn: () => getStoreRequisitionProcess(request.id),
-    enabled: approved && canViewProcess && !assetRequest,
+    enabled: approved && canViewProcess,
   })
   const mutation = useMutation({
-    mutationFn: (actionCode: string) =>
+    mutationFn: ({ actionCode, extra = {} }: { actionCode: string; extra?: Record<string, string | number> }) =>
       actionCode === 'START_LPR'
         ? updateStoreRequisitionProcess(request.id, actionCode, lprProjectNo, {
             procurementSource: lprSource,
             officerType: lprOfficer,
           })
-        : updateStoreRequisitionProcess(request.id, actionCode),
+        : updateStoreRequisitionProcess(request.id, actionCode, '', extra),
     onSuccess: async (data) => {
       queryClient.setQueryData(['facility', 'store-requisition', 'detail', request.id], data.request)
       await queryClient.invalidateQueries({ queryKey: ['store-process', request.id] })
@@ -233,13 +225,6 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
 
   const requesterHandoff = approved && (ownsRequest || !canViewProcess)
   if (!approved) return null
-  if (assetRequest) {
-    return (
-      <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-700">
-        Facilities completes the asset assignment and handover in Business Central.
-      </section>
-    )
-  }
   if (!canViewProcess && !requesterHandoff) return null
 
   const stage = text(processQuery.data?.stageCode).toUpperCase()
@@ -268,36 +253,38 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const givNo = text(request.payload?.StoreIssueNo ?? request.payload?.Store_Issue_No)
   const storeName = text(request.payload?.StoreName ?? request.payload?.StoreCode ?? request.payload?.IssuingStore)
 
-  const run = async (actionCode: string, title: string, message: string) => {
-    const yes = await confirm({ title, message, confirmLabel: title })
-    if (!yes) return false
+  const run = async (
+    actionCode: string,
+    title: string,
+    message: string,
+    extra: Record<string, string | number> = {},
+    confirmFirst = true,
+  ) => {
+    if (confirmFirst && !(await confirm({ title, message, confirmLabel: title }))) return false
     try {
-      const data = await mutation.mutateAsync(actionCode)
+      const data = await mutation.mutateAsync({ actionCode, extra })
       if (actionCode === 'CONFIRM_RECEIPT') {
         window.localStorage.setItem(receiptStorageKey(request.requestNo), 'received')
         setReceiptConfirmed(true)
       }
       const issuedGiv = text(data.request?.payload?.StoreIssueNo ?? data.request?.payload?.Store_Issue_No) || givNo
       const createdLpr = text((data.process?.links as Record<string, unknown> | undefined)?.lprNo)
-      toast.success(
-        actionCode === 'PREPARE_ISSUE'
-          ? 'Submitted to the store manager. Stock has not moved yet.'
-          : actionCode === 'ACCEPT_ISSUE'
-            ? `Store requisition ${requestNo} accepted. The requester must accept the borrowing form before the goods issue voucher is created.`
-            : actionCode === 'ACCEPT_ITEM'
-              ? `Accepted. Goods issue voucher ${issuedGiv || '(GIV)'} is with the storekeeper for requisition ${requestNo}. Status is In Transit. Confirm receipt when you have the item.`
-              : actionCode === 'DECLINE_ITEM'
-                ? `Declined. Store requisition ${requestNo} is back with the storekeeper. They can offer another item, or close the request.`
-                : actionCode === 'CONFIRM_RECEIPT'
-                  ? `Store requisition ${requestNo} marked as received.`
-                  : actionCode === 'ISSUE_AFTER_LPR'
-                    ? 'Issued after LPR receive — the goods issue voucher is posted to the requester.'
-                    : actionCode === 'REQUEST_FOR_LPR'
-                      ? `Store requisition ${requestNo} is with the Store Manager for Local Purchase. Requester: ${requesterId || 'the employee'}. Store Manager: open this request and choose Start Local Purchase (LPR).`
-                      : actionCode === 'START_LPR'
-                        ? `Local Purchase Requisition ${createdLpr || '(LPR)'} created for store requisition ${requestNo}${requesterId ? ` (employee ${requesterId})` : ''}. Assigned procurement officer ${startLprOfficerId || startLprOfficerLabel} prepares it first. Project ${lprProjectNo || '(non-project)'}. Then ${lprOfficers?.operationsManager ? `Operations Manager ${lprOfficers.operationsManager}` : 'the Operations Manager'} approves, then FAD.`
-                        : 'Linked Purchase Request created from this store requisition.',
-      )
+      // Same wording as the Business Central messages for each step.
+      const successMessages: Record<string, string> = {
+        PREPARE_ISSUE: `Store requisition ${requestNo} is with the store manager. The requester's line and the store offer line are both there. Stock has not moved.`,
+        ADD_STORE_OFFER: 'Item added to issue. Submit to Store Manager when the offer is complete.',
+        REMOVE_STORE_OFFER: 'Store offer removed.',
+        OFFER_ANOTHER_ITEM: `The new item on store requisition ${requestNo} is with the store manager. After the manager accepts, the requester can accept or decline it.`,
+        CLOSE_REQUEST: `Store requisition ${requestNo} is closed. Nothing was issued.`,
+        ACCEPT_ISSUE: `Store requisition ${requestNo} accepted. The requester must accept the borrowing form before the goods issue voucher is created.`,
+        ACCEPT_ITEM: `Accepted. Goods issue voucher ${issuedGiv || '(GIV)'} is with the storekeeper for requisition ${requestNo}. Status is In Transit. Confirm receipt when you have the item.`,
+        DECLINE_ITEM: `Declined. Store requisition ${requestNo} is back with the storekeeper. They can offer another item, or close the request.`,
+        CONFIRM_RECEIPT: `Store requisition ${requestNo} marked as received.`,
+        ISSUE_AFTER_LPR: 'Issued after LPR receive — the goods issue voucher is posted to the requester.',
+        REQUEST_FOR_LPR: `Store requisition ${requestNo} is with the Store Manager for Local Purchase. Requester: ${requesterId || 'the employee'}. Store Manager: open this request and choose Start Local Purchase (LPR).`,
+        START_LPR: `Local Purchase Requisition ${createdLpr || '(LPR)'} created for store requisition ${requestNo}${requesterId ? ` (employee ${requesterId})` : ''}. Assigned procurement officer ${startLprOfficerId || startLprOfficerLabel} prepares it first. Project ${lprProjectNo || '(non-project)'}. Then ${lprOfficers?.operationsManager ? `Operations Manager ${lprOfficers.operationsManager}` : 'the Operations Manager'} approves, then FAD.`,
+      }
+      toast.success(successMessages[actionCode] ?? 'Linked Purchase Request created from this store requisition.')
       return true
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', title)
@@ -349,6 +336,19 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const awaitingRequester = stageHandOff === 'ACCEPTED'
   const requesterDeclined = requesterDecision(request) === 'DECLINED' && stageHandOff === ''
   const lprPath = /lpr/i.test(text(request.payload?.IssueStage ?? request.payload?.Issue_Stage))
+  // Store Keeper works on the Store Offer until the store manager accepts it (BC Store Req Header Approved).
+  const showOfferSection =
+    storeOffers &&
+    canManageStock &&
+    ['approved', 'released'].includes(status) &&
+    (stageHandOff === '' || stageHandOff === 'PREPARED') &&
+    !lprPath &&
+    !issued
+  const offerAvailable: Record<string, number> = Object.fromEntries(
+    (stockCheck?.lines ?? [])
+      .filter((line) => realBcItemNo(line.itemNo))
+      .map((line) => [String(line.itemNo).toUpperCase(), Number(line.available ?? 0)]),
+  )
 
   return (
     <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
@@ -477,7 +477,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           {lprNo ? ` · Purchase Request: ${lprNo}` : ''}
         </p>
       ) : null}
-      {atStockCheck && needsBcPrep ? (
+      {atStockCheck && needsBcPrep && !storeOffers ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <p className="font-semibold">Business Central prep required before GIV</p>
           <ul className="mt-1 list-disc space-y-1 pl-4">
@@ -487,7 +487,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </ul>
         </div>
       ) : null}
-      {atStockCheck && stockCheck?.lines?.length ? (
+      {atStockCheck && stockCheck?.lines?.length && !storeOffers ? (
         <div className="mt-3 overflow-x-auto rounded-md border border-teal-100 bg-white/70">
           <table className="min-w-full text-xs">
             <thead className="bg-teal-50 text-left text-slate-600">
@@ -527,21 +527,31 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </table>
         </div>
       ) : null}
-      {atStockCheck && stockBlocked ? (
+      {atStockCheck && stockBlocked && !storeOffers ? (
         <p className="mt-2 text-xs font-medium text-red-700">
           Stock is not available at {stockCheck?.issuingStore || 'the issuing store'}. Use Purchase Request — do not
           issue GIV until a posted GRV receives stock into that location.
         </p>
       ) : null}
-      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !bcStoreHandOff ? (
+      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !storeOffers ? (
         <p className="mt-2 text-xs text-slate-600">
           Item in store: in Business Central (Store Req Header Approved) use Add Item to Issue, then Submit to Store
-          Manager. Item not in store: Request for LPR below.
+          Manager{bcStoreHandOff ? ' (in BC or here)' : ''}. Item not in store: Request for LPR below.
         </p>
+      ) : null}
+      {showOfferSection ? (
+        <StoreKeeperOfferSection
+          request={request}
+          stage={stageHandOff}
+          declined={requesterDeclined}
+          available={offerAvailable}
+          busy={mutation.isPending}
+          run={run}
+        />
       ) : null}
       {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {bcStoreHandOff ? (
+          {bcStoreHandOff && !storeOffers ? (
             <Button
               type="button"
               variant="gradient"

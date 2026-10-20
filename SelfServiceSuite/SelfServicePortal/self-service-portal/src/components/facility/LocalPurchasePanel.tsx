@@ -17,13 +17,14 @@ import {
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
+import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { todayIsoDate } from '@/utils/validators'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
-const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR'])
+const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'])
 const RETURN_ACTIONS = new Set(['REJECT_LPR', 'SEND_BACK_RFQ', 'SEND_BACK_PO'])
 
 const ROLE_LABELS: Record<string, string> = {
@@ -148,9 +149,10 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const allowed = (code: string) => nextActions.some((action) => action.actionCode === code && action.allowed)
   const ribbon = nextActions.filter((action) => action.allowed && !INLINE_ACTIONS.has(action.actionCode))
   const waiting = nextActions.filter(
-    (action) => !action.allowed && !['UPSERT_VENDOR_QUOTE', 'ISSUE_AFTER_LPR'].includes(action.actionCode),
+    (action) => !action.allowed && !['UPSERT_VENDOR_QUOTE', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'].includes(action.actionCode),
   )
   const issueAfterLpr = nextActions.find((action) => action.actionCode === 'ISSUE_AFTER_LPR')
+  const updateLprLine = nextActions.find((action) => action.actionCode === 'UPDATE_LPR_LINE' && action.allowed)
   const needsComment = ribbon.some(
     (action) => action.commentRequired || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW',
   )
@@ -490,6 +492,27 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {updateLprLine ? (
+        <LprDraftLineEditor
+          lines={Array.isArray(request.payload?.lines) ? (request.payload.lines as Array<Record<string, unknown>>) : []}
+          busy={busy}
+          onSave={async (change) => {
+            try {
+              await actionMutation.mutateAsync({
+                actionCode: 'UPDATE_LPR_LINE',
+                documentNo: updateLprLine.documentNo,
+                payload: change,
+              })
+              toast.success(`Line ${change.lineNo} saved on ${updateLprLine.documentNo}.`)
+              return true
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : 'Could not save the LPR line', 'Save LPR line')
+              return false
+            }
+          }}
+        />
       ) : null}
 
       {ribbon.length > 0 ? (

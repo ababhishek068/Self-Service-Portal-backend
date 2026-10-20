@@ -35,6 +35,8 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   // Owners mirror ABH Local Procurement's TestIs* checks (ABH Local Proc Setup user IDs).
   // Workflow per "ERP & BC – Staff Item-Asset Request to Payment Workflow" (meeting 18 Oct).
   SUBMIT_LPR_OPS: { roles: PROCUREMENT },
+  /** Step 7: quantity / description / specification on a Draft LPR line. */
+  UPDATE_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
   APPROVE_LPR_OPS: { roles: ['operationsManager'] },
   APPROVE_LPR_FAD: { roles: ['fad'] },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
@@ -68,6 +70,7 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
 /** BC captions from the Local RFQ / Purchase Order ribbons. */
 export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   SUBMIT_LPR_OPS: 'Submit to Operations Manager',
+  UPDATE_LPR_LINE: 'Save LPR line',
   APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
@@ -217,6 +220,7 @@ export function localPurchaseNextActions(
     const lprStage = stageKey(chain.lpr.flowStage)
     if (lprStatus === 'DRAFT' || lprStage === 'LPR DRAFT') {
       // Step 7: the assigned Procurement Officer prepares the LPR, then sends it to the Operations Manager.
+      push('UPDATE_LPR_LINE', 'lpr', lprNo)
       push('SUBMIT_LPR_OPS', 'lpr', lprNo)
     } else if (
       lprStatus === 'PENDING OPERATIONS' ||

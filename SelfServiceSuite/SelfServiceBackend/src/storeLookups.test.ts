@@ -9,6 +9,7 @@ import {
   storeHeaderDetailsError,
   storeHeaderDetailsFromBody,
   startLprOptionsFromBody,
+  listStoreFeatures,
 } from './storeLookups.js'
 
 const stores = normalizeStoreRows(
@@ -102,5 +103,26 @@ describe('store requisition lookups (BC Store / Project / UOM)', () => {
     assert.equal(startLprOptionsFromBody({ officerType: 'PROCUREMENT' }, 'SAF-001').custom, true)
     assert.match(startLprOptionsFromBody({ officerType: 'PROJECT' }, '').error, /needs a project/)
     assert.match(startLprOptionsFromBody({ procurementSource: 'IMPORT' }, '').error, /Local or Foreign/)
+  })
+
+  it('shows only the store steps the BC app can run (feature detection)', async () => {
+    const bc545 = async (method: string) => {
+      if (method === 'PortalStoreFeatures') return { returnValue: JSON.stringify({ features: ['storeList', 'storeOffers'] }) }
+      throw new Error('unexpected')
+    }
+    assert.deepEqual(await listStoreFeatures(bc545), ['storeList', 'storeOffers'])
+    clearStoreLookupCache()
+    const bc544 = async (method: string) => {
+      if (method === 'PortalStoreList') return { returnValue: JSON.stringify({ stores: [{ code: 'IT', locationCode: 'IT' }] }) }
+      throw new Error(`No Action matches ${method}`)
+    }
+    const features544 = await listStoreFeatures(bc544)
+    assert.ok(features544.includes('storeHandOff'))
+    assert.ok(!features544.includes('storeOffers'))
+    clearStoreLookupCache()
+    const older = async (method: string) => {
+      throw new Error(`No Action matches ${method}`)
+    }
+    assert.deepEqual(await listStoreFeatures(older), [])
   })
 })
