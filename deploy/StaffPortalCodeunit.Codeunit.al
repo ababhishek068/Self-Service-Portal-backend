@@ -1723,7 +1723,7 @@ codeunit 50049 "Staff Portal Codeunit"
                 // TbEmployee.TestField("Global Dimension 1 Code");
                 // TbEmployee.TestField("Global Dimension 2 Code");
                 // TbEmployee.TestField("Responsibility Center");
-                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code"));
+                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                 TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
                 TbStoreRequisition."Shortcut Dimension 3 Code" := TbEmployee."Global Dimension 3 Code";
                 TbStoreRequisition."Responsibility Center" := TbEmployee."Responsibility Center";
@@ -1737,7 +1737,7 @@ codeunit 50049 "Staff Portal Codeunit"
             TbStoreRequisition."Requester ID" := CopyStr(myUserID, 1, MaxStrLen(TbStoreRequisition."Requester ID"));
             TbStoreRequisition."Employee No" := TbUserSetup."Employee No.";
             if TbEmployee."No." <> '' then begin
-                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code"));
+                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                 TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
             end;
             TbStoreRequisition.Modify(false);
@@ -1771,7 +1771,7 @@ codeunit 50049 "Staff Portal Codeunit"
                     // TbEmployee.TestField("Global Dimension 1 Code");
                     // TbEmployee.TestField("Global Dimension 2 Code");
                     // TbEmployee.TestField("Responsibility Center");
-                    TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code"));
+                    TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                     TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
                     TbStoreRequisition."Shortcut Dimension 3 Code" := TbEmployee."Global Dimension 3 Code";
                     TbStoreRequisition."Responsibility Center" := TbEmployee."Responsibility Center";
@@ -1785,36 +1785,19 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     /// <summary>
-    /// Division for a portal store requisition, as on the BC Store Requisition card: the user's
-    /// User Setup division first; the employee card's division only when it is an active
-    /// Division dimension value (a blocked or old value would stop the goods issue posting).
+    /// Division for a portal store requisition, as on the BC Store Requisition card (Store Mgmt
+    /// ResolveStoreDivision): User Setup first, never an old / inactive employee-card value when an
+    /// active one can be found. Falls back to the employee card when nothing valid is found.
     /// </summary>
-    local procedure PortalStoreDivision(UserIDCode: Code[100]; EmployeeDivision: Code[20]): Code[20]
+    local procedure PortalStoreDivision(UserIDCode: Code[100]; EmployeeDivision: Code[20]; EmployeeDivisionName: Text): Code[20]
     var
-        UserSetupMgt: Codeunit "User Setup Management BR";
-        UserSetupDivision: Code[20];
+        StoreMgmt: Codeunit "Store Mgmt";
+        Division: Code[20];
     begin
-        UserSetupDivision := UserSetupMgt.GetSetDimensions(CopyStr(UserIDCode, 1, 30), 1);
-        if ActiveDivisionValue(UserSetupDivision) then
-            exit(UserSetupDivision);
-        if ActiveDivisionValue(EmployeeDivision) then
-            exit(EmployeeDivision);
-        if UserSetupDivision <> '' then
-            exit(UserSetupDivision);
+        Division := StoreMgmt.ResolveStoreDivision(CopyStr(UserIDCode, 1, 50), EmployeeDivision, EmployeeDivisionName);
+        if Division <> '' then
+            exit(Division);
         exit(EmployeeDivision);
-    end;
-
-    local procedure ActiveDivisionValue(DivisionCode: Code[20]): Boolean
-    var
-        GLSetup: Record "General Ledger Setup";
-        DimValue: Record "Dimension Value";
-    begin
-        if DivisionCode = '' then
-            exit(false);
-        GLSetup.Get();
-        if not DimValue.Get(GLSetup."Global Dimension 1 Code", DivisionCode) then
-            exit(false);
-        exit((not DimValue.Blocked) and (DimValue."Dimension Value Type" = DimValue."Dimension Value Type"::Standard));
     end;
 
     procedure StoreRequisitionLine("action": Text; lineNo: Integer; type: Integer; reqNo: Code[50]; itemNo: Code[100]; location: Code[30]; quantity: Decimal; description: Text[70]; unitOfMeasure: Code[20]; preferredBrandModel: Text[50]; remarks: Text[200]) return_value: Boolean

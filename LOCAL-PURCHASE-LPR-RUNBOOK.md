@@ -3,7 +3,7 @@
 Follows **ERP & BC – Staff Item-Asset Request to Payment Workflow** (26 steps, meeting 18 Oct 2026):
 the Operations Manager checks the LPR, the RFQ, the quote evaluation, the PO and the invoice; F&A (FAD)
 approves the LPR, the final supplier, the PO and the payment; Finance verifies PO + GRN + invoice and pays.
-BC app **1.0.3.548** or later is required for this flow (ABH-LIVE-AL main). 1.0.3.544 added the store
+BC app **1.0.3.550** or later is required for this flow (ABH-LIVE-AL main). 1.0.3.544 added the store
 requisition steps from the 20 Oct meeting (store, project and UOM lists, Store Manager accept, borrowing form,
 GIV and Confirm Receipt, Start LPR source/officer); 1.0.3.545 adds the Store Keeper steps (Add Item to Issue,
 Offer Another Item, Close Request) and the Draft LPR line preparation, so no store or LPR step needs BC.
@@ -11,6 +11,9 @@ Offer Another Item, Close Request) and the Draft LPR line preparation, so no sto
 1.0.3.547 lists all the store's items for Add Item to Issue (any finance class, in stock first, with stock in all stores).
 1.0.3.548: the Store Manager is whoever BC says — Warehouse Employees for the central store (MAIN) or the
 Store Manager on a store card (`PortalStoreRoles`); the portal job title "Store Manager" still works too.
+1.0.3.550: a store requisition always carries an active Division (User Setup first, else the employee card's
+when active, else the active division with the matching name, e.g. FINANCE AND ADMIN -> FAD); requests that
+already carry an inactive one are corrected before the GIV posts or the LPR is created.
 The portal asks BC which steps it supports (`PortalStoreFeatures`) and shows only those.
 
 ## Deploy prerequisites
