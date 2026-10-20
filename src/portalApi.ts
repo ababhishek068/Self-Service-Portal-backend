@@ -449,7 +449,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v240 — 1.0.3.399 (Store request: View Item opens the borrowing form with Accept / Decline; item card specification needs BC 1.0.3.546)'
+export const PORTAL_API_BUILD = 'v241 — 1.0.3.400 (Add Item to Issue lists all the store items, in stock first; needs BC 1.0.3.547)'
 
 interface LookupSpec {
   service: string

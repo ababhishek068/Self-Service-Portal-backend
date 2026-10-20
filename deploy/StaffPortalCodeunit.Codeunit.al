@@ -5256,7 +5256,7 @@ codeunit 50049 "Staff Portal Codeunit"
     begin
         if not ReqHeader.Get(requestNo) then
             Error('Store requisition %1 was not found.', requestNo);
-        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 50);
+        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 200);
     end;
 
     /// <summary>

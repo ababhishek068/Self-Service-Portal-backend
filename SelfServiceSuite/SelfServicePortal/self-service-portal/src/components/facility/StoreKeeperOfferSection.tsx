@@ -90,6 +90,7 @@ export function StoreKeeperOfferSection({
     retry: false,
   })
   const items = itemsQuery.data?.items ?? []
+  const issuingStore = itemsQuery.data?.issuingStore || 'the issuing store'
 
   const addOffer = async () => {
     if (!selected) return
@@ -195,7 +196,7 @@ export function StoreKeeperOfferSection({
           <Input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Item No. or description (blank lists the items in stock)"
+            placeholder="Item No. or description (blank lists all the store's items)"
             aria-label="Search the items in stock"
           />
           <Button type="submit" variant="outline" disabled={busy || itemsQuery.isFetching}>
@@ -210,16 +211,25 @@ export function StoreKeeperOfferSection({
         ) : null}
         {search !== null && !itemsQuery.isFetching && !itemsQuery.isError ? (
           items.length ? (
-            <ul className="max-h-60 max-w-xl overflow-y-auto rounded-md border border-slate-200 bg-white">
+            <ul className="max-h-80 max-w-2xl overflow-y-auto rounded-md border border-slate-200 bg-white">
+              <li className="sticky top-0 border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+                {items.length} item{items.length === 1 ? '' : 's'} · in stock at {issuingStore} first. Items with no stock
+                at {issuingStore} cannot be issued — use Request for LPR.
+              </li>
               {items.map((item) => {
                 const active = selected?.no === item.no
+                const atStore = Number(item.available ?? 0)
+                const onHand = item.onHand === undefined ? undefined : Number(item.onHand)
+                const inStock = atStore > 0
                 return (
                   <li key={item.no}>
                     <button
                       type="button"
+                      disabled={!inStock}
+                      title={inStock ? undefined : `No stock at ${issuingStore}.`}
                       onClick={() => setSelected(item)}
                       className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left text-xs last:border-b-0 ${
-                        active ? 'bg-teal-50' : 'hover:bg-slate-50'
+                        active ? 'bg-teal-50' : inStock ? 'hover:bg-slate-50' : 'cursor-not-allowed opacity-60'
                       }`}
                     >
                       <span>
@@ -231,8 +241,11 @@ export function StoreKeeperOfferSection({
                           </span>
                         ) : null}
                       </span>
-                      <span className="shrink-0 text-teal-800">
-                        {quantityLabel(Number(item.available ?? 0))} {item.unitOfMeasure} in stock
+                      <span className={`shrink-0 text-right ${inStock ? 'text-teal-800' : 'text-red-700'}`}>
+                        {quantityLabel(atStore)} {item.unitOfMeasure} at {issuingStore}
+                        {onHand !== undefined && onHand !== atStore ? (
+                          <span className="block text-slate-500">{quantityLabel(onHand)} in all stores</span>
+                        ) : null}
                       </span>
                     </button>
                   </li>
@@ -241,8 +254,7 @@ export function StoreKeeperOfferSection({
             </ul>
           ) : (
             <p className="text-xs text-slate-600">
-              No item in stock at {itemsQuery.data?.issuingStore || 'the issuing store'} matches. If there is no similar
-              item, use Request for LPR.
+              No item at {issuingStore} matches. If there is no similar item, use Request for LPR.
             </p>
           )
         ) : null}
@@ -250,7 +262,7 @@ export function StoreKeeperOfferSection({
           <div className="flex max-w-xl flex-wrap items-end gap-2">
             <div className="min-w-0 flex-1 text-xs text-slate-700">
               Selected: <strong>{selected.no}</strong> — {selected.description} ({quantityLabel(Number(selected.available ?? 0))}{' '}
-              {selected.unitOfMeasure} in stock)
+              {selected.unitOfMeasure} at {issuingStore})
             </div>
             <label className="space-y-1 text-xs font-medium text-slate-700">
               Qty to issue

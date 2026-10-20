@@ -168,7 +168,10 @@ export interface StoreOfferItem {
   no: string
   description: string
   unitOfMeasure: string
+  /** Stock at the request's issuing store (what BC can issue). */
   available: number
+  /** Stock in all stores (BC Quantity on Hand); BC 1.0.3.547+. */
+  onHand?: number
   brand?: string
   model?: string
   /** Item card Details/Specification. */
