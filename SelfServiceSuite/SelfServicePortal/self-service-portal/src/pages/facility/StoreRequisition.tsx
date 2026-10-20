@@ -152,7 +152,6 @@ export function StoreRequisition() {
         storeCode: '',
         isProject: false,
         projectCode: '',
-        projectName: '',
       }}
       headerOnValuesChange={(values, form) => {
         // A saved draft may carry only the issuing location (e.g. SU): show its store (SUP).
@@ -161,16 +160,8 @@ export function StoreRequisition() {
           const byLocation = bcStores.find((store) => store.locationCode === storeCode)
           if (byLocation) form.setValue('storeCode', byLocation.code)
         }
-        const isProject = values.isProject === true
-        const projectCode = String(values.projectCode ?? '')
-        if (!isProject) {
-          if (projectCode) form.setValue('projectCode', '')
-          if (String(values.projectName ?? '')) form.setValue('projectName', '')
-          return
-        }
-        // BC fills Project Name from the project (Job) description.
-        const projectName = bcProjects?.find((project) => project.no === projectCode)?.description ?? ''
-        if (projectName && String(values.projectName ?? '') !== projectName) form.setValue('projectName', projectName)
+        // BC fills Project Name from the project (Job) chosen here.
+        if (values.isProject !== true && String(values.projectCode ?? '')) form.setValue('projectCode', '')
       }}
       headerSupplement={() => <FinanceEmployeeOrgBanner showJobGradeAndDistrict={false} />}
       buildHeaderPayload={(values) => {
@@ -265,20 +256,12 @@ export function StoreRequisition() {
               },
               {
                 name: 'projectCode',
-                label: 'Project Code',
+                label: 'Project',
                 type: 'select' as const,
                 options: projectOptions,
                 placeholder: optionsQuery.isLoading ? 'Loading projects…' : 'Select the project',
                 visibleWhen: (values: Record<string, unknown>) => values.isProject === true,
                 valuePaths: ['ProjectCode', 'Project_Code'],
-              },
-              {
-                name: 'projectName',
-                label: 'Project Name',
-                type: 'text' as const,
-                readOnly: true,
-                visibleWhen: (values: Record<string, unknown>) => values.isProject === true,
-                valuePaths: ['ProjectName', 'Project_Name'],
               },
             ]
           : []),
@@ -312,8 +295,16 @@ export function StoreRequisition() {
           paths: [],
           resolve: (request) => (request.payload?.IsProject === true ? 'Yes' : undefined),
         },
-        { label: 'Project Code', paths: ['payload.ProjectCode', 'payload.Project_Code'] },
-        { label: 'Project Name', paths: ['payload.ProjectName', 'payload.Project_Name'] },
+        {
+          label: 'Project',
+          paths: [],
+          resolve: (request) => {
+            const code = String(request.payload?.ProjectCode ?? request.payload?.Project_Code ?? '').trim()
+            const name = String(request.payload?.ProjectName ?? request.payload?.Project_Name ?? '').trim()
+            if (!code) return undefined
+            return name && name !== code ? `${code} — ${name}` : code
+          },
+        },
         { label: 'Issue Stage', paths: ['payload.IssueStage', 'payload.Issue_Stage'] },
         {
           label: 'Requester Decision',

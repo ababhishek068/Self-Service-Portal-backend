@@ -177,7 +177,7 @@ export function storeHeaderDetailsError(
     }
   }
   if (details.isProject) {
-    if (!details.projectCode) return 'Select the project code, or untick Is Project.'
+    if (!details.projectCode) return 'Select the project, or untick Is Project.'
     if (projects && !projects.some((project) => project.no.toUpperCase() === details.projectCode)) {
       return `Project ${details.projectCode} is not an open project in Business Central. Select the project from the list.`
     }

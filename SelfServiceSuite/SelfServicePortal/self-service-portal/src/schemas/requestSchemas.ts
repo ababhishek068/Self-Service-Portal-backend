@@ -231,13 +231,12 @@ export const storeHeaderSchema = z
     storeCode: z.string().trim().min(1, 'Select the issuing store'),
     isProject: z.preprocess((value) => value === true || value === 'true', z.boolean()),
     projectCode: optionalText,
-    projectName: optionalText,
   })
   .superRefine((data, ctx) => {
     if (data.isProject && !String(data.projectCode ?? '').trim()) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Select the project code, or untick Is Project',
+        message: 'Select the project, or untick Is Project',
         path: ['projectCode'],
       })
     }

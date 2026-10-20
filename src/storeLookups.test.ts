@@ -63,7 +63,7 @@ describe('store requisition lookups (BC Store / Project / UOM)', () => {
 
   it('needs a project code from the BC list when Is Project is on', () => {
     const missing = storeHeaderDetailsFromBody({ storeCode: 'IT', isProject: true, projectCode: '' })
-    assert.match(storeHeaderDetailsError(missing, stores, projects), /project code/)
+    assert.match(storeHeaderDetailsError(missing, stores, projects), /Select the project/)
     const wrong = storeHeaderDetailsFromBody({ storeCode: 'IT', isProject: 'true', projectCode: 'NOPE' })
     assert.match(storeHeaderDetailsError(wrong, stores, projects), /not an open project/)
     const ok = storeHeaderDetailsFromBody({ storeCode: 'IT', isProject: true, projectCode: 'saf-001' })
