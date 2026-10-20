@@ -171,6 +171,8 @@ export interface StoreOfferItem {
   available: number
   brand?: string
   model?: string
+  /** Item card Details/Specification. */
+  specification?: string
   category?: string
 }
 

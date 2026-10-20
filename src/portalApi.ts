@@ -449,7 +449,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v238 — 1.0.3.397 (Store Keeper and Store Manager in the portal; one Project field on the store request)'
+export const PORTAL_API_BUILD = 'v239 — 1.0.3.398 (Store offer shows the item card specification and brand / model; needs BC 1.0.3.546)'
 
 interface LookupSpec {
   service: string
@@ -1982,6 +1982,48 @@ function mapStoreLine(row: ODataRecord, index: number) {
   }
 }
 
+/**
+ * A store offer line shows the item card it issues: Details/Specification as the description
+ * and Brand / Model (BC 1.0.3.546 fills both on new offers; this covers older offer lines).
+ */
+export function applyItemCardToStoreOffer<T extends Record<string, unknown>>(line: T, item: ODataRecord | null): T {
+  if (!item || !/offer/i.test(String(line.lineRole ?? ''))) return line
+  const specification = text(item, ['DetailsSpecification', 'Details_Specification'])
+  const brandModel = [text(item, ['Brand']), text(item, ['Model'])].filter(Boolean).join(' / ')
+  const description = String(line.description ?? '').trim()
+  const itemName = String(line.itemName ?? '').trim()
+  return {
+    ...line,
+    description: specification && (!description || description === itemName) ? specification : description,
+    preferredBrandModel: String(line.preferredBrandModel ?? '').trim() || brandModel,
+  }
+}
+
+async function applyItemCardsToStoreOffers<T extends Record<string, unknown>>(lines: T[]): Promise<T[]> {
+  const itemNos = [
+    ...new Set(
+      lines
+        .filter((line) => /offer/i.test(String(line.lineRole ?? '')))
+        .map((line) => String(line.itemNo ?? '').trim())
+        .filter((itemNo) => itemNo && !storeLineNeedsBcMapping(itemNo)),
+    ),
+  ]
+  if (!itemNos.length) return lines
+  const items = new Map<string, ODataRecord>()
+  await Promise.all(
+    itemNos.map(async (itemNo) => {
+      const rows = (await fetchOData('QyItem', {
+        $filter: `No eq '${odataString(itemNo)}'`,
+        $top: 1,
+      }).catch(() => null)) as ODataRecord[] | null
+      if (Array.isArray(rows) && rows[0]) items.set(itemNo.toUpperCase(), rows[0])
+    }),
+  )
+  return lines.map((line) =>
+    applyItemCardToStoreOffer(line, items.get(String(line.itemNo ?? '').trim().toUpperCase()) ?? null),
+  )
+}
+
 function mapTransferLine(row: ODataRecord, index: number) {
   const lineNo = text(row, ['lineNo', 'LineNo', 'Line_No'], String((index + 1) * 10000))
   return {
@@ -2796,6 +2838,9 @@ async function requestDetail(
   ])
   let headerForMapping: ODataRecord = row
   let mappedLines = mapModuleLines(module, row, Array.isArray(lines) ? lines : [])
+  if (module === 'storeRequisition') {
+    mappedLines = await applyItemCardsToStoreOffers(mappedLines as Array<Record<string, unknown>>)
+  }
   let enrichedSalaryBase = 0
   let payloadRow: ODataRecord = row
   if (isFinanceDetailModule(module)) {

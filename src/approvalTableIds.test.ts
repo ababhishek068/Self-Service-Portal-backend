@@ -79,6 +79,7 @@ import {
   approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
+  applyItemCardToStoreOffer,
   storeLineNeedsBcMapping,
   storePrepHints,
   storeIssueStageCode,
@@ -321,6 +322,19 @@ describe('purchase stock decision authorization', () => {
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
+  })
+
+  it('shows the item card specification and brand / model on a store offer line', () => {
+    const item = { No: 'ABH-ITM000140', Brand: 'DELL', Model: '45678XC', DetailsSpecification: '1TB HD,SSD, 16GB RAM, 14-Inch' }
+    const offer = applyItemCardToStoreOffer(
+      { lineRole: 'Store Offer', itemNo: 'ABH-ITM000140', itemName: 'Laptop', description: 'Laptop', preferredBrandModel: '' },
+      item,
+    )
+    assert.equal(offer.description, '1TB HD,SSD, 16GB RAM, 14-Inch')
+    assert.equal(offer.preferredBrandModel, 'DELL / 45678XC')
+    // The requester's own line is never changed.
+    const request = { lineRole: 'Request', itemNo: '', itemName: 'Laptop', description: '16GB RAM', preferredBrandModel: 'Dell' }
+    assert.deepEqual(applyItemCardToStoreOffer(request, item), request)
     assert.equal(storeLineNeedsBcMapping(''), true)
     assert.equal(storeLineNeedsBcMapping('PORTAL-12'), true)
     assert.equal(storeLineNeedsBcMapping('ITEM-100'), false)

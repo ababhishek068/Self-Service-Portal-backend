@@ -109,11 +109,14 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   # 20 Oct store requisition: store/project/UOM lists, store hand-off and BC forms for the portal.
   cp "$AL_ROOT/src/src/Store/StoreMgmt.Codeunit.al" "$PENDING_AL_DIR/"
   cp "$AL_ROOT/src/src/Query/StoreRequisitionsHeader.Query.al" "$PENDING_AL_DIR/"
+  # Store offer line from the item card (Details/Specification, Brand / Model).
+  cp "$AL_ROOT/src/src/Table/StoreRequistionLines.Table.al" "$PENDING_AL_DIR/"
+  cp "$AL_ROOT/src/src/Query/Items.Query.al" "$PENDING_AL_DIR/"
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.545.app,
-publish with docs/ERP-Publish-1.0.3.545.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.546.app,
+publish with docs/ERP-Publish-1.0.3.546.ps1).
 Store requisition (meeting 20 Oct), all in the portal: the requester picks the Issuing
 Store, Is Project / Project Code and the Unit of Measure; the Store Keeper adds the item
 to issue (in-stock list) and submits, or sends Request for LPR; the Store Manager accepts

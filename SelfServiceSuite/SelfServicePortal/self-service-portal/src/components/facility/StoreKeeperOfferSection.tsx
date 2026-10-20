@@ -18,6 +18,8 @@ type OfferLine = {
   lineNo: string
   itemNo: string
   itemName: string
+  specification: string
+  brandModel: string
   unitOfMeasure: string
   quantity: number
 }
@@ -66,6 +68,8 @@ export function StoreKeeperOfferSection({
     lineNo: text(line.lineNo),
     itemNo: text(line.itemNo),
     itemName: text(line.itemName) || text(line.description),
+    specification: text(line.description) === text(line.itemName) ? '' : text(line.description),
+    brandModel: text(line.preferredBrandModel),
     unitOfMeasure: text(line.unitOfMeasure),
     quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
   }))
@@ -136,7 +140,14 @@ export function StoreKeeperOfferSection({
                 return (
                   <tr key={offer.lineNo} className="border-t border-slate-100">
                     <td className="px-3 py-2 font-medium">{offer.itemNo}</td>
-                    <td className="px-3 py-2">{offer.itemName || '—'}</td>
+                    <td className="px-3 py-2">
+                      {offer.itemName || '—'}
+                      {offer.specification || offer.brandModel ? (
+                        <span className="block text-slate-500">
+                          {[offer.brandModel, offer.specification].filter(Boolean).join(' · ')}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2">{offer.unitOfMeasure || '—'}</td>
                     <td className="px-3 py-2">{quantityLabel(offer.quantity)}</td>
                     <td className={`px-3 py-2 ${short ? 'font-medium text-red-700' : 'text-teal-800'}`}>
@@ -214,8 +225,10 @@ export function StoreKeeperOfferSection({
                       <span>
                         <span className="font-medium text-slate-900">{item.no}</span>
                         <span className="text-slate-600"> — {item.description || 'No description'}</span>
-                        {item.brand || item.model ? (
-                          <span className="block text-slate-500">{[item.brand, item.model].filter(Boolean).join(' · ')}</span>
+                        {item.brand || item.model || item.specification ? (
+                          <span className="block text-slate-500">
+                            {[[item.brand, item.model].filter(Boolean).join(' / '), item.specification].filter(Boolean).join(' · ')}
+                          </span>
                         ) : null}
                       </span>
                       <span className="shrink-0 text-teal-800">
