@@ -169,7 +169,8 @@ export function StoreKeeperOfferSection({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
         <p className="text-xs text-slate-600">{footerHint}</p>
         <div className="flex flex-wrap items-center gap-2">
-          {secondaryAction}
+          {/* Request for LPR only before an item is offered (the LPR buys the item instead). */}
+          {offers.length === 0 ? secondaryAction : null}
           {withManager ? null : declined ? (
             <>
               <Button
