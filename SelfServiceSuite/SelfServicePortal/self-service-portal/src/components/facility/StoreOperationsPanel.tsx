@@ -4,13 +4,11 @@ import { Warehouse } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
-import { Select } from '@/components/ui/select'
 import { useAuth } from '@/hooks/useAuth'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import {
   downloadStoreBorrowingForm,
   downloadStoreIssueVoucher,
-  getLocalPurchaseProjects,
   getStoreBorrowingFormUrl,
   getStoreRequisitionOptions,
   getStoreRequisitionProcess,
@@ -18,6 +16,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFormViewer'
 import { StoreKeeperOfferSection } from '@/components/facility/StoreKeeperOfferSection'
+import { StartLprCard, StoreManagerReviewCard } from '@/components/facility/StoreManagerSections'
 import type { PortalRequest } from '@/types/erp.types'
 
 function text(value: unknown) {
@@ -180,6 +179,8 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   // Start Local Purchase (LPR) prompts on the BC card: source, project, then the officer.
   const [lprSource, setLprSource] = useState<'LOCAL' | 'FOREIGN'>('LOCAL')
   const [lprOfficer, setLprOfficer] = useState<'' | 'PROCUREMENT' | 'PROJECT'>('')
+  // The store manager reviews the offer; "Change the item" opens the store keeper section.
+  const [managerEditing, setManagerEditing] = useState(false)
   const storeOptionsQuery = useQuery({
     queryKey: ['store-requisition', 'options'],
     queryFn: getStoreRequisitionOptions,
@@ -343,6 +344,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
     canManageStock &&
     ['approved', 'released'].includes(status) &&
     (stageHandOff === '' || stageHandOff === 'PREPARED') &&
+    !(storeManager && stageHandOff === 'PREPARED' && !managerEditing) &&
     !lprPath &&
     !issued
   // No item / no similar item in store needs no item mapping (BC Request for LPR).
@@ -626,104 +628,56 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </p>
       ) : null}
       {canStartLpr ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-xs text-slate-700">
-            Store requisition {requestNo} is with you for Local Purchase{requesterId ? ` (requester ${requesterId})` : ''}.
-          </p>
-          {lprOfficers ? (
-            <div className="max-w-md space-y-1">
-              <label htmlFor={`lpr-source-${request.id}`} className="text-xs font-medium text-slate-700">
-                Request procurement from which source?
-              </label>
-              <Select
-                id={`lpr-source-${request.id}`}
-                options={[
-                  { value: 'LOCAL', label: 'Local (Inhouse Local)' },
-                  { value: 'FOREIGN', label: 'Foreign (Inhouse / Salable Foreign)' },
-                ]}
-                value={lprSource}
-                onChange={(event) => setLprSource(event.target.value === 'FOREIGN' ? 'FOREIGN' : 'LOCAL')}
-                disabled={mutation.isPending}
-              />
-            </div>
-          ) : null}
-          <LprProjectPicker
-            id={`lpr-project-${request.id}`}
-            value={lprProjectNo}
-            onChange={(value) => {
-              setLprProjectNo(value)
-              // The officer follows the project again unless the manager picks one.
-              setLprOfficer('')
-            }}
-            disabled={mutation.isPending}
-          />
-          {lprOfficers ? (
-            <div className="max-w-md space-y-1">
-              <label htmlFor={`lpr-officer-${request.id}`} className="text-xs font-medium text-slate-700">
-                Procurement officer
-              </label>
-              <Select
-                id={`lpr-officer-${request.id}`}
-                options={(lprProjectNo ? (['PROJECT', 'PROCUREMENT'] as const) : (['PROCUREMENT'] as const)).map((kind) => ({
-                  value: kind,
-                  label:
-                    kind === 'PROJECT'
-                      ? `Project Procurement Officer${lprOfficers?.projectProcurementOfficer ? ` (${lprOfficers.projectProcurementOfficer})` : ''}`
-                      : `Procurement Officer${lprOfficers?.procurementOfficer ? ` (${lprOfficers.procurementOfficer})` : ''}`,
-                }))}
-                value={startLprOfficerKind}
-                onChange={(event) => setLprOfficer(event.target.value === 'PROJECT' ? 'PROJECT' : 'PROCUREMENT')}
-                disabled={mutation.isPending}
-              />
-              <p className="text-xs text-slate-500">
-                A project purchase defaults to the Project Procurement Officer. A project procurement officer needs a project.
-              </p>
-            </div>
-          ) : (
-            // Older BC app: Local purchase; the officer follows the project.
-            <p className="text-xs text-slate-500">
-              Local purchase. A project purchase goes to the Project Procurement Officer, others to the Procurement Officer.
-            </p>
-          )}
-          <Button
-            type="button"
-            variant="gradient"
-            disabled={mutation.isPending}
-            onClick={() =>
-              void run(
-                'START_LPR',
-                'Start Local Purchase (LPR)',
-                `Create the ${lprSource === 'FOREIGN' ? 'Foreign' : 'Local'} Purchase Requisition (LPR) for store requisition ${requestNo}` +
-                  `${lprProjectNo ? ` — project ${lprProjectNo}` : ' — non-project'}` +
-                  `, assigned to ${startLprOfficerId ? `${startLprOfficerLabel} ${startLprOfficerId}` : startLprOfficerLabel}?` +
-                  ' The officer prepares it first, then the Operations Manager and FAD approve it on the LPR (not Requests to Approve).',
-              )
-            }
-          >
-            Start Local Purchase (LPR)
-          </Button>
-        </div>
+        <StartLprCard
+          requestNo={requestNo}
+          requesterId={requesterId}
+          request={request}
+          showChoices={Boolean(lprOfficers)}
+          officers={lprOfficers}
+          source={lprSource}
+          onSourceChange={setLprSource}
+          projectNo={lprProjectNo}
+          onProjectChange={(value) => {
+            setLprProjectNo(value)
+            // The officer follows the project again unless the manager picks one.
+            setLprOfficer('')
+          }}
+          officerKind={startLprOfficerKind}
+          onOfficerChange={setLprOfficer}
+          busy={mutation.isPending}
+          onStart={() =>
+            void run(
+              'START_LPR',
+              'Start Local Purchase (LPR)',
+              `Create the ${lprSource === 'FOREIGN' ? 'Foreign' : 'Local'} Purchase Requisition (LPR) for store requisition ${requestNo}` +
+                `${lprProjectNo ? ` — project ${lprProjectNo}` : ' — non-project'}` +
+                `, assigned to ${startLprOfficerId ? `${startLprOfficerLabel} ${startLprOfficerId}` : startLprOfficerLabel}?` +
+                ' The officer prepares it first, then the Operations Manager and FAD approve it on the LPR (not Requests to Approve).',
+            )
+          }
+        />
       ) : null}
-      {stageHandOff === 'PREPARED' && storeManager && !bcStoreHandOff ? (
-        <p className="mt-2 text-xs text-slate-600">
-          Accept the offered item in Business Central: Store Req Header Approved → Accept Item (Store Manager).
-        </p>
+      {stageHandOff === 'PREPARED' && storeManager && !managerEditing ? (
+        <StoreManagerReviewCard
+          request={request}
+          available={offerAvailable}
+          storeName={storeName}
+          canAccept={bcStoreHandOff}
+          busy={mutation.isPending}
+          onChangeItem={() => setManagerEditing(true)}
+          onAccept={() =>
+            void run(
+              'ACCEPT_ISSUE',
+              'Accept Item (Store Manager)',
+              `Accept the item offered on store requisition ${requestNo}${storeName ? ` from store ${storeName}` : ''}? The requester will get the borrowing form and can accept or decline it. No voucher is created yet.`,
+            )
+          }
+        />
       ) : null}
-      {stageHandOff === 'PREPARED' && storeManager && bcStoreHandOff ? (
-        <div className="mt-3">
-          <Button
-            type="button"
-            variant="gradient"
-            disabled={mutation.isPending}
-            onClick={() =>
-              void run(
-                'ACCEPT_ISSUE',
-                'Accept Item (Store Manager)',
-                `Accept the item offered on store requisition ${requestNo}${storeName ? ` from store ${storeName}` : ''}? The requester will get the borrowing form and can accept or decline it. No voucher is created yet.`,
-              )
-            }
-          >
-            Accept Item (Store Manager)
+      {stageHandOff === 'PREPARED' && storeManager && managerEditing ? (
+        <div className="mt-3 flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={() => setManagerEditing(false)}>
+            Back to review
           </Button>
         </div>
       ) : null}
@@ -782,50 +736,5 @@ function MetaChip({ label, value }: { label: string; value: string }) {
       <span className="text-slate-400">{label}</span>
       <span className="font-medium text-slate-700">{value}</span>
     </span>
-  )
-}
-
-/** Project for the new LPR, chosen before the procurement officer (blank = non-project). */
-function LprProjectPicker({
-  id,
-  value,
-  onChange,
-  disabled,
-}: {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  disabled?: boolean
-}) {
-  const projectsQuery = useQuery({
-    queryKey: ['local-purchase', 'projects'],
-    queryFn: getLocalPurchaseProjects,
-    retry: false,
-    staleTime: 5 * 60_000,
-  })
-  const options = [
-    { value: '', label: 'Non-project purchase (Procurement Officer)' },
-    ...(projectsQuery.data?.projects ?? []).map((project) => ({
-      value: project.no,
-      label: project.description ? `${project.no} — ${project.description}` : project.no,
-    })),
-  ]
-  return (
-    <div className="mt-3 max-w-md space-y-1">
-      <label htmlFor={id} className="text-xs font-medium text-slate-700">
-        Project for the LPR (project purchases go to the Project Procurement Officer)
-      </label>
-      <Select
-        id={id}
-        options={options}
-        value={value}
-        placeholder={projectsQuery.isLoading ? 'Loading projects…' : 'Non-project purchase'}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled || projectsQuery.isLoading}
-      />
-      {projectsQuery.isError ? (
-        <p className="text-xs text-red-700">Could not load projects from Business Central.</p>
-      ) : null}
-    </div>
   )
 }

@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button'
 import { getStoreOfferItems, type StoreOfferItem } from '@/api/endpoints/requestEndpoint'
 import { cn } from '@/lib/utils'
 import type { PortalRequest } from '@/types/erp.types'
+import { quantityLabel, storeOfferLines, text } from './storeOfferLines'
+import { RequestedSummary, StoreStockPill } from './StoreStockPill'
 
 type StoreAction = (
   actionCode: string,
@@ -24,42 +26,6 @@ type StoreAction = (
   extra?: Record<string, string | number>,
   confirmFirst?: boolean,
 ) => Promise<boolean>
-
-type OfferLine = {
-  lineNo: string
-  itemNo: string
-  itemName: string
-  specification: string
-  brandModel: string
-  unitOfMeasure: string
-  quantity: number
-}
-
-type RequestedLine = {
-  key: string
-  itemName: string
-  details: string
-  brand: string
-  unitOfMeasure: string
-  quantity: number
-}
-
-function text(value: unknown) {
-  return String(value ?? '').trim()
-}
-
-function requestLines(request: PortalRequest) {
-  const lines = request.payload?.lines
-  return Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : []
-}
-
-function isOfferLine(line: Record<string, unknown>) {
-  return /offer/i.test(text(line.lineRole))
-}
-
-function quantityLabel(value: number) {
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
 
 function brandModelOf(item: StoreOfferItem) {
   return [item.brand, item.model].map(text).filter(Boolean).join(' / ')
@@ -76,27 +42,6 @@ function matchesFilter(item: StoreOfferItem, filter: string) {
     .split(/\s+/)
     .filter(Boolean)
     .every((word) => haystack.includes(word))
-}
-
-function StockPill({ atStore, unit, low }: { atStore: number; unit: string; low: boolean }) {
-  if (atStore <= 0) {
-    return (
-      <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-        Out of stock
-      </span>
-    )
-  }
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1',
-        low ? 'bg-amber-50 text-amber-800 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-      )}
-    >
-      <span className={cn('h-1.5 w-1.5 rounded-full', low ? 'bg-amber-500' : 'bg-emerald-500')} />
-      {quantityLabel(atStore)} {unit}
-    </span>
-  )
 }
 
 /**
@@ -124,30 +69,7 @@ export function StoreKeeperOfferSection({
   /** Extra footer action, e.g. Request for LPR when nothing similar is in store. */
   secondaryAction?: ReactNode
 }) {
-  const lines = requestLines(request)
-  const offers: OfferLine[] = lines.filter(isOfferLine).map((line) => ({
-    lineNo: text(line.lineNo),
-    itemNo: text(line.itemNo),
-    itemName: text(line.itemName) || text(line.description),
-    specification: text(line.description) === text(line.itemName) ? '' : text(line.description),
-    brandModel: text(line.preferredBrandModel),
-    unitOfMeasure: text(line.unitOfMeasure),
-    quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
-  }))
-  const requestedLines: RequestedLine[] = lines
-    .filter((line) => !isOfferLine(line))
-    .map((line, index) => {
-      const itemName = text(line.itemName) || text(line.description)
-      return {
-        key: text(line.lineNo) || String(index),
-        itemName,
-        details: text(line.description) === itemName ? '' : text(line.description),
-        brand: text(line.preferredBrandModel),
-        unitOfMeasure: text(line.unitOfMeasure),
-        quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
-      }
-    })
-  const requested = requestedLines.reduce((total, line) => total + line.quantity, 0)
+  const { offers, requestedLines, requested } = storeOfferLines(request)
   const requestNo = request.requestNo
   const withManager = stage === 'PREPARED'
 
@@ -226,18 +148,9 @@ export function StoreKeeperOfferSection({
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <ClipboardList className="h-3.5 w-3.5" /> Requested by the employee
             </p>
-            <ul className="mt-1.5 space-y-1">
-              {requestedLines.map((line) => (
-                <li key={line.key} className="flex flex-wrap items-baseline gap-x-2 text-sm text-slate-800">
-                  <span className="font-semibold">{line.itemName || '—'}</span>
-                  <span className="text-xs text-slate-500">
-                    {quantityLabel(line.quantity)} {line.unitOfMeasure}
-                    {line.brand ? ` · ${line.brand}` : ''}
-                  </span>
-                  {line.details ? <span className="basis-full text-xs text-slate-500">{line.details}</span> : null}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-1.5">
+              <RequestedSummary lines={requestedLines} />
+            </div>
           </div>
         ) : null}
 
@@ -397,7 +310,7 @@ export function StoreKeeperOfferSection({
                       {active ? (
                         <CheckCircle2 className="h-4 w-4 text-[var(--portal-navy)]" />
                       ) : (
-                        <StockPill atStore={atStore} unit={item.unitOfMeasure} low={inStock && atStore < requested} />
+                        <StoreStockPill atStore={atStore} unit={item.unitOfMeasure} low={inStock && atStore < requested} />
                       )}
                     </div>
                     <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.description || 'No description'}</p>
