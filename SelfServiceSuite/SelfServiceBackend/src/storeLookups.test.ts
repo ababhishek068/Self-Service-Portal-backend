@@ -10,6 +10,8 @@ import {
   storeHeaderDetailsFromBody,
   startLprOptionsFromBody,
   listStoreFeatures,
+  resolveStoreRoles,
+  cachedStoreRoles,
 } from './storeLookups.js'
 
 const stores = normalizeStoreRows(
@@ -124,5 +126,18 @@ describe('store requisition lookups (BC Store / Project / UOM)', () => {
       throw new Error(`No Action matches ${method}`)
     }
     assert.deepEqual(await listStoreFeatures(older), [])
+  })
+
+  it('reads the Store Manager / Store Keeper roles BC assigns (Warehouse Employees, store card)', async () => {
+    const soap = async () => ({
+      returnValue: JSON.stringify({ storeManager: true, storeKeeper: true, locations: ['MAIN', 'IT'] }),
+    })
+    const roles = await resolveStoreRoles(soap, 'girma_t')
+    assert.deepEqual(roles, { storeManager: true, storeKeeper: true, locations: ['MAIN', 'IT'] })
+    assert.deepEqual(cachedStoreRoles('GIRMA_T'), roles)
+    clearStoreLookupCache()
+    // Older BC app without PortalStoreRoles: no BC roles, the portal job title still applies.
+    assert.equal(await resolveStoreRoles(async () => { throw new Error('No Action matches PortalStoreRoles') }, 'girma_t'), null)
+    assert.equal(await resolveStoreRoles(soap, ''), null)
   })
 })

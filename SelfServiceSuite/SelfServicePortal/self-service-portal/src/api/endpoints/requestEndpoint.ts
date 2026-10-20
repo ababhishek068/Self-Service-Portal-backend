@@ -187,6 +187,12 @@ export async function getStoreOfferItems(id: string, search: string) {
   )
 }
 
+/** Store Manager / Store Keeper for the signed-in user (portal job title or BC Warehouse Employees / store card). */
+export async function getMyStoreRoles() {
+  requireAuthApiUrl()
+  return authGet<{ storeManager: boolean; storeKeeper: boolean }>('/api/store-requisition/my-roles')
+}
+
 export async function getStoreRequisitionOptions() {
   requireAuthApiUrl()
   return authGet<StoreRequisitionOptions>('/api/store-requisition/options')

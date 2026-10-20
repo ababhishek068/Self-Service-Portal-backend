@@ -84,6 +84,7 @@ async function cachedLookup<T>(
 
 export function clearStoreLookupCache() {
   lookupCache.clear()
+  rolesCache.clear()
 }
 
 export function listStoreRequisitionStores(soap: SoapCall, now = Date.now()) {
@@ -281,4 +282,43 @@ export async function listStoreFeatures(soap: SoapCall, now = Date.now()): Promi
   )
   if (published) return published
   return (await listStoreRequisitionStores(soap, now)) ? FEATURES_1_0_3_544 : []
+}
+
+/** A portal user's store roles as Business Central sees them (Warehouse Employees, store cards). */
+export type PortalStoreRoles = { storeManager: boolean; storeKeeper: boolean; locations: string[] }
+
+const ROLES_TTL_MS = 60_000
+const rolesCache = new Map<string, { at: number; roles: PortalStoreRoles | null }>()
+
+export function normalizeStoreRoles(returnValue: unknown): PortalStoreRoles {
+  const row = parseSoapJson(returnValue)
+  const locations = Array.isArray(row.locations) ? row.locations.map((value) => textOf(value)).filter(Boolean) : []
+  return {
+    storeManager: portalBoolean(row.storeManager),
+    storeKeeper: portalBoolean(row.storeKeeper),
+    locations,
+  }
+}
+
+/** BC store roles for a user (null on BC apps without PortalStoreRoles), cached for a minute. */
+export async function resolveStoreRoles(soap: SoapCall, userId: string, now = Date.now()) {
+  const key = userId.trim().toUpperCase()
+  if (!key) return null
+  const cached = rolesCache.get(key)
+  if (cached && now - cached.at < ROLES_TTL_MS) return cached.roles
+  let roles: PortalStoreRoles | null
+  try {
+    roles = normalizeStoreRoles((await soap('PortalStoreRoles', { actorUserID: userId.trim() })).returnValue)
+  } catch {
+    roles = null
+  }
+  rolesCache.set(key, { at: now, roles })
+  return roles
+}
+
+/** Last resolved BC store roles without calling BC (sync visibility checks). */
+export function cachedStoreRoles(userId: string, now = Date.now()) {
+  const cached = rolesCache.get(userId.trim().toUpperCase())
+  if (!cached || now - cached.at >= ROLES_TTL_MS) return null
+  return cached.roles
 }

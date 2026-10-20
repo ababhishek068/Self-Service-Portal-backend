@@ -76,6 +76,8 @@ import {
   listStoreFeatures,
   listStoreProjects,
   listStoreUnitsOfMeasure,
+  cachedStoreRoles,
+  resolveStoreRoles,
   startLprOptionsFromBody,
   storeRequisitionStoreOptions,
   ABH_UNITS_OF_MEASURE_FALLBACK,
@@ -449,7 +451,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v244 — 1.0.3.403 (Store Keeper picks the item in a dialog; compact Items to issue)'
+export const PORTAL_API_BUILD = 'v245 — 1.0.3.404 (Store Manager / Keeper from BC: Warehouse Employees MAIN or the store card; needs BC 1.0.3.548)'
 
 interface LookupSpec {
   service: string
@@ -1269,11 +1271,28 @@ function canViewLocalPurchase(authUser: FacilityAuth & { userID?: string }) {
 /** Resolve (and cache) BC Local Purchase access before purchase-requisition visibility checks. */
 async function warmLocalPurchaseAccess(module: string, authUser: AuthUser) {
   if (module === 'purchaseRequisition') await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+  if (module === 'storeRequisition') await resolveStoreRoles(callSoapMethod, String(authUser.userID ?? ''))
 }
 
-function canViewStoreProcess(authUser: FacilityAuth) {
+function canViewStoreProcess(authUser: FacilityAuth & { userID?: string }) {
   const roles = facilityProcessRoles(authUser)
-  return roles.includes('operations') || roles.includes('procurement')
+  if (roles.includes('operations') || roles.includes('procurement')) return true
+  // Store Manager / Store Keeper assigned in BC (Warehouse Employees, store cards).
+  const bcRoles = cachedStoreRoles(String(authUser.userID ?? ''))
+  return Boolean(bcRoles?.storeManager || bcRoles?.storeKeeper)
+}
+
+/**
+ * Store Manager and Store Keeper for the store steps: the portal job title / roles, or what
+ * BC assigns (Warehouse Employees for the central store or a store card's Store Manager).
+ */
+async function storeUserRoles(authUser: AuthUser) {
+  const bcRoles = await resolveStoreRoles(callSoapMethod, String(authUser.userID ?? ''))
+  const manager = portalUserIsStoreManager(authUser) || Boolean(bcRoles?.storeManager)
+  return {
+    manager,
+    keeper: canManagePurchaseStock(authUser) || manager || Boolean(bcRoles?.storeKeeper),
+  }
 }
 
 interface FacilityActionRule {
@@ -4449,7 +4468,7 @@ export function buildPortalApiRouter() {
       if (module !== 'storeRequisition') {
         throw portalError('Store items apply to Store Requisition only', 422)
       }
-      if (!canManagePurchaseStock(authUser)) {
+      if (!(await storeUserRoles(authUser)).keeper) {
         throw portalError('Only the storekeeper can add the item to issue.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
       await requestDetail(requestId, authUser)
@@ -4462,6 +4481,16 @@ export function buildPortalApiRouter() {
         issuingStore: String(parsed.issuingStore ?? ''),
         items: Array.isArray(parsed.items) ? parsed.items : [],
       })
+    }),
+  )
+
+  /** The signed-in user's Store Manager / Store Keeper roles (portal job title or BC assignment). */
+  router.get(
+    '/store-requisition/my-roles',
+    safe(async (req, res) => {
+      const roles = await storeUserRoles(user(req))
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ storeManager: roles.manager, storeKeeper: roles.keeper })
     }),
   )
 
@@ -4544,7 +4573,7 @@ export function buildPortalApiRouter() {
             (detail.payload as ODataRecord).Issue_Stage,
         )
         if (requestedAction === 'PREPARE_ISSUE') {
-          if (!canManagePurchaseStock(authUser)) {
+          if (!(await storeUserRoles(authUser)).keeper) {
             throw portalError('Only the storekeeper can submit an issue to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
           }
           if (issueStage) {
@@ -4554,7 +4583,7 @@ export function buildPortalApiRouter() {
         } else if (STORE_KEEPER_OFFER_ACTIONS.includes(requestedAction)) {
           // Store Keeper on the approved request: Add Item to Issue, remove an offer,
           // Offer Another Item or Close Request (BC checks the store roster and the stage).
-          if (!canManagePurchaseStock(authUser)) {
+          if (!(await storeUserRoles(authUser)).keeper) {
             throw portalError(
               'Only the storekeeper can change the item to issue or close the request.',
               403,
@@ -4581,8 +4610,12 @@ export function buildPortalApiRouter() {
             await callStoreIssueHandoff('ClosePortalStoreRequest', no, authUser.userID)
           }
         } else if (requestedAction === 'ACCEPT_ISSUE') {
-          if (!portalUserIsStoreManager(authUser)) {
-            throw portalError('Only the store manager can accept and issue this requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
+          if (!(await storeUserRoles(authUser)).manager) {
+            throw portalError(
+              'Only the store manager can accept this item. In Business Central, add the user on Warehouse Employees for the central store (MAIN), or as Store Manager on the store card.',
+              403,
+              'PROCESS_ACTION_FORBIDDEN',
+            )
           }
           if (issueStage !== 'PREPARED') {
             throw portalError('The storekeeper must submit the issue before the store manager can accept it.', 409, 'INVALID_PROCESS_TRANSITION')
@@ -4698,14 +4731,19 @@ export function buildPortalApiRouter() {
         // Local Purchase store actions need the BC app with the LPR portal methods.
         await requireLocalPurchaseAccess(authUser)
       }
-      if (requestedAction === 'START_LPR' && !portalUserIsStoreManager(authUser)) {
+      const storeRoles = await storeUserRoles(authUser)
+      if (requestedAction === 'START_LPR' && !storeRoles.manager) {
         throw portalError('Only the store manager can start the Local Purchase Requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)
       const actionComment = String(req.body?.actionComment ?? '').trim()
+      // A Store Keeper / Manager assigned in BC acts as Operations/Store for these steps.
+      const storeActor = storeRoles.keeper
+        ? { ...authUser, roles: [...(authUser.roles ?? []), 'operations'] }
+        : authUser
       const actionCode = assertStoreProcessActionAllowed(
-        authUser,
+        storeActor,
         procurementStageCode(currentProcess),
         String(req.body?.actionCode ?? ''),
         actionComment,

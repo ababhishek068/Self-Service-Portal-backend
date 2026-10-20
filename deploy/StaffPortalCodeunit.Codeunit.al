@@ -5241,6 +5241,7 @@ codeunit 50049 "Staff Portal Codeunit"
         Features.Add('storeOffers');
         Features.Add('startLprOptions');
         Features.Add('storeDocuments');
+        Features.Add('storeRoles');
         Root.Add('features', Features);
         Root.WriteTo(JsonText);
         return_value := JsonText;
@@ -5312,5 +5313,15 @@ codeunit 50049 "Staff Portal Codeunit"
             Error('Store requisition %1 was not found.', requestNo);
         StoreMgmt.CloseDeclinedRequestForPortal(ReqHeader, actorUserID);
         return_value := true;
+    end;
+
+    /// <summary>
+    /// Store Manager / Store Keeper roles of a portal user, from Warehouse Employees and the store cards.
+    /// </summary>
+    procedure PortalStoreRoles(actorUserID: Code[50]) return_value: Text
+    var
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        return_value := StoreMgmt.GetPortalStoreRoles(actorUserID);
     end;
 }

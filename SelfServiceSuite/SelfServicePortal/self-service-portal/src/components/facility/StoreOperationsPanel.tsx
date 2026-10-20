@@ -9,6 +9,7 @@ import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import {
   downloadStoreBorrowingForm,
   downloadStoreIssueVoucher,
+  getMyStoreRoles,
   getStoreBorrowingFormUrl,
   getStoreRequisitionOptions,
   getStoreRequisitionProcess,
@@ -133,10 +134,20 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const assignment = [employee?.jobTitle, employee?.departmentCode, employee?.departmentName]
     .map((value) => String(value ?? '').trim().toLowerCase())
     .join(' ')
+  // Store roles also come from BC (Warehouse Employees for MAIN, the store card's Store Manager).
+  const storeRolesQuery = useQuery({
+    queryKey: ['store-requisition', 'my-roles'],
+    queryFn: getMyStoreRoles,
+    enabled: approved,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const storeManager = userIsStoreManager(employee) || storeRolesQuery.data?.storeManager === true
   const canManageStock =
     (employee?.roles ?? []).some((role) => ['operations', 'store'].includes(String(role).toLowerCase())) ||
-    /\b(operations?|ops|store|storekeeper)\b/.test(assignment)
-  const storeManager = userIsStoreManager(employee)
+    /\b(operations?|ops|store|storekeeper)\b/.test(assignment) ||
+    storeManager ||
+    storeRolesQuery.data?.storeKeeper === true
   const issued = linesHaveBeenIssued(request)
   const storedReceipt =
     typeof window !== 'undefined' && window.localStorage.getItem(receiptStorageKey(request.requestNo)) === 'received'
