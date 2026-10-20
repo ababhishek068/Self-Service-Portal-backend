@@ -186,7 +186,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   // Local Purchase store actions (BC recording) appear only once BC has the LPR portal methods.
   const localPurchase = useLocalPurchaseAccess()
   // Meeting 18 Oct: project first (blank = non-project); BC then assigns the procurement officer.
-  const [lprProjectNo, setLprProjectNo] = useState('')
+  // Start LPR defaults to the project already on the store request.
+  const [lprProjectNo, setLprProjectNo] = useState(() =>
+    request.payload?.IsProject === true ? text(request.payload?.ProjectCode ?? request.payload?.Project_Code) : '',
+  )
   // Start Local Purchase (LPR) prompts on the BC card: source, project, then the officer.
   const [lprSource, setLprSource] = useState<'LOCAL' | 'FOREIGN'>('LOCAL')
   const [lprOfficer, setLprOfficer] = useState<'' | 'PROCUREMENT' | 'PROJECT'>('')
