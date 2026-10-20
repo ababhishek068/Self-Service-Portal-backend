@@ -97,9 +97,8 @@ export function StoreRequisition() {
   const bcStores = optionsQuery.data?.stores
   const bcProjects = optionsQuery.data?.projects
   const bcUnits = optionsQuery.data?.unitsOfMeasure
-  // Older BC apps publish no store list: the store is then assigned in Business Central.
-  const showStoreDetails = optionsQuery.isLoading || Boolean(bcStores)
-  const showProject = showStoreDetails && (optionsQuery.isLoading || Boolean(bcProjects))
+  // Is Project is saved by BC 1.0.3.544 (SetPortalStoreRequisitionDetails); hidden on older BC apps.
+  const showProject = optionsQuery.data?.storesFromBc === true && Boolean(bcProjects)
   const storeOptions = (bcStores ?? []).map((store) => ({ value: store.code, label: storeLabel(store) }))
   const projectOptions = (bcProjects ?? []).map((project) => ({
     value: project.no,
@@ -120,7 +119,7 @@ export function StoreRequisition() {
   return (
     <MultiStepRequestPage
       title="Store Requisition"
-      description="Describe what you need and the quantity, then submit for approval. You do not pick from the store catalog. The store maps a real item before anything is issued."
+      description="Choose the issuing store, describe what you need with the unit of measure and quantity, then send it for approval. The store offers the real item; you check the Item Borrowing Form and accept it, then confirm receipt."
       headerLabel="New Store Requisition"
       processBanner={storeProcessBanner}
       showProcessBannerOnList={false}
@@ -156,6 +155,12 @@ export function StoreRequisition() {
         projectName: '',
       }}
       headerOnValuesChange={(values, form) => {
+        // A saved draft may carry only the issuing location (e.g. SU): show its store (SUP).
+        const storeCode = String(values.storeCode ?? '').trim()
+        if (storeCode && bcStores?.length && !bcStores.some((store) => store.code === storeCode)) {
+          const byLocation = bcStores.find((store) => store.locationCode === storeCode)
+          if (byLocation) form.setValue('storeCode', byLocation.code)
+        }
         const isProject = values.isProject === true
         const projectCode = String(values.projectCode ?? '')
         if (!isProject) {
@@ -242,18 +247,14 @@ export function StoreRequisition() {
             urgent: 'urgent',
           },
         },
-        ...(showStoreDetails
-          ? [
-              {
-                name: 'storeCode',
-                label: 'Store',
-                type: 'select' as const,
-                options: storeOptions,
-                placeholder: optionsQuery.isLoading ? 'Loading stores…' : 'Select the store',
-                valuePaths: ['StoreCode', 'Store_Code'],
-              },
-            ]
-          : []),
+        {
+          name: 'storeCode',
+          label: 'Issuing Store',
+          type: 'select',
+          options: storeOptions,
+          placeholder: optionsQuery.isLoading ? 'Loading stores…' : 'Select the issuing store',
+          valuePaths: ['StoreCode', 'Store_Code', 'IssuingStore', 'Issuing_Store'],
+        },
         ...(showProject
           ? [
               {
@@ -305,7 +306,7 @@ export function StoreRequisition() {
         { label: 'Required Date', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
         { label: 'Division', paths: ['payload.FunctionName', 'payload.GlobalDimension1Code', 'payload.Global_Dimension_1_Code'] },
         { label: 'Department', paths: ['payload.BudgetCenterName', 'payload.DepartmentName', 'payload.ShortcutDimension2Code', 'payload.Shortcut_Dimension_2_Code'] },
-        { label: 'Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
+        { label: 'Issuing Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
         {
           label: 'Is Project',
           paths: [],

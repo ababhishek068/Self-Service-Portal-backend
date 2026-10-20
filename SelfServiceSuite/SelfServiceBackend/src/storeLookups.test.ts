@@ -47,7 +47,7 @@ describe('store requisition lookups (BC Store / Project / UOM)', () => {
 
   it('requires a listed store once BC publishes the store list', () => {
     const base = storeHeaderDetailsFromBody({ storeCode: '', isProject: false })
-    assert.equal(storeHeaderDetailsError(base, stores, projects), 'Select the store from the list.')
+    assert.equal(storeHeaderDetailsError(base, stores, projects), 'Select the issuing store from the list.')
     const unknown = storeHeaderDetailsFromBody({ storeCode: 'XYZ' })
     assert.match(storeHeaderDetailsError(unknown, stores, projects), /not an active store/)
     const ok = storeHeaderDetailsFromBody({ storeCode: 'it' })

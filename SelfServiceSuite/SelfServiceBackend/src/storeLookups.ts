@@ -102,6 +102,37 @@ export function listStoreUnitsOfMeasure(soap: SoapCall, now = Date.now()) {
   )
 }
 
+/**
+ * ABH stores as on the BC Stores lookup (Active, not Blocked) on 20 Oct 2026. Used only while
+ * the BC app has no PortalStoreList (before 1.0.3.544); BC then backfills Store Code from the
+ * issuing location when the request is created.
+ */
+export const ABH_STORES_FALLBACK: StoreOption[] = [
+  { code: 'AMS', name: 'AMS-Store', locationCode: 'AMS', centralStore: false, defaultIssueStore: false },
+  { code: 'CL-SA', name: 'Cleaning and Sanitation', locationCode: 'CL-SA', centralStore: false, defaultIssueStore: false },
+  { code: 'EL', name: 'Electrical', locationCode: 'EL', centralStore: false, defaultIssueStore: false },
+  { code: 'IT', name: 'IT Store', locationCode: 'IT', centralStore: false, defaultIssueStore: false },
+  { code: 'MAIN', name: 'Main Central Store', locationCode: 'MAIN', centralStore: true, defaultIssueStore: true },
+  { code: 'PHARMA', name: 'Pharmaceuticals', locationCode: 'PHARMA', centralStore: false, defaultIssueStore: false },
+  { code: 'SUP', name: 'Supplies', locationCode: 'SU', centralStore: false, defaultIssueStore: false },
+  { code: 'VM', name: 'Vehicles & Machinery', locationCode: 'VM', centralStore: false, defaultIssueStore: false },
+]
+
+/** The Issuing Store list: BC's when published, else the ABH fallback above. */
+export async function storeRequisitionStoreOptions(soap: SoapCall, now = Date.now()) {
+  const stores = await listStoreRequisitionStores(soap, now)
+  return stores ? { stores, fromBc: true } : { stores: ABH_STORES_FALLBACK, fromBc: false }
+}
+
+/** Units of measure as on the BC Unit of Measure lookup (20 Oct 2026), until BC publishes PortalUnitsOfMeasure. */
+export const ABH_UNITS_OF_MEASURE_FALLBACK: UnitOfMeasureOption[] = [
+  { code: 'EACH', description: 'Each' },
+  { code: 'G', description: 'Gram' },
+  { code: 'KG', description: 'Kilogram' },
+  { code: 'LTR', description: 'Liter' },
+  { code: 'METER', description: 'Meter' },
+]
+
 /** Same project list as the Local Purchase project picker (BC Jobs that are not blocked). */
 export function listStoreProjects(soap: SoapCall, now = Date.now()) {
   return cachedLookup(
@@ -140,9 +171,9 @@ export function storeHeaderDetailsError(
   projects: ProjectOption[] | null,
 ) {
   if (stores) {
-    if (!details.storeCode) return 'Select the store from the list.'
+    if (!details.storeCode) return 'Select the issuing store from the list.'
     if (!stores.some((store) => store.code.toUpperCase() === details.storeCode)) {
-      return `Store ${details.storeCode} is not an active store in Business Central. Select the store from the list.`
+      return `Store ${details.storeCode} is not an active store in Business Central. Select the issuing store from the list.`
     }
   }
   if (details.isProject) {

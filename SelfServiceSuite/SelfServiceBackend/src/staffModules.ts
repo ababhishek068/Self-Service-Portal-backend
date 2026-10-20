@@ -31,6 +31,7 @@ import {
   resolveStoreLineUnitOfMeasure,
   storeHeaderDetailsError,
   storeHeaderDetailsFromBody,
+  storeRequisitionStoreOptions,
 } from './storeLookups.js'
 
 /* -------------------------------------------------------------------------- */
@@ -987,13 +988,39 @@ const storeRequisition: ModuleSpec = {
         throw Object.assign(new Error('Required Date is required.'), { status: 422 })
       }
       const details = storeHeaderDetailsFromBody(req.body ?? {})
+      let issuingStore = ''
       if (details.provided) {
-        const [stores, projects] = await Promise.all([
-          listStoreRequisitionStores(callSoapMethod),
+        const [storeOptions, projects] = await Promise.all([
+          storeRequisitionStoreOptions(callSoapMethod),
           details.isProject ? listStoreProjects(callSoapMethod) : Promise.resolve(null),
         ])
-        const detailsError = storeHeaderDetailsError(details, stores, projects)
+        const detailsError = storeHeaderDetailsError(details, storeOptions.stores, projects)
         if (detailsError) throw Object.assign(new Error(detailsError), { status: 422 })
+        if (details.isProject && !storeOptions.fromBc) {
+          throw Object.assign(
+            new Error('Is Project needs Business Central 1.0.3.544. Untick Is Project for now, or wait for the BC update.'),
+            { status: 422 },
+          )
+        }
+        // The location comes from the store list, never from the request body.
+        issuingStore =
+          storeOptions.stores.find((store) => store.code.toUpperCase() === details.storeCode)?.locationCode ?? ''
+        if (no && issuingStore && !storeOptions.fromBc) {
+          // Older BC sets only Issuing Store on an edit, so its Store Code would no longer match.
+          const rows = (await fetchOData('QyStoreRequisitionHeader', {
+            $filter: `No eq '${odataString(no)}'`,
+            $top: 1,
+          }).catch(() => null)) as ODataRecord[] | null
+          const currentStore = Array.isArray(rows) && rows[0] ? fieldText(rows[0], ['IssuingStore', 'Issuing_Store']) : ''
+          if (currentStore && currentStore.toUpperCase() !== issuingStore.toUpperCase()) {
+            throw Object.assign(
+              new Error(
+                `This draft is for store ${currentStore}. Changing the issuing store of a saved draft needs Business Central 1.0.3.544 — create a new request for the other store.`,
+              ),
+              { status: 422 },
+            )
+          }
+        }
       }
       return {
       myAction: no ? 'edit' : 'create',
@@ -1006,10 +1033,10 @@ const storeRequisition: ModuleSpec = {
           '',
       ).slice(0, 150),
       requestDate: requiredDate,
-      // Never pass a raw location from the requester. The chosen store is set
-      // afterwards through SetPortalStoreRequisitionDetails, which validates
-      // Store Code exactly like the Store lookup on the BC card.
-      issuingStore: '',
+      // Location of the store picked from the list (never a raw location from the
+      // requester). BC 1.0.3.544 then validates Store Code exactly like the Store
+      // lookup on the BC card (SetPortalStoreRequisitionDetails).
+      issuingStore,
       justification: justification.slice(0, 250),
       priority: storePriorityCode(req.body?.priority ?? 'normal'),
       storeRequisitionType: storeHeaderRequestTypeCode(req.body?.requestType ?? 'item'),
@@ -1107,14 +1134,9 @@ const storeRequisition: ModuleSpec = {
   afterSaveHeader: async ({ req, user, no }) => {
     const details = storeHeaderDetailsFromBody(req.body ?? {})
     if (!details.provided || !no) return
-    if (!(await listStoreRequisitionStores(callSoapMethod))) {
-      // Older BC app: no store list and no SetPortalStoreRequisitionDetails yet.
-      if (!details.storeCode && !details.isProject) return
-      throw Object.assign(
-        new Error('Publish Business Central 1.0.3.544 to save the store and project on a store requisition.'),
-        { status: 502, code: 'STORE_DETAILS_NOT_PUBLISHED' },
-      )
-    }
+    // Older BC app: the issuing store already went through the header SOAP, and
+    // Is Project was refused before saving (it needs SetPortalStoreRequisitionDetails).
+    if (!(await listStoreRequisitionStores(callSoapMethod))) return
     await callSoapMethod('SetPortalStoreRequisitionDetails', {
       requestNo: no,
       actorUserID: user.userID,

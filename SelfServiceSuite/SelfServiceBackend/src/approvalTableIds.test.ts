@@ -1829,6 +1829,22 @@ describe('staffClaim saveLine params', () => {
     assert.equal(payload.issuingStore, '')
   })
 
+  it('sends the location of the Issuing Store picked from the store list', async () => {
+    const spec = findModuleSpec('store-requisition')
+    const header = (body: Record<string, unknown>) =>
+      spec!.params!.saveHeader!({
+        req: { body: { justification: 'Toner', dateRequired: '2026-10-21', ...body } },
+        user: { employeeNo: 'ABH-010', userID: 'ZERIHUN_SISAY' },
+        no: '',
+      } as never) as Promise<Record<string, unknown>>
+    // No BC store list in this test, so the ABH fallback list applies (SUP lives at location SU).
+    assert.equal((await header({ storeCode: 'SUP', isProject: false })).issuingStore, 'SU')
+    await assert.rejects(header({ storeCode: '', isProject: false }), /Select the issuing store/)
+    await assert.rejects(header({ storeCode: 'NOPE', isProject: false }), /not an active store/)
+    // Is Project needs BC 1.0.3.544 (SetPortalStoreRequisitionDetails).
+    await assert.rejects(header({ storeCode: 'IT', isProject: true, projectCode: 'SAF-001' }), /1\.0\.3\.544|project/i)
+  })
+
   it('rejects an incomplete store requisition line before calling Business Central', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveLine)

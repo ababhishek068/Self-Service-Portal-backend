@@ -74,9 +74,10 @@ import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import {
   listLprOfficers,
   listStoreProjects,
-  listStoreRequisitionStores,
   listStoreUnitsOfMeasure,
   startLprOptionsFromBody,
+  storeRequisitionStoreOptions,
+  ABH_UNITS_OF_MEASURE_FALLBACK,
 } from './storeLookups.js'
 import {
   enrichFinanceHeaderFromEmployee,
@@ -447,7 +448,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v235 — 1.0.3.394 (Store requisition per BC: store, project and UOM lists; requester accepts the borrowing form, then confirms receipt)'
+export const PORTAL_API_BUILD = 'v236 — 1.0.3.395 (Store requisition per the 20 Oct flow: Issuing Store, UOM, Request for LPR, Start LPR, accept borrowing form, confirm receipt)'
 
 interface LookupSpec {
   service: string
@@ -4387,14 +4388,22 @@ export function buildPortalApiRouter() {
     '/store-requisition/options',
     safe(async (req, res) => {
       user(req)
-      const [stores, unitsOfMeasure, projects, lprOfficers] = await Promise.all([
-        listStoreRequisitionStores(callSoapMethod),
+      const [storeOptions, unitsOfMeasure, projects, lprOfficers] = await Promise.all([
+        storeRequisitionStoreOptions(callSoapMethod),
         listStoreUnitsOfMeasure(callSoapMethod),
         listStoreProjects(callSoapMethod),
         listLprOfficers(callSoapMethod),
       ])
       res.setHeader('Cache-Control', 'private, no-store')
-      res.json({ stores, unitsOfMeasure, projects, lprOfficers })
+      res.json({
+        stores: storeOptions.stores,
+        storesFromBc: storeOptions.fromBc,
+        // The BC Unit of Measure list; the BC lookup values until BC publishes PortalUnitsOfMeasure.
+        unitsOfMeasure: unitsOfMeasure ?? ABH_UNITS_OF_MEASURE_FALLBACK,
+        unitsFromBc: Boolean(unitsOfMeasure),
+        projects,
+        lprOfficers,
+      })
     }),
   )
 

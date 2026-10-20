@@ -154,6 +154,8 @@ export interface LprOfficers {
 /** BC lookups for the store requisition form. A list is null when BC does not publish it yet. */
 export interface StoreRequisitionOptions {
   stores: StoreRequisitionStore[] | null
+  /** False while BC has no store list yet (portal uses the ABH store list until BC 1.0.3.544). */
+  storesFromBc?: boolean
   unitsOfMeasure: StoreUnitOfMeasure[] | null
   projects: LocalPurchaseProject[] | null
   lprOfficers?: LprOfficers | null

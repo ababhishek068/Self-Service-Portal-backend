@@ -228,7 +228,7 @@ export const storeHeaderSchema = z
     priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
     justification: z.string().min(3, 'Purpose / justification is required'),
     // Store and project as on the BC Store Requisition card (Business Central checks them again).
-    storeCode: optionalText,
+    storeCode: z.string().trim().min(1, 'Select the issuing store'),
     isProject: z.preprocess((value) => value === true || value === 'true', z.boolean()),
     projectCode: optionalText,
     projectName: optionalText,

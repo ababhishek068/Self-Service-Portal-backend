@@ -189,14 +189,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   // Start Local Purchase (LPR) prompts on the BC card: source, project, then the officer.
   const [lprSource, setLprSource] = useState<'LOCAL' | 'FOREIGN'>('LOCAL')
   const [lprOfficer, setLprOfficer] = useState<'' | 'PROCUREMENT' | 'PROJECT'>('')
-  const officersQuery = useQuery({
+  const storeOptionsQuery = useQuery({
     queryKey: ['store-requisition', 'options'],
     queryFn: getStoreRequisitionOptions,
-    enabled: storeManager && localPurchase.enabled,
+    enabled: storeManager || canManageStock,
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
-  const lprOfficers = officersQuery.data?.lprOfficers ?? null
+  const lprOfficers = storeOptionsQuery.data?.lprOfficers ?? null
+  // BC 1.0.3.544 has the store hand-off methods (Submit to Store Manager, Accept Item) for the portal.
+  const bcStoreHandOff = storeOptionsQuery.data?.storesFromBc === true
   const [borrowingFormUrl, setBorrowingFormUrl] = useState<string | null>(null)
   const [borrowingFormLoading, setBorrowingFormLoading] = useState(false)
   // Free the PDF blob when the viewer closes or the panel unmounts.
@@ -531,29 +533,37 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           issue GIV until a posted GRV receives stock into that location.
         </p>
       ) : null}
+      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !bcStoreHandOff ? (
+        <p className="mt-2 text-xs text-slate-600">
+          Item in store: in Business Central (Store Req Header Approved) use Add Item to Issue, then Submit to Store
+          Manager. Item not in store: Request for LPR below.
+        </p>
+      ) : null}
       {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="gradient"
-            disabled={mutation.isPending || stockBlocked || needsBcPrep}
-            title={
-              needsBcPrep
-                ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
-                : stockBlocked
-                  ? 'Stock is not available at the issuing store for one or more items.'
-                  : undefined
-            }
-            onClick={() =>
-              void run(
-                'PREPARE_ISSUE',
-                'Submit to Store Manager',
-                'Fill the remaining quantity and hand this issue to the store manager. Stock does not move yet.',
-              )
-            }
-          >
-            Submit to Store Manager
-          </Button>
+          {bcStoreHandOff ? (
+            <Button
+              type="button"
+              variant="gradient"
+              disabled={mutation.isPending || stockBlocked || needsBcPrep}
+              title={
+                needsBcPrep
+                  ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
+                  : stockBlocked
+                    ? 'Stock is not available at the issuing store for one or more items.'
+                    : undefined
+              }
+              onClick={() =>
+                void run(
+                  'PREPARE_ISSUE',
+                  'Submit to Store Manager',
+                  'Fill the remaining quantity and hand this issue to the store manager. Stock does not move yet.',
+                )
+              }
+            >
+              Submit to Store Manager
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant={stockBlocked || localPurchase.enabled ? 'gradient' : 'outline'}
@@ -595,21 +605,23 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           <p className="text-xs text-slate-700">
             Store requisition {requestNo} is with you for Local Purchase{requesterId ? ` (requester ${requesterId})` : ''}.
           </p>
-          <div className="max-w-md space-y-1">
-            <label htmlFor={`lpr-source-${request.id}`} className="text-xs font-medium text-slate-700">
-              Request procurement from which source?
-            </label>
-            <Select
-              id={`lpr-source-${request.id}`}
-              options={[
-                { value: 'LOCAL', label: 'Local (Inhouse Local)' },
-                { value: 'FOREIGN', label: 'Foreign (Inhouse / Salable Foreign)' },
-              ]}
-              value={lprSource}
-              onChange={(event) => setLprSource(event.target.value === 'FOREIGN' ? 'FOREIGN' : 'LOCAL')}
-              disabled={mutation.isPending}
-            />
-          </div>
+          {lprOfficers ? (
+            <div className="max-w-md space-y-1">
+              <label htmlFor={`lpr-source-${request.id}`} className="text-xs font-medium text-slate-700">
+                Request procurement from which source?
+              </label>
+              <Select
+                id={`lpr-source-${request.id}`}
+                options={[
+                  { value: 'LOCAL', label: 'Local (Inhouse Local)' },
+                  { value: 'FOREIGN', label: 'Foreign (Inhouse / Salable Foreign)' },
+                ]}
+                value={lprSource}
+                onChange={(event) => setLprSource(event.target.value === 'FOREIGN' ? 'FOREIGN' : 'LOCAL')}
+                disabled={mutation.isPending}
+              />
+            </div>
+          ) : null}
           <LprProjectPicker
             id={`lpr-project-${request.id}`}
             value={lprProjectNo}
@@ -620,27 +632,34 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             }}
             disabled={mutation.isPending}
           />
-          <div className="max-w-md space-y-1">
-            <label htmlFor={`lpr-officer-${request.id}`} className="text-xs font-medium text-slate-700">
-              Procurement officer
-            </label>
-            <Select
-              id={`lpr-officer-${request.id}`}
-              options={(lprProjectNo ? (['PROJECT', 'PROCUREMENT'] as const) : (['PROCUREMENT'] as const)).map((kind) => ({
-                value: kind,
-                label:
-                  kind === 'PROJECT'
-                    ? `Project Procurement Officer${lprOfficers?.projectProcurementOfficer ? ` (${lprOfficers.projectProcurementOfficer})` : ''}`
-                    : `Procurement Officer${lprOfficers?.procurementOfficer ? ` (${lprOfficers.procurementOfficer})` : ''}`,
-              }))}
-              value={startLprOfficerKind}
-              onChange={(event) => setLprOfficer(event.target.value === 'PROJECT' ? 'PROJECT' : 'PROCUREMENT')}
-              disabled={mutation.isPending}
-            />
+          {lprOfficers ? (
+            <div className="max-w-md space-y-1">
+              <label htmlFor={`lpr-officer-${request.id}`} className="text-xs font-medium text-slate-700">
+                Procurement officer
+              </label>
+              <Select
+                id={`lpr-officer-${request.id}`}
+                options={(lprProjectNo ? (['PROJECT', 'PROCUREMENT'] as const) : (['PROCUREMENT'] as const)).map((kind) => ({
+                  value: kind,
+                  label:
+                    kind === 'PROJECT'
+                      ? `Project Procurement Officer${lprOfficers?.projectProcurementOfficer ? ` (${lprOfficers.projectProcurementOfficer})` : ''}`
+                      : `Procurement Officer${lprOfficers?.procurementOfficer ? ` (${lprOfficers.procurementOfficer})` : ''}`,
+                }))}
+                value={startLprOfficerKind}
+                onChange={(event) => setLprOfficer(event.target.value === 'PROJECT' ? 'PROJECT' : 'PROCUREMENT')}
+                disabled={mutation.isPending}
+              />
+              <p className="text-xs text-slate-500">
+                A project purchase defaults to the Project Procurement Officer. A project procurement officer needs a project.
+              </p>
+            </div>
+          ) : (
+            // Older BC app: Local purchase; the officer follows the project.
             <p className="text-xs text-slate-500">
-              A project purchase defaults to the Project Procurement Officer. A project procurement officer needs a project.
+              Local purchase. A project purchase goes to the Project Procurement Officer, others to the Procurement Officer.
             </p>
-          </div>
+          )}
           <Button
             type="button"
             variant="gradient"
@@ -660,7 +679,12 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           </Button>
         </div>
       ) : null}
-      {stageHandOff === 'PREPARED' && storeManager ? (
+      {stageHandOff === 'PREPARED' && storeManager && !bcStoreHandOff ? (
+        <p className="mt-2 text-xs text-slate-600">
+          Accept the offered item in Business Central: Store Req Header Approved → Accept Item (Store Manager).
+        </p>
+      ) : null}
+      {stageHandOff === 'PREPARED' && storeManager && bcStoreHandOff ? (
         <div className="mt-3">
           <Button
             type="button"
