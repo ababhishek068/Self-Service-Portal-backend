@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { Warehouse } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -344,6 +345,40 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
     (stageHandOff === '' || stageHandOff === 'PREPARED') &&
     !lprPath &&
     !issued
+  // No item / no similar item in store needs no item mapping (BC Request for LPR).
+  const requestLprButton = (
+    <Button
+      type="button"
+      variant={showOfferSection ? 'outline' : stockBlocked || localPurchase.enabled ? 'gradient' : 'outline'}
+      disabled={mutation.isPending || (!localPurchase.enabled && needsBcPrep)}
+      title={
+        !localPurchase.enabled && needsBcPrep
+          ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
+          : localPurchase.enabled
+            ? 'No item / no similar item in store: send this request to the Store Manager with the employee details.'
+            : undefined
+      }
+      onClick={() =>
+        localPurchase.enabled
+          ? void run(
+              'REQUEST_FOR_LPR',
+              'Request for LPR',
+              `No stock / no similar item for store requisition ${requestNo}? Send Request for LPR to the Store Manager with the employee details?`,
+            )
+          : void run(
+              'STOCK_UNAVAILABLE',
+              'Create Purchase Request',
+              'Confirm stock is unavailable and create the linked Purchase Request.',
+            )
+      }
+    >
+      {localPurchase.enabled
+        ? showOfferSection
+          ? 'Not in store? Request for LPR'
+          : 'Request for LPR'
+        : 'Stock not available — Purchase Request'}
+    </Button>
+  )
   const offerAvailable: Record<string, number> = Object.fromEntries(
     (stockCheck?.lines ?? [])
       .filter((line) => realBcItemNo(line.itemNo))
@@ -351,8 +386,13 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   )
 
   return (
-    <section className="rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
-      <p className="font-semibold text-[var(--portal-navy)]">Store status</p>
+    <section className="rounded-xl border border-teal-200/80 bg-gradient-to-br from-teal-50/90 via-white to-white p-4 text-sm text-slate-800 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--portal-navy)]/10 text-[var(--portal-navy-dark)]">
+          <Warehouse className="h-4 w-4" />
+        </span>
+        <p className="text-base font-semibold text-[var(--portal-navy-dark)]">Store status</p>
+      </div>
       {requesterHandoff ? (
         <p className="mt-1 text-slate-600">
           {requesterStatusText(stageHandOff, requesterDeclined, lprPath, givNo)}
@@ -455,23 +495,25 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           }
         />
       ) : null}
-      <p className="mt-2">
-        Issue: <strong>{issueStageLabel(stageHandOff)}</strong>
-        {text(request.payload?.StoreName ?? request.payload?.StoreCode)
-          ? ` · Store: ${text(request.payload?.StoreName ?? request.payload?.StoreCode)}`
-          : ''}
-      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 font-semibold text-[var(--portal-navy-dark)] shadow-sm ring-1 ring-teal-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-[var(--portal-navy)]" />
+          {issueStageLabel(stageHandOff)}
+        </span>
+        {storeName ? <MetaChip label="Store" value={storeName} /> : null}
+        {canViewProcess && !processQuery.isError && processQuery.data ? (
+          <>
+            <MetaChip label="Stage" value={label} />
+            {owner ? <MetaChip label="Owner" value={owner} /> : null}
+            {stock ? <MetaChip label="Stock" value={stock} /> : null}
+          </>
+        ) : null}
+        {ginNo || givNo ? <MetaChip label="GIV" value={ginNo || givNo} /> : null}
+        {lprNo ? <MetaChip label="LPR" value={lprNo} /> : null}
+      </div>
       {processQuery.isError ? (
         <p className="mt-2 text-red-700">
           {processQuery.error instanceof Error ? processQuery.error.message : 'Could not load store process stage.'}
-        </p>
-      ) : canViewProcess ? (
-        <p className="mt-2">
-          Stage: <strong>{label}</strong>
-          {owner ? ` · Owner: ${owner}` : ''}
-          {stock ? ` · Stock: ${stock}` : ''}
-          {ginNo ? ` · GIV: ${ginNo}` : ''}
-          {lprNo ? ` · Purchase Request: ${lprNo}` : ''}
         </p>
       ) : null}
       {atStockCheck && needsBcPrep && !storeOffers ? (
@@ -544,9 +586,12 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           available={offerAvailable}
           busy={mutation.isPending}
           run={run}
+          secondaryAction={
+            atStockCheck && stageHandOff === '' && !processQuery.isError ? requestLprButton : null
+          }
         />
       ) : null}
-      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError ? (
+      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !showOfferSection ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {bcStoreHandOff && !storeOffers ? (
             <Button
@@ -571,34 +616,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
               Submit to Store Manager
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant={stockBlocked || localPurchase.enabled ? 'gradient' : 'outline'}
-            // No item / no similar item in store needs no item mapping (BC Request for LPR).
-            disabled={mutation.isPending || (!localPurchase.enabled && needsBcPrep)}
-            title={
-              !localPurchase.enabled && needsBcPrep
-                ? 'Finish Business Central prep (Issuing Store + item mapping) first.'
-                : localPurchase.enabled
-                  ? 'No item / no similar item in store: send this request to the Store Manager with the employee details.'
-                  : undefined
-            }
-            onClick={() =>
-              localPurchase.enabled
-                ? void run(
-                    'REQUEST_FOR_LPR',
-                    'Request for LPR',
-                    `No stock / no similar item for store requisition ${requestNo}? Send Request for LPR to the Store Manager with the employee details?`,
-                  )
-                : void run(
-                    'STOCK_UNAVAILABLE',
-                    'Create Purchase Request',
-                    'Confirm stock is unavailable and create the linked Purchase Request.',
-                  )
-            }
-          >
-            {localPurchase.enabled ? 'Request for LPR' : 'Stock not available — Purchase Request'}
-          </Button>
+          {requestLprButton}
         </div>
       ) : null}
       {atLprRequested && localPurchase.enabled && !storeManager ? (
@@ -755,6 +773,15 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         <p className="mt-2 text-teal-800">GIV posted — inventory reduced and requisition closed.</p>
       ) : null}
     </section>
+  )
+}
+
+function MetaChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-slate-600 ring-1 ring-slate-200">
+      <span className="text-slate-400">{label}</span>
+      <span className="font-medium text-slate-700">{value}</span>
+    </span>
   )
 }
 

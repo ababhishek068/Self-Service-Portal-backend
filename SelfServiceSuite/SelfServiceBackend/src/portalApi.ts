@@ -449,7 +449,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v241 — 1.0.3.400 (Add Item to Issue lists all the store items, in stock first; needs BC 1.0.3.547)'
+export const PORTAL_API_BUILD = 'v242 — 1.0.3.401 (Store Keeper item picker redesign: item cards, filter, stock badges, quantity stepper)'
 
 interface LookupSpec {
   service: string

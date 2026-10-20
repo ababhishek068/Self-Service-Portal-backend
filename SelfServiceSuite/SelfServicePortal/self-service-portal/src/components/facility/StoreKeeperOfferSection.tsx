@@ -1,9 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
-import { Search } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import {
+  CheckCircle2,
+  ClipboardList,
+  Minus,
+  PackageCheck,
+  PackagePlus,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { getStoreOfferItems, type StoreOfferItem } from '@/api/endpoints/requestEndpoint'
+import { cn } from '@/lib/utils'
 import type { PortalRequest } from '@/types/erp.types'
 
 type StoreAction = (
@@ -20,6 +31,15 @@ type OfferLine = {
   itemName: string
   specification: string
   brandModel: string
+  unitOfMeasure: string
+  quantity: number
+}
+
+type RequestedLine = {
+  key: string
+  itemName: string
+  details: string
+  brand: string
   unitOfMeasure: string
   quantity: number
 }
@@ -41,6 +61,44 @@ function quantityLabel(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
+function brandModelOf(item: StoreOfferItem) {
+  return [item.brand, item.model].map(text).filter(Boolean).join(' / ')
+}
+
+function matchesFilter(item: StoreOfferItem, filter: string) {
+  if (!filter) return true
+  const haystack = [item.no, item.description, item.brand, item.model, item.specification, item.category]
+    .map(text)
+    .join(' ')
+    .toLowerCase()
+  return filter
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((word) => haystack.includes(word))
+}
+
+function StockPill({ atStore, unit, low }: { atStore: number; unit: string; low: boolean }) {
+  if (atStore <= 0) {
+    return (
+      <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+        Out of stock
+      </span>
+    )
+  }
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1',
+        low ? 'bg-amber-50 text-amber-800 ring-amber-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+      )}
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', low ? 'bg-amber-500' : 'bg-emerald-500')} />
+      {quantityLabel(atStore)} {unit}
+    </span>
+  )
+}
+
 /**
  * Store Keeper on an approved store requisition — the BC Store Req Header Approved steps:
  * Add Item to Issue (the real item in stock), Submit to Store Manager; after the requester
@@ -53,6 +111,7 @@ export function StoreKeeperOfferSection({
   available,
   busy,
   run,
+  secondaryAction,
 }: {
   request: PortalRequest
   /** '' (with the store) or 'PREPARED' (with the store manager). */
@@ -62,6 +121,8 @@ export function StoreKeeperOfferSection({
   available: Record<string, number>
   busy: boolean
   run: StoreAction
+  /** Extra footer action, e.g. Request for LPR when nothing similar is in store. */
+  secondaryAction?: ReactNode
 }) {
   const lines = requestLines(request)
   const offers: OfferLine[] = lines.filter(isOfferLine).map((line) => ({
@@ -73,224 +134,386 @@ export function StoreKeeperOfferSection({
     unitOfMeasure: text(line.unitOfMeasure),
     quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
   }))
-  const requested = lines
+  const requestedLines: RequestedLine[] = lines
     .filter((line) => !isOfferLine(line))
-    .reduce((total, line) => total + Number(line.quantityRequested ?? line.quantity ?? 0), 0)
+    .map((line, index) => {
+      const itemName = text(line.itemName) || text(line.description)
+      return {
+        key: text(line.lineNo) || String(index),
+        itemName,
+        details: text(line.description) === itemName ? '' : text(line.description),
+        brand: text(line.preferredBrandModel),
+        unitOfMeasure: text(line.unitOfMeasure),
+        quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
+      }
+    })
+  const requested = requestedLines.reduce((total, line) => total + line.quantity, 0)
   const requestNo = request.requestNo
   const withManager = stage === 'PREPARED'
 
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState<string | null>(null)
+  // The store's items load straight away; typing filters them, Enter searches every item in BC.
+  const [filter, setFilter] = useState('')
+  const [serverSearch, setServerSearch] = useState('')
+  const [inStockOnly, setInStockOnly] = useState(true)
   const [selected, setSelected] = useState<StoreOfferItem | null>(null)
-  const [quantity, setQuantity] = useState(requested > 0 ? String(requested) : '1')
+  const [quantity, setQuantity] = useState(requested > 0 ? requested : 1)
   const itemsQuery = useQuery({
-    queryKey: ['store-offer-items', request.id, search],
-    queryFn: () => getStoreOfferItems(request.id, search ?? ''),
-    enabled: search !== null,
+    queryKey: ['store-offer-items', request.id, serverSearch],
+    queryFn: () => getStoreOfferItems(request.id, serverSearch),
     retry: false,
+    staleTime: 60_000,
   })
-  const items = itemsQuery.data?.items ?? []
-  const issuingStore = itemsQuery.data?.issuingStore || 'the issuing store'
+  const allItems = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data])
+  const issuingStore = itemsQuery.data?.issuingStore || 'the store'
+  const inStockCount = allItems.filter((item) => Number(item.available ?? 0) > 0).length
+  const visibleItems = allItems.filter(
+    (item) => matchesFilter(item, filter) && (!inStockOnly || Number(item.available ?? 0) > 0),
+  )
+  const selectedAvailable = Number(selected?.available ?? 0)
+  const tooMany = Boolean(selected) && quantity > selectedAvailable
+
+  const searchEverywhere = () => {
+    setSelected(null)
+    setInStockOnly(false)
+    setServerSearch(filter.trim())
+  }
 
   const addOffer = async () => {
-    if (!selected) return
+    if (!selected || !(quantity > 0) || tooMany) return
     const added = await run(
       'ADD_STORE_OFFER',
       'Add Item to Issue',
       '',
-      { itemNo: selected.no, quantity: Number(quantity) },
+      { itemNo: selected.no, quantity },
       false,
     )
-    if (added) {
-      setSelected(null)
-      setSearch(null)
-      setSearchInput('')
-    }
+    if (added) setSelected(null)
   }
 
+  const footerHint = withManager
+    ? 'With the store manager. You can still change the item until they accept it.'
+    : declined
+      ? 'The requester declined the last item. Offer another item, or close the request.'
+      : offers.length
+        ? 'Check the items, then submit them to the store manager. Stock does not move yet.'
+        : 'Add the item you will issue, then submit it to the store manager.'
+
   return (
-    <div className="mt-3 space-y-3 rounded-md border border-teal-100 bg-white/80 p-3">
-      <div>
-        <p className="text-sm font-semibold text-[var(--portal-navy)]">Items to issue (Store Offer)</p>
-        <p className="mt-0.5 text-xs text-slate-600">
-          {withManager
-            ? 'With the store manager. You can still change the item until the manager accepts it.'
-            : declined
-              ? 'The requester declined. Change the item, then Offer Another Item — or Close Request.'
-              : 'Add the real item in stock that you will issue. The requester’s line stays as they wrote it.'}
-        </p>
+    <div className="mt-4 overflow-hidden rounded-xl border border-[var(--portal-card-border)] bg-white shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-teal-50 via-white to-white px-4 py-3">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--portal-navy)]/10 text-[var(--portal-navy-dark)]">
+            <PackageCheck className="h-4 w-4" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Items to issue</p>
+            <p className="text-xs text-slate-500">Store offer — the real item from stock. The requester’s line stays as written.</p>
+          </div>
+        </div>
+        <span
+          className={cn(
+            'rounded-full px-2.5 py-1 text-[11px] font-semibold',
+            offers.length ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+          )}
+        >
+          {offers.length ? `${offers.length} item${offers.length === 1 ? '' : 's'} offered` : 'No item offered yet'}
+        </span>
       </div>
 
-      {offers.length ? (
-        <div className="overflow-x-auto rounded-md border border-slate-200">
-          <table className="min-w-full text-xs">
-            <thead className="bg-slate-50 text-left text-slate-600">
-              <tr>
-                <th className="px-3 py-2 font-medium">Item No.</th>
-                <th className="px-3 py-2 font-medium">Description</th>
-                <th className="px-3 py-2 font-medium">UOM</th>
-                <th className="px-3 py-2 font-medium">Qty to issue</th>
-                <th className="px-3 py-2 font-medium">Available</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {offers.map((offer) => {
-                const onHand = available[offer.itemNo.toUpperCase()]
-                const short = onHand !== undefined && onHand < offer.quantity
-                return (
-                  <tr key={offer.lineNo} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-medium">{offer.itemNo}</td>
-                    <td className="px-3 py-2">
-                      {offer.itemName || '—'}
-                      {offer.specification || offer.brandModel ? (
-                        <span className="block text-slate-500">
-                          {[offer.brandModel, offer.specification].filter(Boolean).join(' · ')}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2">{offer.unitOfMeasure || '—'}</td>
-                    <td className="px-3 py-2">{quantityLabel(offer.quantity)}</td>
-                    <td className={`px-3 py-2 ${short ? 'font-medium text-red-700' : 'text-teal-800'}`}>
-                      {onHand === undefined ? '—' : quantityLabel(onHand)}
-                      {short ? ' · not enough' : ''}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            'REMOVE_STORE_OFFER',
-                            'Remove store offer',
-                            `Remove ${offer.itemNo} from the items to issue on store requisition ${requestNo}?`,
-                            { lineNo: Number(offer.lineNo) },
-                          )
-                        }
-                      >
-                        Remove
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-xs text-slate-500">No item added yet.</p>
-      )}
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-slate-700">Add Item to Issue</p>
-        <form
-          className="flex max-w-xl gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setSelected(null)
-            setSearch(searchInput.trim())
-          }}
-        >
-          <Input
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Item No. or description (blank lists all the store's items)"
-            aria-label="Search the items in stock"
-          />
-          <Button type="submit" variant="outline" disabled={busy || itemsQuery.isFetching}>
-            <Search className="h-4 w-4" />
-            {itemsQuery.isFetching ? 'Searching…' : 'Search'}
-          </Button>
-        </form>
-        {itemsQuery.isError ? (
-          <p className="text-xs text-red-700">
-            {itemsQuery.error instanceof Error ? itemsQuery.error.message : 'Could not load the items in stock.'}
-          </p>
+      <div className="space-y-4 px-4 py-4">
+        {requestedLines.length ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-3 py-2.5">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <ClipboardList className="h-3.5 w-3.5" /> Requested by the employee
+            </p>
+            <ul className="mt-1.5 space-y-1">
+              {requestedLines.map((line) => (
+                <li key={line.key} className="flex flex-wrap items-baseline gap-x-2 text-sm text-slate-800">
+                  <span className="font-semibold">{line.itemName || '—'}</span>
+                  <span className="text-xs text-slate-500">
+                    {quantityLabel(line.quantity)} {line.unitOfMeasure}
+                    {line.brand ? ` · ${line.brand}` : ''}
+                  </span>
+                  {line.details ? <span className="basis-full text-xs text-slate-500">{line.details}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
-        {search !== null && !itemsQuery.isFetching && !itemsQuery.isError ? (
-          items.length ? (
-            <ul className="max-h-80 max-w-2xl overflow-y-auto rounded-md border border-slate-200 bg-white">
-              <li className="sticky top-0 border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-                {items.length} item{items.length === 1 ? '' : 's'} · in stock at {issuingStore} first. Items with no stock
-                at {issuingStore} cannot be issued — use Request for LPR.
-              </li>
-              {items.map((item) => {
-                const active = selected?.no === item.no
+
+        {offers.length ? (
+          <ul className="space-y-2">
+            {offers.map((offer) => {
+              const onHand = available[offer.itemNo.toUpperCase()]
+              const short = onHand !== undefined && onHand < offer.quantity
+              return (
+                <li
+                  key={offer.lineNo}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2.5"
+                >
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {offer.itemName || offer.itemNo}
+                      <span className="ml-2 font-mono text-[11px] font-normal text-slate-500">{offer.itemNo}</span>
+                    </p>
+                    {offer.brandModel || offer.specification ? (
+                      <p className="truncate text-xs text-slate-500">
+                        {[offer.brandModel, offer.specification].filter(Boolean).join(' · ')}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="text-sm font-semibold text-slate-800">
+                    {quantityLabel(offer.quantity)} {offer.unitOfMeasure}
+                  </span>
+                  {onHand !== undefined ? (
+                    <span className={cn('text-xs', short ? 'font-semibold text-red-700' : 'text-slate-500')}>
+                      {short ? `only ${quantityLabel(onHand)} in stock` : `${quantityLabel(onHand)} in stock`}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Remove ${offer.itemNo}`}
+                    title="Remove this item"
+                    className="rounded-md p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    onClick={() =>
+                      void run(
+                        'REMOVE_STORE_OFFER',
+                        'Remove store offer',
+                        `Remove ${offer.itemNo} from the items to issue on store requisition ${requestNo}?`,
+                        { lineNo: Number(offer.lineNo) },
+                      )
+                    }
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
+
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+              <PackagePlus className="h-4 w-4 text-[var(--portal-navy)]" />
+              {offers.length ? 'Add another item' : 'Add Item to Issue'}
+            </p>
+            <div className="inline-flex rounded-full bg-slate-100 p-0.5 text-xs font-medium">
+              {[
+                { value: true, label: `In stock (${inStockCount})` },
+                { value: false, label: `All (${allItems.length})` },
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => setInStockOnly(option.value)}
+                  className={cn(
+                    'rounded-full px-3 py-1 transition',
+                    inStockOnly === option.value
+                      ? 'bg-white text-[var(--portal-navy-dark)] shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <form
+            className="relative"
+            onSubmit={(event) => {
+              event.preventDefault()
+              searchEverywhere()
+            }}
+          >
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder={`Filter ${issuingStore} items by name, number, brand or spec — Enter searches every item`}
+              aria-label="Filter the store items"
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-9 text-sm text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--portal-navy)] focus:ring-2 focus:ring-[var(--portal-navy)]/15"
+            />
+            {filter ? (
+              <button
+                type="button"
+                aria-label="Clear the filter"
+                onClick={() => {
+                  setFilter('')
+                  if (serverSearch) setServerSearch('')
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </form>
+
+          {itemsQuery.isLoading || itemsQuery.isFetching ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[0, 1, 2, 3].map((index) => (
+                <div key={index} className="h-[5.5rem] animate-pulse rounded-lg border border-slate-100 bg-slate-50" />
+              ))}
+            </div>
+          ) : itemsQuery.isError ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              {itemsQuery.error instanceof Error ? itemsQuery.error.message : 'Could not load the store items.'}
+              <Button type="button" variant="outline" size="sm" onClick={() => void itemsQuery.refetch()}>
+                <RefreshCw className="h-3.5 w-3.5" /> Retry
+              </Button>
+            </div>
+          ) : visibleItems.length ? (
+            <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+              {visibleItems.map((item) => {
                 const atStore = Number(item.available ?? 0)
                 const onHand = item.onHand === undefined ? undefined : Number(item.onHand)
                 const inStock = atStore > 0
+                const active = selected?.no === item.no
+                const brandModel = brandModelOf(item)
                 return (
-                  <li key={item.no}>
-                    <button
-                      type="button"
-                      disabled={!inStock}
-                      title={inStock ? undefined : `No stock at ${issuingStore}.`}
-                      onClick={() => setSelected(item)}
-                      className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left text-xs last:border-b-0 ${
-                        active ? 'bg-teal-50' : inStock ? 'hover:bg-slate-50' : 'cursor-not-allowed opacity-60'
-                      }`}
-                    >
-                      <span>
-                        <span className="font-medium text-slate-900">{item.no}</span>
-                        <span className="text-slate-600"> — {item.description || 'No description'}</span>
-                        {item.brand || item.model || item.specification ? (
-                          <span className="block text-slate-500">
-                            {[[item.brand, item.model].filter(Boolean).join(' / '), item.specification].filter(Boolean).join(' · ')}
-                          </span>
-                        ) : null}
+                  <button
+                    key={item.no}
+                    type="button"
+                    disabled={!inStock || busy}
+                    title={inStock ? undefined : `No stock at ${issuingStore} — use Request for LPR.`}
+                    onClick={() => {
+                      setSelected(item)
+                      setQuantity(Math.min(Math.max(requested, 1), atStore))
+                    }}
+                    className={cn(
+                      'relative flex flex-col gap-1 rounded-lg border p-3 text-left transition',
+                      active
+                        ? 'border-[var(--portal-navy)] bg-teal-50/70 ring-2 ring-[var(--portal-navy)]/20'
+                        : inStock
+                          ? 'border-slate-200 bg-white hover:-translate-y-px hover:border-teal-300 hover:shadow-md'
+                          : 'cursor-not-allowed border-slate-100 bg-slate-50 opacity-60',
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-mono text-[11px] text-slate-500">{item.no}</span>
+                      {active ? (
+                        <CheckCircle2 className="h-4 w-4 text-[var(--portal-navy)]" />
+                      ) : (
+                        <StockPill atStore={atStore} unit={item.unitOfMeasure} low={inStock && atStore < requested} />
+                      )}
+                    </div>
+                    <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.description || 'No description'}</p>
+                    {brandModel ? (
+                      <span className="w-fit rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                        {brandModel}
                       </span>
-                      <span className={`shrink-0 text-right ${inStock ? 'text-teal-800' : 'text-red-700'}`}>
-                        {quantityLabel(atStore)} {item.unitOfMeasure} at {issuingStore}
-                        {onHand !== undefined && onHand !== atStore ? (
-                          <span className="block text-slate-500">{quantityLabel(onHand)} in all stores</span>
-                        ) : null}
-                      </span>
-                    </button>
-                  </li>
+                    ) : null}
+                    {item.specification ? (
+                      <p className="line-clamp-2 text-xs leading-snug text-slate-500">{item.specification}</p>
+                    ) : null}
+                    {onHand !== undefined && onHand !== atStore ? (
+                      <p className="text-[11px] text-slate-400">{quantityLabel(onHand)} in all stores</p>
+                    ) : null}
+                  </button>
                 )
               })}
-            </ul>
-          ) : (
-            <p className="text-xs text-slate-600">
-              No item at {issuingStore} matches. If there is no similar item, use Request for LPR.
-            </p>
-          )
-        ) : null}
-        {selected ? (
-          <div className="flex max-w-xl flex-wrap items-end gap-2">
-            <div className="min-w-0 flex-1 text-xs text-slate-700">
-              Selected: <strong>{selected.no}</strong> — {selected.description} ({quantityLabel(Number(selected.available ?? 0))}{' '}
-              {selected.unitOfMeasure} at {issuingStore})
             </div>
-            <label className="space-y-1 text-xs font-medium text-slate-700">
-              Qty to issue
-              <Input
-                type="number"
-                min={0}
-                step="any"
-                value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
-                className="w-28"
-              />
-            </label>
-            <Button
-              type="button"
-              variant="gradient"
-              disabled={busy || !(Number(quantity) > 0)}
-              onClick={() => void addOffer()}
-            >
-              Add Item to Issue
-            </Button>
-          </div>
-        ) : null}
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-600">
+              <p className="font-medium text-slate-700">
+                {filter ? `Nothing at ${issuingStore} matches “${filter}”.` : `No item in stock at ${issuingStore}.`}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {filter && !serverSearch
+                  ? 'Press Enter to search every item in Business Central, or use Request for LPR if nothing similar is in store.'
+                  : 'If there is no similar item in store, use Request for LPR.'}
+              </p>
+              {filter && !serverSearch ? (
+                <Button type="button" variant="outline" size="sm" className="mt-3" onClick={searchEverywhere}>
+                  <Search className="h-3.5 w-3.5" /> Search all items
+                </Button>
+              ) : null}
+            </div>
+          )}
+
+          {selected ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-50 to-white px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-700">Selected</p>
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {selected.description} <span className="font-mono text-[11px] font-normal text-slate-500">{selected.no}</span>
+                </p>
+                <p className={cn('text-xs', tooMany ? 'font-semibold text-red-700' : 'text-slate-500')}>
+                  {tooMany
+                    ? `Only ${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} at ${issuingStore}`
+                    : `${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} available · requested ${quantityLabel(requested)}`}
+                </p>
+              </div>
+              <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
+                <button
+                  type="button"
+                  aria-label="Less"
+                  disabled={quantity <= 1}
+                  onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                  className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  step="any"
+                  value={Number.isFinite(quantity) ? quantity : ''}
+                  onChange={(event) => setQuantity(Number(event.target.value))}
+                  aria-label="Quantity to issue"
+                  className="w-14 border-x border-slate-200 py-1.5 text-center text-sm font-semibold text-slate-900 outline-none"
+                />
+                <button
+                  type="button"
+                  aria-label="More"
+                  disabled={quantity >= selectedAvailable}
+                  onClick={() => setQuantity((current) => Math.min(selectedAvailable, current + 1))}
+                  className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              <span className="text-xs text-slate-500">{selected.unitOfMeasure}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="gradient"
+                disabled={busy || !(quantity > 0) || tooMany}
+                onClick={() => void addOffer()}
+              >
+                <PackagePlus className="h-4 w-4" /> Add to offer
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {!withManager ? (
-        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-          {declined ? (
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+        <p className="text-xs text-slate-600">{footerHint}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {secondaryAction}
+          {withManager ? null : declined ? (
             <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                className="border-red-200 text-red-700 hover:bg-red-50"
+                onClick={() =>
+                  void run(
+                    'CLOSE_REQUEST',
+                    'Close Request',
+                    `Close store requisition ${requestNo}? The requester declined the item. No goods issue voucher will be created.`,
+                  )
+                }
+              >
+                Close Request
+              </Button>
               <Button
                 type="button"
                 variant="gradient"
@@ -304,20 +527,6 @@ export function StoreKeeperOfferSection({
                 }
               >
                 Offer Another Item
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void run(
-                    'CLOSE_REQUEST',
-                    'Close Request',
-                    `Close store requisition ${requestNo}? The requester declined the item. No goods issue voucher will be created.`,
-                  )
-                }
-              >
-                Close Request
               </Button>
             </>
           ) : (
@@ -338,7 +547,7 @@ export function StoreKeeperOfferSection({
             </Button>
           )}
         </div>
-      ) : null}
+      </div>
     </div>
   )
 }
