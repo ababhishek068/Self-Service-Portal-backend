@@ -86,7 +86,7 @@ function requesterStatusText(stage: string, declined: boolean, lprPath: boolean,
     case 'PREPARED':
       return 'The store has prepared an item for you. Waiting for the store manager to accept it.'
     case 'ACCEPTED':
-      return 'The store offered an item. Open the Item Borrowing Form and check it, then accept or decline the item. No voucher is created until you accept.'
+      return 'The store offered an item. Click View Item to check it on the Item Borrowing Form, then accept or decline it there. No voucher is created until you accept.'
     case 'TRANSIT':
       return `Goods issue voucher ${givNo || '(GIV)'} is with the storekeeper. Status is In Transit. Confirm receipt when you have the item.`
     case 'RECEIVED':
@@ -359,21 +359,18 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </p>
       ) : null}
       {requesterHandoff && awaitingRequester ? (
+        // View Item opens the Item Borrowing Form with Accept Item / Decline Item (as on the BC card).
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" disabled={borrowingFormLoading} onClick={openBorrowingForm}>
-            {borrowingFormLoading ? 'Opening…' : 'Item Borrowing Form'}
-          </Button>
           <Button
             type="button"
             variant="gradient"
             disabled={mutation.isPending || borrowingFormLoading}
-            title="Opens the Item Borrowing Form first, then asks you to accept."
             onClick={openBorrowingForm}
           >
-            Accept Item
+            {borrowingFormLoading ? 'Opening…' : 'View Item'}
           </Button>
-          <Button type="button" variant="outline" disabled={mutation.isPending} onClick={() => void declineItem()}>
-            Decline Item
+          <Button type="button" variant="outline" onClick={downloadBorrowingForm}>
+            Item Borrowing Form
           </Button>
         </div>
       ) : null}

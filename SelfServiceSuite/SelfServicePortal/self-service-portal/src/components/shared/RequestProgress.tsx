@@ -123,7 +123,7 @@ function storeRequisitionSteps(
       ? `Accepted — GIV ${givNo}`
       : 'Item accepted — GIV created'
     : stage === 'ACCEPTED'
-      ? 'Open the Item Borrowing Form, then accept or decline'
+      ? 'View Item, then accept or decline'
       : 'Starts after the store manager accepts'
   const receiptNote = receiptDone
     ? received > 0 || issued > 0
