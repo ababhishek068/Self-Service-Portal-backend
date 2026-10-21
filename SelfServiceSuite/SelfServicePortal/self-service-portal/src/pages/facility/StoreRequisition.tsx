@@ -61,7 +61,7 @@ function isAssetRequestPayload(payload: Record<string, unknown> | undefined) {
   )
     .trim()
     .toLowerCase()
-  return value === '1' || value === 'asset' || value === 'minor asset'
+  return ['1', 'asset', 'minor asset', 'minor_asset', 'fixed asset', 'fixed_asset'].includes(value)
 }
 
 const storeProcessBanner = (
@@ -213,7 +213,16 @@ export function StoreRequisition() {
           type: 'select',
           options: storeRequestTypeOptions,
           valuePaths: ['StoreRequisitionType', 'Store_Requisition_Type', 'requestType'],
-          valueMap: { item: 'item', asset: 'asset', 'minor asset': 'asset' },
+          // BC Request Type: Consumable (Item) or Fixed Asset (Minor Asset).
+          valueMap: {
+            item: 'item',
+            consumable: 'item',
+            asset: 'asset',
+            'minor asset': 'asset',
+            minor_asset: 'asset',
+            'fixed asset': 'asset',
+            fixed_asset: 'asset',
+          },
         },
         {
           name: 'dateRequired',
@@ -315,7 +324,11 @@ export function StoreRequisition() {
           },
         },
         { label: 'GIV / Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
-        { label: 'Request Type', paths: ['payload.StoreRequisitionType', 'payload.Store_Requisition_Type'] },
+        {
+          label: 'Request Type',
+          paths: [],
+          resolve: (request) => (isAssetRequestPayload(request.payload) ? 'Fixed Asset' : 'Consumable'),
+        },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
         { label: 'Store Receipt No.', paths: ['payload.SRNNo', 'payload.SRN_No'] },
@@ -394,7 +407,8 @@ export function StoreRequisition() {
           {
             key: 'type',
             header: 'Type',
-            format: (value) => (String(value) === '2' || String(value).toLowerCase() === 'asset' ? 'Asset' : 'Item'),
+            format: (value) =>
+              String(value) === '2' || /asset/i.test(String(value)) ? 'Fixed Asset' : 'Consumable',
           },
           {
             key: 'lineRole',

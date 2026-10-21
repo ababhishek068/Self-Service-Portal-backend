@@ -53,8 +53,8 @@ export const storeLineTypeOptions = [
 
 /** ABH Item / Asset Request template — header request type. */
 export const storeRequestTypeOptions = [
-  { label: 'Item', value: 'item' },
-  { label: 'Asset', value: 'asset' },
+  { label: 'Consumable', value: 'item' },
+  { label: 'Fixed Asset', value: 'asset' },
 ]
 
 /** ABH Item / Asset Request template — priority (Low → Urgent). */
