@@ -115,8 +115,10 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.559.app,
-publish with docs/ERP-Publish-1.0.3.559.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.560.app,
+publish with docs/ERP-Publish-1.0.3.560.ps1).
+1.0.3.560: Consumable / Fixed Asset is chosen on each portal line; the header Request Type
+follows the lines (Fixed Asset when any line is a Fixed Asset) while the request is Open.
 Store requisition (meeting 20 Oct), all in the portal: the requester picks the Issuing
 Store, Is Project / Project Code and the Unit of Measure; the Store Keeper adds the item
 to issue (in-stock list) and submits, or sends Request for LPR; the Store Manager accepts

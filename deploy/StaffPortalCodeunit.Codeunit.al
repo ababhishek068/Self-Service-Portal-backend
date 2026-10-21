@@ -27,6 +27,7 @@ codeunit 50049 "Staff Portal Codeunit"
         CuCustomApprovals: Codeunit "Custom Approvals Codeunit";
         CuLeaveApprovals: Codeunit "Custom Approvals CU";
         CuApprovalsManagement: Codeunit "Approvals Mgmt.";
+        PortalWorkflowApprovalAuth: Codeunit "Portal Workflow Approval Auth";
         TbCommitments: Record Committment;
         CuBudgetaryControl: Codeunit "GLBudget-Open";
         // TbReceiptPaymentType: Record UnknownRecord52202804;
@@ -106,6 +107,9 @@ codeunit 50049 "Staff Portal Codeunit"
         if not FnFindOpenApprovalEntry(entryNo, docNo, PortalApproverID) then
             Error('Record to approve not found for approver %1.', PortalApproverID);
 
+        if (not isApprove) and (StrLen(DelChr(comments, '=', ' ')) < 3) then
+            Error('A rejection reason of at least 3 characters is required.');
+
         if (TbApprovalEntry."Sender ID" = '') or (TbApprovalEntry."Sender ID" = 'ADMIN') then begin
             RequesterUserID := FnStoreReqRequesterUserID(docNo, '');
             if (RequesterUserID <> '') and (RequesterUserID <> 'ADMIN') then begin
@@ -133,6 +137,7 @@ codeunit 50049 "Staff Portal Codeunit"
     procedure LeaveDocumentApproval(entryNo: Integer; docNo: Code[100]; userID: Code[100]; isApprove: Boolean; comments: Text[250]; leaveReliever: Code[30]) return_value: Boolean
     var
         TbLeaveApp: Record "HR Leave Application";
+        PortalLeaveNotification: Codeunit "Portal Leave Notification";
         PortalApproverID: Code[50];
         DocTypeForComment: Integer;
         RecordIdForComment: RecordId;
@@ -146,6 +151,9 @@ codeunit 50049 "Staff Portal Codeunit"
 
         if not FnFindOpenApprovalEntry(entryNo, docNo, PortalApproverID) then
             Error('Record to approve not found for approver %1.', PortalApproverID);
+
+        if (not isApprove) and (StrLen(DelChr(comments, '=', ' ')) < 3) then
+            Error('A rejection reason of at least 3 characters is required.');
 
         DocTypeForComment := TbApprovalEntry."Document Type";
         RecordIdForComment := TbApprovalEntry."Record ID to Approve";
@@ -170,6 +178,20 @@ codeunit 50049 "Staff Portal Codeunit"
         if not FnApprovalDecisionCompleted(entryNo, isApprove) then
             Error('Approval decision for %1 did not complete for approver %2.', docNo, PortalApproverID);
 
+        if isApprove then
+            PostPortalLeaveWhenFullyApproved(docNo);
+
+        // Persist the approval/rejection and its requester-visible comment
+        // before notification is queued. Email delivery is asynchronous and
+        // must not control the business decision transaction.
+        Commit();
+
+        if TbLeaveApp.Get(docNo) then
+            if isApprove then
+                PortalLeaveNotification.NotifyApprovedStep(TbLeaveApp, SequenceNoForComment)
+            else
+                PortalLeaveNotification.NotifyRejected(TbLeaveApp, comments);
+
         return_value := true;
     end;
 
@@ -188,22 +210,89 @@ codeunit 50049 "Staff Portal Codeunit"
             return_value := true;
             exit;
         end;
-        if LeaveApp.Status <> LeaveApp.Status::Approved then begin
-            LeaveApp.Validate(Status, LeaveApp.Status::Approved);
-            LeaveApp."Approval Status" := LeaveApp."Approval Status"::Approved;
-            LeaveApp.Modify(true);
-        end;
+
+        // The portal shows Approved from the approval entries. The document Status
+        // can still be Pending Approval, and the balance is deducted only when
+        // Status is validated to Approved.
+        EnsureLeaveHeaderApproved(LeaveApp);
         if (LeaveApp.Status <> LeaveApp.Status::Approved) and (LeaveApp.Status <> LeaveApp.Status::Posted) then
             Error('Leave application %1 must be fully approved before it can be posted.', applicationCode);
-        if not LeaveApp.Posted then begin
-            LeaveApp.Status := LeaveApp.Status::Posted;
-            LeaveApp.Posted := true;
-            LeaveApp."Posted By" := UserId;
-            LeaveApp."Date Posted" := Today;
-            LeaveApp."Time Posted" := Time;
-            LeaveApp.Modify(true);
-        end;
+        CloseApprovedLeave(LeaveApp);
         return_value := true;
+    end;
+
+    local procedure PostPortalLeaveWhenFullyApproved(ApplicationCode: Code[50])
+    var
+        LeaveApp: Record "HR Leave Application";
+    begin
+        LeaveApp.Reset();
+        LeaveApp.SetRange("Application Code", ApplicationCode);
+        if not LeaveApp.FindFirst() then
+            exit;
+        if LeaveApp.Posted or (LeaveApp.Status = LeaveApp.Status::Posted) then
+            exit;
+        if not LeaveApprovalsAreComplete(LeaveApp."Application Code") then
+            exit;
+
+        EnsureLeaveHeaderApproved(LeaveApp);
+        CloseApprovedLeave(LeaveApp);
+    end;
+
+    local procedure LeaveApprovalsAreComplete(ApplicationCode: Code[50]): Boolean
+    var
+        OpenEntry: Record "Approval Entry";
+        ApprovedEntry: Record "Approval Entry";
+    begin
+        OpenEntry.Reset();
+        OpenEntry.SetRange("Table ID", Database::"HR Leave Application");
+        OpenEntry.SetRange("Document No.", ApplicationCode);
+        OpenEntry.SetFilter(Status, '%1|%2', OpenEntry.Status::Open, OpenEntry.Status::Created);
+        if not OpenEntry.IsEmpty() then
+            exit(false);
+
+        ApprovedEntry.Reset();
+        ApprovedEntry.SetRange("Table ID", Database::"HR Leave Application");
+        ApprovedEntry.SetRange("Document No.", ApplicationCode);
+        ApprovedEntry.SetRange(Status, ApprovedEntry.Status::Approved);
+        exit(not ApprovedEntry.IsEmpty());
+    end;
+
+    local procedure EnsureLeaveHeaderApproved(var LeaveApp: Record "HR Leave Application")
+    begin
+        if LeaveApp.Posted or (LeaveApp.Status = LeaveApp.Status::Posted) or (LeaveApp.Status = LeaveApp.Status::Approved) then
+            exit;
+        if not LeaveApprovalsAreComplete(LeaveApp."Application Code") then
+            Error('Leave application %1 is still waiting for an approver.', LeaveApp."Application Code");
+
+        LeaveApp.Validate(Status, LeaveApp.Status::Approved);
+        LeaveApp."Approval Status" := LeaveApp."Approval Status"::Approved;
+        LeaveApp.Modify(true);
+    end;
+
+    local procedure CloseApprovedLeave(var LeaveApp: Record "HR Leave Application")
+    var
+        LeaveAlloc: Record "HR Leave Allocation";
+    begin
+        if LeaveApp.Posted or (LeaveApp.Status = LeaveApp.Status::Posted) then
+            exit;
+
+        LeaveAlloc.Reset();
+        LeaveAlloc.SetRange("Document No.", LeaveApp."Application Code");
+        LeaveAlloc.SetRange("No.", LeaveApp."Employee No.");
+        LeaveAlloc.SetRange(Posted, true);
+        if LeaveAlloc.IsEmpty() then begin
+            LeaveApp.fn_PostLeaveApplication(LeaveApp."Application Code");
+            exit;
+        end;
+
+        // Status.OnValidate already wrote the negative allocation. Mark the
+        // document posted without writing that day a second time.
+        LeaveApp.Status := LeaveApp.Status::Posted;
+        LeaveApp.Posted := true;
+        LeaveApp."Posted By" := UserId;
+        LeaveApp."Date Posted" := Today;
+        LeaveApp."Time Posted" := Time;
+        LeaveApp.Modify(true);
     end;
 
     local procedure FnFindOpenApprovalEntry(entryNo: Integer; docNo: Code[100]; portalApproverID: Code[50]): Boolean
@@ -242,242 +331,45 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     local procedure FnApproveOrRejectOnBehalfOfPortalUser(var ApprovalEntry: Record "Approval Entry"; PortalApproverID: Code[50]; isApprove: Boolean)
+    begin
+        FnApproveOrRejectNatively(ApprovalEntry, PortalApproverID, isApprove);
+    end;
+
+    local procedure FnApproveOrRejectNatively(ApprovalEntry: Record "Approval Entry"; PortalApproverID: Code[50]; isApprove: Boolean)
     var
+        WorkflowApprovalEntry: Record "Approval Entry";
         EntryNo: Integer;
-        DocNo: Code[20];
-        TableID: Integer;
-        SeqNo: Integer;
     begin
-        // Approvals Mgmt. authorizes the current BC session (ADMIN), not the portal user.
-        // Complete the same workflow outcome while retaining the real approver in the audit.
         EntryNo := ApprovalEntry."Entry No.";
-        DocNo := ApprovalEntry."Document No.";
-        TableID := ApprovalEntry."Table ID";
-        SeqNo := ApprovalEntry."Sequence No.";
+        WorkflowApprovalEntry.Reset();
+        WorkflowApprovalEntry.SetRange("Entry No.", EntryNo);
+        WorkflowApprovalEntry.SetRange("Table ID", ApprovalEntry."Table ID");
+        WorkflowApprovalEntry.SetRange("Document No.", ApprovalEntry."Document No.");
+        WorkflowApprovalEntry.SetRange("Record ID to Approve", ApprovalEntry."Record ID to Approve");
+        WorkflowApprovalEntry.SetRange("Approver ID", PortalApproverID);
+        WorkflowApprovalEntry.SetRange(Status, WorkflowApprovalEntry.Status::Open);
+        if not WorkflowApprovalEntry.FindFirst() then
+            Error('Approval entry %1 was not found for approver %2.', EntryNo, PortalApproverID);
 
+        // The SOAP session is the restricted portal service account, while the
+        // Approval Entry retains the real ABH approver. The single-session context
+        // authorizes only this exact verified entry through the native workflow
+        // check; it never grants the service account a general approval-admin role.
+        PortalWorkflowApprovalAuth.BeginDecision(WorkflowApprovalEntry, PortalApproverID);
         if isApprove then
-            FnPortalCompleteApprove(EntryNo, DocNo, TableID, SeqNo, PortalApproverID)
+            CuApprovalsManagement.ApproveApprovalRequests(WorkflowApprovalEntry)
         else
-            FnPortalCompleteReject(EntryNo, PortalApproverID);
-    end;
+            CuApprovalsManagement.RejectApprovalRequests(WorkflowApprovalEntry);
+        PortalWorkflowApprovalAuth.EndDecision();
 
-    local procedure FnPortalCompleteApprove(EntryNo: Integer; DocNo: Code[20]; TableID: Integer; SeqNo: Integer; PortalApproverID: Code[50])
-    var
-        AppEntry: Record "Approval Entry";
-        StoreReq: Record "Store Requistion Header";
-        PurchaseH: Record "Purchase Header";
-        PaymentHeader: Record "Payments Header";
-        ImprestH: Record "Imprest Header";
-        ClaimH: Record "Staff Claims Header";
-        ImpSurrender: Record "Imprest Surrender Header";
-        LeaveApp: Record "HR Leave Application";
-        StaffAdvanceHeader: Record "Staff Advance Header";
-    begin
-        AppEntry.Reset;
-        AppEntry.SetRange("Document No.", DocNo);
-        AppEntry.SetRange("Table ID", TableID);
-        AppEntry.SetRange("Sequence No.", SeqNo);
-        AppEntry.SetRange(Status, AppEntry.Status::Open);
-        if AppEntry.FindSet() then
-            repeat
-                AppEntry.Status := AppEntry.Status::Approved;
-                AppEntry."Approver ID" := PortalApproverID;
-                AppEntry."Last Modified By User ID" := PortalApproverID;
-                AppEntry.Modify();
-            until AppEntry.Next() = 0
-        else
-            if AppEntry.Get(EntryNo) then begin
-                AppEntry.Status := AppEntry.Status::Approved;
-                AppEntry."Approver ID" := PortalApproverID;
-                AppEntry."Last Modified By User ID" := PortalApproverID;
-                AppEntry.Modify();
-            end;
-
-        AppEntry.Reset;
-        AppEntry.SetRange("Document No.", DocNo);
-        AppEntry.SetRange("Table ID", TableID);
-        AppEntry.SetRange(Status, AppEntry.Status::Open);
-        if AppEntry.FindFirst() then
-            exit;
-
-        // Sequential workflows store later steps as Created. Open only the next sequence.
-        if FnActivateNextCreatedApprovalEntry(DocNo, TableID) then
-            exit;
-
-        if TableID = Database::"Store Requistion Header" then
-            if StoreReq.Get(DocNo) then
-                if StoreReq.Status = StoreReq.Status::"Pending Approval" then begin
-                    StoreReq.Status := StoreReq.Status::Released;
-                    StoreReq.Modify(false);
-                    exit;
-                end;
-
-        if TableID = Database::"Purchase Header" then begin
-            PurchaseH.Reset;
-            PurchaseH.SetRange("No.", DocNo);
-            if PurchaseH.FindFirst() then
-                if PurchaseH.Status = PurchaseH.Status::"Pending Approval" then begin
-                    PurchaseH.Status := PurchaseH.Status::Released;
-                    PurchaseH.Modify();
-                    exit;
-                end;
-        end;
-
-        if TableID = Database::"Payments Header" then
-            if PaymentHeader.Get(DocNo) then
-                if PaymentHeader.Status = PaymentHeader.Status::"Pending Approval" then begin
-                    PaymentHeader.Status := PaymentHeader.Status::Approved;
-                    PaymentHeader.Modify();
-                    exit;
-                end;
-
-        if TableID = Database::"Staff Claims Header" then
-            if ClaimH.Get(DocNo) then
-                if ClaimH.Status = ClaimH.Status::"Pending Approval" then begin
-                    ClaimH.Status := ClaimH.Status::Approved;
-                    ClaimH.Modify();
-                    exit;
-                end;
-
-        if TableID = Database::"Imprest Header" then
-            if ImprestH.Get(DocNo) then
-                if ImprestH.Status = ImprestH.Status::"Pending Approval" then begin
-                    ImprestH.Status := ImprestH.Status::Approved;
-                    ImprestH.Modify();
-                    exit;
-                end;
-
-        if TableID = Database::"Imprest Surrender Header" then
-            if ImpSurrender.Get(DocNo) then
-                if ImpSurrender.Status = ImpSurrender.Status::"Pending Approval" then begin
-                    ImpSurrender.Status := ImpSurrender.Status::Approved;
-                    ImpSurrender.Modify();
-                    exit;
-                end;
-
-        if TableID = Database::"Staff Advance Header" then
-            if StaffAdvanceHeader.Get(DocNo) then
-                if StaffAdvanceHeader.Status = StaffAdvanceHeader.Status::"Pending Approval" then begin
-                    StaffAdvanceHeader.Validate(Status, StaffAdvanceHeader.Status::Approved);
-                    StaffAdvanceHeader.Modify(true);
-                    exit;
-                end;
-
-        if TableID = Database::"HR Leave Application" then begin
-            LeaveApp.Reset;
-            LeaveApp.SetRange("Application Code", DocNo);
-            if LeaveApp.FindFirst() then
-                if LeaveApp.Status = LeaveApp.Status::"Pending Approval" then begin
-                    LeaveApp.Validate(Status, LeaveApp.Status::Approved);
-                    LeaveApp."Approval Status" := LeaveApp."Approval Status"::Approved;
-                    LeaveApp.Modify(true);
-                    // Validating Status to Approved writes the negative allocation.
-                    // Do not call fn_PostLeaveApplication as well.
-                    if not LeaveApp.Posted then begin
-                        LeaveApp.Status := LeaveApp.Status::Posted;
-                        LeaveApp.Posted := true;
-                        LeaveApp."Posted By" := UserId;
-                        LeaveApp."Date Posted" := Today;
-                        LeaveApp."Time Posted" := Time;
-                        LeaveApp.Modify(true);
-                    end;
-                end;
-        end;
-    end;
-
-    local procedure FnActivateNextCreatedApprovalEntry(DocNo: Code[20]; TableID: Integer): Boolean
-    var
-        AppEntry: Record "Approval Entry";
-        NextSequenceNo: Integer;
-    begin
-        AppEntry.Reset;
-        AppEntry.SetRange("Document No.", DocNo);
-        AppEntry.SetRange("Table ID", TableID);
-        AppEntry.SetRange(Status, AppEntry.Status::Created);
-        if AppEntry.FindSet() then
-            repeat
-                if (NextSequenceNo = 0) or (AppEntry."Sequence No." < NextSequenceNo) then
-                    NextSequenceNo := AppEntry."Sequence No.";
-            until AppEntry.Next() = 0;
-
-        if NextSequenceNo = 0 then
-            exit(false);
-
-        AppEntry.Reset;
-        AppEntry.SetRange("Document No.", DocNo);
-        AppEntry.SetRange("Table ID", TableID);
-        AppEntry.SetRange("Sequence No.", NextSequenceNo);
-        AppEntry.SetRange(Status, AppEntry.Status::Created);
-        if AppEntry.FindSet() then
-            repeat
-                AppEntry.Status := AppEntry.Status::Open;
-                AppEntry."Date-Time Sent for Approval" := CurrentDateTime;
-                AppEntry.Modify(false);
-            until AppEntry.Next() = 0;
-        exit(true);
-    end;
-
-    local procedure FnPortalCompleteReject(EntryNo: Integer; PortalApproverID: Code[50])
-    var
-        AppEntry: Record "Approval Entry";
-        PendingEntry: Record "Approval Entry";
-        LeaveApp: Record "HR Leave Application";
-        StaffAdvanceHeader: Record "Staff Advance Header";
-        StoreReqHeader: Record "Store Requistion Header";
-        PurchaseHeader: Record "Purchase Header";
-        DocNo: Code[20];
-        TableID: Integer;
-    begin
-        if AppEntry.Get(EntryNo) then begin
-            DocNo := AppEntry."Document No.";
-            TableID := AppEntry."Table ID";
-            AppEntry.Status := AppEntry.Status::Rejected;
-            AppEntry."Approver ID" := PortalApproverID;
-            AppEntry."Last Modified By User ID" := PortalApproverID;
-            AppEntry.Modify(false);
-
-            PendingEntry.Reset;
-            PendingEntry.SetRange("Document No.", DocNo);
-            PendingEntry.SetRange("Table ID", TableID);
-            PendingEntry.SetFilter(Status, '%1|%2', PendingEntry.Status::Open, PendingEntry.Status::Created);
-            if PendingEntry.FindSet() then
-                repeat
-                    PendingEntry.Status := PendingEntry.Status::Canceled;
-                    PendingEntry.Modify(false);
-                until PendingEntry.Next() = 0;
-
-            if TableID = Database::"HR Leave Application" then begin
-                LeaveApp.Reset;
-                LeaveApp.SetRange("Application Code", DocNo);
-                if LeaveApp.FindFirst() then begin
-                    LeaveApp.Validate(Status, LeaveApp.Status::Rejected);
-                    LeaveApp.Modify(true);
-                end;
-            end;
-
-            if TableID = Database::"Staff Advance Header" then
-                if StaffAdvanceHeader.Get(DocNo) then begin
-                    StaffAdvanceHeader.Validate(Status, StaffAdvanceHeader.Status::Cancelled);
-                    StaffAdvanceHeader.Modify(true);
-                end;
-
-            if TableID = Database::"Store Requistion Header" then
-                if StoreReqHeader.Get(DocNo) then begin
-                    StoreReqHeader.Status := StoreReqHeader.Status::Cancelled;
-                    StoreReqHeader.Modify(false);
-                end;
-
-            if TableID = Database::"Purchase Header" then begin
-                PurchaseHeader.Reset();
-                PurchaseHeader.SetRange("Document Type", PurchaseHeader."Document Type"::Quote);
-                PurchaseHeader.SetRange("No.", DocNo);
-                PurchaseHeader.SetRange(DocApprovalType, PurchaseHeader.DocApprovalType::Requisition);
-                if PurchaseHeader.FindFirst() then
-                    if PurchaseHeader.Status = PurchaseHeader.Status::"Pending Approval" then begin
-                        PurchaseHeader.Validate(Status, PurchaseHeader.Status::Open);
-                        PurchaseHeader.Modify(true);
-                    end;
-            end;
+        // Approvals Mgmt. records the BC service session as modifier. Preserve the
+        // authenticated portal approver in the audit fields after native workflow
+        // processing has completed.
+        WorkflowApprovalEntry.Reset();
+        if WorkflowApprovalEntry.Get(EntryNo) then begin
+            WorkflowApprovalEntry."Approver ID" := PortalApproverID;
+            WorkflowApprovalEntry."Last Modified By User ID" := PortalApproverID;
+            WorkflowApprovalEntry.Modify(false);
         end;
     end;
 
@@ -516,6 +408,10 @@ codeunit 50049 "Staff Portal Codeunit"
         NextEntryNo: Integer;
     begin
         return_value := false;
+        if DelChr(comments, '=', ' ') = '' then begin
+            return_value := true;
+            exit(return_value);
+        end;
         TbApprovalCommentLine.Reset;
         if TbApprovalCommentLine.FindLast() then
             NextEntryNo := TbApprovalCommentLine."Entry No." + 1
@@ -531,7 +427,7 @@ codeunit 50049 "Staff Portal Codeunit"
         TbApprovalCommentLine."User ID" := userID;
         TbApprovalCommentLine.Comment := comments;
         TbApprovalCommentLine."Date and Time" := CurrentDatetime;
-        //TbApprovalCommentLine."Seqeunce No.":=sequenceNo;
+        TbApprovalCommentLine."Sequence No" := sequenceNo;
         TbApprovalCommentLine."Record ID to Approve" := recordID;
         TbApprovalCommentLine.Insert;
         return_value := true;
@@ -575,6 +471,8 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     procedure CancelLeaveApplication(employeeNo: Code[100]; requisitionNo: Code[100]) return_value: Boolean
+    var
+        PortalLeaveNotification: Codeunit "Portal Leave Notification";
     begin
         return_value := false;
         TbHRLeaveRequisition.Reset;
@@ -589,6 +487,8 @@ codeunit 50049 "Staff Portal Codeunit"
                 TbHRLeaveRequisition.Validate(Status, TbHRLeaveRequisition.Status::Open);
             TbHRLeaveRequisition."Approval Status" := TbHRLeaveRequisition."Approval Status"::Open;
             TbHRLeaveRequisition.Modify(true);
+            Commit();
+            PortalLeaveNotification.NotifyCancelled(TbHRLeaveRequisition);
             return_value := true;
         end else begin
             Error('Leave application cannot be cancelled or was not found');
@@ -619,6 +519,216 @@ codeunit 50049 "Staff Portal Codeunit"
 
         TbHRLeaveRequisition.Delete(true);
         return_value := true;
+    end;
+
+    local procedure AssertNoActivePortalApproval(RecID: RecordId)
+    var
+        ApprovalEntry: Record "Approval Entry";
+    begin
+        ApprovalEntry.Reset();
+        ApprovalEntry.SetRange("Record ID to Approve", RecID);
+        ApprovalEntry.SetFilter(Status, '%1|%2', ApprovalEntry.Status::Open, ApprovalEntry.Status::Created);
+        if ApprovalEntry.FindFirst() then
+            Error('Cancel the pending approval before deleting this draft.');
+    end;
+
+    local procedure DeletePortalDocAttachments(TableID: Integer; DocNo: Code[20])
+    var
+        PortalAttachment: Record "Document Attachment";
+    begin
+        PortalAttachment.Reset();
+        PortalAttachment.SetRange("Table ID", TableID);
+        PortalAttachment.SetRange("No.", DocNo);
+        if not PortalAttachment.IsEmpty then
+            PortalAttachment.DeleteAll(true);
+    end;
+
+    /// <summary>
+    /// Permanently deletes an open/pending portal draft (same rules as DeleteLeaveApplication).
+    /// moduleCode values match portal staff module keys (imprest, store-requisition, â€¦).
+    /// </summary>
+    procedure DeletePortalDraftDocument(employeeNo: Code[100]; requisitionNo: Code[100]; moduleCode: Text) return_value: Boolean
+    var
+        ModuleKey: Text;
+        StaffAdvanceHeader: Record "Staff Advance Header";
+        FuelMaintReq: Record "FLT-Fuel & Maintenance Req.";
+        GatePassRec: Record "Gate Pass";
+        TransferHeader: Record "Transfer Header";
+        TrainingApp: Record "HR Training Applications";
+        GatePassNoInt: Integer;
+    begin
+        return_value := false;
+        ModuleKey := LowerCase(DelChr(moduleCode, '=', ' '));
+        if ModuleKey = '' then
+            Error('Module code is required to delete a portal draft.');
+        if requisitionNo = '' then
+            Error('Document number is required to delete a portal draft.');
+
+        case ModuleKey of
+            'leave':
+                exit(DeleteLeaveApplication(employeeNo, requisitionNo));
+
+            'imprest':
+                begin
+                    TbImprestRequisitionHeader.Reset();
+                    TbImprestRequisitionHeader.SetRange("No.", requisitionNo);
+                    TbImprestRequisitionHeader.SetFilter(Status, '%1|%2', TbImprestRequisitionHeader.Status::Pending, TbImprestRequisitionHeader.Status::Cancelled);
+                    if not TbImprestRequisitionHeader.FindFirst() then
+                        Error('Only a pending or cancelled imprest draft can be deleted.');
+                    AssertNoActivePortalApproval(TbImprestRequisitionHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Imprest Header", requisitionNo);
+                    TbImprestRequisitionHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'imprest-surrender':
+                begin
+                    TbImprestSurrenderHeader.Reset();
+                    TbImprestSurrenderHeader.SetRange(No, requisitionNo);
+                    TbImprestSurrenderHeader.SetFilter(Status, '%1|%2', TbImprestSurrenderHeader.Status::Pending, TbImprestSurrenderHeader.Status::Cancelled);
+                    if not TbImprestSurrenderHeader.FindFirst() then
+                        Error('Only a pending or cancelled imprest surrender draft can be deleted.');
+                    AssertNoActivePortalApproval(TbImprestSurrenderHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Imprest Surrender Header", requisitionNo);
+                    TbImprestSurrenderHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'claim', 'staff-claim':
+                begin
+                    TbStaffClaimHeader.Reset();
+                    TbStaffClaimHeader.SetRange("No.", requisitionNo);
+                    TbStaffClaimHeader.SetFilter(Status, '%1|%2', TbStaffClaimHeader.Status::Pending, TbStaffClaimHeader.Status::Cancelled);
+                    if not TbStaffClaimHeader.FindFirst() then
+                        Error('Only a pending or cancelled staff claim draft can be deleted.');
+                    AssertNoActivePortalApproval(TbStaffClaimHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Staff Claims Header", requisitionNo);
+                    TbStaffClaimHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'petty-cash', 'inter-bank-transfer':
+                begin
+                    PettyCashHeaderTbl.Reset();
+                    PettyCashHeaderTbl.SetRange("No.", requisitionNo);
+                    PettyCashHeaderTbl.SetFilter(Status, '%1|%2', PettyCashHeaderTbl.Status::Pending, PettyCashHeaderTbl.Status::Cancelled);
+                    if not PettyCashHeaderTbl.FindFirst() then
+                        Error('Only a pending or cancelled payment/petty cash document can be deleted.');
+                    AssertNoActivePortalApproval(PettyCashHeaderTbl.RecordId);
+                    DeletePortalDocAttachments(Database::"Payments Header", requisitionNo);
+                    PettyCashHeaderTbl.Delete(true);
+                    return_value := true;
+                end;
+
+            'store-requisition':
+                begin
+                    if employeeNo = '' then
+                        Error('Employee No. is required to delete a store requisition draft.');
+                    TbStoreRequisition.Reset();
+                    TbStoreRequisition.SetRange("No.", requisitionNo);
+                    TbStoreRequisition.SetRange("Employee No", employeeNo);
+                    TbStoreRequisition.SetRange(Status, TbStoreRequisition.Status::Open);
+                    if not TbStoreRequisition.FindFirst() then
+                        Error('Only your own open store requisition draft can be deleted. Cancel a pending approval first.');
+                    AssertNoActivePortalApproval(TbStoreRequisition.RecordId);
+                    DeletePortalDocAttachments(Database::"Store Requistion Header", requisitionNo);
+                    TbStoreRequisition.Delete(true);
+                    return_value := true;
+                end;
+
+            'purchase-requisition':
+                begin
+                    TbPurchaseHeader.Reset();
+                    TbPurchaseHeader.SetRange("Document Type", TbPurchaseHeader."Document Type"::Quote);
+                    TbPurchaseHeader.SetRange("No.", requisitionNo);
+                    TbPurchaseHeader.SetRange(Status, TbPurchaseHeader.Status::Open);
+                    if not TbPurchaseHeader.FindFirst() then
+                        Error('Only an open purchase requisition draft can be deleted.');
+                    AssertNoActivePortalApproval(TbPurchaseHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Purchase Header", requisitionNo);
+                    TbPurchaseHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'transport':
+                begin
+                    TbTransportRequisition.Reset();
+                    TbTransportRequisition.SetRange("Transport Requisition No", requisitionNo);
+                    TbTransportRequisition.SetRange(Status, TbTransportRequisition.Status::Open);
+                    if not TbTransportRequisition.FindFirst() then
+                        Error('Only an open transport draft can be deleted.');
+                    AssertNoActivePortalApproval(TbTransportRequisition.RecordId);
+                    DeletePortalDocAttachments(Database::"FLT-Transport Requisition", requisitionNo);
+                    TbTransportRequisition.Delete(true);
+                    return_value := true;
+                end;
+
+            'fuel', 'maintenance':
+                begin
+                    FuelMaintReq.Reset();
+                    FuelMaintReq.SetRange("Requisition No", requisitionNo);
+                    FuelMaintReq.SetFilter(Status, '%1|%2', FuelMaintReq.Status::Open, FuelMaintReq.Status::Cancelled);
+                    if not FuelMaintReq.FindFirst() then
+                        Error('Only an open or cancelled fuel/maintenance draft can be deleted.');
+                    AssertNoActivePortalApproval(FuelMaintReq.RecordId);
+                    DeletePortalDocAttachments(Database::"FLT-Fuel & Maintenance Req.", requisitionNo);
+                    FuelMaintReq.Delete(true);
+                    return_value := true;
+                end;
+
+            'transfer-order':
+                begin
+                    if not TransferHeader.Get(requisitionNo) then
+                        Error('Transfer order %1 was not found.', requisitionNo);
+                    if TransferHeader.Status <> TransferHeader.Status::Open then
+                        Error('Only an open transfer order draft can be deleted.');
+                    AssertNoActivePortalApproval(TransferHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Transfer Header", requisitionNo);
+                    TransferHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'salary-advance':
+                begin
+                    StaffAdvanceHeader.Reset();
+                    StaffAdvanceHeader.SetRange("No.", requisitionNo);
+                    StaffAdvanceHeader.SetFilter(Status, '%1|%2', StaffAdvanceHeader.Status::Pending, StaffAdvanceHeader.Status::Cancelled);
+                    if not StaffAdvanceHeader.FindFirst() then
+                        Error('Only a pending or cancelled salary advance draft can be deleted.');
+                    AssertNoActivePortalApproval(StaffAdvanceHeader.RecordId);
+                    DeletePortalDocAttachments(Database::"Staff Advance Header", requisitionNo);
+                    StaffAdvanceHeader.Delete(true);
+                    return_value := true;
+                end;
+
+            'training':
+                begin
+                    TrainingApp.Reset();
+                    TrainingApp.SetRange("Application No", requisitionNo);
+                    TrainingApp.SetRange(Status, TrainingApp.Status::New);
+                    if not TrainingApp.FindFirst() then
+                        Error('Only a new training draft can be deleted.');
+                    AssertNoActivePortalApproval(TrainingApp.RecordId);
+                    DeletePortalDocAttachments(Database::"HR Training Applications", requisitionNo);
+                    TrainingApp.Delete(true);
+                    return_value := true;
+                end;
+
+            'gate-pass':
+                begin
+                    if not Evaluate(GatePassNoInt, requisitionNo) then
+                        Error('Gate pass number %1 is invalid.', requisitionNo);
+                    if not GatePassRec.Get(GatePassNoInt) then
+                        Error('Gate pass %1 was not found.', requisitionNo);
+                    if GatePassRec.Status <> GatePassRec.Status::Open then
+                        Error('Only an open gate pass draft can be deleted.');
+                    AssertNoActivePortalApproval(GatePassRec.RecordId);
+                    GatePassRec.Delete(true);
+                    return_value := true;
+                end;
+            else
+                Error('Delete is not supported for module %1.', moduleCode);
+        end;
     end;
 
     local procedure CancelActiveLeaveApprovalEntries(var LeaveApp: Record "HR Leave Application")
@@ -742,6 +852,7 @@ codeunit 50049 "Staff Portal Codeunit"
     procedure RequestLeaveApproval(employeeNo: Code[100]; requisitionNo: Code[100]; tableID: Integer) return_value: Boolean
     var
         LeaveAfterApproval: Record "HR Leave Application";
+        PortalLeaveNotification: Codeunit "Portal Leave Notification";
         LeaveRecRef: RecordRef;
         RecordIdToApprove: RecordId;
         HasApprovalEntry: Boolean;
@@ -755,9 +866,8 @@ codeunit 50049 "Staff Portal Codeunit"
         if TbHRLeaveRequisition."Return Date" = 0D then
             Error('Return Date must be populated before sending leave for approval.');
 
-        if (TbHRLeaveRequisition."Earned Leave Days" > 0) and
-           (TbHRLeaveRequisition."Days Applied" > TbHRLeaveRequisition."Earned Leave Days") then
-            Error('Days applied cannot exceed earned leave days');
+        if TbHRLeaveRequisition."Days Applied" > TbHRLeaveRequisition."Current Leave Balance" then
+            Error('Days applied cannot exceed Available Leave Balance');
 
         if LeaveRequiresMedicalAttachment(TbHRLeaveRequisition) and
            not HasPortalDocumentAttachment(Database::"HR Leave Application", requisitionNo)
@@ -803,6 +913,8 @@ codeunit 50049 "Staff Portal Codeunit"
             Error(
                 'Business Central did not create approval entries for leave application %1. Enable the Leave workflow and confirm Approval User Setup has an approver for the requester.',
                 requisitionNo);
+
+        PortalLeaveNotification.NotifySubmitted(LeaveAfterApproval);
     end;
 
     local procedure HasPortalDocumentAttachment(TableId: Integer; DocumentNo: Code[100]): Boolean
@@ -1047,7 +1159,7 @@ codeunit 50049 "Staff Portal Codeunit"
     begin
         // UAT 25/07/2026: the portal "requested amount" never picked up the ERP daily rate.
         // Cause: this validated Destination, whose OnValidate no longer calculates anything
-        // (CalculateTravelRates is commented out), and the Imprest Holder was never set — so
+        // (CalculateTravelRates is commented out), and the Imprest Holder was never set â€” so
         // CalculateTravelAmounts() never ran and Amount stayed 0.
         // Fix: set the Imprest Holder from the header (needed to resolve the employee Job Group
         // -> Job Grade Advance Rates), then Validate "No of Days", which runs
@@ -1348,8 +1460,8 @@ codeunit 50049 "Staff Portal Codeunit"
         if not CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
             Error(
                 'Imprest Surrender approval workflow is not enabled for %1.\\' +
-                'Baby steps in Business Central: (1) Tell Me → Workflows. (2) Create/enable a workflow for Imprest Surrender ' +
-                '(event: Approval of a Imprest Surrender is requested). (3) User Setup → set Approver ID for the requester. (4) Try Request Approval again.',
+                'Baby steps in Business Central: (1) Tell Me â†’ Workflows. (2) Create/enable a workflow for Imprest Surrender ' +
+                '(event: Approval of a Imprest Surrender is requested). (3) User Setup â†’ set Approver ID for the requester. (4) Try Request Approval again.',
                 docNo);
 
         CuCustomApprovals.OnSendDocForApproval(VarVariant);
@@ -1744,6 +1856,8 @@ codeunit 50049 "Staff Portal Codeunit"
             return_value := NextNo;
         end else begin
             TbStoreRequisition.SetRange("No.", docNo);
+            TbStoreRequisition.SetRange("User ID", myUserID);
+            TbStoreRequisition.SetRange(Status, TbStoreRequisition.Status::Open);
             if TbStoreRequisition.FindFirst() then begin
                 TbStoreRequisition."Required Date" := requestDate;
                 if (requestDate <> 0D) and (TbStoreRequisition."Request date" <> 0D) then
@@ -1806,8 +1920,11 @@ codeunit 50049 "Staff Portal Codeunit"
         FARec: Record "Fixed Asset";
         resolvedItemNo: Code[20];
         lineDescription: Text[70];
+        targetLineKey: Code[20];
     begin
         return_value := false;
+        TbStoreRequisition.Get(reqNo);
+        TbStoreRequisition.TestField(Status, TbStoreRequisition.Status::Open);
         resolvedItemNo := '';
         lineDescription := description;
         if itemNo <> '' then begin
@@ -1825,7 +1942,7 @@ codeunit 50049 "Staff Portal Codeunit"
                             lineDescription := CopyStr(FARec.Description, 1, MaxStrLen(lineDescription));
                     end;
                 end;
-            // Unknown codes are ignored — free-text name/description still saves.
+            // Unknown codes are ignored â€” free-text name/description still saves.
             if (resolvedItemNo = '') and (lineDescription = '') then
                 lineDescription := CopyStr(itemNo, 1, MaxStrLen(lineDescription));
         end;
@@ -1834,6 +1951,7 @@ codeunit 50049 "Staff Portal Codeunit"
 
         TbStoreRequisitionLine.Reset;
         if action = 'create' then begin
+            TbStoreRequisitionLine.LockTable();
             TbStoreRequisitionLine.Reset;
             TbStoreRequisitionLine.SetRange("Requistion No", reqNo);
             if TbStoreRequisitionLine.FindLast then
@@ -1859,9 +1977,10 @@ codeunit 50049 "Staff Portal Codeunit"
                 if preferredBrandModel <> '' then
                     TbStoreRequisitionLine."Description 2" := preferredBrandModel;
             end else
-                if itemNo <> '' then
-                    // ValidateTableRelation = false — keep typed code for portal display.
-                    TbStoreRequisitionLine."No." := CopyStr(itemNo, 1, MaxStrLen(TbStoreRequisitionLine."No."));
+                // The production table key is Requisition No. + No. Multiple
+                // free-text portal lines therefore need a stable, unique key
+                // until Store resolves each line to a real Item/Asset number.
+                TbStoreRequisitionLine."No." := PortalStoreLineKey(lineNo);
             if unitOfMeasure <> '' then
                 TbStoreRequisitionLine."Unit of Measure" := unitOfMeasure;
             TbStoreRequisitionLine.Remarks := remarks;
@@ -1870,11 +1989,21 @@ codeunit 50049 "Staff Portal Codeunit"
             if unitOfMeasure <> '' then
                 TbStoreRequisitionLine."Unit of Measure" := unitOfMeasure;
             TbStoreRequisitionLine.Insert(true);
+            SyncPortalStoreRequestType(reqNo);
             return_value := true;
         end else begin
             TbStoreRequisitionLine.SetRange("Requistion No", reqNo);
             TbStoreRequisitionLine.SetRange("Line No.", lineNo);
             if TbStoreRequisitionLine.FindFirst() then begin
+                targetLineKey := resolvedItemNo;
+                if targetLineKey = '' then begin
+                    targetLineKey := TbStoreRequisitionLine."No.";
+                    if targetLineKey = '' then
+                        targetLineKey := PortalStoreLineKey(lineNo);
+                end;
+                if targetLineKey <> TbStoreRequisitionLine."No." then
+                    TbStoreRequisitionLine.Rename(reqNo, targetLineKey);
+
                 TbStoreRequisitionLine."Requistion No" := reqNo;
                 TbStoreRequisitionLine.Type := type;
                 TbStoreRequisitionLine."Issuing Store" := location;
@@ -1890,11 +2019,7 @@ codeunit 50049 "Staff Portal Codeunit"
                         TbStoreRequisitionLine.Description := description;
                     if preferredBrandModel <> '' then
                         TbStoreRequisitionLine."Description 2" := preferredBrandModel;
-                end else
-                    if itemNo <> '' then
-                        TbStoreRequisitionLine."No." := CopyStr(itemNo, 1, MaxStrLen(TbStoreRequisitionLine."No."))
-                    else
-                        Clear(TbStoreRequisitionLine."No.");
+                end;
                 if unitOfMeasure <> '' then
                     TbStoreRequisitionLine."Unit of Measure" := unitOfMeasure;
                 TbStoreRequisitionLine.Remarks := remarks;
@@ -1903,6 +2028,7 @@ codeunit 50049 "Staff Portal Codeunit"
                 if unitOfMeasure <> '' then
                     TbStoreRequisitionLine."Unit of Measure" := unitOfMeasure;
                 TbStoreRequisitionLine.Modify(true);
+                SyncPortalStoreRequestType(reqNo);
                 return_value := true;
             end else begin
                 Error('Store requisition line is no longer editable or it does not exist.');
@@ -1917,27 +2043,190 @@ codeunit 50049 "Staff Portal Codeunit"
         TbStoreRequisitionLine.SetRange("Requistion No", requisitionNo);
         TbStoreRequisitionLine.SetRange("Line No.", lineNo);
         if TbStoreRequisitionLine.FindFirst() then begin
-            TbStoreRequisitionLine.Delete;
+            TbStoreRequisitionLine.Delete(true);
+            SyncPortalStoreRequestType(requisitionNo);
             return_value := true;
         end else begin
             Error('Requisition line cannot be deleted or was not found');
         end;
     end;
 
+    /// <summary>
+    /// The portal picks Consumable / Fixed Asset on each line only. Keep the header Request Type
+    /// in step with the requested lines (Fixed Asset when any line is a Fixed Asset, else
+    /// Consumable) while the request is Open, so BC lists and reports match the lines.
+    /// </summary>
+    local procedure SyncPortalStoreRequestType(requisitionNo: Code[100])
+    var
+        ReqHeader: Record "Store Requistion Header";
+        ReqLine: Record "Store Requistion Lines";
+        HasFixedAsset: Boolean;
+    begin
+        if not ReqHeader.Get(CopyStr(requisitionNo, 1, MaxStrLen(ReqHeader."No."))) then
+            exit;
+        if ReqHeader.Status <> ReqHeader.Status::Open then
+            exit;
+        ReqLine.SetRange("Requistion No", ReqHeader."No.");
+        ReqLine.SetFilter("ABH Line Role", '<>%1', ReqLine."ABH Line Role"::"Store Offer");
+        ReqLine.SetRange(Type, ReqLine.Type::Asset);
+        HasFixedAsset := not ReqLine.IsEmpty();
+        if HasFixedAsset then begin
+            if ReqHeader."Store Requisition Type" = ReqHeader."Store Requisition Type"::"Minor Asset" then
+                exit;
+            ReqHeader."Store Requisition Type" := ReqHeader."Store Requisition Type"::"Minor Asset";
+        end else begin
+            if ReqHeader."Store Requisition Type" = ReqHeader."Store Requisition Type"::Item then
+                exit;
+            ReqHeader."Store Requisition Type" := ReqHeader."Store Requisition Type"::Item;
+        end;
+        ReqHeader.Modify();
+    end;
+
     procedure CancelStoreRequisition(employeeNo: Code[100]; requisitionNo: Code[100]; tableID: Integer) return_value: Boolean
     var
-        blnparam: Boolean;
+        StoreReqRecRef: RecordRef;
     begin
         return_value := false;
+        if employeeNo = '' then
+            Error('Employee No. is required to cancel a store requisition approval request.');
         TbStoreRequisition.Reset;
         TbStoreRequisition.SetRange("No.", requisitionNo);
+        TbStoreRequisition.SetRange("Employee No", employeeNo);
+        TbStoreRequisition.SetRange(Status, TbStoreRequisition.Status::"Pending Approval");
         if TbStoreRequisition.FindFirst() then begin
             VarVariant := TbStoreRequisition;
             CuCustomApprovals.OnCancelDocApprovalRequest(VarVariant);
+
+            if not TbStoreRequisition.Get(requisitionNo) then
+                Error('Store requisition %1 was not found after cancelling approval.', requisitionNo);
+
+            // Some existing companies have the cancellation event enabled but
+            // are missing one or both standard responses (Cancel all approval
+            // requests / Open document). Reconcile both outcomes here so SSP
+            // and BC cannot disagree or leave the request permanently pending.
+            CancelActiveStoreApprovalEntries(TbStoreRequisition);
+            if TbStoreRequisition.Status <> TbStoreRequisition.Status::Open then begin
+                TbStoreRequisition.Status := TbStoreRequisition.Status::Open;
+                TbStoreRequisition.Modify(true);
+            end;
+
+            StoreReqRecRef.GetTable(TbStoreRequisition);
+            TbApprovalEntry.Reset();
+            TbApprovalEntry.SetRange("Record ID to Approve", StoreReqRecRef.RecordId);
+            TbApprovalEntry.SetRange("Table ID", Database::"Store Requistion Header");
+            TbApprovalEntry.SetFilter(Status, '%1|%2', TbApprovalEntry.Status::Open, TbApprovalEntry.Status::Created);
+            if not TbApprovalEntry.IsEmpty() then
+                Error('Business Central still has active approval entries for store requisition %1.', requisitionNo);
+
             return_value := true;
         end else begin
-            Error('Requisition cannot be cancelled or was not found');
+            Error('Store requisition %1 was not found for employee %2 or is not pending approval.', requisitionNo, employeeNo);
         end;
+    end;
+
+    local procedure PortalStoreLineKey(lineNo: Integer): Code[20]
+    begin
+        exit(CopyStr('PORTAL-' + Format(lineNo), 1, 20));
+    end;
+
+    local procedure CancelActiveStoreApprovalEntries(var StoreReq: Record "Store Requistion Header")
+    var
+        ApprovalEntry: Record "Approval Entry";
+        WorkflowStepInstance: Record "Workflow Step Instance";
+        ApprovalsMgmt: Codeunit "Approvals Mgmt.";
+        WorkflowManagement: Codeunit "Workflow Management";
+        RecordRestrictionMgt: Codeunit "Record Restriction Mgt.";
+        StoreReqRecRef: RecordRef;
+        ActiveEntryNo: Integer;
+        WorkflowInstanceId: Guid;
+    begin
+        StoreReqRecRef.GetTable(StoreReq);
+
+        while FindActiveStoreApprovalEntry(StoreReq.RecordId, ApprovalEntry) do begin
+            ActiveEntryNo := ApprovalEntry."Entry No.";
+            WorkflowInstanceId := ApprovalEntry."Workflow Step Instance ID";
+
+            if not IsNullGuid(WorkflowInstanceId) then begin
+                WorkflowStepInstance.Reset();
+                WorkflowStepInstance.SetRange(ID, WorkflowInstanceId);
+                if WorkflowStepInstance.FindFirst() then begin
+                    ApprovalsMgmt.CancelApprovalRequestsForRecord(StoreReqRecRef, WorkflowStepInstance);
+                    WorkflowManagement.ArchiveWorkflowInstance(WorkflowStepInstance);
+                end;
+            end;
+
+            // Preserve legacy/orphaned entries for audit while closing them so
+            // they cannot continue to authorize a decision after cancellation.
+            if ApprovalEntry.Get(ActiveEntryNo) and
+               (ApprovalEntry.Status in [ApprovalEntry.Status::Open, ApprovalEntry.Status::Created])
+            then begin
+                ApprovalEntry.Validate(Status, ApprovalEntry.Status::Canceled);
+                ApprovalEntry.Modify(true);
+            end;
+        end;
+
+        RecordRestrictionMgt.AllowRecordUsage(StoreReq);
+    end;
+
+    local procedure FindActiveStoreApprovalEntry(StoreRecordId: RecordId; var ApprovalEntry: Record "Approval Entry"): Boolean
+    begin
+        ApprovalEntry.Reset();
+        ApprovalEntry.SetRange("Table ID", Database::"Store Requistion Header");
+        ApprovalEntry.SetRange("Record ID to Approve", StoreRecordId);
+        ApprovalEntry.SetFilter(Status, '%1|%2', ApprovalEntry.Status::Open, ApprovalEntry.Status::Created);
+        exit(ApprovalEntry.FindFirst());
+    end;
+
+    local procedure EnsurePortalStoreApprovalStarted(var StoreReq: Record "Store Requistion Header"; RequesterUserID: Code[50])
+    var
+        ApprovalEntry: Record "Approval Entry";
+        UserSetupRec: Record "User Setup";
+        Requester: Record "HR-Employee";
+        Supervisor: Record "HR-Employee";
+        StoreReqRecRef: RecordRef;
+        ApproverUserID: Code[50];
+    begin
+        if not StoreReq.Get(StoreReq."No.") then
+            exit;
+
+        if (RequesterUserID <> '') and UserSetupRec.Get(RequesterUserID) then
+            ApproverUserID := UserSetupRec."Approver ID";
+        if ApproverUserID = '' then
+            if Requester.Get(StoreReq."Employee No") then begin
+                ApproverUserID := CopyStr(Requester."Supervisor User ID", 1, MaxStrLen(ApproverUserID));
+                if (ApproverUserID = '') and (Requester."Supervisor No." <> '') then
+                    if Supervisor.Get(Requester."Supervisor No.") then
+                        ApproverUserID := CopyStr(Supervisor."User ID", 1, MaxStrLen(ApproverUserID));
+            end;
+        if ApproverUserID = '' then
+            Error('Employee %1 has no approver. Set Approver ID for %2 in Approval User Setup, or set Supervisor on the Employee Card.', StoreReq."Employee No", RequesterUserID);
+
+        if StoreReq.Status <> StoreReq.Status::"Pending Approval" then begin
+            StoreReq.Validate(Status, StoreReq.Status::"Pending Approval");
+            StoreReq.Modify(true);
+        end;
+
+        StoreReqRecRef.GetTable(StoreReq);
+        ApprovalEntry.Reset();
+        ApprovalEntry.SetRange("Table ID", Database::"Store Requistion Header");
+        ApprovalEntry.SetRange("Record ID to Approve", StoreReqRecRef.RecordId);
+        ApprovalEntry.SetFilter(Status, '%1|%2', ApprovalEntry.Status::Open, ApprovalEntry.Status::Created);
+        if not ApprovalEntry.IsEmpty() then
+            exit;
+
+        ApprovalEntry.Init();
+        ApprovalEntry."Table ID" := Database::"Store Requistion Header";
+        ApprovalEntry."Document No." := StoreReq."No.";
+        ApprovalEntry."Sequence No." := 1;
+        ApprovalEntry."Sender ID" := RequesterUserID;
+        ApprovalEntry."Approver ID" := ApproverUserID;
+        ApprovalEntry.Status := ApprovalEntry.Status::Open;
+        ApprovalEntry."Date-Time Sent for Approval" := CurrentDateTime;
+        ApprovalEntry."Last Date-Time Modified" := CurrentDateTime;
+        ApprovalEntry."Last Modified By User ID" := RequesterUserID;
+        ApprovalEntry."Record ID to Approve" := StoreReqRecRef.RecordId;
+        ApprovalEntry."Approval Type" := ApprovalEntry."Approval Type"::Approver;
+        ApprovalEntry.Insert(true);
     end;
 
     procedure RequestStoreReqApproval(employeeNo: Code[100]; reqNo: Code[50]; tableID: Integer) return_value: Boolean
@@ -1949,10 +2238,13 @@ codeunit 50049 "Staff Portal Codeunit"
         RequesterUserID: Code[50];
     begin
         return_value := false;
+        if employeeNo = '' then
+            Error('Employee No. is required to request store requisition approval.');
         if not IsStoreReqLinesExists(reqNo) then
             Error('You must add store requisition lines before sending the requisition for approval.');
         TbStoreRequisition.Reset;
         TbStoreRequisition.SetRange("No.", reqNo);
+        TbStoreRequisition.SetRange("Employee No", employeeNo);
         TbStoreRequisition.SetRange(Status, TbStoreRequisition.Status::Open);
         if TbStoreRequisition.FindFirst() then begin
             // Repair older portal drafts that were stamped as ADMIN by the table
@@ -1969,7 +2261,6 @@ codeunit 50049 "Staff Portal Codeunit"
                     end;
                     TbStoreRequisition."Employee No" := CopyStr(employeeNo, 1, MaxStrLen(TbStoreRequisition."Employee No"));
                     TbStoreRequisition.Modify(false);
-                    Commit();
                 end;
             end;
 
@@ -1977,39 +2268,33 @@ codeunit 50049 "Staff Portal Codeunit"
                 Error('Purpose / Justification is required.');
             if TbStoreRequisition."Required Date" = 0D then
                 Error('Required Date is required.');
-            // A specification file is optional. Do not block approval when none is attached.
+            // Supporting documents are optional for store requisitions (UAT / meeting decision).
             if RequesterUserID = '' then
                 RequesterUserID := TbStoreRequisition."User ID";
-            if RequesterUserID <> '' then
-                if TbUserSetup.Get(RequesterUserID) then
-                    if TbUserSetup."Approver ID" = '' then
-                        Error(
-                            'Approval User Setup for %1 has no Approver ID. Store requisition flow is Supervisor → Department Head → Division Head → Finance and Admin Head. If the requester is a supervisor, set Approver ID to the Department Head. If Department Head, set it to the Division Head. If Division Head, set it to the Finance and Admin Head.',
-                            RequesterUserID);
-
             VarVariant := TbStoreRequisition;
             if not CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
                 Error('Business Central approval workflow is not configured for store requisition %1.', reqNo);
 
             CuCustomApprovals.OnSendDocForApproval(VarVariant);
-            Commit();
 
             if not StoreReqAfterApproval.Get(reqNo) then
                 Error('Store requisition %1 was not found after requesting approval.', reqNo);
 
             StoreReqRecRef.GetTable(StoreReqAfterApproval);
             RecordIdToApprove := StoreReqRecRef.RecordId;
+            FnUpdateApprovalEntries(reqNo, RequesterUserID, RecordIdToApprove);
             TbApprovalEntry.Reset();
             TbApprovalEntry.SetRange("Record ID to Approve", RecordIdToApprove);
             TbApprovalEntry.SetRange("Table ID", Database::"Store Requistion Header");
             TbApprovalEntry.SetFilter(Status, '%1|%2', TbApprovalEntry.Status::Open, TbApprovalEntry.Status::Created);
             HasApprovalEntry := not TbApprovalEntry.IsEmpty;
 
-            return_value := HasApprovalEntry;
+            return_value :=
+                HasApprovalEntry and
+                (StoreReqAfterApproval.Status = StoreReqAfterApproval.Status::"Pending Approval");
             if not return_value then
-                Error(
-                    'Business Central did not create approval entries for store requisition %1. Enable the Store Requisition workflow and confirm Approval User Setup is assigned for the requester.',
-                    reqNo);
+                EnsurePortalStoreApprovalStarted(StoreReqAfterApproval, RequesterUserID);
+            return_value := true;
         end else begin
             Error('Requisition is no longer editable or it does not exist.');
         end;
@@ -2041,7 +2326,7 @@ codeunit 50049 "Staff Portal Codeunit"
             TbPurchaseHeader."Document Type 2" := TbPurchaseHeader."Document Type 2"::Requisition;
             TbPurchaseHeader.DocApprovalType := TbPurchaseHeader.DocApprovalType::Requisition;
             TbPurchaseHeader."No." := NextNo;
-            // Assign fields without Validate before Insert — Validate on Dimension/
+            // Assign fields without Validate before Insert â€” Validate on Dimension/
             // Currency/Vendor can Get(Document Type, No.) and fail with
             // "Purchase Header does not exist" because the row is not saved yet.
             TbPurchaseHeader."Assigned User ID" := myUserId;
@@ -2178,7 +2463,7 @@ codeunit 50049 "Staff Portal Codeunit"
                     TbPurchaseHeader."Requestor Name" := CopyStr(TbEmployee."Full Name", 1, MaxStrLen(TbPurchaseHeader."Requestor Name"));
                 end;
                 // Portal requestingDepartment maps to Purchase Header.Department (ABH).
-                // Assign without Dimension Value Validate — see create branch.
+                // Assign without Dimension Value Validate â€” see create branch.
                 if requestingDepartment <> '' then begin
                     TbPurchaseHeader.Department := CopyStr(requestingDepartment, 1, MaxStrLen(TbPurchaseHeader.Department));
                     DimValue.Reset();
@@ -2216,7 +2501,7 @@ codeunit 50049 "Staff Portal Codeunit"
         effectiveDescription := itemName;
 
         // Only stamp Purchase Line."No." when the code exists in the matching master.
-        // Portal Item/Service Code is optional free text — unknown codes must not Validate.
+        // Portal Item/Service Code is optional free text â€” unknown codes must not Validate.
         resolvedNo := '';
         if itemNo <> '' then begin
             case type of
@@ -2246,6 +2531,15 @@ codeunit 50049 "Staff Portal Codeunit"
             Error('Item / service name is required when no valid BC item, service, or asset code is provided.');
 
         TbPurchaseLine.Reset;
+        // If the portal asks to edit a line that was already deleted, create a new line
+        // instead of failing â€” common after Delete then Save on a stale edit form.
+        if (action <> 'create') and (lineNo <> 0) then begin
+            TbPurchaseLine.SetRange("Document No.", reqNo);
+            TbPurchaseLine.SetRange("Line No.", lineNo);
+            if not TbPurchaseLine.FindFirst() then
+                action := 'create';
+            TbPurchaseLine.Reset;
+        end;
         if action = 'create' then begin
             TbPurchaseHeader.Reset();
             TbPurchaseHeader.SetRange("Document Type", TbPurchaseHeader."Document Type"::Quote);
@@ -2279,7 +2573,7 @@ codeunit 50049 "Staff Portal Codeunit"
             TbPurchaseLine."Location Code" := location;
             TbPurchaseLine.Quantity := quantity;
             TbPurchaseLine."Request Summary" := CopyStr(effectiveSpecification, 1, MaxStrLen(TbPurchaseLine."Request Summary"));
-            // Comment (free-text) lines must not carry Direct Unit Cost — BC tax/VAT
+            // Comment (free-text) lines must not carry Direct Unit Cost â€” BC tax/VAT
             // calc then fails with "Tax Amount Line does not exist" on approval.
             if (resolvedNo <> '') and (estimatedUnitPrice > 0) then begin
                 TbPurchaseLine."Direct Unit Cost" := estimatedUnitPrice;
@@ -2287,6 +2581,7 @@ codeunit 50049 "Staff Portal Codeunit"
             end;
             if category <> '' then
                 TbPurchaseLine."Request Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Request Category"));
+                TbPurchaseLine."Portal Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Portal Category"));
             if requiredDate <> 0D then
                 TbPurchaseLine."Expected Receipt Date" := requiredDate;
             if preferredBrandModel <> '' then begin
@@ -2300,26 +2595,36 @@ codeunit 50049 "Staff Portal Codeunit"
             TbPurchaseLine."Portal Line Description" := CopyStr(reasonForRequest, 1, MaxStrLen(TbPurchaseLine."Portal Line Description"));
             TbPurchaseLine."Portal Estimated Unit Price" := estimatedUnitPrice;
             TbPurchaseLine."Portal Remarks" := CopyStr(remarks, 1, MaxStrLen(TbPurchaseLine."Portal Remarks"));
-            // Preserve portal Type/Code/UOM for Comment (free-text) lines — BC Type is blank.
+            // Preserve portal Type/Code/UOM for Comment (free-text) lines â€” BC Type is blank.
             TbPurchaseLine."Portal Line Type" := type;
             if itemNo <> '' then
                 TbPurchaseLine."Portal Item Code" := CopyStr(itemNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"))
             else
                 if resolvedNo <> '' then
                     TbPurchaseLine."Portal Item Code" := CopyStr(resolvedNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"));
-            if unitOfMeasure <> '' then
+            if unitOfMeasure <> '' then begin
                 TbPurchaseLine."Unit of Measure Code" := unitOfMeasure;
+                TbPurchaseLine."Portal Unit of Measure" := CopyStr(unitOfMeasure, 1, MaxStrLen(TbPurchaseLine."Portal Unit of Measure"));
+            end;
             TbPurchaseLine.Validate(Quantity);
-            if unitOfMeasure <> '' then
+            if unitOfMeasure <> '' then begin
                 TbPurchaseLine."Unit of Measure Code" := unitOfMeasure;
+                TbPurchaseLine."Portal Unit of Measure" := CopyStr(unitOfMeasure, 1, MaxStrLen(TbPurchaseLine."Portal Unit of Measure"));
+            end;
             TbPurchaseLine.Insert(true);
             // Re-stamp requestor text / portal display fields after insert triggers.
+            // Validate(Quantity) can clear Description / Category / UOM / dates on Comment lines.
             TbPurchaseLine.Description := CopyStr(effectiveDescription, 1, MaxStrLen(TbPurchaseLine.Description));
             TbPurchaseLine."Portal Line Description" := CopyStr(reasonForRequest, 1, MaxStrLen(TbPurchaseLine."Portal Line Description"));
             TbPurchaseLine."Portal Estimated Unit Price" := estimatedUnitPrice;
             TbPurchaseLine."Portal Remarks" := CopyStr(remarks, 1, MaxStrLen(TbPurchaseLine."Portal Remarks"));
             if effectiveSpecification <> '' then
                 TbPurchaseLine."Request Summary" := CopyStr(effectiveSpecification, 1, MaxStrLen(TbPurchaseLine."Request Summary"));
+            if category <> '' then
+                TbPurchaseLine."Request Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Request Category"));
+                TbPurchaseLine."Portal Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Portal Category"));
+            if requiredDate <> 0D then
+                TbPurchaseLine."Expected Receipt Date" := requiredDate;
             if preferredBrandModel <> '' then begin
                 TbPurchaseLine."Preferred Brand Model" := preferredBrandModel;
                 TbPurchaseLine."RFQ Remarks" := CopyStr(preferredBrandModel, 1, MaxStrLen(TbPurchaseLine."RFQ Remarks"));
@@ -2333,8 +2638,10 @@ codeunit 50049 "Staff Portal Codeunit"
             else
                 if resolvedNo <> '' then
                     TbPurchaseLine."Portal Item Code" := CopyStr(resolvedNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"));
-            if unitOfMeasure <> '' then
+            if unitOfMeasure <> '' then begin
                 TbPurchaseLine."Unit of Measure Code" := unitOfMeasure;
+                TbPurchaseLine."Portal Unit of Measure" := CopyStr(unitOfMeasure, 1, MaxStrLen(TbPurchaseLine."Portal Unit of Measure"));
+            end;
             TbPurchaseLine.Modify(true);
             return_value := true;
         end else begin
@@ -2367,6 +2674,7 @@ codeunit 50049 "Staff Portal Codeunit"
                     end;
                 if category <> '' then
                     TbPurchaseLine."Request Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Request Category"));
+                    TbPurchaseLine."Portal Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Portal Category"));
                 if requiredDate <> 0D then
                     TbPurchaseLine."Expected Receipt Date" := requiredDate;
                 if preferredBrandModel <> '' then begin
@@ -2388,11 +2696,51 @@ codeunit 50049 "Staff Portal Codeunit"
                         TbPurchaseLine."Portal Item Code" := CopyStr(resolvedNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"))
                     else
                         Clear(TbPurchaseLine."Portal Item Code");
-                if unitOfMeasure <> '' then
+                if unitOfMeasure <> '' then begin
                     TbPurchaseLine."Unit of Measure Code" := unitOfMeasure;
+                    TbPurchaseLine."Portal Unit of Measure" := CopyStr(unitOfMeasure, 1, MaxStrLen(TbPurchaseLine."Portal Unit of Measure"));
+                end;
                 TbPurchaseLine.Validate(Quantity);
-                if unitOfMeasure <> '' then
+                // Validate(Quantity) can clear Description / portal text on Comment lines â€”
+                // re-stamp the same way the create path does after Insert.
+                TbPurchaseLine.Description := CopyStr(effectiveDescription, 1, MaxStrLen(TbPurchaseLine.Description));
+                TbPurchaseLine."Portal Line Description" := CopyStr(reasonForRequest, 1, MaxStrLen(TbPurchaseLine."Portal Line Description"));
+                TbPurchaseLine."Portal Estimated Unit Price" := estimatedUnitPrice;
+                TbPurchaseLine."Portal Remarks" := CopyStr(remarks, 1, MaxStrLen(TbPurchaseLine."Portal Remarks"));
+                if effectiveSpecification <> '' then
+                    TbPurchaseLine."Request Summary" := CopyStr(effectiveSpecification, 1, MaxStrLen(TbPurchaseLine."Request Summary"));
+                TbPurchaseLine."Preferred Brand Model" := preferredBrandModel;
+                if preferredBrandModel <> '' then
+                    TbPurchaseLine."RFQ Remarks" := CopyStr(preferredBrandModel, 1, MaxStrLen(TbPurchaseLine."RFQ Remarks"));
+                TbPurchaseLine."Suggested Supplier" := suggestedSupplier;
+                TbPurchaseLine."Extended Description" := CopyStr(remarks, 1, MaxStrLen(TbPurchaseLine."Extended Description"));
+                if category <> '' then
+                    TbPurchaseLine."Request Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Request Category"));
+                    TbPurchaseLine."Portal Category" := CopyStr(category, 1, MaxStrLen(TbPurchaseLine."Portal Category"));
+                if requiredDate <> 0D then
+                    TbPurchaseLine."Expected Receipt Date" := requiredDate;
+                TbPurchaseLine."Portal Line Type" := type;
+                if itemNo <> '' then
+                    TbPurchaseLine."Portal Item Code" := CopyStr(itemNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"))
+                else
+                    if resolvedNo <> '' then
+                        TbPurchaseLine."Portal Item Code" := CopyStr(resolvedNo, 1, MaxStrLen(TbPurchaseLine."Portal Item Code"))
+                    else
+                        Clear(TbPurchaseLine."Portal Item Code");
+                if unitOfMeasure <> '' then begin
                     TbPurchaseLine."Unit of Measure Code" := unitOfMeasure;
+                    TbPurchaseLine."Portal Unit of Measure" := CopyStr(unitOfMeasure, 1, MaxStrLen(TbPurchaseLine."Portal Unit of Measure"));
+                end;
+                if (resolvedNo <> '') and (estimatedUnitPrice > 0) then begin
+                    TbPurchaseLine."Direct Unit Cost" := estimatedUnitPrice;
+                    TbPurchaseLine.Validate("Direct Unit Cost");
+                end else
+                    if resolvedNo = '' then begin
+                        TbPurchaseLine."Direct Unit Cost" := 0;
+                        TbPurchaseLine.Amount := 0;
+                        TbPurchaseLine."Amount Including VAT" := 0;
+                        TbPurchaseLine."Line Amount" := 0;
+                    end;
                 TbPurchaseLine.Modify(true);
                 return_value := true;
             end else begin
@@ -2492,12 +2840,16 @@ codeunit 50049 "Staff Portal Codeunit"
 
             // Repair old portal drafts whose assigned user is blank or the SOAP
             // service account, using the employee's User Setup mapping.
+            // Do not overwrite store-officer ownership on store-originated LPRs:
+            // Employee No. drives the approval chain; Assigned User ID stays the portal actor.
             if employeeNo <> '' then begin
                 TbUserSetup.Reset();
                 TbUserSetup.SetRange("Employee No.", employeeNo);
                 if TbUserSetup.FindFirst() then begin
                     RequesterUserID := TbUserSetup."User ID";
-                    if (RequesterUserID <> '') and (TbPurchaseHeader."Assigned User ID" <> RequesterUserID) then begin
+                    if (RequesterUserID <> '') and
+                       ((TbPurchaseHeader."Assigned User ID" = '') or
+                        (TbPurchaseHeader."Assigned User ID" = 'ADMIN')) then begin
                         TbPurchaseHeader.Validate("Assigned User ID", RequesterUserID);
                         TbPurchaseHeader.Modify(true);
                         Commit();
@@ -2526,15 +2878,6 @@ codeunit 50049 "Staff Portal Codeunit"
                     TbPurchaseHeader."Shortcut Dimension 2 Code");
             if RequesterUserID = '' then
                 RequesterUserID := TbPurchaseHeader."Assigned User ID";
-            // Same as Leave: first approver comes from Employee Card Supervisor → User Setup Approver ID.
-            EnsurePurchaseApproverFromSupervisor(employeeNo, RequesterUserID);
-            if RequesterUserID <> '' then
-                if TbUserSetup.Get(RequesterUserID) then
-                    if TbUserSetup."Approver ID" = '' then
-                        Error(
-                            'Approval User Setup for %1 has no Approver ID. Purchase requisition uses the same chain as Leave: Supervisor (Employee Card Supervisor No.) → Department Head → Division Head → Finance & Administration. Set Approver ID from the supervisor''s Employee User ID, and create department Purchase Approval workflows like Leave Approval-IT / Leave Approval-FINANCE.',
-                            RequesterUserID);
-
             VarVariant := TbPurchaseHeader;
             if not CuCustomApprovals.CheckApprovalsWorkflowEnabled(VarVariant) then
                 Error('Business Central approval workflow is not configured for purchase requisition %1.', reqNo);
@@ -2547,24 +2890,20 @@ codeunit 50049 "Staff Portal Codeunit"
 
             PurchaseRecRef.GetTable(PurchaseAfterApproval);
             RecordIdToApprove := PurchaseRecRef.RecordId;
+            FnUpdateApprovalEntries(reqNo, RequesterUserID, RecordIdToApprove);
+            Commit();
             TbApprovalEntry.Reset();
             TbApprovalEntry.SetRange("Record ID to Approve", RecordIdToApprove);
             TbApprovalEntry.SetRange("Table ID", Database::"Purchase Header");
             TbApprovalEntry.SetFilter(Status, '%1|%2', TbApprovalEntry.Status::Open, TbApprovalEntry.Status::Created);
             HasApprovalEntry := not TbApprovalEntry.IsEmpty;
 
-            if (PurchaseAfterApproval.Status <> PurchaseAfterApproval.Status::"Pending Approval") and HasApprovalEntry then begin
-                PurchaseAfterApproval.Validate(Status, PurchaseAfterApproval.Status::"Pending Approval");
-                PurchaseAfterApproval.Modify(true);
-                Commit();
-            end;
-
             if PurchaseAfterApproval.Get(PurchaseDocumentType, reqNo) then
                 return_value := (PurchaseAfterApproval.Status = PurchaseAfterApproval.Status::"Pending Approval") and HasApprovalEntry;
 
             if not return_value then
                 Error(
-                    'Business Central did not create approval entries for purchase requisition %1. Enable Purchase Requisition workflows the same way as Leave (for example Purchase Approval-IT, Purchase Approval-FINANCE per department), and confirm Approval User Setup Approver ID matches Employee Card Supervisor.',
+                    'Business Central did not fully start the workflow for purchase requisition %1. Configure the Purchase Requisition workflow to set Pending Approval and create the required approval entries/approvers.',
                     reqNo);
         end else begin
             Error('Requisition is no longer editable or it does not exist.');
@@ -2590,50 +2929,13 @@ codeunit 50049 "Staff Portal Codeunit"
                 Error('Description is required on purchase line %1.', PurchaseLine."Line No.");
             if DelChr(PurchaseLine."Request Summary", '=', ' ') = '' then
                 Error('Specification is required on purchase line %1.', PurchaseLine."Line No.");
-            if PurchaseLine."Unit of Measure Code" = '' then
+            if (PurchaseLine."Unit of Measure Code" = '') and (PurchaseLine."Portal Unit of Measure" = '') then
                 Error('Unit of Measure is required on purchase line %1.', PurchaseLine."Line No.");
-            if DelChr(PurchaseLine."Request Category", '=', ' ') = '' then
+            if (DelChr(PurchaseLine."Request Category", '=', ' ') = '') and
+               (DelChr(PurchaseLine."Portal Category", '=', ' ') = '')
+            then
                 Error('Category is required on purchase line %1.', PurchaseLine."Line No.");
         until PurchaseLine.Next() = 0;
-    end;
-
-    local procedure EnsurePurchaseApproverFromSupervisor(employeeNo: Code[100]; requesterUserID: Code[50])
-    var
-        Requester: Record "HR-Employee";
-        Supervisor: Record "HR-Employee";
-        UserSetupRec: Record "User Setup";
-        SupervisorSetup: Record "User Setup";
-        SupervisorUserID: Code[50];
-    begin
-        if requesterUserID = '' then
-            exit;
-        if not UserSetupRec.Get(requesterUserID) then
-            exit;
-        if UserSetupRec."Approver ID" <> '' then
-            exit;
-
-        // Mirror Leave: first approver is Employee Card Supervisor No. → that person's User ID.
-        if employeeNo <> '' then
-            if Requester.Get(employeeNo) then begin
-                SupervisorUserID := CopyStr(Requester."Supervisor User ID", 1, MaxStrLen(SupervisorUserID));
-                if (SupervisorUserID = '') and (Requester."Supervisor No." <> '') then
-                    if Supervisor.Get(Requester."Supervisor No.") then
-                        SupervisorUserID := CopyStr(Supervisor."User ID", 1, MaxStrLen(SupervisorUserID));
-            end;
-
-        if SupervisorUserID = '' then
-            Error(
-                'Employee %1 has no Supervisor set. Purchase requisition uses the same first approver as Leave — set Supervisor No. (and Employee User ID on the supervisor) on the Employee Card, or set Approver ID in User Setup.',
-                employeeNo);
-
-        if not SupervisorSetup.Get(SupervisorUserID) then
-            Error(
-                'Supervisor user %1 is not in User Setup. Add the supervisor to User Setup so Purchase / Leave approval can route like Leave.',
-                SupervisorUserID);
-
-        UserSetupRec."Approver ID" := SupervisorUserID;
-        UserSetupRec.Modify(true);
-        Commit();
     end;
 
     procedure IsPurchaseReqLinesExists(reqNo: Code[100]) hasLines: Boolean
@@ -4048,6 +4350,13 @@ codeunit 50049 "Staff Portal Codeunit"
     /// Returns the employee-card job title and related profile fields so the
     /// self-service portal displays the actual BC designation instead of a
     /// generic role label such as Staff.
+    procedure GetEmployeeProfileDetails(employeeNo: Code[30]) return_value: Text
+    var
+        ProfileReader: Codeunit "Portal Employee Profile";
+    begin
+        exit(ProfileReader.GetDetails(employeeNo));
+    end;
+
     procedure FnGetEmployeeProfile(employeeNo: Code[30]) return_value: Text
     var
         HREmployee: Record "HR-Employee";
@@ -4056,22 +4365,74 @@ codeunit 50049 "Staff Portal Codeunit"
         if not HREmployee.Get(employeeNo) then
             exit;
 
+        // Keep legacy #key=value contract for the portal fallback path.
+        // Prefer caption text for options; blank/0D dates stay empty so the UI can hide them.
         return_value :=
           'JobTitle=' + HREmployee."Job Title" +
           '#JobID=' + HREmployee."Job ID" +
+          '#JobGrade=' + HREmployee."Job Group" +
           '#CustomerNo=' + HREmployee."Customer No" +
           '#FullName=' + HREmployee."Full Name" +
+          '#FirstName=' + HREmployee."First Name" +
+          '#MiddleName=' + HREmployee."Middle Name" +
+          '#LastName=' + HREmployee."Last Name" +
           '#Gender=' + Format(HREmployee.Gender) +
           '#MaritalStatus=' + Format(HREmployee."Marital Status") +
+          '#Status=' + Format(HREmployee.Status) +
+          '#IsHOD=' + Format(HREmployee."Is HOD") +
+          '#ICTOfficer=' + Format(HREmployee."ICT Officer") +
+          '#IDNumber=' + HREmployee."ID Number" +
+          '#DateOfBirth=' + PortalProfileDate(HREmployee."Date Of Birth") +
+          '#Citizenship=' + HREmployee.Citizenship +
+          '#CountryCode=' + HREmployee."Country Code" +
+          '#CellPhoneNumber=' + HREmployee."Cell Phone Number" +
+          '#CellularPhoneNumber=' + HREmployee."Cellular Phone Number" +
+          '#HomePhoneNumber=' + HREmployee."Home Phone Number" +
+          '#WorkPhoneNumber=' + HREmployee."Work Phone Number" +
+          '#Extension=' + HREmployee."Ext." +
+          '#CompanyEMail=' + HREmployee."Company E-Mail" +
+          '#EMail=' + HREmployee."E-Mail" +
+          '#PostalAddress=' + HREmployee."Postal Address" +
+          '#PostalAddress2=' + HREmployee."Postal Address2" +
+          '#PostalAddress3=' + HREmployee."Postal Address3" +
+          '#ResidentialAddress=' + HREmployee."Residential Address" +
+          '#ResidentialAddress2=' + HREmployee."Residential Address2" +
+          '#ResidentialAddress3=' + HREmployee."Residential Address3" +
+          '#City=' + HREmployee.City +
+          '#PostCode=' + HREmployee."Post Code" +
+          '#DivisionName=' + HREmployee."Division Name" +
+          '#GlobalDimension1Code=' + HREmployee."Global Dimension 1 Code" +
+          '#GlobalDimension1Name=' + HREmployee."Global Dimension 1 Name" +
+          '#GlobalDimension2Code=' + HREmployee."Global Dimension 2 Code" +
+          '#GlobalDimension2Name=' + HREmployee."Global Dimension 2 Name" +
+          '#DepartmentCode=' + HREmployee."Department Code" +
+          '#SectorName=' + HREmployee."Sector Name" +
+          '#DistrictName=' + HREmployee."District Name" +
+          '#BranchDisplayName=' + HREmployee."Branch- Name" +
+          '#ResponsibilityCenter=' + HREmployee."Responsibility Center" +
+          '#WorkStation=' + HREmployee."Work Station" +
+          '#Office=' + HREmployee.Office +
+          '#SupervisorNo=' + HREmployee."Supervisor No." +
+          '#SupervisorName=' + HREmployee."Name Of Manager" +
+          '#AnnualLeaveBalance=' + Format(HREmployee."Annual Leave balance") +
           '#DateOfJoining=' + PortalProfileDate(HREmployee."Date Of Joining the Company") +
           '#EndOfProbation=' + PortalProfileDate(HREmployee."End Of Probation Date") +
           '#ContractEnd=' + PortalProfileDate(HREmployee."Contract End Date") +
           '#EndOfContract=' + PortalProfileDate(HREmployee."End of Contract Date") +
+          '#DateOfLeaving=' + PortalProfileDate(HREmployee."Date Of Leaving the Company") +
+          '#PensionSchemeJoin=' + PortalProfileDate(HREmployee."Pension Scheme Join Date") +
+          '#MedicalSchemeJoin=' + PortalProfileDate(HREmployee."Medical Scheme Join Date") +
           '#ContractType=' + HREmployee."Contract Type" +
           '#EmployeeContractType=' + Format(HREmployee."Employee Contract Type") +
           '#EmployeeType=' + Format(HREmployee."Employee Type") +
           '#OnProbation=' + Format(HREmployee."On Probation") +
-          '#ContractDuration=' + Format(HREmployee."Contract Duration");
+          '#ContractDuration=' + Format(HREmployee."Contract Duration") +
+          '#NoticePeriod=' + HREmployee."Notice Period" +
+          '#ActingJob=' + HREmployee."Acting job" +
+          '#ActingJobStartDate=' + PortalProfileDate(HREmployee."Acting job Start Date") +
+          '#ActingJobExpiryDate=' + PortalProfileDate(HREmployee."Acting job Expiry Date") +
+          '#TemporaryJob=' + HREmployee."Temporary Job" +
+          '#TemporaryJobExpiryDate=' + PortalProfileDate(HREmployee."Temporary job Expiry Date");
     end;
 
     local procedure PortalProfileDate(Value: Date): Text
@@ -4082,20 +4443,156 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     procedure GetLeaveDates(empNo: Code[30]; leaveType: code[30]; startDate: Date; noOfDays: Decimal) return_value: text
+    begin
+        exit(CalculatePortalLeaveDates(empNo, leaveType, startDate, noOfDays, 0));
+    end;
+
+    procedure GetPortalLeaveDates(empNo: Code[30]; leaveType: Code[30]; startDate: Date; noOfDays: Decimal; whetherIsHalfDay: Integer) return_value: Text
+    begin
+        if not (whetherIsHalfDay in [0, 1, 2]) then
+            Error('Half-day selection must be Normal, Morning, or Evening.');
+
+        exit(CalculatePortalLeaveDates(empNo, leaveType, startDate, noOfDays, whetherIsHalfDay));
+    end;
+
+    local procedure CalculatePortalLeaveDates(empNo: Code[30]; leaveType: Code[30]; startDate: Date; noOfDays: Decimal; whetherIsHalfDay: Integer) return_value: Text
     var
+        LeaveTypeSetup: Record "Leave Types";
         returnDate: Date;
         endDate2: Date;
-        calendarDays: Integer;
+        cursorDate: Date;
+        remainingDays: Decimal;
+        dayCapacity: Decimal;
+        endsAtMidday: Boolean;
+        returnPeriod: Text[20];
+        guard: Integer;
     begin
         return_value := '';
         if startDate = 0D then
             Error('Start Date is required.');
-        calendarDays := Round(noOfDays, 1, '>');
-        if calendarDays < 1 then
-            calendarDays := 1;
-        endDate2 := startDate + calendarDays - 1;
-        returnDate := endDate2 + 1;
-        return_value := 'EndDate=' + format(endDate2) + '#ReturnDate=' + format(returnDate);
+        if noOfDays <= 0 then
+            Error('Applied Days must be greater than zero.');
+        if not LeaveTypeSetup.Get(leaveType) then
+            Error('Leave Type %1 was not found.', leaveType);
+        if PortalLeaveDateWeight(startDate, LeaveTypeSetup) = 0 then
+            Error('The Start Date must be a working day.');
+
+        remainingDays := noOfDays;
+        cursorDate := startDate;
+        repeat
+            guard += 1;
+            if guard > 3660 then
+                Error('Could not calculate leave dates. Check the active leave calendar.');
+
+            dayCapacity := PortalLeaveDateWeight(cursorDate, LeaveTypeSetup);
+            if dayCapacity > 0 then begin
+                endDate2 := cursorDate;
+                if remainingDays < dayCapacity then begin
+                    remainingDays := 0;
+                    endsAtMidday := true;
+                end else begin
+                    remainingDays -= dayCapacity;
+                    endsAtMidday := false;
+                end;
+            end;
+            if remainingDays > 0 then
+                cursorDate += 1;
+        until remainingDays <= 0;
+
+        // Fractional Normal leave can finish mid-weekday (remaining < day capacity).
+        // Morning half-day also returns the same afternoon. Evening half-day and
+        // full Normal leave return on the next working day after End Date.
+        // Example: Fri + 2 Normal days â†’ End Monday, Return Tuesday.
+        if endsAtMidday and (whetherIsHalfDay <> 2) then begin
+            returnDate := endDate2;
+            returnPeriod := 'Afternoon';
+        end else begin
+            returnDate := PortalNextWorkingDate(endDate2);
+            returnPeriod := 'Morning';
+        end;
+
+        return_value :=
+          'EndDate=' + Format(endDate2) +
+          '#ReturnDate=' + Format(returnDate) +
+          '#ReturnPeriod=' + returnPeriod;
+    end;
+
+    local procedure PortalLeaveDateWeight(leaveDate: Date; var LeaveTypeSetup: Record "Leave Types"): Decimal
+    var
+        dayOfWeek: Integer;
+    begin
+        if LeaveTypeSetup."Inclusive of Non Working Days" then
+            exit(1);
+
+        if PortalLeaveCalendarNonWorking(leaveDate) then begin
+            if LeaveTypeSetup."Inclusive of Holidays" then
+                exit(1);
+            exit(0);
+        end;
+
+        dayOfWeek := Date2DWY(leaveDate, 1);
+        // Weekend days are skipped for Normal leave unless the leave type
+        // explicitly includes them. Do not treat Saturday as a half leave day.
+        if dayOfWeek = 6 then begin
+            if LeaveTypeSetup."Inclusive of Saturday" then
+                exit(1);
+            exit(0);
+        end;
+        if dayOfWeek = 7 then begin
+            if LeaveTypeSetup."Inclusive of Sunday" then
+                exit(1);
+            exit(0);
+        end;
+
+        exit(1);
+    end;
+
+    local procedure PortalLeaveCalendarNonWorking(leaveDate: Date): Boolean
+    var
+        LeaveCalendar: Record "HR Leave Calendar.";
+        LeaveCalendarLine: Record "HR Leave Calendar Lines";
+    begin
+        LeaveCalendar.Reset();
+        LeaveCalendar.SetRange(Current, true);
+        if not LeaveCalendar.FindFirst() then
+            exit(false);
+
+        LeaveCalendarLine.Reset();
+        LeaveCalendarLine.SetRange(Code, LeaveCalendar.Code);
+        LeaveCalendarLine.SetRange(Date, leaveDate);
+        if LeaveCalendarLine.FindFirst() then
+            exit(LeaveCalendarLine."Non Working");
+
+        exit(false);
+    end;
+
+    local procedure PortalNextWorkingDate(fromDate: Date): Date
+    var
+        nextDate: Date;
+        guard: Integer;
+    begin
+        nextDate := fromDate + 1;
+        while PortalWorkingDayCapacity(nextDate) = 0 do begin
+            nextDate += 1;
+            guard += 1;
+            if guard > 366 then
+                Error('Could not find the next working day. Check the active leave calendar.');
+        end;
+        exit(nextDate);
+    end;
+
+    local procedure PortalWorkingDayCapacity(workingDate: Date): Decimal
+    var
+        dayOfWeek: Integer;
+    begin
+        if PortalLeaveCalendarNonWorking(workingDate) then
+            exit(0);
+
+        dayOfWeek := Date2DWY(workingDate, 1);
+        if dayOfWeek in [6, 7] then
+            exit(0);
+
+        exit(1);
     end;
 
     // TODO: Staff Portal: Appraisal and performance type?
@@ -4622,12 +5119,21 @@ codeunit 50049 "Staff Portal Codeunit"
         Result.Add('earnedLeaveDays', AnnualLeaveAccruedToDate);
         Result.Add('leaveAccruedToDate', AnnualLeaveAccruedToDate);
         Result.Add('carryForwardBalance', AnnualCarryForwardBalance);
-        Result.Add('leaveEntitlement', AnnualLeaveEntitlement);
-        Result.Add('carryForward', AnnualCarryForward);
+        if IsAnnual then begin
+            Result.Add('leaveEntitlement', AnnualLeaveEntitlement);
+            Result.Add('carryForward', AnnualCarryForward);
+            Result.Add('totalLeaveTakenToDate', AnnualTotalLeaveTakenToDate);
+        end else begin
+            Result.Add('leaveEntitlement', AllocatedDays);
+            Result.Add('carryForward', CarryForwardBalance);
+            Result.Add('totalLeaveTakenToDate', CurrentTotalLeaveTaken);
+        end;
         Result.Add('totalAvailableLeaveBalance', AnnualCardBalance);
-        Result.Add('totalLeaveTakenToDate', AnnualTotalLeaveTakenToDate);
-        Result.Add('availableLeaveBalance', AnnualAvailableLeaveBalance);
+        // Type-specific available balance. Never reuse the annual card figure for
+        // Sick/Paternity/etc. â€” that made every leave type show ~23.8 days.
+        Result.Add('availableLeaveBalance', CurrentLeaveBalance);
         Result.Add('applicationLimit', CurrentLeaveBalance);
+        Result.Add('annualAvailableLeaveBalance', AnnualAvailableLeaveBalance);
         if LeaveTypeSetup.Get(leaveType) then begin
             Result.Add('setupDays', LeaveTypeSetup.Days);
             Result.Add('unlimitedDays', LeaveTypeSetup."Unlimited Days");
@@ -4638,8 +5144,6 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     local procedure ApplyPortalLeaveFields(var LeaveApp: Record "HR Leave Application"; employeeNo: Code[100]; leaveType: Code[30]; reason: Text[250]; daysApplied: Decimal; startDate: DateTime; endDate: DateTime; returnDate: DateTime; reliever: Code[30]; isRequestLeaveAllowance: Boolean; isHalfDayLeave: Boolean; myUserID: Code[30]; familyMember: Text[30]; deliveryDate: DateTime)
-    var
-        CalendarDays: Integer;
     begin
         AssertPortalLeaveEligibility(employeeNo, leaveType, Dt2Date(startDate));
         LeaveApp."Employee No." := employeeNo;
@@ -4667,10 +5171,9 @@ codeunit 50049 "Staff Portal Codeunit"
         LeaveApp.Validate("Start Date");
 
         if Dt2Date(deliveryDate) = 0D then begin
-            CalendarDays := Round(daysApplied, 1, '>');
-            if CalendarDays < 1 then
-                CalendarDays := 1;
-            LeaveApp."End Date" := LeaveApp."Start Date" + CalendarDays - 1;
+            if Dt2Date(endDate) = 0D then
+                Error('End Date is required. Recalculate the leave dates and try again.');
+            LeaveApp."End Date" := Dt2Date(endDate);
         end else
             if (LeaveApp."End Date" = 0D) and (Dt2Date(endDate) <> 0D) then
                 LeaveApp."End Date" := Dt2Date(endDate);
@@ -4922,26 +5425,30 @@ codeunit 50049 "Staff Portal Codeunit"
 
         LeaveEntitlement := HREmployee."Leave Allocation";
         CarryForward := HREmployee."Carry forward";
-        AccruedDays := HREmployee."Earned Leave Days";
         CarryForwardBalance := HREmployee."Carry forward Balance";
         TotalLeaveTakenToDate := Abs(HREmployee."Total Leave Taken");
 
-        // Employee Card "Annual Leave balance": full-year entitlement remaining.
-        TotalAvailableLeaveBalance :=
-            LeaveEntitlement + CarryForward - TotalLeaveTakenToDate;
+        // Accrued Days = (Leave Entitlement / 365) Ã— No of Worked Days.
+        // Fall back to the employee card Earned Leave Days when worked days are blank.
+        if (LeaveEntitlement > 0) and (HREmployee."No of Worked Days" > 0) then
+            AccruedDays := Round((LeaveEntitlement / 365) * HREmployee."No of Worked Days", 0.01)
+        else
+            AccruedDays := HREmployee."Earned Leave Days";
+
+        // Annual Leave balance = Entitlement + Carry Forward (gross, before taken).
+        TotalAvailableLeaveBalance := LeaveEntitlement + CarryForward;
         if TotalAvailableLeaveBalance < 0 then
             TotalAvailableLeaveBalance := 0;
 
-        // Employee Card "Leave Accrued To-Date".
-        LeaveAccruedToDate := CarryForwardBalance + AccruedDays;
+        // Leave Accrued To-Date = Carry Forward + Accrued Days (gross carry, not CF Balance).
+        LeaveAccruedToDate := CarryForward + AccruedDays;
         if LeaveAccruedToDate < 0 then
             LeaveAccruedToDate := 0;
 
-        // The employee can apply only up to what has accrued, while never
-        // exceeding the remaining full-year balance.
-        AvailableLeaveBalance := LeaveAccruedToDate;
-        if TotalAvailableLeaveBalance < AvailableLeaveBalance then
-            AvailableLeaveBalance := TotalAvailableLeaveBalance;
+        // Available / remain balance = Leave Accrued To-Date âˆ’ Leave Taken To-Date.
+        AvailableLeaveBalance := LeaveAccruedToDate - TotalLeaveTakenToDate;
+        if AvailableLeaveBalance < 0 then
+            AvailableLeaveBalance := 0;
     end;
 
     procedure GetPurchaseProcurementProcess(requestNo: Code[50]) return_value: Text
@@ -4973,9 +5480,42 @@ codeunit 50049 "Staff Portal Codeunit"
     end;
 
     /// <summary>
+    /// Store Manager: Start Local Purchase (LPR) with the BC card prompts — source (LOCAL / FOREIGN),
+    /// project (blank = non-project) and officer (PROCUREMENT / PROJECT, blank = follows the project).
+    /// </summary>
+    procedure StartPortalStoreLpr(requestNo: Code[50]; projectNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; actorJobTitle: Text[100]; procurementSource: Text[30]; officerType: Text[30]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.StartStoreLpr(requestNo, projectNo, actionComment, actorUserID, actorJobTitle, procurementSource, officerType));
+    end;
+
+    /// <summary>
+    /// Officer and approver user IDs from ABH Local Proc Setup, for the portal Start LPR prompts.
+    /// </summary>
+    procedure PortalLprOfficers() return_value: Text
+    var
+        Setup: Record "ABH Local Proc Setup";
+        Root: JsonObject;
+        JsonText: Text;
+    begin
+        if not Setup.Get('SETUP') then
+            Clear(Setup);
+        Root.Add('procurementOfficer', Setup."Procurement User ID");
+        Root.Add('projectProcurementOfficer', Setup."Project Procurement User ID");
+        Root.Add('operationsManager', Setup."Operations Manager User ID");
+        Root.Add('fad', Setup."FAD User ID");
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
     /// Local Purchase (LPR→RFQ→PO→pay) actions for the Self-Service Portal.
-    /// Mirror of ABH-LIVE-AL StaffPortal PortalLocalPurchaseAction / ListVendorQuotes.
-    /// Publish after deploying Portal Procurement Mgt. RunLocalPurchaseAction.
+    /// actionCode examples: APPROVE_LPR_FAD, CONVERT_TO_RFQ, UPSERT_VENDOR_QUOTE, AUTO_SELECT_WINNER,
+    /// SEND_TO_TECHNICAL, SEND_FOR_FAD_APPROVAL, SUBMIT_TECHNICAL_REVIEW, SELECT_WINNER_FAD,
+    /// APPROVE_WINNER_FAD_FINAL, CREATE_PO, APPROVE_PO_FINANCE_CHECKER, APPROVE_PO_FAD,
+    /// PREPARE_LOCAL_RECEIVE, CREATE_LOCAL_INVOICE, VERIFY_PO_GRN_INVOICE, APPROVE_PAYMENT_CEO,
+    /// CLOSE_LPR_AFTER_PAYMENT, FIX_LOCAL_CURRENCY.
     /// </summary>
     procedure PortalLocalPurchaseAction(documentNo: Code[50]; actionCode: Text[50]; linkedDocumentNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; payloadJson: Text) return_value: Text
     var
@@ -5028,6 +5568,105 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(ProcurementMgt.AttachVendorQuoteFile(rfqNo, lineNo, fileName, ContentText, description));
     end;
 
+    procedure CreateIctHelpdeskTicket(
+        employeeNo: Code[20];
+        dim1: Code[20];
+        dim2: Code[20];
+        priorityCode: Text[20];
+        requestType: Text[50];
+        subject: Text[150];
+        description: Text[250];
+        contactPhone: Text[50];
+        contactEmail: Text[80];
+        locationBranch: Text[100];
+        requiredDate: Date;
+        attachmentName: Text[250]
+    ) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+        Hrset: Record "HR Setup";
+        TicketNo: Code[20];
+        Parsed: JsonObject;
+        Token: JsonToken;
+    begin
+        return_value := IctMgt.CreateTicket(
+            employeeNo, dim1, dim2, priorityCode, requestType, subject, description,
+            contactPhone, contactEmail, locationBranch, requiredDate, attachmentName);
+        if Parsed.ReadFrom(return_value) then
+            if Parsed.Get('no', Token) then
+                TicketNo := CopyStr(Token.AsValue().AsText(), 1, MaxStrLen(TicketNo));
+        if (TicketNo <> '') and Hrset.Get() then
+            if Hrset."ICT Email" <> '' then
+                SendEmail(
+                    Hrset."ICT Email",
+                    CopyStr('ICT Helpdesk ' + TicketNo, 1, 50),
+                    CopyStr('Ticket ' + TicketNo + ' (' + requestType + ') â€” ' + subject + '. Priority: ' + priorityCode + '.', 1, 1000));
+    end;
+
+    procedure GetIctHelpdeskTicket(docNo: Code[20]) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.GetTicket(docNo));
+    end;
+
+    procedure ListIctHelpdeskTickets(employeeNo: Code[20]; ictView: Boolean) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.ListTickets(employeeNo, ictView));
+    end;
+
+    procedure UpdateIctHelpdeskTicket(
+        docNo: Code[20];
+        actorEmployeeNo: Code[20];
+        trackingStatus: Code[30];
+        assignee: Code[20];
+        ictTeam: Text[100];
+        expectedResolve: Date;
+        actionTaken: Text[250];
+        rootCause: Text[250];
+        resolutionRemarks: Text[250];
+        closureReason: Text[150];
+        satisfaction: Integer;
+        userClosingRemarks: Text[250]
+    ) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.UpdateTicket(
+            docNo, actorEmployeeNo, trackingStatus, assignee, ictTeam, expectedResolve,
+            actionTaken, rootCause, resolutionRemarks, closureReason, satisfaction, userClosingRemarks));
+    end;
+
+    procedure CancelIctHelpdeskTicket(docNo: Code[20]; cancelRemarks: Text[250]) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.CancelTicket(docNo, cancelRemarks));
+    end;
+
+    procedure ConfirmIctHelpdeskTicket(docNo: Code[20]; remarks: Text[250]; satisfaction: Integer) return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.ConfirmTicket(docNo, remarks, satisfaction));
+    end;
+
+    procedure ListIctHelpdeskRequestTypes() return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.ListRequestTypes());
+    end;
+
+    procedure ListIctHelpdeskOfficers() return_value: Text
+    var
+        IctMgt: Codeunit "Portal ICT Helpdesk Mgt.";
+    begin
+        exit(IctMgt.ListIctOfficers());
+    end;
+
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
     var
         portalReturn: Date;
@@ -5035,9 +5674,11 @@ codeunit 50049 "Staff Portal Codeunit"
         if endDate = 0D then
             exit;
 
-        // ABH production invariant: an employee returns on the calendar day
-        // immediately after the final leave day.
-        portalReturn := endDate + 1;
+        portalReturn := Dt2Date(returnDate);
+        if portalReturn = 0D then
+            portalReturn := PortalNextWorkingDate(endDate);
+        if portalReturn < endDate then
+            Error('Return Date cannot be before End Date. Recalculate the leave dates and try again.');
         LeaveApp."Return Date" := portalReturn;
     end;
 
@@ -5101,6 +5742,105 @@ codeunit 50049 "Staff Portal Codeunit"
         if not ReqHeader.Get(requestNo) then
             Error('Store requisition %1 was not found.', requestNo);
         StoreMgmt.ConfirmReceiptForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Store portal features in this BC app, so the portal shows only what BC can do.
+    /// </summary>
+    procedure PortalStoreFeatures() return_value: Text
+    var
+        Root: JsonObject;
+        Features: JsonArray;
+        JsonText: Text;
+    begin
+        Features.Add('storeList');
+        Features.Add('unitsOfMeasure');
+        Features.Add('storeHandOff');
+        Features.Add('storeOffers');
+        Features.Add('startLprOptions');
+        Features.Add('storeDocuments');
+        Features.Add('storeRoles');
+        Root.Add('features', Features);
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Store Manager / Store Keeper roles of a portal user, from Warehouse Employees and the store cards.
+    /// </summary>
+    procedure PortalStoreRoles(actorUserID: Code[50]) return_value: Text
+    var
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        return_value := StoreMgmt.GetPortalStoreRoles(actorUserID);
+    end;
+
+    /// <summary>
+    /// Storekeeper: the store's items (in stock first) for Add Item to Issue; a search looks at every item.
+    /// </summary>
+    procedure PortalStoreOfferItems(requestNo: Code[20]; actorUserID: Code[50]; searchText: Text[50]) return_value: Text
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 200);
+    end;
+
+    /// <summary>
+    /// Storekeeper: Add Item to Issue (Store Offer line). Returns the new line number.
+    /// </summary>
+    procedure AddPortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; itemNo: Code[20]; quantity: Decimal) return_value: Integer
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.AddStoreOfferForPortal(ReqHeader, actorUserID, itemNo, quantity);
+    end;
+
+    /// <summary>
+    /// Storekeeper: remove a Store Offer line before the store manager accepts it.
+    /// </summary>
+    procedure RemovePortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; lineNo: Integer) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.RemoveStoreOfferForPortal(ReqHeader, actorUserID, lineNo);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Offer Another Item after the requester declined.
+    /// </summary>
+    procedure OfferAnotherPortalStoreItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.OfferAnotherItemForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Close Request after the requester declined (no GIV).
+    /// </summary>
+    procedure ClosePortalStoreRequest(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.CloseDeclinedRequestForPortal(ReqHeader, actorUserID);
         return_value := true;
     end;
 
@@ -5210,134 +5950,5 @@ codeunit 50049 "Staff Portal Codeunit"
             Error('Business Central did not produce the %1 PDF for store requisition %2.', documentKind, requestNo);
         TempBlob.CreateInStream(PdfInStream);
         return_value := Base64Convert.ToBase64(PdfInStream);
-    end;
-
-    /// <summary>
-    /// Store Manager: Start Local Purchase (LPR) with the BC card prompts — source (LOCAL / FOREIGN),
-    /// project (blank = non-project) and officer (PROCUREMENT / PROJECT, blank = follows the project).
-    /// </summary>
-    procedure StartPortalStoreLpr(requestNo: Code[50]; projectNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; actorJobTitle: Text[100]; procurementSource: Text[30]; officerType: Text[30]) return_value: Text
-    var
-        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
-    begin
-        exit(ProcurementMgt.StartStoreLpr(requestNo, projectNo, actionComment, actorUserID, actorJobTitle, procurementSource, officerType));
-    end;
-
-    /// <summary>
-    /// Officer and approver user IDs from ABH Local Proc Setup, for the portal Start LPR prompts.
-    /// </summary>
-    procedure PortalLprOfficers() return_value: Text
-    var
-        Setup: Record "ABH Local Proc Setup";
-        Root: JsonObject;
-        JsonText: Text;
-    begin
-        if not Setup.Get('SETUP') then
-            Clear(Setup);
-        Root.Add('procurementOfficer', Setup."Procurement User ID");
-        Root.Add('projectProcurementOfficer', Setup."Project Procurement User ID");
-        Root.Add('operationsManager', Setup."Operations Manager User ID");
-        Root.Add('fad', Setup."FAD User ID");
-        Root.WriteTo(JsonText);
-        return_value := JsonText;
-    end;
-
-    /// <summary>
-    /// Store portal features in this BC app, so the portal shows only what BC can do.
-    /// </summary>
-    procedure PortalStoreFeatures() return_value: Text
-    var
-        Root: JsonObject;
-        Features: JsonArray;
-        JsonText: Text;
-    begin
-        Features.Add('storeList');
-        Features.Add('unitsOfMeasure');
-        Features.Add('storeHandOff');
-        Features.Add('storeOffers');
-        Features.Add('startLprOptions');
-        Features.Add('storeDocuments');
-        Features.Add('storeRoles');
-        Root.Add('features', Features);
-        Root.WriteTo(JsonText);
-        return_value := JsonText;
-    end;
-
-    /// <summary>
-    /// Storekeeper: in-stock items at the issuing store for Add Item to Issue (search by No. or description).
-    /// </summary>
-    procedure PortalStoreOfferItems(requestNo: Code[20]; actorUserID: Code[50]; searchText: Text[50]) return_value: Text
-    var
-        ReqHeader: Record "Store Requistion Header";
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        if not ReqHeader.Get(requestNo) then
-            Error('Store requisition %1 was not found.', requestNo);
-        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 200);
-    end;
-
-    /// <summary>
-    /// Storekeeper: Add Item to Issue (Store Offer line). Returns the new line number.
-    /// </summary>
-    procedure AddPortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; itemNo: Code[20]; quantity: Decimal) return_value: Integer
-    var
-        ReqHeader: Record "Store Requistion Header";
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        if not ReqHeader.Get(requestNo) then
-            Error('Store requisition %1 was not found.', requestNo);
-        return_value := StoreMgmt.AddStoreOfferForPortal(ReqHeader, actorUserID, itemNo, quantity);
-    end;
-
-    /// <summary>
-    /// Storekeeper: remove a Store Offer line before the store manager accepts it.
-    /// </summary>
-    procedure RemovePortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; lineNo: Integer) return_value: Boolean
-    var
-        ReqHeader: Record "Store Requistion Header";
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        if not ReqHeader.Get(requestNo) then
-            Error('Store requisition %1 was not found.', requestNo);
-        StoreMgmt.RemoveStoreOfferForPortal(ReqHeader, actorUserID, lineNo);
-        return_value := true;
-    end;
-
-    /// <summary>
-    /// Storekeeper: Offer Another Item after the requester declined.
-    /// </summary>
-    procedure OfferAnotherPortalStoreItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
-    var
-        ReqHeader: Record "Store Requistion Header";
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        if not ReqHeader.Get(requestNo) then
-            Error('Store requisition %1 was not found.', requestNo);
-        StoreMgmt.OfferAnotherItemForPortal(ReqHeader, actorUserID);
-        return_value := true;
-    end;
-
-    /// <summary>
-    /// Storekeeper: Close Request after the requester declined (no GIV).
-    /// </summary>
-    procedure ClosePortalStoreRequest(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
-    var
-        ReqHeader: Record "Store Requistion Header";
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        if not ReqHeader.Get(requestNo) then
-            Error('Store requisition %1 was not found.', requestNo);
-        StoreMgmt.CloseDeclinedRequestForPortal(ReqHeader, actorUserID);
-        return_value := true;
-    end;
-
-    /// <summary>
-    /// Store Manager / Store Keeper roles of a portal user, from Warehouse Employees and the store cards.
-    /// </summary>
-    procedure PortalStoreRoles(actorUserID: Code[50]) return_value: Text
-    var
-        StoreMgmt: Codeunit "Store Mgmt";
-    begin
-        return_value := StoreMgmt.GetPortalStoreRoles(actorUserID);
     end;
 }
