@@ -1,4 +1,4 @@
-ABH BUSINESS CENTRAL PRODUCTION SETUP — APP 1.0.3.273
+ABH BUSINESS CENTRAL PRODUCTION SETUP — APP 1.0.3.307
 ====================================================
 
 This file contains configuration only. Do not invent users, approval limits,
@@ -9,7 +9,7 @@ actual ABH records already approved by Finance/HR management.
 ===============================
 
 Publish, sync, data-upgrade, and restart BC240 in that order. Confirm installed
-version 1.0.3.273 before starting the portal.
+version 1.0.3.307 before starting the portal.
 
 2. APPROVAL USERS
 =================
@@ -83,8 +83,12 @@ Then Search: Workflows
 - Import Workflows\Store-Requisition-Approval-Workflow.xml.
 - Open STORE-REQ-WF and select the applicable actual workflow user group in the
   Create Approval Requests response.
+- Under "An Approval of a Store Requisition is canceled", include both native
+  responses: "Cancel all approval requests" and "Open the document". App
+  1.0.3.307 also reconciles these outcomes defensively, but the workflow should
+  still be complete for approvals cancelled directly inside Business Central.
 - Do not type "Create an approval request for the Store Requisition" manually.
-  App 1.0.3.273 registers Store against BC's native Create Approval Requests
+  App 1.0.3.307 registers Store against BC's native Create Approval Requests
   response; select that native response from the lookup.
 - Enable and test each requester-role route; do not assume the skip without a
   test Approval Entry showing the next intended approver.

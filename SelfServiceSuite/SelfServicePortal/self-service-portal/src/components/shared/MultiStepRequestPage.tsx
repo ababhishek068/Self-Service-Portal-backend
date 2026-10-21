@@ -859,20 +859,28 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
     setSelectedId(request.id)
   }
 
+  const actionInFlight = useRef(false)
+
   const runAction = async (
     id: string,
     action: () => Promise<unknown>,
     errorLabel: string,
     successMessage?: string,
   ) => {
+    if (actionInFlight.current) return
+    actionInFlight.current = true
     setActionId(id)
     try {
       await action()
       await refresh()
       if (successMessage) toast.success(successMessage)
     } catch (err: unknown) {
+      // BC may have committed before a SOAP timeout, or rolled back a failed
+      // approval save. Refresh from BC in either case, preserving the original error.
+      await refresh().catch(() => undefined)
       toast.error(err instanceof Error ? err.message : errorLabel, 'Action failed')
     } finally {
+      actionInFlight.current = false
       setActionId(null)
     }
   }
@@ -1093,9 +1101,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       disabled={actionId === selected.id}
                       onClick={() =>
                         void confirm({
-                          title: 'Cancel request',
-                          message: 'Are you sure you want to cancel this request?',
-                          confirmLabel: 'Cancel Request',
+                          title: selected.status === 'Pending Approval' ? 'Cancel approval' : 'Cancel request',
+                          message: selected.status === 'Pending Approval'
+                            ? 'Cancel this approval request and reopen the draft? You can then edit or permanently delete it.'
+                            : 'Are you sure you want to cancel this request?',
+                          confirmLabel: selected.status === 'Pending Approval' ? 'Cancel Approval' : 'Cancel Request',
                           cancelLabel: 'Keep',
                           tone: 'danger',
                         }).then((yes) => {
@@ -1109,7 +1119,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                         })
                       }
                     >
-                      Cancel
+                      {selected.status === 'Pending Approval' ? 'Cancel Approval' : 'Cancel'}
                     </Button>
                   ) : null}
                   {canDeleteDocumentDraft(selected.status, config.module.module) ? (
@@ -1474,9 +1484,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               disabled={actionId === row.id}
               onClick={() =>
                 void confirm({
-                  title: 'Cancel request',
-                  message: 'Are you sure you want to cancel this request?',
-                  confirmLabel: 'Cancel Request',
+                  title: row.status === 'Pending Approval' ? 'Cancel approval' : 'Cancel request',
+                  message: row.status === 'Pending Approval'
+                    ? 'Cancel this approval request and reopen the draft? You can then edit or permanently delete it.'
+                    : 'Are you sure you want to cancel this request?',
+                  confirmLabel: row.status === 'Pending Approval' ? 'Cancel Approval' : 'Cancel Request',
                   cancelLabel: 'Keep',
                   tone: 'danger',
                 }).then((yes) => {
@@ -1491,7 +1503,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 })
               }
             >
-              Cancel
+              {row.status === 'Pending Approval' ? 'Cancel Approval' : 'Cancel'}
             </Button>
           ) : null}
           {canDeleteDocumentDraft(row.status, config.module.module) ? (
@@ -1521,7 +1533,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               }}
             >
               <Trash2 className="h-4 w-4" />
-              Delete
+              {config.module.module === 'storeRequisition' ? 'Delete Draft' : 'Delete'}
             </Button>
           ) : null}
         </div>

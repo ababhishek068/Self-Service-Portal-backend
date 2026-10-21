@@ -1,4 +1,4 @@
-import { Check, ClipboardCheck, FileCheck2, ListPlus, PackageCheck, Send } from 'lucide-react'
+import { Check, ClipboardCheck, FileCheck2, FileSignature, ListPlus, PackageCheck, Send } from 'lucide-react'
 import type { ApprovalStep, PortalModuleKey } from '@/types/erp.types'
 
 interface RequestProgressProps {
@@ -38,6 +38,18 @@ function booleanField(payload: Record<string, unknown>, keys: string[]) {
     return ['true', 'yes', '1'].includes(String(value ?? '').trim().toLowerCase())
   }
   return false
+}
+
+/** BC Issue Stage on the store requisition (Store Req Header Approved / Store Requisition Header UP). */
+function storeIssueStage(payload: Record<string, unknown>) {
+  const raw = String(payload.IssueStage ?? payload.Issue_Stage ?? '').trim().toLowerCase()
+  if (raw.includes('lpr requested')) return 'LPR_REQUESTED'
+  if (raw.includes('lpr started')) return 'LPR_STARTED'
+  if (raw.includes('prepared')) return 'PREPARED'
+  if (raw.includes('accepted')) return 'ACCEPTED'
+  if (raw.includes('transit')) return 'TRANSIT'
+  if (raw.includes('received')) return 'RECEIVED'
+  return ''
 }
 
 function quantityLabel(value: number) {
@@ -85,24 +97,43 @@ function storeRequisitionSteps(
       : approvalPending
         ? `With ${currentApprover?.actorName || currentApprover?.actorEmployeeNo || 'the current approver'}`
         : 'Request approval when lines are complete'
-  const issueNote = fullyIssued
-    ? issued > 0 || requested > 0
-      ? `${quantityLabel(issued || requested)} fully issued`
-      : 'All requested lines issued'
-    : issued > 0
-      ? `${quantityLabel(issued)} of ${quantityLabel(requested)} issued`
-      : approvalDone
-        ? 'Awaiting issue by the store'
-        : 'Starts after approval'
-  const receiptNote = fullyReceived
+  // Store hand-off as in BC: Store Keeper → Store Manager → requester accepts the
+  // borrowing form (GIV, In Transit) → Confirm Receipt. No stock: Request for LPR → LPR.
+  const stage = storeIssueStage(payload)
+  const declined = /declin/i.test(String(payload.RequesterDecision ?? payload.Requester_Decision ?? '')) && !stage
+  const givNo = String(payload.StoreIssueNo ?? payload.Store_Issue_No ?? '').trim()
+  const itemAccepted = ['TRANSIT', 'RECEIVED'].includes(stage) || Boolean(givNo) || issued > 0
+  const receiptDone = stage === 'RECEIVED' || (!stage && fullyReceived)
+  const storeIssueDone = ['ACCEPTED', 'TRANSIT', 'RECEIVED'].includes(stage) || itemAccepted || fullyIssued
+  const issueNote = storeIssueDone
+    ? 'Store manager accepted the item'
+    : stage === 'PREPARED'
+      ? 'With the store manager to accept the item'
+      : stage === 'LPR_REQUESTED'
+        ? 'Not in stock — with the Store Manager to start the LPR'
+        : stage === 'LPR_STARTED'
+          ? 'Local purchase (LPR) in progress'
+          : declined
+            ? 'You declined — the store can offer another item'
+            : approvalDone
+              ? 'Store keeper: add the item to issue, or Request for LPR'
+              : 'Starts after approval'
+  const acceptNote = itemAccepted
+    ? givNo
+      ? `Accepted — GIV ${givNo}`
+      : 'Item accepted — GIV created'
+    : stage === 'ACCEPTED'
+      ? 'View Item, then accept or decline'
+      : 'Starts after the store manager accepts'
+  const receiptNote = receiptDone
     ? received > 0 || issued > 0
       ? `${quantityLabel(received || issued)} receipt confirmed`
       : 'Receipt confirmed'
     : received > 0
       ? `${quantityLabel(received)} of ${quantityLabel(issued)} received`
-      : issued > 0
-        ? `Confirm receipt of ${quantityLabel(Math.max(0, issued - received))}`
-        : 'Starts after store issue'
+      : itemAccepted
+        ? 'In transit — confirm receipt when you have the item'
+        : 'Starts after you accept the item'
 
   return [
     {
@@ -128,21 +159,27 @@ function storeRequisitionSteps(
       note: issueNote,
       tone: rejected
         ? 'pending'
-        : fullyIssued
+        : storeIssueDone
           ? 'complete'
-          : approvalDone || issued > 0
+          : approvalDone
             ? 'active'
             : 'pending',
       icon: PackageCheck,
+    },
+    {
+      label: 'Accept item',
+      note: acceptNote,
+      tone: rejected ? 'pending' : itemAccepted ? 'complete' : stage === 'ACCEPTED' ? 'active' : 'pending',
+      icon: FileSignature,
     },
     {
       label: 'Receipt confirmation',
       note: receiptNote,
       tone: rejected
         ? 'pending'
-        : fullyReceived
+        : receiptDone
           ? 'complete'
-          : issued > 0
+          : itemAccepted
             ? 'active'
             : 'pending',
       icon: ClipboardCheck,
@@ -188,9 +225,11 @@ export function RequestProgress({
       ? storeRequisitionSteps(status, lines, payload, approvalSteps)
       : genericSteps
   const gridClass =
-    steps.length === 5
-      ? 'sm:grid-cols-2 lg:grid-cols-5'
-      : 'sm:grid-cols-3'
+    steps.length === 6
+      ? 'sm:grid-cols-2 lg:grid-cols-3'
+      : steps.length === 5
+        ? 'sm:grid-cols-2 lg:grid-cols-5'
+        : 'sm:grid-cols-3'
 
   return (
     <div className={`grid gap-2 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/80 to-white p-3 ${gridClass}`}>

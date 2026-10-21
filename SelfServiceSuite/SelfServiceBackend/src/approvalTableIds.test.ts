@@ -1,3 +1,6 @@
+import {fetchPortalProfileDetails, mapProfileDetails, mergeProfileRecords, parseLegacyProfile, parseProfileSections, profileText} from './profileDetails.js'
+import { runStoreApprovalOnce, storeApprovalSubmissionComplete } from './storeApprovalSubmission.js'
+import { buildStoreBorrowingFormPdf } from './storeBorrowingForm.js'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { Request } from 'express'
@@ -22,6 +25,8 @@ import {
   purchasePriorityCode,
   approvalDocumentNoCandidates,
   portalApprovalEntryFilter,
+  portalAttachmentRequiredForModule,
+  portalDraftDeleteAllowed,
   uniqueExactMasterNoByName,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
@@ -74,6 +79,11 @@ import {
   approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
+  applyItemCardToStoreOffer,
+  storeLineNeedsBcMapping,
+  storePrepHints,
+  storeIssueStageCode,
+  portalUserIsStoreManager,
   weeklyLateAttendanceSummary,
   authUserCanManageHrPolicies,
   parseHrPolicyUpload,
@@ -86,6 +96,54 @@ import {
   validateEmployeeExitDetails,
 } from './employeeExit.js'
 import { hrServiceLetterCanBeDeleted } from './hrServiceLetters.js'
+
+describe('Portal attachment policy', () => {
+  it('keeps store and purchase attachments optional while claims remain mandatory', () => {
+    assert.equal(portalAttachmentRequiredForModule('store-requisition'), false)
+    assert.equal(portalAttachmentRequiredForModule('purchase-requisition'), false)
+    assert.equal(portalAttachmentRequiredForModule('claim'), true)
+  })
+})
+
+describe('Store draft deletion lifecycle', () => {
+  it('matches Leave: delete Open/Draft only and cancel pending approval first', () => {
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Open'), true)
+    assert.equal(portalDraftDeleteAllowed('storeRequisition', 'Open'), true)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', ' draft '), true)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Pending Approval'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Cancelled'), false)
+    assert.equal(portalDraftDeleteAllowed('storeRequisition', 'Cancelled'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Rejected'), false)
+    assert.equal(portalDraftDeleteAllowed('store-requisition', 'Approved'), false)
+  })
+
+  it('accepts cancellation only after BC reopens the header and closes active entries', () => {
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Open' },
+        'storeRequisition',
+        [{ Status: 'Canceled' }, { Status: 'Approved' }],
+      ),
+      true,
+    )
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Open' },
+        'storeRequisition',
+        [{ Status: 'Open' }],
+      ),
+      false,
+    )
+    assert.equal(
+      approvalCancellationComplete(
+        { Status: 'Pending Approval' },
+        'storeRequisition',
+        [{ Status: 'Canceled' }],
+      ),
+      false,
+    )
+  })
+})
 
 describe('Leave approval SOAP contract', () => {
   it('emits RequestLeaveApproval parameters in the positional order required by BC', () => {
@@ -134,13 +192,18 @@ import {
   pickDimensionCodeFromRow,
 } from './employeeProfile.js'
 import {
+  applyUnpostedApprovedLeave,
+  approvedLeaveDaysNotPosted,
   leaveApplicationExceedsAvailableBalance,
   parseBcLeaveSummary,
+  nonAnnualApplicationLimit,
   resolveAnnualAvailableLeaveBalance,
   resolveBcLeaveBalance,
   resolveLeaveBalanceBreakdown,
+  resolveNonAnnualLeaveBalanceBreakdown,
 } from './leaveBalance.js'
 import {
+  approvalCancellationComplete,
   documentStatusFromBc,
   injectSalaryAdvanceSalaryHint,
   mapRequest,
@@ -169,9 +232,10 @@ describe('purchase stock decision authorization', () => {
     assert.equal(canManagePurchaseStock({ ...base, jobTitle: 'Finance Manager' }), false)
   })
 
-  it('separates Operations, Procurement, Finance, and Audit assignments', () => {
+  it('separates Operations, Purchase, Finance, and Audit assignments', () => {
     assert.deepEqual(facilityProcessRoles({ ...base, roles: ['OPS'] }), ['operations'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Purchasing Officer' }), ['procurement'])
+    assert.deepEqual(facilityProcessRoles({ ...base, departmentName: 'Purchase Department' }), ['procurement'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'Accountant' }), ['finance'])
     assert.deepEqual(facilityProcessRoles({ ...base, departmentName: 'Internal Audit' }), ['auditor'])
     assert.deepEqual(facilityProcessRoles({ ...base, jobTitle: 'ICT Administrator' }), [])
@@ -184,8 +248,16 @@ describe('purchase stock decision authorization', () => {
     const auditor = { ...base, roles: ['auditor'] }
 
     assert.equal(
-      assertPurchaseProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
-      'STOCK_AVAILABLE',
+      assertPurchaseProcessActionAllowed(procurement, 'PURCHASE_SOURCING', 'START_PURCHASE'),
+      'START_PURCHASE',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(finance, 'PURCHASE_APPROVAL', 'PURCHASE_APPROVED'),
+      'PURCHASE_APPROVED',
+    )
+    assert.equal(
+      assertPurchaseProcessActionAllowed(operations, 'GRV', 'LINK_GRV'),
+      'LINK_GRV',
     )
     assert.equal(
       assertPurchaseProcessActionAllowed(procurement, 'LPR_CORRECTION', 'LPR_RESUBMITTED'),
@@ -216,8 +288,8 @@ describe('purchase stock decision authorization', () => {
       'AUDIT_RESUBMITTED',
     )
     assert.throws(
-      () => assertPurchaseProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
-      /not authorized/i,
+      () => assertPurchaseProcessActionAllowed(operations, 'STOCK_CHECK', 'STOCK_AVAILABLE'),
+      /not valid/i,
     )
     assert.throws(
       () => assertPurchaseProcessActionAllowed(finance, 'PROCUREMENT_APPROVAL', 'PROCUREMENT_RETURNED'),
@@ -240,9 +312,49 @@ describe('purchase stock decision authorization', () => {
       () => assertStoreProcessActionAllowed(procurement, 'STOCK_CHECK', 'STOCK_UNAVAILABLE'),
       /not authorized/i,
     )
+    // Local Purchase: Store Keeper confirms unavailability (step 5), Store Manager starts the LPR (step 6).
+    assert.equal(assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'REQUEST_FOR_LPR'), 'REQUEST_FOR_LPR')
+    assert.equal(assertStoreProcessActionAllowed(operations, 'LPR_REQUESTED', 'START_LPR'), 'START_LPR')
+    assert.throws(() => assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'START_LPR'), /not valid/i)
+    assert.throws(() => assertStoreProcessActionAllowed(procurement, 'LPR_REQUESTED', 'START_LPR'), /not authorized/i)
+    assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Manager' }), true)
+    assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Keeper' }), false)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 1 }), true)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
+  })
+
+  it('shows the item card specification and brand / model on a store offer line', () => {
+    const item = { No: 'ABH-ITM000140', Brand: 'DELL', Model: '45678XC', DetailsSpecification: '1TB HD,SSD, 16GB RAM, 14-Inch' }
+    const offer = applyItemCardToStoreOffer(
+      { lineRole: 'Store Offer', itemNo: 'ABH-ITM000140', itemName: 'Laptop', description: 'Laptop', preferredBrandModel: '' },
+      item,
+    )
+    assert.equal(offer.description, '1TB HD,SSD, 16GB RAM, 14-Inch')
+    assert.equal(offer.preferredBrandModel, 'DELL / 45678XC')
+    // The requester's own line is never changed.
+    const request = { lineRole: 'Request', itemNo: '', itemName: 'Laptop', description: '16GB RAM', preferredBrandModel: 'Dell' }
+    assert.deepEqual(applyItemCardToStoreOffer(request, item), request)
+    assert.equal(storeLineNeedsBcMapping(''), true)
+    assert.equal(storeLineNeedsBcMapping('PORTAL-12'), true)
+    assert.equal(storeLineNeedsBcMapping('ITEM-100'), false)
+    assert.deepEqual(storePrepHints('', [{ needsBcMapping: true }]), [
+      'Set Issuing Store on the Store Requisition header.',
+      'Replace each PORTAL-* line with a real Item No.',
+      'Confirm on-hand quantity at that location.',
+    ])
+    assert.deepEqual(storePrepHints('MAIN', [{ needsBcMapping: false }]), [])
+    assert.equal(storeIssueStageCode('Prepared by Store'), 'PREPARED')
+    assert.equal(storeIssueStageCode('In Transit'), 'TRANSIT')
+    assert.equal(storeIssueStageCode(''), '')
+    assert.equal(
+      portalUserIsStoreManager({ roles: [], jobTitle: 'Store Manager', department: '', departmentName: '' }),
+      true,
+    )
+    assert.equal(
+      portalUserIsStoreManager({ roles: ['store'], jobTitle: 'Storekeeper', department: 'IT', departmentName: 'IT' }),
+      false,
+    )
   })
 })
 
@@ -1186,6 +1298,34 @@ describe('resolveBcLeaveBalance', () => {
   })
 })
 
+describe('approved leave that is not yet posted', () => {
+  it('adds the approved days to taken and reduces available once', () => {
+    const shown = applyUnpostedApprovedLeave(
+      {
+        leaveEntitlement: 21,
+        carryForward: 27,
+        totalAvailableLeaveBalance: 48,
+        leaveAccruedToDate: 31.89,
+        totalLeaveTakenToDate: 10,
+        availableLeaveBalance: 21.89,
+      },
+      approvedLeaveDaysNotPosted([{ Status: 'Approved', DaysApplied: 1, Posted: false }]),
+    )
+    assert.equal(shown.totalLeaveTakenToDate, 11)
+    assert.equal(shown.availableLeaveBalance, 20.89)
+  })
+
+  it('does not count a leave that is already posted', () => {
+    assert.equal(
+      approvedLeaveDaysNotPosted([
+        { Status: 'Posted', DaysApplied: 1, Posted: true },
+        { Status: 'Approved', DaysApplied: 2, Posted: false },
+      ]),
+      2,
+    )
+  })
+})
+
 describe('six-field leave balance contract', () => {
   it('keeps Total Available separate from the balance the employee may apply against', () => {
     const summary = parseBcLeaveSummary(
@@ -1477,17 +1617,43 @@ describe('parseLeaveDatesReturn', () => {
 })
 
 describe('computeLeaveDatesFallback', () => {
-  it('uses the same day for half-day leave and the next working day as return', () => {
+  it('returns after lunch for morning half-day leave', () => {
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
       endDate: '2026-07-17',
       returnDate: '2026-07-20',
     })
+    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '1'), {
+      endDate: '2026-07-17',
+      returnDate: '2026-07-17',
+    })
   })
 
-  it('does not consume a weekend for normal leave', () => {
-    assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 2, '0'), {
-      endDate: '2026-07-20',
-      returnDate: '2026-07-21',
+  it('skips weekend for Fri + 2 Normal days (End Mon, Return Tue)', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 2, '0'), {
+      endDate: '2026-09-07',
+      returnDate: '2026-09-08',
+    })
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-25', 2, '0'), {
+      endDate: '2026-09-28',
+      returnDate: '2026-09-29',
+    })
+  })
+
+  it('returns next Monday when Friday is the only leave day', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 1, '0'), {
+      endDate: '2026-09-04',
+      returnDate: '2026-09-07',
+    })
+  })
+
+  it('rejects Saturday or Sunday start dates', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-05', 2, '0'), {
+      endDate: '',
+      returnDate: '',
+    })
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-06', 2, '0'), {
+      endDate: '',
+      returnDate: '',
     })
   })
 })
@@ -1677,6 +1843,22 @@ describe('staffClaim saveLine params', () => {
     assert.equal(payload.issuingStore, '')
   })
 
+  it('sends the location of the Issuing Store picked from the store list', async () => {
+    const spec = findModuleSpec('store-requisition')
+    const header = (body: Record<string, unknown>) =>
+      spec!.params!.saveHeader!({
+        req: { body: { justification: 'Toner', dateRequired: '2026-10-21', ...body } },
+        user: { employeeNo: 'ABH-010', userID: 'ZERIHUN_SISAY' },
+        no: '',
+      } as never) as Promise<Record<string, unknown>>
+    // No BC store list in this test, so the ABH fallback list applies (SUP lives at location SU).
+    assert.equal((await header({ storeCode: 'SUP', isProject: false })).issuingStore, 'SU')
+    await assert.rejects(header({ storeCode: '', isProject: false }), /Select the issuing store/)
+    await assert.rejects(header({ storeCode: 'NOPE', isProject: false }), /not an active store/)
+    // Is Project needs BC 1.0.3.544 (SetPortalStoreRequisitionDetails).
+    await assert.rejects(header({ storeCode: 'IT', isProject: true, projectCode: 'SAF-001' }), /1\.0\.3\.544|project/i)
+  })
+
   it('rejects an incomplete store requisition line before calling Business Central', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveLine)
@@ -1685,7 +1867,6 @@ describe('staffClaim saveLine params', () => {
         spec!.params!.saveLine!({
           req: {
             body: {
-              itemName: 'Laptop',
               quantity: 1,
               uom: 'PCS',
             },
@@ -1693,21 +1874,20 @@ describe('staffClaim saveLine params', () => {
           user: { employeeNo: 'ABH-114', userID: 'HERMON_GETACHEW' },
           no: 'SREQ-TEST',
         } as never),
-      /description, UOM, and a positive quantity are required/i,
+      /Describe the item or asset you need and enter a positive quantity/i,
     )
   })
 
-  it('creates a store requisition line from the stated business need without a BC item lookup', async () => {
+  it('saves a typed store request without a catalog item code and without issuing stock', async () => {
     const spec = findModuleSpec('store-requisition')
     assert.ok(spec?.params?.saveLine)
     const payload = (await spec!.params!.saveLine!({
       req: {
         body: {
           type: '1',
-          itemNo: 'ITEM-001',
-          itemName: 'Heavy-duty archive boxes',
-          description: 'A4 document storage with lids',
-          quantity: 12,
+          itemName: 'All in one Desktop',
+          lineDescription: 'With keyboard',
+          quantity: 1,
           uom: 'PCS',
         },
       },
@@ -1716,9 +1896,10 @@ describe('staffClaim saveLine params', () => {
     } as never)) as Record<string, unknown>
 
     assert.equal(payload.itemNo, '')
-    assert.equal(payload.description, 'Heavy-duty archive boxes')
-    assert.equal(payload.remarks, 'A4 document storage with lids')
-    assert.equal(payload.quantity, 12)
+    assert.equal(payload.description, 'All in one Desktop')
+    assert.equal(payload.remarks, 'With keyboard')
+    assert.equal(payload.quantity, 1)
+    assert.equal(payload.location, '')
   })
 
   it('rejects an incomplete purchase requisition header before calling Business Central', async () => {
@@ -2482,6 +2663,16 @@ describe('leave status is driven only by Business Central', () => {
     )
   })
 
+  it('shows Posted after the leave is written to the ledger, even when approval entries stay Approved', () => {
+    assert.equal(
+      resolveLeaveStatus(
+        { ApplicationCode: 'LV-00001', Status: 'Posted', ApprovalStatus: 'Approved', Posted: true },
+        [{ Status: 'Approved', DocumentNo: 'LV-00001' }],
+      ),
+      'Posted',
+    )
+  })
+
   it('shows Rejected when an approval step was rejected (even if Sent_for_approval is still set)', () => {
     assert.equal(
       resolveLeaveStatus(
@@ -2768,5 +2959,382 @@ describe('HOD role resolution', () => {
     assert.equal(merged?.IsHOD, true)
     assert.equal(merged?.ICTOfficer, true)
     assert.equal(merged?.FirstName, 'Hermon')
+  })
+})
+
+// The BC-style borrowing form must retain every item across continuation pages.
+describe('borrowing form pagination', () => {
+  const input = {
+    requestNo: 'SR-TEST', storeIssueNo: '', requisitionType: 'Stationery',
+    requestDate: '2026-10-07', requiredDate: '2026-10-07', issueDate: '',
+    requesterName: 'Test Requester', employeeNo: 'EMP-1', division: 'Admin',
+    functionName: 'Admin', department: 'IT', issuingStore: 'MAIN', purpose: 'Test',
+  }
+  const line = (i: number) => ({
+    itemNo: `ITEM-${i}`, description: `Description ${i}`, unitOfMeasure: 'EA',
+    quantityRequested: '1', quantityIssued: '0',
+  })
+  it('keeps the single-item form on one page', () => {
+    const pdf = buildStoreBorrowingFormPdf({ ...input, lines: [line(1)] }).toString()
+    assert.match(pdf, /\/Count 1\b/)
+    assert.match(pdf, /ABH MAIN Item Borrowing Form/)
+    assert.match(pdf, /Requester signature:/)
+  })
+  it('includes all 65 items and repeats table headings on continuation pages', () => {
+    const pdf = buildStoreBorrowingFormPdf({ ...input, lines: Array.from({ length: 65 }, (_, i) => line(i + 1)) }).toString()
+    for (let i = 1; i <= 65; i++) assert.ok(pdf.includes(`(ITEM-${i}) Tj`))
+    const pages = Number(pdf.match(/\/Count (\d+)/)?.[1])
+    assert.ok(pages > 1)
+    assert.equal((pdf.match(/\(Item Code\) Tj/g) ?? []).length, pages)
+    assert.equal((pdf.match(/Requester signature:/g) ?? []).length, 1)
+    assert.ok(pdf.includes(`Page ${pages} of ${pages}`))
+  })
+})
+
+
+describe('non-annual BC leave balance synchronization', () => {
+  // GetLeaveBalance includes annual Employee Card fields even for other types.
+  const summaryFor = (values: Record<string, unknown>) => parseBcLeaveSummary(JSON.stringify({
+    accruedDays: 5.29, leaveAccruedToDate: 32.29, earnedLeaveDays: 32.29,
+    totalAvailableLeaveBalance: 48, carryForwardBalance: 27,
+    carryForwardBalanceForType: 0, ...values,
+  }))
+  for (const type of ['MOURNING', 'PATERNITY', 'WEDDING']) {
+    it(`uses the live ${type} balance without annual accrual contamination`, () => {
+      const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+        allocatedDays: 3, currentTotalLeaveTaken: 1, currentLeaveBalance: 2,
+        availableLeaveBalance: 23.8,
+      }))
+      assert.deepEqual(result, {
+        leaveEntitlement: 3, carryForward: 0, totalAvailableLeaveBalance: 3,
+        totalLeaveTakenToDate: 1, leaveAccruedToDate: null, availableLeaveBalance: 2,
+      })
+    })
+  }
+  it('keeps BC maternity entitlement and balance at 120', () => {
+    const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+      allocatedDays: 120, currentTotalLeaveTaken: 0, currentLeaveBalance: 120,
+    }))
+    assert.equal(result?.availableLeaveBalance, 120)
+    assert.equal(result?.totalAvailableLeaveBalance, 120)
+  })
+  it('preserves zero and negative sick balances and does not substitute an application cap', () => {
+    for (const balance of [0, -2]) {
+      const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+        allocatedDays: 0, currentTotalLeaveTaken: -balance, currentLeaveBalance: balance,
+        unlimitedDays: true, maximumApplicationDays: 180,
+      }))
+      assert.equal(result?.availableLeaveBalance, balance)
+      assert.equal(result?.leaveAccruedToDate, null)
+    }
+  })
+  it('includes type-specific carry forward and reimbursement without deducting twice', () => {
+    const result = resolveNonAnnualLeaveBalanceBreakdown(summaryFor({
+      allocatedDays: 10, carryForwardBalanceForType: 2, reimbursedDays: 1.5,
+      currentTotalLeaveTaken: 3.5, currentLeaveBalance: 10,
+    }))
+    assert.equal(result?.totalAvailableLeaveBalance, 13.5)
+    assert.equal(result?.availableLeaveBalance, 10)
+  })
+  it('reports unavailable when BC supplies no type-specific balance', () => {
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(null), null)
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(summaryFor({ setupDays: 30, availableLeaveBalance: 23.8 })), null)
+    assert.equal(resolveNonAnnualLeaveBalanceBreakdown(summaryFor({ currentLeaveBalance: 'invalid' })), null)
+  })
+})
+
+describe('Store approval submission recovery', () => {
+  it('does not treat a failed Open submission or historical entries as success', () => {
+    for (const status of ['Approved', 'Rejected', 'Canceled']) {
+      assert.equal(storeApprovalSubmissionComplete({ Status: 'Open' }, [{ Status: status }]), false)
+    }
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Open' }, []), false)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, []), false)
+  })
+  it('recognizes a live approval or a completed header for idempotent retries', () => {
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, [{ Status: 'Open' }]), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Pending Approval' }, [{ Status: 'Created' }]), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Released' }, []), true)
+    assert.equal(storeApprovalSubmissionComplete({ Status: 'Posted' }, []), true)
+  })
+  it('does not accept active entries when the header remains editable or was cancelled', () => {
+    for (const status of ['Open', 'Draft', 'Cancelled', 'Rejected']) {
+      assert.equal(storeApprovalSubmissionComplete({ Status: status }, [{ Status: 'Open' }]), false)
+    }
+  })
+  it('sends concurrent clicks only once and permits a later approval cycle', async () => {
+    let calls = 0
+    let finish!: () => void
+    const action = async () => { calls++; await new Promise<void>((resolve) => { finish = resolve }) }
+    const first = runStoreApprovalOnce('test-SR', action)
+    const second = runStoreApprovalOnce('test-SR', action)
+    await Promise.resolve()
+    assert.equal(calls, 1)
+    finish()
+    await Promise.all([first, second])
+    await runStoreApprovalOnce('test-SR', async () => { calls++ })
+    assert.equal(calls, 2)
+  })
+  it('propagates BC failures to all waiting callers and allows retry', async () => {
+    const failure = new Error('BC approval rolled back')
+    const action = async () => { throw failure }
+    const results = await Promise.allSettled([
+      runStoreApprovalOnce('test-failed-SR', action), runStoreApprovalOnce('test-failed-SR', action),
+    ])
+    for (const result of results) {
+      assert.equal(result.status, 'rejected')
+      if (result.status === 'rejected') assert.equal(result.reason, failure)
+    }
+    await runStoreApprovalOnce('test-failed-SR', async () => {})
+  })
+})
+
+describe('BC profile display contract', () => {
+  
+  it('surfaces extra BC card fields that are not in the fixed bio layout', async () => {
+    const { collectExtraProfileFields, mapProfileDetails } = await import('./profileDetails.js')
+    const mapped = mapProfileDetails({
+      No: 'ABH-010',
+      FullName: 'Zerihun',
+      Gender: 'Male',
+      BloodGroup: 'O+',
+      NHIFNo: '12345',
+      PortalPassword: 'secret',
+    }, { details: [{ key: 'NSSFNo', label: 'NSSF No.', value: '9988' }, { key: 'BloodGroup', label: 'Blood Group', value: 'O+' }] })
+    assert.ok(mapped.extraFields.some(f => f.label === 'NSSF No.' && f.value === '9988'))
+    assert.ok(!mapped.extraFields.some(f => /password/i.test(f.key) || /password/i.test(f.label)))
+    assert.ok(!mapped.extraFields.some(f => f.key === 'FullName' || f.label === 'Full Name'))
+    const extras = collectExtraProfileFields({ CustomFlag: 'Yes', FullName: 'Zerihun' }, {
+      employeeNo: 'ABH-010', fullName: 'Zerihun', jobTitle: '', jobId: '', jobGrade: '', division: '', department: '',
+      sector: '', district: '', branch: '', responsibilityCenter: '', placeOfDuty: '', maritalStatus: '', gender: '',
+      employmentType: '', employeeType: '', status: '', phoneNumber: '', homePhoneNumber: '', workPhoneNumber: '',
+      extension: '', email: '', personalEmail: '', idNumber: '', employeeAccountNo: '', annualLeaveBalance: '',
+      nationality: '', country: '', postalAddress: '', residentialAddress: '', city: '', postCode: '', region: '',
+      dateOfBirth: '', dateOfJoin: '', contractStartDate: '', contractEndDate: '', probationEndDate: '', onProbation: '',
+      contractDuration: '', noticePeriod: '', supervisorNo: '', supervisorName: '', actingJob: '', actingJobStartDate: '',
+      actingJobExpiryDate: '', temporaryJob: '', temporaryJobExpiryDate: '', dateOfLeaving: '', pensionSchemeJoin: '',
+      medicalSchemeJoin: '',
+    })
+    assert.ok(extras.some(f => f.key === 'CustomFlag' && f.value === 'Yes'))
+  })
+
+  it('recovers real SOAP profile fields and ignores empty option zero', () => {
+    const profile = mapProfileDetails(mergeProfileRecords({No:'ABH-010',FullName:'Zerihun',Gender:'Male'},parseLegacyProfile('JobID=MIE#FullName=Zerihun Sisay Reta#MaritalStatus=Married#ContractType=PERMANENT#EmployeeContractType=0#EmployeeType=Primary#DateOfJoining=2015-06-08#OnProbation=No')))
+    assert.equal(profile.jobId,'MIE')
+    assert.equal(profile.fullName,'Zerihun Sisay Reta')
+    assert.equal(profile.maritalStatus,'Married')
+    assert.equal(profile.employmentType,'PERMANENT')
+    assert.equal(profile.onProbation,'No')
+    assert.equal(profile.dateOfJoin,'2015-06-08')
+    // ABH cards usually omit a separate contract start; mirror joining date for display.
+    assert.equal(profile.contractStartDate,'2015-06-08')
+    assert.equal(profile.branch,'')
+  })
+  it('keeps bank branches separate from the work branch and retains full addresses', () => {
+    const p=mapProfileDetails({BranchName:'Bank branch',Citizenship:'ET',SupervisorName:'Manager',PostalAddress:'Line 1',PostalAddress2:'Line 2',PostalAddress3:'Line 3'})
+    assert.equal(p.branch,'');assert.equal(p.nationality,'ET');assert.equal(p.supervisorName,'Manager')
+    assert.equal(p.postalAddress,'Line 1, Line 2, Line 3')
+    assert.equal(mapProfileDetails({BranchName:'Bank',BranchDisplayName:'Actual work branch'}).branch,'Actual work branch')
+    assert.equal(mapProfileDetails({}, {qualifications:[{LineNo:1}]}).qualifications.length,0)
+  })
+  it('retains real zero balances and false booleans but hides absent dates and enums', () => {
+    const p=mapProfileDetails({AnnualLeaveBalance:0,OnProbation:false,EmployeeContractType:0,Gender:0,DateOfBirth:'0001-01-01',ContractEndDate:'0D'})
+    assert.equal(p.annualLeaveBalance,'0');assert.equal(p.onProbation,'No')
+    assert.equal(p.employmentType,'');assert.equal(p.gender,'');assert.equal(p.dateOfBirth,'');assert.equal(p.contractEndDate,'')
+  })
+  it('uses BC option definitions and never exposes an unknown numeric enum', () => {
+    assert.equal(mapProfileDetails({EmployeeType:1,EmployeeContractType:1}).employeeType,'Seconded')
+    assert.equal(mapProfileDetails({EmployeeContractType:1}).employmentType,'Permanent and Pensionable')
+    assert.equal(mapProfileDetails({EmployeeContractType:987,Gender:987}).employmentType,'')
+  })
+  it('maps all kin names and real history fields without invented values', () => {
+    const p=mapProfileDetails({}, {nextOfKin:[{SurName:'Doe',OtherNames:'Jane',HomeTelNo:'123'}],employmentHistory:[{Company_Name:'Example',Job_Title:'Analyst',From:'2020-01-01',To_Date:'0001-01-01'}],assignedAssets:[{No:'FA1',Description:'Laptop',AcquisitionDate:'2021-01-01'}]})
+    assert.equal(p.nextOfKin[0]?.name,'Doe Jane')
+    assert.equal(p.employmentHistory[0]?.organisation,'Example')
+    assert.equal(p.employmentHistory[0]?.position,'Analyst')
+    assert.equal(p.employmentHistory[0]?.toDate,'')
+    assert.equal(p.employmentHistory[0]?.type,'')
+    assert.equal(p.assignedAssets[0]?.assignedDate,'')
+    assert.equal(p.assignedAssets[0]?.status,'')
+  })
+  it('allowlists public profile fields and preserves delimiter characters in JSON values', () => {
+    const p=mapProfileDetails({No:'ABH-010',FullName:'Name #1 = Name',PortalPassword:'secret',PortalOTPCode:'123456',PortalResetToken:'secret',SystemId:'internal'})
+    assert.equal(p.fullName,'Name #1 = Name')
+    assert.equal(JSON.stringify(p).includes('secret'),false)
+    assert.equal('PortalOTPCode' in p,false)
+    assert.equal(profileText(' — '),'')
+  })
+})
+
+describe('profile source failure and identity handling',()=>{
+  const body={employee:{No:'ABH-010',FullName:'Test employee'},nextOfKin:[],qualifications:[],employmentHistory:[],assignedAssets:[]}
+  it('never calls legacy sources when the complete profile is available',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>{throw new Error('must not call')}})
+    assert.equal(profile.employeeNo,'ABH-010');assert.deepEqual(profile.unavailableSections,[])
+  })
+  it('rejects a different employee response rather than displaying it',async()=>{
+    await assert.rejects(fetchPortalProfileDetails('ABH-011',{soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>[]}),/identity/)
+  })
+  it('does not hide an outage or malformed response behind a legacy fallback',async()=>{
+    for(const response of ['invalid JSON',JSON.stringify({...body,qualifications:{}})]){
+      await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:response}),odata:async()=>{throw new Error('must not call')}}))
+    }
+    await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>{throw new Error('connection timed out')},odata:async()=>[]}),/timed out/)
+  })
+  it('supports an undeployed method while distinguishing a failed section from an empty one',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{
+      soap:async(method)=>{if(method==='GetEmployeeProfileDetails')throw new Error("Method 'GetEmployeeProfileDetails' is invalid!");return {returnValue:'FullName=Test employee#JobID=MIE'}},
+      odata:async(service)=>{if(service==='QyHREmployee')return [{No:'ABH-010'}];if(service==='QyHREmployeeKin')throw new Error('unavailable');return []},
+    })
+    assert.equal(profile.jobId,'MIE');assert.ok(profile.unavailableSections.includes('kin'));assert.equal(profile.unavailableSections.includes('history'),false)
+  })
+  it('splits legacy kin rows into next of kin, dependants and beneficiaries like the BC card',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',{
+      soap:async(method)=>{if(method==='GetEmployeeProfileDetails')throw new Error("Method 'GetEmployeeProfileDetails' is invalid!");return {returnValue:'FullName=Test employee'}},
+      odata:async(service)=>{
+        if(service==='QyHREmployee')return [{No:'ABH-010'}]
+        if(service==='QyHREmployeeKin')return [{SurName:'Reta',OtherNames:'Abebe',Type:'Next of Kin'},{SurName:'Reta',OtherNames:'Kid',Type:'Dependant'},{SurName:'Reta',OtherNames:'Ben',Type:'2'}]
+        return []
+      },
+    })
+    assert.deepEqual(profile.nextOfKin.map(r=>r.name),['Reta Abebe'])
+    assert.deepEqual(profile.dependants.map(r=>r.name),['Reta Kid'])
+    assert.deepEqual(profile.beneficiaries.map(r=>r.name),['Reta Ben'])
+    assert.deepEqual(profile.sections,[])
+  })
+})
+
+describe('schema-2 employee card contract (codeunit 50997)',()=>{
+  const body={
+    schema:2,
+    employee:{No:'ABH-010',FullName:'Zerihun Sisay Reta',JobTitle:'Senior Developer',SupervisorName:'Fikadu Kebede',Age:'35 Years 2 Months',LengthOfService:'11 Years 4 Months',AvailableLeaveBalance:'19.41',PortalPassword:'secret'},
+    sections:[
+      {key:'identity',title:'Personal Information',fields:[
+        {key:'firstName',label:'First Name',value:'Zerihun',type:'text'},
+        {key:'dateOfBirth',label:'Date Of Birth',value:'1991-08-01',type:'date'},
+        {key:'portalPassword',label:'Portal Password',value:'secret',type:'text'},
+        {key:'blank',label:'Blank',value:'   ',type:'text'},
+        {key:'placeholder',label:'Placeholder',value:'0001-01-01',type:'date'},
+        {key:'firstName',label:'Duplicate',value:'again',type:'text'},
+        {key:'weird',label:'Weird Type',value:'x',type:'blob'},
+      ]},
+      {key:'leave',title:'Leave Summary',fields:[{key:'availableLeaveBalance',label:'Available Leave Balance (Days)',value:'19.41',type:'number'}]},
+      {key:'empty',title:'Empty Group',fields:[]},
+      {key:'bad',title:'Bad Group'},
+      'not an object',
+    ],
+    nextOfKin:[{lineNo:'1',type:'Next of Kin',surName:'Reta',otherNames:'Abebe',relationship:'Parent/Guardian',homeTelNo:'0911'}],
+    beneficiaries:[],
+    dependants:[{lineNo:'2',type:'Dependant',fullName:'Kid Reta',relationship:'Child',dateOfBirth:'2018-02-03',identificationType:'Birth Cert. No.',cardNo:'BC-1'}],
+    qualifications:[{source:'Employee Qualifications',level:'Masters',qualification:'MSc Computer Science',institution:'AAU',fromDate:'2014-09-01',toDate:'2016-07-01',highestQualification:'Yes'}],
+    employmentHistory:[],
+    internalHistory:[{refNo:'PRM-1',reasonForChange:'Promotion',jobTitle:'Senior Developer',jobId:'SD',fromDate:'2020-01-01',status:'Approved',current:'Yes'}],
+    trainingHistory:[{applicationNo:'TR-1',courseTitle:'AZ-900',description:'Azure Fundamentals',institution:'Microsoft',fromDate:'2023-03-01',toDate:'2023-03-03',duration:'3 Days',trainingStatus:'Completed Successfully'}],
+    memberships:[{membershipNo:'M-1',nameOfBody:'IEEE',dateOfMembership:'2019-01-01',status:'Active'}],
+    rewards:[],
+    assignedAssets:[{no:'FA-7',description:'Laptop',faClassCode:'ICT',faSubclassCode:'LAPTOP',serialNo:'SN1',inactive:'Yes'}],
+    salaryAllowances:[{code:'HOUSE',name:'Housing Allowance',amount:'10000',period:'September 2026'},{code:'ZERO',name:'',amount:''}],
+    salaryAllowancePeriod:'September 2026',
+    unavailableSections:['allowances','bogus'],
+  }
+  const services={soap:async()=>({returnValue:JSON.stringify(body)}),odata:async()=>{throw new Error('must not call')}}
+  it('splits schema-1 kin rows into next of kin and dependants when BC does not send the lists', async () => {
+    const body = {
+      employee: { No: 'ABH-010', FullName: 'Zerihun' },
+      details: [{ key: 'Religion', label: 'Religion', value: 'CHRISTIAN' }, { key: 'BasicPay', label: 'Basic Pay', value: '44,534.261750000005' }],
+      nextOfKin: [
+        { SurName: 'Alemahu', OtherNames: 'Etaferahu', Relationship: 'Spouse', Type: 'Next of Kin' },
+        { SurName: 'Zerihun', OtherNames: 'Nael', Relationship: 'Child', Type: 'Dependant' },
+      ],
+      qualifications: [], employmentHistory: [], assignedAssets: [],
+    }
+    const profile = await fetchPortalProfileDetails('ABH-010', { soap: async () => ({ returnValue: JSON.stringify(body) }), odata: async () => { throw new Error('must not call') } })
+    assert.deepEqual(profile.nextOfKin.map(r => r.name), ['Alemahu Etaferahu'])
+    assert.deepEqual(profile.dependants.map(r => r.name), ['Zerihun Nael'])
+    assert.equal(profile.beneficiaries.length, 0)
+    assert.ok(profile.extraFields.some(f => f.label === 'Religion' && f.value === 'CHRISTIAN'))
+    assert.ok(profile.extraFields.some(f => f.label === 'Basic Pay' && f.value === '44,534.26'))
+  })
+  it('keeps captions that merely contain a secret-looking substring but drops real secret labels', () => {
+    const sections = parseProfileSections([{ key: 'assets', title: 'Assets', fields: [
+      { key: 'laptopModel', label: 'Laptop Model', value: 'ThinkPad', type: 'text' },
+      { key: 'promotedDate', label: 'Promoted', value: 'Yes', type: 'boolean' },
+      { key: 'otpDevice', label: 'OTP Device', value: 'phone', type: 'text' },
+      { key: 'portalAccess', label: 'Portal Password', value: 'x', type: 'text' },
+    ] }])
+    assert.deepEqual(sections[0]?.fields.map(field => field.label), ['Laptop Model', 'Promoted'])
+  })
+  it('keeps every populated card group and drops secrets, blanks, placeholders and duplicates',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',services)
+    assert.deepEqual(profile.sections.map(s=>s.key),['identity','leave'])
+    assert.deepEqual(profile.sections[0]?.fields.map(f=>f.key),['firstName','dateOfBirth','weird'])
+    assert.equal(profile.sections[0]?.fields.find(f=>f.key==='weird')?.type,'text')
+    assert.equal(profile.sections[1]?.fields[0]?.type,'number')
+    assert.equal(JSON.stringify(profile).includes('secret'),false)
+    assert.deepEqual(profile.extraFields,[])
+    assert.equal(profile.supervisorName,'Fikadu Kebede');assert.equal(profile.age,'35 Years 2 Months');assert.equal(profile.lengthOfService,'11 Years 4 Months');assert.equal(profile.availableLeaveBalance,'19.41')
+  })
+  it('maps the related lists the Employee card exposes',async()=>{
+    const profile=await fetchPortalProfileDetails('ABH-010',services)
+    assert.equal(profile.nextOfKin[0]?.name,'Reta Abebe');assert.equal(profile.nextOfKin[0]?.relationship,'Parent/Guardian');assert.equal(profile.nextOfKin[0]?.phone,'0911')
+    assert.equal(profile.dependants[0]?.name,'Kid Reta');assert.equal(profile.dependants[0]?.identification,'Birth Cert. No. BC-1');assert.equal(profile.dependants[0]?.dateOfBirth,'2018-02-03')
+    assert.deepEqual(profile.beneficiaries,[])
+    assert.equal(profile.qualifications[0]?.title,'MSc Computer Science');assert.equal(profile.qualifications[0]?.level,'Masters');assert.equal(profile.qualifications[0]?.highestQualification,'Yes')
+    assert.equal(profile.internalHistory[0]?.change,'Promotion');assert.equal(profile.internalHistory[0]?.current,'Yes')
+    assert.equal(profile.trainingHistory[0]?.course,'Azure Fundamentals');assert.equal(profile.trainingHistory[0]?.status,'Completed Successfully')
+    assert.equal(profile.memberships[0]?.body,'IEEE');assert.equal(profile.memberships[0]?.since,'2019-01-01')
+    assert.equal(profile.assignedAssets[0]?.assetClass,'ICT / LAPTOP');assert.equal(profile.assignedAssets[0]?.status,'Inactive')
+    assert.deepEqual(profile.salaryAllowances.map(r=>[r.name,r.amount]),[['Housing Allowance','10000']])
+    assert.equal(profile.salaryAllowancePeriod,'September 2026')
+    assert.deepEqual(profile.unavailableSections,['allowances'])
+  })
+  it('rejects malformed optional lists or card groups instead of showing a partial profile',async()=>{
+    for(const broken of [{...body,dependants:'x'},{...body,sections:{}},{...body,salaryAllowances:[null]}]){
+      await assert.rejects(fetchPortalProfileDetails('ABH-010',{soap:async()=>({returnValue:JSON.stringify(broken)}),odata:async()=>{throw new Error('must not call')}}),/invalid profile section/)
+    }
+  })
+})
+
+describe('unlimited non-annual leave (Sick Leave: Days 0, Unlimited Days)', () => {
+  it('does not cap an unlimited type by its negative per-type balance', () => {
+    // BC: 0 days − 2 taken = −2; Unlimited Days is ticked.
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: true, maximumApplicationDays: null, availableLeaveBalance: -2 })
+    assert.equal(limit, null)
+  })
+
+  it('still applies Maximum Application Days when HR sets one', () => {
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: true, maximumApplicationDays: 5, availableLeaveBalance: -2 })
+    assert.equal(limit, 5)
+    assert.equal(leaveApplicationExceedsAvailableBalance(6, limit), true)
+    assert.equal(leaveApplicationExceedsAvailableBalance(5, limit), false)
+  })
+
+  it('keeps the per-type balance limit for limited types (Paternity 3 − 1 taken)', () => {
+    const limit = nonAnnualApplicationLimit({ unlimitedDays: false, maximumApplicationDays: null, availableLeaveBalance: 2 })
+    assert.equal(limit, 2)
+    assert.equal(leaveApplicationExceedsAvailableBalance(3, limit), true)
+    assert.equal(leaveApplicationExceedsAvailableBalance(2, limit), false)
+  })
+})
+
+describe('password reset email', () => {
+  it('fits the StaffPortal SendEmail limits and greets the employee by first name', async () => {
+    const { passwordResetEmail } = await import('./auth.js')
+    const mail = passwordResetEmail('Zerihun', '33735')
+    assert.ok(mail.subject.length <= 50)
+    assert.ok(mail.message.length <= 1000)
+    assert.match(mail.message, /Dear Zerihun,/)
+    assert.match(mail.message, /<b[^>]*>33735<\/b>/)
+  })
+
+  it('generates 6-digit reset codes', async () => {
+    const { newPasswordResetToken } = await import('./auth.js')
+    for (let i = 0; i < 200; i += 1) assert.match(newPasswordResetToken(), /^[1-9]\d{5}$/)
+  })
+
+  it('escapes names and falls back to a neutral greeting', async () => {
+    const { passwordResetEmail } = await import('./auth.js')
+    assert.match(passwordResetEmail('<b>x</b>', '1').message, /&lt;b&gt;x&lt;\/b&gt;/)
+    assert.match(passwordResetEmail('  ', '1').message, /Dear Colleague,/)
   })
 })

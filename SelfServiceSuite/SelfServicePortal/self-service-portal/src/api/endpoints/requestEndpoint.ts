@@ -115,11 +115,103 @@ export async function downloadStoreBorrowingForm(id: string, requestNo: string) 
   return downloadRequestPdf(id, 'borrowing-form', `Item-Borrowing-Form-${requestNo}.pdf`)
 }
 
-export async function updateStoreRequisitionProcess(id: string, actionCode: string) {
+/** Item Borrowing Form as a blob URL for the in-page viewer (revoke it when the viewer closes). */
+export async function getStoreBorrowingFormUrl(id: string) {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>(
+    `/api/requests/${encodeURIComponent(id)}/borrowing-form`,
+    { responseType: 'blob' },
+  )
+  return URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+}
+
+/** Store Issuance Voucher (GIV) — exists after the requester accepts the item. */
+export async function downloadStoreIssueVoucher(id: string, storeIssueNo: string) {
+  return downloadRequestPdf(id, 'store-issue-voucher', `Store-Issuance-Voucher-${storeIssueNo}.pdf`)
+}
+
+export interface StoreRequisitionStore {
+  code: string
+  name: string
+  locationCode: string
+  centralStore: boolean
+  defaultIssueStore: boolean
+}
+
+export interface StoreUnitOfMeasure {
+  code: string
+  description: string
+}
+
+/** Officer and approver user IDs from BC ABH Local Proc Setup. */
+export interface LprOfficers {
+  procurementOfficer: string
+  projectProcurementOfficer: string
+  operationsManager: string
+  fad: string
+}
+
+/** BC lookups for the store requisition form. A list is null when BC does not publish it yet. */
+export interface StoreRequisitionOptions {
+  stores: StoreRequisitionStore[] | null
+  /** False while BC has no store list yet (portal uses the ABH store list until BC 1.0.3.544). */
+  storesFromBc?: boolean
+  unitsOfMeasure: StoreUnitOfMeasure[] | null
+  projects: LocalPurchaseProject[] | null
+  lprOfficers?: LprOfficers | null
+  /** Store steps this BC app runs from the portal (storeHandOff, storeOffers, …). */
+  features?: string[]
+}
+
+/** In-stock item the Store Keeper can offer (Add Item to Issue). */
+export interface StoreOfferItem {
+  no: string
+  description: string
+  unitOfMeasure: string
+  /** Stock at the request's issuing store (what BC can issue). */
+  available: number
+  /** Stock in all stores (BC Quantity on Hand); BC 1.0.3.547+. */
+  onHand?: number
+  brand?: string
+  model?: string
+  /** Item card Details/Specification. */
+  specification?: string
+  category?: string
+}
+
+export async function getStoreOfferItems(id: string, search: string) {
+  requireAuthApiUrl()
+  return authGet<{ issuingStore: string; items: StoreOfferItem[] }>(
+    `/api/requests/${encodeURIComponent(id)}/store-offer-items`,
+    { params: { search } },
+  )
+}
+
+/** Store Manager / Store Keeper for the signed-in user (portal job title or BC Warehouse Employees / store card). */
+export async function getMyStoreRoles() {
+  requireAuthApiUrl()
+  return authGet<{ storeManager: boolean; storeKeeper: boolean }>('/api/store-requisition/my-roles')
+}
+
+export async function getStoreRequisitionOptions() {
+  requireAuthApiUrl()
+  return authGet<StoreRequisitionOptions>('/api/store-requisition/options')
+}
+
+/**
+ * `linkedDocumentNo` on START_LPR is the BC project No. (blank = non-project purchase);
+ * `options` carries the Start LPR source and officer (procurementSource, officerType).
+ */
+export async function updateStoreRequisitionProcess(
+  id: string,
+  actionCode: string,
+  linkedDocumentNo = '',
+  options: Record<string, string | number> = {},
+) {
   requireAuthApiUrl()
   return authPost<{ process: Record<string, unknown>; request: PortalRequest }>(
     `/api/requests/${encodeURIComponent(id)}/store-process`,
-    { actionCode },
+    { actionCode, ...(linkedDocumentNo ? { linkedDocumentNo } : {}), ...options },
   )
 }
 
@@ -174,4 +266,133 @@ export async function downloadRequestAttachment(
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+export interface LocalPurchaseNextAction {
+  actionCode: string
+  label: string
+  target: 'lpr' | 'rfq' | 'po' | 'storeRequisition'
+  documentNo: string
+  allowed: boolean
+  ownerRoles: string[]
+  commentRequired?: boolean
+}
+
+export interface LocalPurchaseVendorQuote {
+  rfqNo: string
+  lineNo: number
+  vendorNo: string
+  vendorName: string
+  quotedAmount: number
+  leadTimeDays: number
+  quoteDate: string
+  rank: number
+  selected: boolean
+  notes: string
+  attachments: number
+}
+
+export interface LocalPurchaseState {
+  chain: {
+    documentNo?: string
+    storeRequisitionNo?: string
+    lpr?: Record<string, unknown>
+    rfq?: Record<string, unknown>
+    po?: Record<string, unknown>
+    receipts?: Array<Record<string, unknown>>
+  }
+  quotes: { rfqNo?: string; quotes?: LocalPurchaseVendorQuote[] }
+  roles: string[]
+  nextActions: LocalPurchaseNextAction[]
+}
+
+/** Local Purchase chain: Store Req ↔ LPR ↔ Local RFQ ↔ Vendor Quotes ↔ PO ↔ GRN ↔ Invoice. */
+export async function getLocalPurchaseState(id: string) {
+  requireAuthApiUrl()
+  return authGet<LocalPurchaseState>(`/api/requests/${encodeURIComponent(id)}/local-purchase`)
+}
+
+export async function runLocalPurchaseAction(
+  id: string,
+  body: {
+    actionCode: string
+    documentNo: string
+    linkedDocumentNo?: string
+    actionComment?: string
+    payload?: Record<string, unknown>
+  },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; request: PortalRequest | null }>(
+    `/api/requests/${encodeURIComponent(id)}/local-purchase`,
+    body,
+    { timeout: 90000 } as Parameters<typeof authPost>[2],
+  )
+}
+
+export async function upsertLocalPurchaseVendorQuote(
+  id: string,
+  quote: {
+    rfqNo: string
+    vendorNo: string
+    quotedAmount: number
+    leadTimeDays: number
+    quoteDate?: string
+    notes?: string
+    lineNo?: number
+  },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; quotes: LocalPurchaseState['quotes'] }>(
+    `/api/requests/${encodeURIComponent(id)}/vendor-quotes`,
+    quote,
+  )
+}
+
+export async function uploadLocalPurchaseQuoteAttachment(
+  id: string,
+  lineNo: number,
+  attachment: { rfqNo: string; fileName: string; contentBase64: string; description: string },
+) {
+  requireAuthApiUrl()
+  return authPost<{ result: Record<string, unknown>; quotes: LocalPurchaseState['quotes'] }>(
+    `/api/requests/${encodeURIComponent(id)}/vendor-quotes/${lineNo}/attachments`,
+    attachment,
+    { timeout: 60000 } as Parameters<typeof authPost>[2],
+  )
+}
+
+export interface LocalPurchaseAccess {
+  /** False until BC has the Local Purchase portal methods; then 382 behaviour applies. */
+  enabled: boolean
+  roles: string[]
+}
+
+/** BC-driven Local Purchase availability and the signed-in user's LPR roles (ABH Local Proc Setup). */
+export async function getLocalPurchaseAccess() {
+  requireAuthApiUrl()
+  return authGet<LocalPurchaseAccess>('/api/local-purchase/access')
+}
+
+export interface LocalPurchaseProject {
+  no: string
+  description?: string
+}
+
+export interface LocalPurchaseBankAccount {
+  no: string
+  name?: string
+  currencyCode?: string
+}
+
+/** BC projects (Job) for Start LPR — project first, then BC assigns the officer. */
+export async function getLocalPurchaseProjects() {
+  requireAuthApiUrl()
+  return authGet<{ projects: LocalPurchaseProject[] }>('/api/local-purchase/projects')
+}
+
+/** BC bank accounts for Pay Vendor & Close LPR (Finance Checker). */
+export async function getLocalPurchaseBankAccounts() {
+  requireAuthApiUrl()
+  return authGet<{ bankAccounts: LocalPurchaseBankAccount[] }>('/api/local-purchase/bank-accounts')
 }

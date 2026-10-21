@@ -8,10 +8,11 @@ export function isEditableRequestStatus(
   status: string | undefined,
   module?: string,
 ) {
+  const normalized = String(status ?? '').trim().toLowerCase()
   return (
-    status === 'Draft' ||
-    status === 'Open' ||
-    ((module === 'assetTransfer' || module === 'training') && status === 'New')
+    normalized === 'draft' ||
+    normalized === 'open' ||
+    ((module === 'assetTransfer' || module === 'training') && normalized === 'new')
   )
 }
 
@@ -56,8 +57,16 @@ export const DOCUMENT_DELETE_MODULES = new Set([
 /** Whole-document delete: Draft/Open/New, plus Cancelled/Rejected cleanup. */
 export function canDeleteDocumentDraft(status: string | undefined, module?: string) {
   if (module && !DOCUMENT_DELETE_MODULES.has(module) && module !== 'leave') return false
+  // Store must follow the same safe lifecycle as Leave: a pending approval is
+  // cancelled first, which reopens the BC header, and only that editable draft
+  // can then be permanently deleted. Never offer delete on a terminal Store
+  // document merely because an old approval entry says Cancelled/Rejected.
+  if (module === 'storeRequisition' || module === 'leave') {
+    return isEditableRequestStatus(status, module)
+  }
   if (isEditableRequestStatus(status, module)) return true
-  return status === 'Cancelled' || status === 'Rejected'
+  const normalized = String(status ?? '').trim().toLowerCase()
+  return normalized === 'cancelled' || normalized === 'canceled' || normalized === 'rejected'
 }
 
 /** Upload attachments only while the header is still editable (Draft/Open). Locked after approval submission. */
@@ -148,4 +157,3 @@ export function canRequestApproval(
   if (OPEN_BC_STATUS_MODULES.has(module)) return status === 'Open'
   return false
 }
-

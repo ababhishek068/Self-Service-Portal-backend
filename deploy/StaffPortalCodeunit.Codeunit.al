@@ -1723,7 +1723,7 @@ codeunit 50049 "Staff Portal Codeunit"
                 // TbEmployee.TestField("Global Dimension 1 Code");
                 // TbEmployee.TestField("Global Dimension 2 Code");
                 // TbEmployee.TestField("Responsibility Center");
-                TbStoreRequisition.Validate("Global Dimension 1 Code", TbEmployee."Global Dimension 1 Code");
+                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                 TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
                 TbStoreRequisition."Shortcut Dimension 3 Code" := TbEmployee."Global Dimension 3 Code";
                 TbStoreRequisition."Responsibility Center" := TbEmployee."Responsibility Center";
@@ -1737,7 +1737,7 @@ codeunit 50049 "Staff Portal Codeunit"
             TbStoreRequisition."Requester ID" := CopyStr(myUserID, 1, MaxStrLen(TbStoreRequisition."Requester ID"));
             TbStoreRequisition."Employee No" := TbUserSetup."Employee No.";
             if TbEmployee."No." <> '' then begin
-                TbStoreRequisition.Validate("Global Dimension 1 Code", TbEmployee."Global Dimension 1 Code");
+                TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                 TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
             end;
             TbStoreRequisition.Modify(false);
@@ -1771,7 +1771,7 @@ codeunit 50049 "Staff Portal Codeunit"
                     // TbEmployee.TestField("Global Dimension 1 Code");
                     // TbEmployee.TestField("Global Dimension 2 Code");
                     // TbEmployee.TestField("Responsibility Center");
-                    TbStoreRequisition.Validate("Global Dimension 1 Code", TbEmployee."Global Dimension 1 Code");
+                    TbStoreRequisition.Validate("Global Dimension 1 Code", PortalStoreDivision(myUserID, TbEmployee."Global Dimension 1 Code", TbEmployee."Division Name"));
                     TbStoreRequisition.Validate("Shortcut Dimension 2 Code", TbEmployee."Global Dimension 2 Code");
                     TbStoreRequisition."Shortcut Dimension 3 Code" := TbEmployee."Global Dimension 3 Code";
                     TbStoreRequisition."Responsibility Center" := TbEmployee."Responsibility Center";
@@ -1782,6 +1782,22 @@ codeunit 50049 "Staff Portal Codeunit"
                 Error('Requisition is no longer editable or it does not exist.');
             end;
         end;
+    end;
+
+    /// <summary>
+    /// Division for a portal store requisition, as on the BC Store Requisition card (Store Mgmt
+    /// ResolveStoreDivision): User Setup first, never an old / inactive employee-card value when an
+    /// active one can be found. Falls back to the employee card when nothing valid is found.
+    /// </summary>
+    local procedure PortalStoreDivision(UserIDCode: Code[100]; EmployeeDivision: Code[20]; EmployeeDivisionName: Text): Code[20]
+    var
+        StoreMgmt: Codeunit "Store Mgmt";
+        Division: Code[20];
+    begin
+        Division := StoreMgmt.ResolveStoreDivision(CopyStr(UserIDCode, 1, 50), EmployeeDivision, EmployeeDivisionName);
+        if Division <> '' then
+            exit(Division);
+        exit(EmployeeDivision);
     end;
 
     procedure StoreRequisitionLine("action": Text; lineNo: Integer; type: Integer; reqNo: Code[50]; itemNo: Code[100]; location: Code[30]; quantity: Decimal; description: Text[70]; unitOfMeasure: Code[20]; preferredBrandModel: Text[50]; remarks: Text[200]) return_value: Boolean
@@ -3021,7 +3037,7 @@ codeunit 50049 "Staff Portal Codeunit"
         end;
     end;
 
-    procedure SendEmail(receiver: Text[250]; subject: Text[50]; message: Text[1000]) returnValue: Boolean
+    procedure SendEmail(receiver: Text[250]; subject: Text[250]; message: Text) returnValue: Boolean
     var
         CuEmail: Codeunit Email;
         CuEmailMessage: Codeunit "Email Message";
@@ -3032,8 +3048,9 @@ codeunit 50049 "Staff Portal Codeunit"
         returnValue := FALSE;
         EmailRecipients := receiver.Split(';');
         CuEmailMessage.Create(EmailRecipients, subject, message, true);
-        CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Default);
-        returnValue := true;
+        // Same account as BC approval notifications (leave approvals reach approvers this way).
+        // BC falls back to the Default account when no account is assigned to Notification.
+        returnValue := CuEmail.Send(CuEmailMessage, Enum::"Email Scenario"::Notification);
     end;
 
     procedure RequestDocumentApproval(docNo: Code[100]; docNoFieldId: Integer; tableID: Integer) return_value: Boolean
@@ -4955,6 +4972,62 @@ codeunit 50049 "Staff Portal Codeunit"
         exit(ProcurementMgt.UpdateStoreProcess(requestNo, actionCode, linkedDocumentNo, actionComment, actorUserID, actorJobTitle));
     end;
 
+    /// <summary>
+    /// Local Purchase (LPR→RFQ→PO→pay) actions for the Self-Service Portal.
+    /// Mirror of ABH-LIVE-AL StaffPortal PortalLocalPurchaseAction / ListVendorQuotes.
+    /// Publish after deploying Portal Procurement Mgt. RunLocalPurchaseAction.
+    /// </summary>
+    procedure PortalLocalPurchaseAction(documentNo: Code[50]; actionCode: Text[50]; linkedDocumentNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; payloadJson: Text) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.RunLocalPurchaseAction(documentNo, actionCode, linkedDocumentNo, actionComment, actorUserID, payloadJson));
+    end;
+
+    procedure PortalListVendorQuotes(rfqNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListVendorQuotes(rfqNo));
+    end;
+
+    procedure PortalLocalPurchaseChain(documentNo: Code[50]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.GetLocalPurchaseChain(documentNo));
+    end;
+
+    procedure PortalLocalPurchaseRoles(actorUserID: Code[100]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.GetLocalPurchaseRoles(actorUserID));
+    end;
+
+    procedure PortalLprProjects() return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListLprProjects());
+    end;
+
+    procedure PortalLprBankAccounts() return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.ListLprBankAccounts());
+    end;
+
+    procedure PortalAttachVendorQuoteFile(rfqNo: Code[50]; lineNo: Integer; fileName: Text[250]; fileBase64: BigText; description: Text[250]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+        ContentText: Text;
+    begin
+        fileBase64.GetSubText(ContentText, 1);
+        exit(ProcurementMgt.AttachVendorQuoteFile(rfqNo, lineNo, fileName, ContentText, description));
+    end;
+
     local procedure ApplyPortalReturnDate(var LeaveApp: Record "HR Leave Application"; returnDate: DateTime; endDate: Date)
     var
         portalReturn: Date;
@@ -4966,5 +5039,305 @@ codeunit 50049 "Staff Portal Codeunit"
         // immediately after the final leave day.
         portalReturn := endDate + 1;
         LeaveApp."Return Date" := portalReturn;
+    end;
+
+    procedure AcceptPortalRevisedItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.AcceptRevisedItemForPortal(ReqHeader, actorUserID);
+    end;
+
+    procedure DeclinePortalRevisedItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.DeclineRevisedItemForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Submit to Store Manager (the store offer line must already exist).
+    /// </summary>
+    procedure PreparePortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.PrepareIssueForManagerForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Store manager: Accept Item (Store Manager). No voucher is created yet.
+    /// </summary>
+    procedure AcceptPortalStoreIssue(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.AcceptIssueAsManagerForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Requester: Confirm Receipt after the item is In Transit.
+    /// </summary>
+    procedure ConfirmPortalStoreReceipt(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.ConfirmReceiptForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Requester: store, Is Project and project code on an Open store requisition.
+    /// </summary>
+    procedure SetPortalStoreRequisitionDetails(requestNo: Code[20]; actorUserID: Code[50]; storeCode: Code[20]; isProject: Boolean; projectCode: Code[20]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.SetStoreAndProjectForPortal(ReqHeader, actorUserID, storeCode, isProject, projectCode);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Stores a requester may pick (same filter as the Store lookup on the request).
+    /// </summary>
+    procedure PortalStoreList() return_value: Text
+    var
+        Store: Record "ABH Store";
+        Root: JsonObject;
+        Arr: JsonArray;
+        Row: JsonObject;
+        JsonText: Text;
+    begin
+        Store.SetRange(Active, true);
+        Store.SetRange(Blocked, false);
+        Store.SetRange("Allow Issue", true);
+        Store.SetFilter("Location Code", '<>%1', '');
+        if Store.FindSet() then
+            repeat
+                Clear(Row);
+                Row.Add('code', Store.Code);
+                Row.Add('name', Store.Name);
+                Row.Add('locationCode', Store."Location Code");
+                Row.Add('centralStore', Store."Central Store");
+                Row.Add('defaultIssueStore', Store."Default Issue Store");
+                Arr.Add(Row);
+            until Store.Next() = 0;
+        Root.Add('stores', Arr);
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Units of measure for store requisition lines (same list as the UOM lookup).
+    /// </summary>
+    procedure PortalUnitsOfMeasure() return_value: Text
+    var
+        UnitOfMeasure: Record "Unit of Measure";
+        Root: JsonObject;
+        Arr: JsonArray;
+        Row: JsonObject;
+        JsonText: Text;
+    begin
+        if UnitOfMeasure.FindSet() then
+            repeat
+                Clear(Row);
+                Row.Add('code', UnitOfMeasure.Code);
+                Row.Add('description', UnitOfMeasure.Description);
+                Arr.Add(Row);
+            until UnitOfMeasure.Next() = 0;
+        Root.Add('unitsOfMeasure', Arr);
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Base64 PDF of the Item Borrowing Form (BORROWING) or the Store Issuance Voucher (GIV).
+    /// </summary>
+    procedure PortalStoreRequisitionPdf(requestNo: Code[20]; documentKind: Text[30]) return_value: Text
+    var
+        ReqHeader: Record "Store Requistion Header";
+        BorrowingForm: Report "ABH Item Borrowing Form";
+        StoreIssue: Report "Store Issue";
+        TempBlob: Codeunit "Temp Blob";
+        Base64Convert: Codeunit "Base64 Convert";
+        HeaderRef: RecordRef;
+        PdfOutStream: OutStream;
+        PdfInStream: InStream;
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        ReqHeader.SetRecFilter();
+        HeaderRef.GetTable(ReqHeader);
+        TempBlob.CreateOutStream(PdfOutStream);
+        case UpperCase(documentKind) of
+            'BORROWING':
+                begin
+                    BorrowingForm.SetTableView(ReqHeader);
+                    BorrowingForm.SaveAs('', ReportFormat::Pdf, PdfOutStream, HeaderRef);
+                end;
+            'GIV':
+                begin
+                    if ReqHeader."Store Issue No" = '' then
+                        Error('Store requisition %1 has no GIV number yet.', requestNo);
+                    StoreIssue.SetTableView(ReqHeader);
+                    StoreIssue.SaveAs('', ReportFormat::Pdf, PdfOutStream, HeaderRef);
+                end;
+            else
+                Error('Unknown store document %1. Use BORROWING or GIV.', documentKind);
+        end;
+        if not TempBlob.HasValue() then
+            Error('Business Central did not produce the %1 PDF for store requisition %2.', documentKind, requestNo);
+        TempBlob.CreateInStream(PdfInStream);
+        return_value := Base64Convert.ToBase64(PdfInStream);
+    end;
+
+    /// <summary>
+    /// Store Manager: Start Local Purchase (LPR) with the BC card prompts — source (LOCAL / FOREIGN),
+    /// project (blank = non-project) and officer (PROCUREMENT / PROJECT, blank = follows the project).
+    /// </summary>
+    procedure StartPortalStoreLpr(requestNo: Code[50]; projectNo: Code[50]; actionComment: Text[250]; actorUserID: Code[100]; actorJobTitle: Text[100]; procurementSource: Text[30]; officerType: Text[30]) return_value: Text
+    var
+        ProcurementMgt: Codeunit "Portal Procurement Mgt.";
+    begin
+        exit(ProcurementMgt.StartStoreLpr(requestNo, projectNo, actionComment, actorUserID, actorJobTitle, procurementSource, officerType));
+    end;
+
+    /// <summary>
+    /// Officer and approver user IDs from ABH Local Proc Setup, for the portal Start LPR prompts.
+    /// </summary>
+    procedure PortalLprOfficers() return_value: Text
+    var
+        Setup: Record "ABH Local Proc Setup";
+        Root: JsonObject;
+        JsonText: Text;
+    begin
+        if not Setup.Get('SETUP') then
+            Clear(Setup);
+        Root.Add('procurementOfficer', Setup."Procurement User ID");
+        Root.Add('projectProcurementOfficer', Setup."Project Procurement User ID");
+        Root.Add('operationsManager', Setup."Operations Manager User ID");
+        Root.Add('fad', Setup."FAD User ID");
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Store portal features in this BC app, so the portal shows only what BC can do.
+    /// </summary>
+    procedure PortalStoreFeatures() return_value: Text
+    var
+        Root: JsonObject;
+        Features: JsonArray;
+        JsonText: Text;
+    begin
+        Features.Add('storeList');
+        Features.Add('unitsOfMeasure');
+        Features.Add('storeHandOff');
+        Features.Add('storeOffers');
+        Features.Add('startLprOptions');
+        Features.Add('storeDocuments');
+        Features.Add('storeRoles');
+        Root.Add('features', Features);
+        Root.WriteTo(JsonText);
+        return_value := JsonText;
+    end;
+
+    /// <summary>
+    /// Storekeeper: in-stock items at the issuing store for Add Item to Issue (search by No. or description).
+    /// </summary>
+    procedure PortalStoreOfferItems(requestNo: Code[20]; actorUserID: Code[50]; searchText: Text[50]) return_value: Text
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.ListStoreOfferItemsForPortal(ReqHeader, actorUserID, searchText, 200);
+    end;
+
+    /// <summary>
+    /// Storekeeper: Add Item to Issue (Store Offer line). Returns the new line number.
+    /// </summary>
+    procedure AddPortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; itemNo: Code[20]; quantity: Decimal) return_value: Integer
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        return_value := StoreMgmt.AddStoreOfferForPortal(ReqHeader, actorUserID, itemNo, quantity);
+    end;
+
+    /// <summary>
+    /// Storekeeper: remove a Store Offer line before the store manager accepts it.
+    /// </summary>
+    procedure RemovePortalStoreOffer(requestNo: Code[20]; actorUserID: Code[50]; lineNo: Integer) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.RemoveStoreOfferForPortal(ReqHeader, actorUserID, lineNo);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Offer Another Item after the requester declined.
+    /// </summary>
+    procedure OfferAnotherPortalStoreItem(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.OfferAnotherItemForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Storekeeper: Close Request after the requester declined (no GIV).
+    /// </summary>
+    procedure ClosePortalStoreRequest(requestNo: Code[20]; actorUserID: Code[50]) return_value: Boolean
+    var
+        ReqHeader: Record "Store Requistion Header";
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        if not ReqHeader.Get(requestNo) then
+            Error('Store requisition %1 was not found.', requestNo);
+        StoreMgmt.CloseDeclinedRequestForPortal(ReqHeader, actorUserID);
+        return_value := true;
+    end;
+
+    /// <summary>
+    /// Store Manager / Store Keeper roles of a portal user, from Warehouse Employees and the store cards.
+    /// </summary>
+    procedure PortalStoreRoles(actorUserID: Code[50]) return_value: Text
+    var
+        StoreMgmt: Codeunit "Store Mgmt";
+    begin
+        return_value := StoreMgmt.GetPortalStoreRoles(actorUserID);
     end;
 }

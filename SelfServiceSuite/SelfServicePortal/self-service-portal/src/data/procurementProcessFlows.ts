@@ -7,116 +7,139 @@ export type ProcurementProcessStep = {
   erp?: boolean
 }
 
-/** Official Local Purchase Request Workflow. */
-export const ABH_PURCHASE_REQUEST_PROCESS_TITLE = 'Local Purchase Request Workflow'
+/** ABH local purchase — "ERP & BC – Staff Item/Asset Request to Payment Workflow" (meeting 18 Oct 2026). */
+export const ABH_PURCHASE_REQUEST_PROCESS_TITLE = 'ABH Local Purchase Process (Request to Payment)'
 
 export const ABH_PURCHASE_REQUEST_PROCESS_NOTE =
-  'Price and vendor information stay hidden from the technical team. A GIN is issued only when the goods are distributed internally.'
+  'A local purchase starts from an approved store requisition when the item is not in store: the Store Keeper sends Request for LPR and the Store Manager starts the LPR (Local or Foreign, project, procurement officer). The Operations Manager checks the LPR, the RFQ, the quote evaluation, the PO and the invoice; FAD approves the LPR, the final supplier, the PO and the payment. Approvals happen on the LPR in the portal or BC, not in Requests to Approve. The goods go to the requester through the store (GIV) after the GRN.'
 
-/** Five phases from the Local Purchase Request Workflow. */
+/** ABH local purchase steps 7–26 (steps 1–6 are the store requisition). */
 export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '1',
-    heading: 'Requisition & Approval',
-    owner: 'Staff → Department Head / Division Head → Finance & Administration',
+    heading: 'LPR & Approval',
+    owner: 'Procurement Officer → Operations Manager → FAD',
     action:
-      'Staff initiates the Purchase Request. The Department Head or Division Head reviews and approves it. Finance & Administration then reviews and approves the Purchase Request.',
+      'The assigned Procurement Officer (Project Procurement Officer for a project) prepares the LPR — need, quantity, specification, justification — and submits it to the Operations Manager. The Operations Manager approves, then FAD approves.',
     portal: true,
     erp: true,
   },
   {
     phase: '2',
-    heading: 'Sourcing & Selection',
-    owner: 'Operations / Procurement → System → Technical Team',
+    heading: 'RFQ & Quotations',
+    owner: 'Procurement → Operations Manager → Procurement',
     action:
-      'Operations / Procurement prepares and sends the RFQ, then processes the supplier replies. The system selects the winning supplier. The technical team gives a recommendation. Price and vendor information are hidden from that team.',
+      'Procurement converts the LPR to an RFQ. The Operations Manager approves the RFQ. Procurement then enters each vendor quotation with its attachment.',
+    portal: true,
     erp: true,
   },
   {
     phase: '3',
-    heading: 'Ordering & Fulfillment',
-    owner: 'Finance & Administration → Operations / Procurement → Finance',
+    heading: 'Evaluation & Supplier Selection',
+    owner: 'Procurement → Operations Manager → Technical (if required) → FAD',
     action:
-      'Finance & Administration gives final approval. Operations / Procurement prepares the Purchase Order. Finance checks the Purchase Order. Finance & Administration approves the Purchase Order and sends it back to Operations.',
+      'Procurement selects the winner and sends it for Operations Manager review. The Operations Manager sends it to Technical if required, or to FAD. FAD approves the final supplier (or sends it back).',
+    portal: true,
     erp: true,
   },
   {
     phase: '4',
-    heading: 'Invoicing & Payment',
-    owner: 'Operations → Finance → Finance & Administration → CEO',
+    heading: 'Purchase Order',
+    owner: 'Procurement → Operations Manager → FAD',
     action:
-      'Operations requests the invoice. Finance checks it. Finance & Administration approves the invoice. Finance processes the payment voucher. The CEO approves the payment. Finance prepares the payment documents for online payment or cheque.',
+      'Procurement creates the PO from the winning quote (the PO totals the quoted amount). The Operations Manager approves the PO, then FAD approves it.',
+    portal: true,
     erp: true,
   },
   {
     phase: '5',
-    heading: 'Post-Delivery',
-    owner: 'Operations / Store',
+    heading: 'Goods Receiving (GRN) & Issue',
+    owner: 'Store Keeper → Requester',
     action:
-      'Operations receives the purchased item. The store processes the GRN. The store processes the GIN when the goods are issued for internal distribution.',
+      'The Store Keeper prepares the local receive and posts the GRN into the store, then uses Issue after LPR receive (GIV). The requester confirms receipt.',
+    portal: true,
+    erp: true,
+  },
+  {
+    phase: '6',
+    heading: 'Invoice & Payment',
+    owner: 'Procurement → Operations Manager → Finance → FAD → Finance',
+    action:
+      'Procurement records the vendor invoice. The Operations Manager approves it, Finance verifies PO + GRN + invoice, F&A (FAD) approves the payment, and Finance pays the vendor from the chosen bank and closes the LPR.',
+    portal: true,
     erp: true,
   },
 ]
 
 export const ABH_PURCHASE_REQUEST_PROCESS_FLOWS = [
-  'Purchase Request → Department Approval → Finance & Admin Approval → RFQ → Supplier Responses → Automatic Winner Selection → Technical Recommendation → Final Approval → PO → Finance Check → Finance & Admin Approval → Invoice → Invoice Check & Approval → Payment Voucher → CEO Approval → Payment Documentation → Goods Received → GRN → GIN',
+  'LPR (Procurement Officer) → Operations Manager → FAD → RFQ → Operations Manager → Vendor Quotes → Evaluation (Operations Manager, Technical if required) → FAD Final Supplier',
+  'PO → Operations Manager → FAD → Store Keeper GRN → Issue to Requester (GIV) → Invoice → Operations Manager → Finance Verify → F&A Payment Approval → Pay & Close',
 ] as const
 
-/** Official ABH Store Requisition Process (Store Requisition Template). */
+/** ABH Store Requisition Process — as on the BC store pages (meeting 20 Oct 2026). */
 export const ABH_STORE_REQUISITION_PROCESS_TITLE = 'Store Requisition Process'
 
-/** ABH Store Requisition Process — five phases per process statement. */
 export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '1',
-    heading: 'Requisition Initiation',
+    heading: 'Requisition',
     owner: 'Staff',
     action:
-      'Staff types what they need, the quantity, and the purpose. They do not see the store catalog. Saving or submitting the request does not issue stock and does not create a purchase.',
+      'Choose the issuing store (and the project, when it is for a project), then add what you need with the unit of measure and quantity. Send it for approval.',
     portal: true,
+    erp: true,
   },
   {
     phase: '2',
     heading: 'Review & Approval',
     owner: 'Supervisor → Dept Head → Division Head → Finance & Administration',
     action:
-      'The SR is routed to the Supervisor/Department Head/Division Head/Finance & Administration, as applicable. At any stage, the SR may be approved, rejected, or returned to the requester for correction.',
+      'The request goes through the Business Central approvals. It can be approved, rejected, or returned for correction.',
     portal: true,
     erp: true,
   },
   {
     phase: '3',
-    heading: 'Store Verification',
-    owner: 'Operations / Store',
+    heading: 'Store Keeper',
+    owner: 'Store Keeper',
     action:
-      'The storekeeper checks stock, maps each line to a real item, sets the issuing store, and submits the quantity to the store manager. Stock does not move yet.',
+      'Item in store: add the item to issue and submit to the Store Manager. No item or similar item in store: Request for LPR — the request goes to the Store Manager with the employee details.',
     portal: true,
     erp: true,
   },
   {
     phase: '4',
-    heading: 'Issuance',
-    owner: 'Store manager',
+    heading: 'Store Manager',
+    owner: 'Store Manager',
     action:
-      'The store manager accepts the prepared issue and posts the Goods Issue Voucher. The goods leave the store and go in transit to the requester.',
+      'Item in store: Accept Item (Store Manager) — no voucher yet. Not in store: Start Local Purchase (LPR) — Local or Foreign, project, then the procurement officer.',
     portal: true,
     erp: true,
   },
   {
     phase: '5',
-    heading: 'Stock Update & Closure',
+    heading: 'Accept the Item',
     owner: 'Requester',
     action:
-      'The requester confirms receipt. If stock was unavailable, the storekeeper raises a Purchase Request first; after the GRV, the same hand-off runs again.',
+      'Open the Item Borrowing Form, check it, then Accept Item (the goods issue voucher is created and the request goes In Transit) or Decline Item (the store can offer another item or close the request).',
+    portal: true,
+    erp: true,
+  },
+  {
+    phase: '6',
+    heading: 'Confirm Receipt',
+    owner: 'Requester',
+    action:
+      'When you have the item, Confirm Receipt. The Item Borrowing Form and the Store Issuance Voucher (GIV) stay available.',
     portal: true,
     erp: true,
   },
 ]
 
 export const ABH_STORE_REQUISITION_PROCESS_NOTE =
-  'Process flow (stock available): Store Requisition → Review & Approval → Store Stock Check → GIV & Issue → Stock Update & Closure. If stock is unavailable: Store Requisition → Purchase Request → Purchase/Source Document → Goods Receiving → GRV → Inventory → GIV & Issue. Phases 1–2 run in the portal. After approval, Operations sets the issuing store and maps each line to a real item in Business Central, then records the stock decision on this requisition.'
+  'Item in store: Store Requisition → Approval → Store Keeper adds the item and submits → Store Manager accepts → requester accepts the Item Borrowing Form (GIV, In Transit) → Confirm Receipt. Item not in store: Store Keeper Request for LPR → Store Manager Start Local Purchase (LPR) → local purchase → GRN → Issue after LPR receive (GIV) → Confirm Receipt.'
 
 export const ABH_STORE_REQUISITION_PROCESS_FLOWS = [
-  'Store Requisition → Review & Approval → Store Stock Check → GIV & Issue → Stock Update & Closure',
-  'If Stock Is Unavailable: Store Requisition → Purchase Request → Purchase/Source Document → Goods Receiving → GRV → Inventory → GIV & Issue',
+  'Item in store: Store Requisition → Approval → Store Keeper: Add Item & Submit → Store Manager: Accept Item → Requester: Item Borrowing Form → Accept Item (GIV) → Confirm Receipt',
+  'Item not in store: Store Keeper: Request for LPR → Store Manager: Start Local Purchase (LPR) → LPR → RFQ → PO → GRN → Issue after LPR receive (GIV) → Requester: Confirm Receipt',
 ] as const

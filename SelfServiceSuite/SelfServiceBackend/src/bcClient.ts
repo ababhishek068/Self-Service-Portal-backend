@@ -581,6 +581,8 @@ function soapFaultError(status: number, xml: string) {
       ? 'Budget Type is Project, but Project Name / Code is missing. Choose Non-Project, or enter a project code before saving.'
     : /Method 'DeletePortalDraftDocument' is invalid/i.test(fault)
       ? 'Draft delete needs Business Central app 1.0.3.217 or later. Publish Technology Associates EA Ltd_BC24_TA App_1.0.3.217.app, run Sync + Data Upgrade, restart BC240, then try Delete again.'
+    : /Method 'PostApprovedPortalLeave' is invalid/i.test(fault)
+      ? 'Posting approved leave needs the updated Staff Portal codeunit. Publish that codeunit, then click Post again. Until then this approved leave is already counted in the portal balance.'
     : /has no Supervisor set/i.test(fault)
       ? (() => {
           const match = fault.match(/Employee\s+(\S+)\s+has no Supervisor/i)

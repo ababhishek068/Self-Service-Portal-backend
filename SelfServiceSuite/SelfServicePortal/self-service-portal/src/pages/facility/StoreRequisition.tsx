@@ -3,7 +3,11 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { StoreOperationsPanel } from '@/components/facility/StoreOperationsPanel'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
-import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
+import {
+  getStoreRequisitionOptions,
+  listModuleRequests,
+  type StoreRequisitionStore,
+} from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
 import { useQuery } from '@tanstack/react-query'
 import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
@@ -34,6 +38,18 @@ function hasText(value: unknown) {
 
 function hasPositiveNumber(value: unknown) {
   return Number(value ?? 0) > 0
+}
+
+function storeLabel(store: StoreRequisitionStore) {
+  const name = store.name && store.name !== store.code ? `${store.code} — ${store.name}` : store.code
+  return store.locationCode && store.locationCode !== store.code ? `${name} (location ${store.locationCode})` : name
+}
+
+function lineRoleLabel(value: unknown) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (text.includes('offer')) return 'Store offer'
+  if (text.includes('request')) return 'Your request'
+  return '—'
 }
 
 function isAssetRequestPayload(payload: Record<string, unknown> | undefined) {
@@ -71,15 +87,44 @@ export function StoreRequisition() {
   const department = String(
     profileQuery.data?.department || employee?.departmentName || employee?.departmentCode || '',
   ).trim()
+  // Store, project and unit-of-measure lists from Business Central (same lookups as the BC card).
+  const optionsQuery = useQuery({
+    queryKey: ['store-requisition', 'options'],
+    queryFn: getStoreRequisitionOptions,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const bcStores = optionsQuery.data?.stores
+  const bcProjects = optionsQuery.data?.projects
+  const bcUnits = optionsQuery.data?.unitsOfMeasure
+  // Is Project is saved by BC 1.0.3.544 (SetPortalStoreRequisitionDetails); hidden on older BC apps.
+  const showProject = optionsQuery.data?.storesFromBc === true && Boolean(bcProjects)
+  const storeOptions = (bcStores ?? []).map((store) => ({ value: store.code, label: storeLabel(store) }))
+  const projectOptions = (bcProjects ?? []).map((project) => ({
+    value: project.no,
+    label: project.description ? `${project.no} — ${project.description}` : project.no,
+  }))
+  const uomOptions = bcUnits?.length
+    ? bcUnits.map((unit) => ({
+        value: unit.code,
+        label: unit.description && unit.description.toUpperCase() !== unit.code ? `${unit.code} — ${unit.description}` : unit.code,
+      }))
+    : storeUomOptions
+  const defaultUom = bcUnits?.length
+    ? (bcUnits.find((unit) => unit.code === 'EACH') ?? bcUnits.find((unit) => unit.code === 'PCS') ?? bcUnits[0]).code
+    : optionsQuery.isLoading
+      ? ''
+      : 'PCS'
 
   return (
     <MultiStepRequestPage
       title="Store Requisition"
-      description="Describe what you need and the quantity, then submit for approval. You do not pick from the store catalog. The store maps a real item before anything is issued."
+      description="Choose the issuing store, describe what you need with the unit of measure and quantity, then send it for approval. The store offers the real item; you check the Item Borrowing Form and accept it, then confirm receipt."
       headerLabel="New Store Requisition"
       processBanner={storeProcessBanner}
       showProcessBannerOnList={false}
       detailActionsPlacement="bottom"
+      cancelStatuses={['Pending Approval']}
       module={module}
       queryKey={['facility', 'store-requisition']}
       listRequests={() => listModuleRequests(module)}
@@ -90,7 +135,8 @@ export function StoreRequisition() {
         cell: (row) => row.amount > 0 ? formatCurrency(row.amount) : 'Not costed',
       }}
       attachmentCategoryOptions={storeAttachmentCategories}
-      attachmentCategoryHint="An extra specification is optional. Attach it when the item needs a drawing, photo, or note, and describe the file."
+      attachmentCategoryHint="Supporting documents are optional. Add a specification, drawing, or reference when useful, and describe each uploaded file."
+      requiresAttachmentBeforeSubmit={false}
       detailSupplement={({ request }) => <StoreOperationsPanel request={request} />}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={storeHeaderSchema}
@@ -103,16 +149,33 @@ export function StoreRequisition() {
         requestType: 'item',
         priority: 'normal',
         justification: '',
+        storeCode: '',
+        isProject: false,
+        projectCode: '',
+      }}
+      headerOnValuesChange={(values, form) => {
+        // A saved draft may carry only the issuing location (e.g. SU): show its store (SUP).
+        const storeCode = String(values.storeCode ?? '').trim()
+        if (storeCode && bcStores?.length && !bcStores.some((store) => store.code === storeCode)) {
+          const byLocation = bcStores.find((store) => store.locationCode === storeCode)
+          if (byLocation) form.setValue('storeCode', byLocation.code)
+        }
+        // BC fills Project Name from the project (Job) chosen here.
+        if (values.isProject !== true && String(values.projectCode ?? '')) form.setValue('projectCode', '')
       }}
       headerSupplement={() => <FinanceEmployeeOrgBanner showJobGradeAndDistrict={false} />}
       buildHeaderPayload={(values) => {
         const justification = String(values.justification ?? '').trim()
+        const isProject = values.isProject === true
         return {
           ...values,
           requestDate: values.dateRequired,
           requestDescription: justification.slice(0, 150),
           justification,
           title: justification.slice(0, 80) || 'Store Requisition',
+          storeCode: String(values.storeCode ?? '').trim(),
+          isProject,
+          projectCode: isProject ? String(values.projectCode ?? '').trim() : '',
         }
       }}
       headerFields={[
@@ -176,6 +239,33 @@ export function StoreRequisition() {
           },
         },
         {
+          name: 'storeCode',
+          label: 'Issuing Store',
+          type: 'select',
+          options: storeOptions,
+          placeholder: optionsQuery.isLoading ? 'Loading stores…' : 'Select the issuing store',
+          valuePaths: ['StoreCode', 'Store_Code', 'IssuingStore', 'Issuing_Store'],
+        },
+        ...(showProject
+          ? [
+              {
+                name: 'isProject',
+                label: 'Is Project',
+                type: 'checkbox' as const,
+                valuePaths: ['IsProject', 'Is_Project'],
+              },
+              {
+                name: 'projectCode',
+                label: 'Project',
+                type: 'select' as const,
+                options: projectOptions,
+                placeholder: optionsQuery.isLoading ? 'Loading projects…' : 'Select the project',
+                visibleWhen: (values: Record<string, unknown>) => values.isProject === true,
+                valuePaths: ['ProjectCode', 'Project_Code'],
+              },
+            ]
+          : []),
+        {
           name: 'justification',
           label: 'Purpose / Justification',
           type: 'textarea',
@@ -199,9 +289,32 @@ export function StoreRequisition() {
         { label: 'Required Date', paths: ['payload.RequiredDate', 'payload.Required_Date', 'payload.RequestDate'], format: 'date' },
         { label: 'Division', paths: ['payload.FunctionName', 'payload.GlobalDimension1Code', 'payload.Global_Dimension_1_Code'] },
         { label: 'Department', paths: ['payload.BudgetCenterName', 'payload.DepartmentName', 'payload.ShortcutDimension2Code', 'payload.Shortcut_Dimension_2_Code'] },
-        { label: 'Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
+        { label: 'Issuing Store', paths: ['payload.StoreName', 'payload.StoreCode', 'payload.IssuingStore', 'payload.Issuing_Store'] },
+        {
+          label: 'Is Project',
+          paths: [],
+          resolve: (request) => (request.payload?.IsProject === true ? 'Yes' : undefined),
+        },
+        {
+          label: 'Project',
+          paths: [],
+          resolve: (request) => {
+            const code = String(request.payload?.ProjectCode ?? request.payload?.Project_Code ?? '').trim()
+            const name = String(request.payload?.ProjectName ?? request.payload?.Project_Name ?? '').trim()
+            if (!code) return undefined
+            return name && name !== code ? `${code} — ${name}` : code
+          },
+        },
         { label: 'Issue Stage', paths: ['payload.IssueStage', 'payload.Issue_Stage'] },
-        { label: 'Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
+        {
+          label: 'Requester Decision',
+          paths: [],
+          resolve: (request) => {
+            const decision = String(request.payload?.RequesterDecision ?? '').trim()
+            return /accept|declin/i.test(decision) ? decision : undefined
+          },
+        },
+        { label: 'GIV / Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
         { label: 'Request Type', paths: ['payload.StoreRequisitionType', 'payload.Store_Requisition_Type'] },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
@@ -219,7 +332,7 @@ export function StoreRequisition() {
           itemNo: '',
           itemName: '',
           description: '',
-          uom: 'PCS',
+          uom: defaultUom,
           quantity: 1,
           preferredBrandModel: '',
         },
@@ -265,7 +378,8 @@ export function StoreRequisition() {
             name: 'uom',
             label: 'UOM',
             type: 'select',
-            options: storeUomOptions,
+            options: uomOptions,
+            placeholder: optionsQuery.isLoading ? 'Loading units…' : 'Select the unit of measure',
             valuePaths: ['uom', 'unitOfMeasure', 'UnitofMeasure'],
           },
           { name: 'quantity', label: 'Quantity', type: 'number' },
@@ -281,6 +395,17 @@ export function StoreRequisition() {
             key: 'type',
             header: 'Type',
             format: (value) => (String(value) === '2' || String(value).toLowerCase() === 'asset' ? 'Asset' : 'Item'),
+          },
+          {
+            key: 'lineRole',
+            header: 'Line Role',
+            format: (value) => lineRoleLabel(value),
+            visibleWhen: (lines) => lines.some((line) => /offer/i.test(String(line.lineRole ?? ''))),
+          },
+          {
+            key: 'itemNo',
+            header: 'Item / Asset No.',
+            visibleWhen: (lines) => lines.some((line) => hasText(line.itemNo)),
           },
           { key: 'itemName', header: 'Requested item' },
           {
