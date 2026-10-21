@@ -213,6 +213,9 @@ export function StoreRequisition() {
           type: 'select',
           options: storeRequestTypeOptions,
           valuePaths: ['StoreRequisitionType', 'Store_Requisition_Type', 'requestType'],
+          // Consumable / Fixed Asset is chosen per line (Type), as on the BC lines; the header
+          // keeps its saved value so older Fixed Asset drafts are not changed.
+          visibleWhen: () => false,
           // BC Request Type: Consumable (Item) or Fixed Asset (Minor Asset).
           valueMap: {
             item: 'item',
@@ -324,11 +327,6 @@ export function StoreRequisition() {
           },
         },
         { label: 'GIV / Store Issue No.', paths: ['payload.StoreIssueNo', 'payload.Store_Issue_No'] },
-        {
-          label: 'Request Type',
-          paths: [],
-          resolve: (request) => (isAssetRequestPayload(request.payload) ? 'Fixed Asset' : 'Consumable'),
-        },
         { label: 'Priority', paths: ['payload.Priority', 'payload.priority'], format: 'storePriority' },
         { label: 'Purpose / Justification', paths: ['payload.Justification', 'payload.justification'] },
         { label: 'Store Receipt No.', paths: ['payload.SRNNo', 'payload.SRN_No'] },
