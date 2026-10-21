@@ -72,6 +72,8 @@ export interface FieldConfig {
   valueMap?: Record<string, string>
   /** Span both columns in two-column forms. */
   fullWidth?: boolean
+  /** Short help shown under the field. */
+  hint?: string
 }
 
 export interface LineItemsConfig {

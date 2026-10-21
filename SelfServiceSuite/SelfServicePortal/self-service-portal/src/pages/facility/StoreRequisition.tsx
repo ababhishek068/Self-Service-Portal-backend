@@ -370,6 +370,7 @@ export function StoreRequisition() {
             label: 'Type',
             type: 'select',
             options: storeLineTypeOptions,
+            hint: 'Consumable: used up, e.g. toner, paper. Fixed Asset: kept and tagged, e.g. laptop, chair.',
             valuePaths: ['type', 'Type'],
             valueMap: {
               item: '1',

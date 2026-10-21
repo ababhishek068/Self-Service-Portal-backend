@@ -399,6 +399,7 @@ function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedVal
             <Label htmlFor={inputId}>{field.label}</Label>
           </>
         ) : null}
+        {field.hint ? <p className="text-xs text-slate-500">{field.hint}</p> : null}
         {message ? <p className="text-xs font-medium text-red-600">{message}</p> : null}
       </div>
     )
