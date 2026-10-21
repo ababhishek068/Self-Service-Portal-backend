@@ -47,8 +47,8 @@ export const fuelRequestTypeOptions = [
 
 /** Store / purchase line types. */
 export const storeLineTypeOptions = [
-  { label: 'Item', value: '1' },
-  { label: 'Asset', value: '2' },
+  { label: 'Consumable', value: '1' },
+  { label: 'Fixed Asset', value: '2' },
 ]
 
 /** ABH Item / Asset Request template — header request type. */

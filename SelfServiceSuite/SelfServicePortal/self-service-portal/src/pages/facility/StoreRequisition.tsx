@@ -367,11 +367,21 @@ export function StoreRequisition() {
         },
         fields: [
           {
+            // BC Store Requisition Line Type: Consumable or Fixed Asset, per line.
             name: 'type',
-            label: 'Line Type',
+            label: 'Type',
             type: 'select',
             options: storeLineTypeOptions,
-            visibleWhen: () => false,
+            valuePaths: ['type', 'Type'],
+            valueMap: {
+              item: '1',
+              consumable: '1',
+              asset: '2',
+              'minor asset': '2',
+              minor_asset: '2',
+              'fixed asset': '2',
+              fixed_asset: '2',
+            },
           },
           {
             name: 'itemName',
