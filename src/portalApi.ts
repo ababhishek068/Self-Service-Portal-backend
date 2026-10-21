@@ -451,7 +451,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v247 — 1.0.3.406 (Request for LPR only before an item is offered; for BC 1.0.3.559)'
+export const PORTAL_API_BUILD = 'v248 — 1.0.3.407 (Store Manager no longer sees the Store Keeper step; for BC 1.0.3.559)'
 
 interface LookupSpec {
   service: string
@@ -1289,9 +1289,13 @@ function canViewStoreProcess(authUser: FacilityAuth & { userID?: string }) {
 async function storeUserRoles(authUser: AuthUser) {
   const bcRoles = await resolveStoreRoles(callSoapMethod, String(authUser.userID ?? ''))
   const manager = portalUserIsStoreManager(authUser) || Boolean(bcRoles?.storeManager)
+  const keeper = canManagePurchaseStock(authUser) || manager || Boolean(bcRoles?.storeKeeper)
   return {
     manager,
-    keeper: canManagePurchaseStock(authUser) || manager || Boolean(bcRoles?.storeKeeper),
+    keeper,
+    // The keeper's own step (add the item, Submit to Store Manager, Request for LPR) is never
+    // done by the Store Manager, who only reviews what the keeper submitted.
+    keeperStep: keeper && !manager,
   }
 }
 
@@ -4573,7 +4577,7 @@ export function buildPortalApiRouter() {
             (detail.payload as ODataRecord).Issue_Stage,
         )
         if (requestedAction === 'PREPARE_ISSUE') {
-          if (!(await storeUserRoles(authUser)).keeper) {
+          if (!(await storeUserRoles(authUser)).keeperStep) {
             throw portalError('Only the storekeeper can submit an issue to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
           }
           if (issueStage) {
@@ -4583,7 +4587,9 @@ export function buildPortalApiRouter() {
         } else if (STORE_KEEPER_OFFER_ACTIONS.includes(requestedAction)) {
           // Store Keeper on the approved request: Add Item to Issue, remove an offer,
           // Offer Another Item or Close Request (BC checks the store roster and the stage).
-          if (!(await storeUserRoles(authUser)).keeper) {
+          // The Store Manager may only change the item while reviewing a submitted issue.
+          const roles = await storeUserRoles(authUser)
+          if (!(issueStage === 'PREPARED' ? roles.keeper : roles.keeperStep)) {
             throw portalError(
               'Only the storekeeper can change the item to issue or close the request.',
               403,
@@ -4734,6 +4740,9 @@ export function buildPortalApiRouter() {
       const storeRoles = await storeUserRoles(authUser)
       if (requestedAction === 'START_LPR' && !storeRoles.manager) {
         throw portalError('Only the store manager can start the Local Purchase Requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
+      }
+      if (requestedAction === 'REQUEST_FOR_LPR' && !storeRoles.keeperStep) {
+        throw portalError('Only the storekeeper can send Request for LPR to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)

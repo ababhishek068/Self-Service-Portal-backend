@@ -148,6 +148,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
     /\b(operations?|ops|store|storekeeper)\b/.test(assignment) ||
     storeManager ||
     storeRolesQuery.data?.storeKeeper === true
+  // The keeper's own step (add the item, Submit to Store Manager, Request for LPR) is never
+  // shown to the Store Manager, who only reviews what the keeper submitted.
+  const keeperStep = canManageStock && !storeManager
   const issued = linesHaveBeenIssued(request)
   const storedReceipt =
     typeof window !== 'undefined' && window.localStorage.getItem(receiptStorageKey(request.requestNo)) === 'received'
@@ -357,7 +360,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
     storeOffers &&
     canManageStock &&
     ['approved', 'released'].includes(status) &&
-    (stageHandOff === '' || stageHandOff === 'PREPARED') &&
+    ((stageHandOff === '' && keeperStep) || stageHandOff === 'PREPARED') &&
     !(storeManager && stageHandOff === 'PREPARED' && !managerEditing) &&
     !lprPath &&
     !issued
@@ -588,7 +591,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           issue GIV until a posted GRV receives stock into that location.
         </p>
       ) : null}
-      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !storeOffers ? (
+      {atStockCheck && stageHandOff === '' && keeperStep && !processQuery.isError && !storeOffers ? (
         <p className="mt-2 text-xs text-slate-600">
           Item in store: in Business Central (Store Req Header Approved) use Add Item to Issue, then Submit to Store
           Manager{bcStoreHandOff ? ' (in BC or here)' : ''}. Item not in store: Request for LPR below.
@@ -607,7 +610,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           }
         />
       ) : null}
-      {atStockCheck && stageHandOff === '' && canManageStock && !processQuery.isError && !showOfferSection ? (
+      {atStockCheck && stageHandOff === '' && keeperStep && !processQuery.isError && !showOfferSection ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {bcStoreHandOff && !storeOffers ? (
             <Button
@@ -703,6 +706,11 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
       {atStockCheck && !canManageStock ? (
         <p className="mt-2 text-xs text-slate-600">Waiting for Operations/Store to record the stock decision.</p>
+      ) : null}
+      {atStockCheck && stageHandOff === '' && storeManager ? (
+        <p className="mt-2 text-xs text-slate-600">
+          Waiting for the Store Keeper to add the item to issue and submit it to you. Nothing to do here yet.
+        </p>
       ) : null}
       {atProcurement && !localPurchase.enabled ? (
         <p className="mt-2 text-xs text-slate-600">
