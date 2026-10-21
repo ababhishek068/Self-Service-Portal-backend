@@ -1,0 +1,28 @@
+import { Badge } from '@/components/ui/badge'
+import type { BadgeStatus } from '@/types/erp.types'
+
+const variants: Record<string, 'green' | 'red' | 'yellow' | 'gray' | 'blue' | 'orange'> = {
+  Approved: 'green',
+  Pass: 'green',
+  Posted: 'red',
+  Synced: 'green',
+  Rejected: 'red',
+  Fail: 'red',
+  Error: 'red',
+  Cancelled: 'red',
+  Draft: 'gray',
+  'Pending Approval': 'blue',
+  'Pending HR Approval': 'blue',
+  'In Progress': 'blue',
+  'Ready for Collection': 'green',
+  Pending: 'red',
+  Open: 'blue',
+  Submitted: 'gray',
+  Created: 'gray',
+  Waiting: 'gray',
+  New: 'red',
+}
+
+export function StatusBadge({ status }: { status: BadgeStatus | string }) {
+  return <Badge variant={variants[status] ?? 'gray'}>{status}</Badge>
+}

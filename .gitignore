@@ -1,0 +1,35 @@
+node_modules
+dist
+/public
+.env
+*.log
+.DS_Store
+*.zip
+**/src-legacy-flat/
+
+SelfServiceSuite/SelfServiceBackend/public/
+# Release dumps / extracted portal packages (deploy from Desktop zip, do not track)
+ABH-Portal-COMPLETE-*/
+ABH-Portal-*/
+ABH-Portal-*.sha256.txt
+.abh-package-staging/
+.suite-bundle-staging/
+deployment-suite-*/
+self-service-bc-uat-test-*/
+TA-Self-Service-Backend_*/
+
+# Compiled BC apps and local build output (keep on disk / Desktop, not in git)
+*.app
+output/
+deliverables/
+
+# Editor / migration leftovers
+*.bak
+*.bak-*
+*.tmp
+**/*.bak-pre-hijra*
+**/*.bak-pre-hijra-port
+
+# Local Cursor / agent scratch
+work/
+.cursor/

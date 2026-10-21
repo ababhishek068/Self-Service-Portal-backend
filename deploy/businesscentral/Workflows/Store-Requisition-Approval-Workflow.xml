@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<Root>
+  <Workflow Code="STORE-REQ-WF" Description="Store Requisition Approval Workflow" Category="FIN">
+    <WorkflowStep StepID="89" EntryPoint="1" PreviousStepID="0" Type="0" FunctionName="RUNWORKFLOWONSENDSTOREREQUISITIONFORAPPROVAL" SequenceNo="1" />
+    <WorkflowStep StepID="90" PreviousStepID="89" Type="1" FunctionName="RESTRICTRECORDUSAGE">
+      <WorkflowStepArgument ResponseFunctionName="RESTRICTRECORDUSAGE" />
+    </WorkflowStep>
+    <WorkflowStep StepID="91" PreviousStepID="90" Type="1" FunctionName="SETSTATUSTOPENDINGAPPROVAL">
+      <WorkflowStepArgument ResponseFunctionName="SETSTATUSTOPENDINGAPPROVAL" />
+    </WorkflowStep>
+    <WorkflowStep StepID="92" PreviousStepID="91" Type="1" FunctionName="CREATEAPPROVALREQUESTS">
+      <WorkflowStepArgument ResponseFunctionName="CREATEAPPROVALREQUESTS" ApproverType="1" ApproverLimitType="1" ShowConfirmationMessage="Yes" />
+    </WorkflowStep>
+    <WorkflowStep StepID="93" PreviousStepID="92" Type="1" FunctionName="SENDAPPROVALREQUESTFORAPPROVAL">
+      <WorkflowStepArgument ResponseFunctionName="SENDAPPROVALREQUESTFORAPPROVAL" />
+    </WorkflowStep>
+    <WorkflowStep StepID="94" PreviousStepID="93" Type="0" FunctionName="RUNWORKFLOWONAPPROVEAPPROVALREQUEST">
+      <WorkflowStepArgument EventConditions="PAA/AHgAbQBsACAAdgBlAHIAcwBpAG8AbgA9ACIAMQAuADAAIgAgAGUAbgBjAG8AZABpAG4AZwA9ACIAdQB0AGYALQA4ACIAIABzAHQAYQBuAGQAYQBsAG8AbgBlAD0AIgB5AGUAcwAiAD8APgA8AFIAZQBwAG8AcgB0AFAAYQByAGEAbQBlAHQAZQByAHMAPgA8AEQAYQB0AGEASQB0AGUAbQBzAD4APABEAGEAdABhAEkAdABlAG0AIABuAGEAbQBlAD0AIgBBAHAAcAByAG8AdgBhAGwAIABFAG4AdAByAHkAIgA+AFYARQBSAFMASQBPAE4AKAAxACkAIABTAE8AUgBUAEkATgBHACgARgBpAGUAbABkADIAOQApACAAVwBIAEUAUgBFACgARgBpAGUAbABkADIAMQA9ADEAKAAwACkAKQA8AC8ARABhAHQAYQBJAHQAZQBtAD4APAAvAEQAYQB0AGEASQB0AGUAbQBzAD4APAAvAFIAZQBwAG8AcgB0AFAAYQByAGEAbQBlAHQAZQByAHMAPgA=" />
+    </WorkflowStep>
+    <WorkflowStep StepID="95" PreviousStepID="94" Type="1" FunctionName="ALLOWRECORDUSAGE">
+      <WorkflowStepArgument ResponseFunctionName="ALLOWRECORDUSAGE" />
+    </WorkflowStep>
+    <WorkflowStep StepID="96" PreviousStepID="95" Type="1" FunctionName="RELEASEDOCUMENT">
+      <WorkflowStepArgument ResponseFunctionName="RELEASEDOCUMENT" />
+    </WorkflowStep>
+    <WorkflowStep StepID="97" PreviousStepID="93" Type="0" FunctionName="RUNWORKFLOWONAPPROVEAPPROVALREQUEST" SequenceNo="1">
+      <WorkflowStepArgument EventConditions="PAA/AHgAbQBsACAAdgBlAHIAcwBpAG8AbgA9ACIAMQAuADAAIgAgAGUAbgBjAG8AZABpAG4AZwA9ACIAdQB0AGYALQA4ACIAIABzAHQAYQBuAGQAYQBsAG8AbgBlAD0AIgB5AGUAcwAiAD8APgA8AFIAZQBwAG8AcgB0AFAAYQByAGEAbQBlAHQAZQByAHMAPgA8AEQAYQB0AGEASQB0AGUAbQBzAD4APABEAGEAdABhAEkAdABlAG0AIABuAGEAbQBlAD0AIgBBAHAAcAByAG8AdgBhAGwAIABFAG4AdAByAHkAIgA+AFYARQBSAFMASQBPAE4AKAAxACkAIABTAE8AUgBUAEkATgBHACgARgBpAGUAbABkADIAOQApACAAVwBIAEUAUgBFACgARgBpAGUAbABkADIAMQA9ADEAKAAmAGcAdAA7ADAAKQApADwALwBEAGEAdABhAEkAdABlAG0APgA8AC8ARABhAHQAYQBJAHQAZQBtAHMAPgA8AC8AUgBlAHAAbwByAHQAUABhAHIAYQBtAGUAdABlAHIAcwA+AA==" />
+    </WorkflowStep>
+    <WorkflowStep StepID="98" PreviousStepID="97" NextStepID="93" Type="1" FunctionName="SENDAPPROVALREQUESTFORAPPROVAL">
+      <WorkflowStepArgument ResponseFunctionName="SENDAPPROVALREQUESTFORAPPROVAL" />
+    </WorkflowStep>
+    <WorkflowStep StepID="99" PreviousStepID="93" Type="0" FunctionName="RUNWORKFLOWONREJECTAPPROVALREQUEST" SequenceNo="2" />
+    <WorkflowStep StepID="100" PreviousStepID="99" Type="1" FunctionName="REJECTALLAPPROVALREQUESTS">
+      <WorkflowStepArgument ResponseFunctionName="REJECTALLAPPROVALREQUESTS" />
+    </WorkflowStep>
+    <WorkflowStep StepID="101" PreviousStepID="100" Type="1" FunctionName="OPENDOCUMENT">
+      <WorkflowStepArgument ResponseFunctionName="OPENDOCUMENT" />
+    </WorkflowStep>
+    <WorkflowStep StepID="102" PreviousStepID="93" Type="0" FunctionName="RUNWORKFLOWONCANCELSTOREREQUISITIONFORAPPROVAL" SequenceNo="3" />
+    <WorkflowStep StepID="103" PreviousStepID="102" Type="1" FunctionName="CANCELALLAPPROVALREQUESTS">
+      <WorkflowStepArgument ResponseFunctionName="CANCELALLAPPROVALREQUESTS" />
+    </WorkflowStep>
+    <WorkflowStep StepID="104" PreviousStepID="103" Type="1" FunctionName="ALLOWRECORDUSAGE">
+      <WorkflowStepArgument ResponseFunctionName="ALLOWRECORDUSAGE" />
+    </WorkflowStep>
+    <WorkflowStep StepID="105" PreviousStepID="104" Type="1" FunctionName="OPENDOCUMENT">
+      <WorkflowStepArgument ResponseFunctionName="OPENDOCUMENT" />
+    </WorkflowStep>
+    <WorkflowStep StepID="106" PreviousStepID="105" Type="1" FunctionName="SHOWMESSAGE">
+      <WorkflowStepArgument ResponseFunctionName="SHOWMESSAGE" Message="The approval request for the record has been canceled." />
+    </WorkflowStep>
+    <WorkflowStep StepID="107" PreviousStepID="93" Type="0" FunctionName="RUNWORKFLOWONDELEGATEAPPROVALREQUEST" SequenceNo="4" />
+    <WorkflowStep StepID="108" PreviousStepID="107" NextStepID="93" Type="1" FunctionName="SENDAPPROVALREQUESTFORAPPROVAL">
+      <WorkflowStepArgument ResponseFunctionName="SENDAPPROVALREQUESTFORAPPROVAL" />
+    </WorkflowStep>
+    <WorkflowCategory CategoryCode="FIN" CategoryDescription="Finance" />
+  </Workflow>
+</Root>

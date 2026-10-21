@@ -1,0 +1,86 @@
+SELF SERVICE SUITE — RELEASE NOTES (2026-06-25)
+================================================
+
+WHAT IS NEW IN THIS BUILD
+-------------------------
+- Pending Approval status shows correctly after you request approval (including transfer orders)
+- Cancel on list and detail while status is Pending Approval
+- Attachments on finance modules: upload on Draft/Open only; view anytime; delete on Draft/Open only
+- Imprest advance lines: amount auto-calculated from type, destination and days; manual entry when BC returns no value
+- Staff claims: Medical Claim auto-selects Medical Allowance; medical amount + hospital category auto-fill amount and refund
+- Petty cash replenishment detail shows paying/receiving accounts and source amount
+- Vehicle Transfer marked Coming Soon (disabled in this release)
+
+MODULE GUIDANCE (for users and testers)
+---------------------------------------
+
+Finance — Imprest Requisition
+  Create the header first, then add advance lines (type, destination, duty area, days, amount).
+  Attach documents, then request approval.
+
+Finance — Imprest Surrender
+  Select a posted imprest; surrender lines are generated automatically.
+  Enter spent and cash receipt details, Save, then request approval.
+
+Finance — Staff Claim
+  Create the header, add claim lines, attach receipts, request approval.
+  Medical claims: pick Medical Claim, enter medical amount and hospital category for auto amounts.
+
+Finance — Petty Cash Request
+  Create the header, add one line per expense; total equals the sum of lines.
+
+Finance — Petty Cash Replenishment
+  Set paying and receiving accounts and source amount (receiving amount matches source).
+  Submitted to Business Central for inter-bank transfer approval.
+
+Facilities — Purchase Requisition
+  Header needs needed-by date and description.
+  Each line needs type, number, quantity and purpose; attach specs, then request approval.
+
+Facilities — Store Requisition
+  Create the header, add item or asset lines (type, issuing store, item, quantity).
+  Attach documents, then request approval.
+
+Facilities — Transfer Orders
+  From/to locations and items must exist in Business Central.
+  Create the header, add lines, request approval when complete.
+
+Facilities — Transport Requisition
+  Trip date cannot be in the past.
+  Add passengers after the header, then request approval.
+
+Facilities — Fuel Requisition
+  Vehicle fuel needs a registration number; recharge card needs a card number.
+  Enter dealer, quantity and price per litre, then request approval.
+
+Facilities — Gate Pass
+  Gate passes appear here after the source request exists in Business Central
+  (store issue, transfer order, or asset transfer).
+  Open gate passes can be sent for approval from the detail screen.
+  New asset transfer requests are not available yet (Vehicle Transfer coming soon).
+
+Facilities — Vehicle Transfer
+  Coming soon — not available in this release.
+
+HR — Salary Advance
+  Percentage cannot exceed 100% of salary. Repayment terms are set in Business Central.
+
+HR — Training Request
+  Saved as draft first; review, then request approval.
+
+HR — Document Requisition
+  Coming soon — not available in this release.
+
+INSTALL ON CLIENT (C:\TA\SelfServiceSuite\)
+-------------------------------------------
+1. powershell -ExecutionPolicy Bypass -File C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\stop-suite.ps1
+2. Backup: C:\TA\SelfServiceSuite → C:\TA\SelfServiceSuite-backup
+3. Extract ZIP to C:\TA\SelfServiceSuite
+4. C:\TA\SelfServiceSuite\SelfServicePortal\deploy\windows\start-suite.bat
+5. Open http://10.30.4.23:4000 and press Ctrl+F5 once.
+
+BUSINESS CENTRAL (admin)
+------------------------
+Enable approval workflows for each document type before users can request approval.
+If BC reports "workflow is not configured", activate the matching workflow in Business Central.
+Master data (locations, items, accounts, dimensions) must exist in BC; the portal displays what BC returns.

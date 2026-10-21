@@ -1,0 +1,95 @@
+@echo off
+setlocal EnableExtensions
+set "ROOT=%~dp0"
+set "BACKEND=%ROOT%SelfServiceSuite\SelfServiceBackend"
+set "ENV_TEMPLATE=%BACKEND%\deploy\windows\host.env.abh-uat-ip.example"
+rem Default; overridden by SelfServiceBackend\.env PORT= (dotenv will not override a pre-set PORT).
+set "PORT=4000"
+if exist "%BACKEND%\.env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (`findstr /b /i "PORT=" "%BACKEND%\.env"`) do set "PORT=%%B"
+)
+set "PORT=%PORT:'=%"
+set "PORT=%PORT:"=%"
+
+if not exist "%BACKEND%\dist\server.js" (
+  echo.
+  echo [ERROR] Missing: %BACKEND%\dist\server.js
+  echo.
+  echo This folder is incomplete. Run VERIFY-SUITE.bat or re-extract the full zip.
+  echo Expected layout: %ROOT%SelfServiceSuite\SelfServiceBackend\dist\server.js
+  echo.
+  pause
+  exit /b 1
+)
+
+if not exist "%BACKEND%\public\index.html" (
+  echo [ERROR] Missing: %BACKEND%\public\index.html
+  pause
+  exit /b 1
+)
+
+pushd "%BACKEND%"
+
+if not exist ".env" (
+  echo [ERROR] Copy the existing server .env into this backend folder first.
+  echo For a new server, configure .env for its BC instance and company.
+  popd
+  pause
+  exit /b 1
+)
+
+if not exist "node_modules\express\package.json" (
+  echo Installing backend dependencies ^(first run only^)...
+  call npm install --omit=dev --no-audit --no-fund
+  if errorlevel 1 (
+    echo [ERROR] npm install failed. Is Node.js installed?
+    popd
+    pause
+    exit /b 1
+  )
+)
+
+echo.
+echo ================================================
+echo   ABH Smart ESSP Enterprise Hub
+echo ================================================
+echo   Backend: %BACKEND%
+echo   Login:   http://127.0.0.1:%PORT%/login
+echo ================================================
+echo.
+
+popd
+rem Kill configured port plus common leftovers (old START hard-coded 4000).
+call "%ROOT%deploy\windows\kill-port.bat" %PORT%
+if not "%PORT%"=="4000" call "%ROOT%deploy\windows\kill-port.bat" 4000
+if not "%PORT%"=="5000" call "%ROOT%deploy\windows\kill-port.bat" 5000
+
+echo Starting server in a new window...
+rem Clear PORT in the child so dotenv reads SelfServiceBackend\.env (not a bat default).
+start "ABH Portal Server" /D "%BACKEND%" cmd /k "set PORT=& node dist\server.js"
+
+echo Waiting for portal to become ready on port %PORT%...
+set /a TRIES=0
+:WAIT_HEALTH
+set /a TRIES+=1
+curl -s -m 2 http://127.0.0.1:%PORT%/api/health 2>nul | findstr /C:"\"ok\":true" >nul
+if %ERRORLEVEL%==0 goto READY
+if %TRIES% GEQ 45 (
+  echo.
+  echo [ERROR] Portal did not start on port %PORT% within 45 seconds.
+  echo         Check the "ABH Portal Server" window for errors.
+  echo         Confirm .env PORT=%PORT% and that nothing else is using that port.
+  pause
+  exit /b 1
+)
+timeout /t 1 /nobreak >nul
+goto WAIT_HEALTH
+
+:READY
+echo.
+echo Portal is ready on port %PORT%.
+start "" "http://127.0.0.1:%PORT%/login"
+echo Browser opened. Keep the "ABH Portal Server" window open while using the portal.
+echo.
+pause
+exit /b 0
