@@ -121,6 +121,7 @@ import {
   portalModuleDocumentOwnedByUser,
   resolveAttachmentDocNo,
   storeOriginatedPurchaseVisible,
+  type ModuleSpec,
 } from './staffModules.js'
 import {
   createEmployeeExitRequest,
@@ -451,7 +452,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v257 — 1.0.3.416 (LPR card: key fields first, Show all details for the rest; for BC 1.0.3.566)'
+export const PORTAL_API_BUILD = 'v258 — 1.0.3.417 (FAD / Local Purchase users see every store LPR; for BC 1.0.3.566)'
 
 interface LookupSpec {
   service: string
@@ -1266,6 +1267,50 @@ export function canViewPurchaseProcess(authUser: FacilityAuth & { userID?: strin
  */
 function canViewLocalPurchase(authUser: FacilityAuth & { userID?: string }) {
   return canViewStoreProcess(authUser) || hasBcLocalPurchaseRole(cachedLocalPurchaseAccess(authUser))
+}
+
+// Store LPR or not, per purchase document. BC copies the employee's own description and purpose
+// onto the LPR, so the text match alone misses real LPRs; BC's Local Purchase chain says it for sure
+// (an LPR carries its store requisition number). The answer never changes, so it is kept.
+const storeLprDocuments = new Map<string, { isLpr: boolean; at: number }>()
+const STORE_LPR_RETRY_MS = 10 * 60_000
+
+async function isStoreLprDocument(documentNo: string, now = Date.now()) {
+  const key = documentNo.trim().toUpperCase()
+  if (!key) return false
+  const known = storeLprDocuments.get(key)
+  if (known && (known.isLpr || known.at === 0 || now - known.at < STORE_LPR_RETRY_MS)) return known.isLpr
+  try {
+    const result = await callSoapMethod('PortalLocalPurchaseChain', { documentNo: key })
+    const isLpr = Boolean(String(parseSoapJson(result.returnValue).storeRequisitionNo ?? '').trim())
+    storeLprDocuments.set(key, { isLpr, at: 0 })
+    return isLpr
+  } catch {
+    // Older BC app or an unknown document: treat as not an LPR and ask again later.
+    storeLprDocuments.set(key, { isLpr: false, at: now })
+    return false
+  }
+}
+
+/** A store-originated LPR shown to Store / Local Purchase users (FAD, Operations Manager, officers…). */
+async function storeLprVisible(row: ODataRecord, spec: ModuleSpec, authUser: AuthUser) {
+  if (spec.module !== 'purchase-requisition' || !canViewLocalPurchase(authUser)) return false
+  if (storeOriginatedPurchaseVisible(row, spec, true)) return true
+  return isStoreLprDocument(text(row, ['No', 'No_', 'no']))
+}
+
+/** Runs `check` over the rows a few at a time (BC SOAP calls). */
+async function rowsPassing<T>(rows: T[], check: (row: T) => Promise<boolean>, concurrency = 6) {
+  const keep = new Array<boolean>(rows.length).fill(false)
+  let next = 0
+  const worker = async () => {
+    while (next < rows.length) {
+      const index = next++
+      keep[index] = await check(rows[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker))
+  return rows.filter((_, index) => keep[index])
 }
 
 /** Resolve (and cache) BC Local Purchase access before purchase-requisition visibility checks. */
@@ -2377,11 +2422,11 @@ async function mappedModuleRows(
     includeAll: includeOperationalQueue,
   })
   const rows = includeOperationalQueue
-    ? fetchedRows.filter((row) => {
+    ? await rowsPassing(fetchedRows, async (row) => {
         if (portalModuleDocumentOwnedByUser(row, spec, authUser)) return true
-        if (storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser))) return true
         const status = statusFromBc(documentStatusFromBc(row, module as PortalModuleKey))
-        return ['Approved', 'Released', 'Posted'].includes(status)
+        if (['Approved', 'Released', 'Posted'].includes(status)) return true
+        return storeLprVisible(row, spec, authUser)
       })
     : fetchedRows
   if (module === 'salaryAdvance') {
@@ -2847,7 +2892,7 @@ async function requestDetail(
   const mayView =
     options.forApproval ||
     portalModuleDocumentOwnedByUser(row, spec, authUser) ||
-    storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser)) ||
+    (await storeLprVisible(row, spec, authUser)) ||
     (await operationalViewAllowed(module, authUser, row, approvers)) ||
     (await approvalEntriesViewableByUser(approvers, authUser))
   if (!mayView) throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
@@ -4240,12 +4285,7 @@ export function buildPortalApiRouter() {
     }
     if (portalModuleDocumentOwnedByUser(row, spec, authUser)) return row
     await warmLocalPurchaseAccess(module, authUser)
-    if (
-      spec.module === 'purchase-requisition' &&
-      storeOriginatedPurchaseVisible(row, spec, canViewLocalPurchase(authUser))
-    ) {
-      return row
-    }
+    if (await storeLprVisible(row, spec, authUser)) return row
     throw portalError('Request not found', 404, 'REQUEST_NOT_FOUND')
   }
 
