@@ -17,6 +17,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFormViewer'
 import { StoreKeeperOfferSection } from '@/components/facility/StoreKeeperOfferSection'
+import { StoreNotice } from '@/components/facility/StoreNotice'
 import { StartLprCard, StoreManagerReviewCard } from '@/components/facility/StoreManagerSections'
 import type { PortalRequest } from '@/types/erp.types'
 
@@ -413,9 +414,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         <p className="text-base font-semibold text-[var(--portal-navy-dark)]">Store status</p>
       </div>
       {requesterHandoff ? (
-        <p className="mt-1 text-slate-600">
+        <StoreNotice tone={stageHandOff === 'RECEIVED' ? 'success' : stageHandOff === 'ACCEPTED' || stageHandOff === 'TRANSIT' ? 'info' : 'waiting'}>
           {requesterStatusText(stageHandOff, requesterDeclined, lprPath, givNo)}
-        </p>
+        </StoreNotice>
       ) : null}
       {requesterHandoff && awaitingRequester ? (
         // View Item opens the Item Borrowing Form with Accept Item / Decline Item (as on the BC card).
@@ -586,16 +587,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {atStockCheck && stockBlocked && !storeOffers ? (
-        <p className="mt-2 text-xs font-medium text-red-700">
+        <StoreNotice tone="warning">
           Stock is not available at {stockCheck?.issuingStore || 'the issuing store'}. Use Purchase Request — do not
           issue GIV until a posted GRV receives stock into that location.
-        </p>
+        </StoreNotice>
       ) : null}
       {atStockCheck && stageHandOff === '' && keeperStep && !processQuery.isError && !storeOffers ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StoreNotice>
           Item in store: in Business Central (Store Req Header Approved) use Add Item to Issue, then Submit to Store
           Manager{bcStoreHandOff ? ' (in BC or here)' : ''}. Item not in store: Request for LPR below.
-        </p>
+        </StoreNotice>
       ) : null}
       {showOfferSection ? (
         <StoreKeeperOfferSection
@@ -639,10 +640,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {atLprRequested && localPurchase.enabled && !storeManager ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StoreNotice tone="waiting">
           Store requisition {requestNo} is with the Store Manager for Local Purchase
           {requesterId ? ` (requester ${requesterId})` : ''}. Waiting for the Store Manager to choose Start Local Purchase (LPR).
-        </p>
+        </StoreNotice>
       ) : null}
       {canStartLpr ? (
         <StartLprCard
@@ -699,33 +700,33 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {stageHandOff === 'PREPARED' && !storeManager && !requesterHandoff ? (
-        <p className="mt-2 text-xs text-slate-600">Waiting for the store manager to accept the offered item.</p>
+        <StoreNotice tone="waiting">Waiting for the store manager to accept the offered item.</StoreNotice>
       ) : null}
       {atStockCheck && stockReady ? (
-        <p className="mt-2 text-xs text-teal-800">All requested quantities are available at the issuing store.</p>
+        <StoreNotice tone="success">All requested quantities are available at the issuing store.</StoreNotice>
       ) : null}
       {atStockCheck && !canManageStock ? (
-        <p className="mt-2 text-xs text-slate-600">Waiting for Operations/Store to record the stock decision.</p>
+        <StoreNotice tone="waiting">Waiting for Operations/Store to record the stock decision.</StoreNotice>
       ) : null}
       {atStockCheck && stageHandOff === '' && storeManager ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StoreNotice tone="waiting">
           Waiting for the Store Keeper to add the item to issue and submit it to you. Nothing to do here yet.
-        </p>
+        </StoreNotice>
       ) : null}
       {atProcurement && !localPurchase.enabled ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StoreNotice tone="waiting">
           Purchase is continuing in the portal / Business Central{lprNo ? ` (${lprNo})` : ''}. After the
           GRV is posted into the issuing store, reopen this requisition — stage returns to stock check
           for GIV.
-        </p>
+        </StoreNotice>
       ) : null}
       {atProcurement && localPurchase.enabled ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StoreNotice tone="waiting">
           Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Procurement Officer submits →
           Operations Manager → FAD → RFQ (Operations Manager) → quotes → evaluation → FAD final supplier → PO
           (Operations Manager, FAD) → Store Keeper receives (GRN). After the GRN is posted into the issuing store, use
           Issue after LPR receive.
-        </p>
+        </StoreNotice>
       ) : null}
       {atProcurement && localPurchase.enabled && canManageStock && !processQuery.isError ? (
         <div className="mt-3">
@@ -746,7 +747,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {stage === 'COMPLETED' ? (
-        <p className="mt-2 text-teal-800">GIV posted — inventory reduced and requisition closed.</p>
+        <StoreNotice tone="success">GIV posted — inventory reduced and requisition closed.</StoreNotice>
       ) : null}
     </section>
   )
