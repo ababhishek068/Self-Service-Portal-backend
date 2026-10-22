@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { PurchaseOperationsPanel } from '@/components/facility/PurchaseOperationsPanel'
+import { LprCardDetails } from '@/components/facility/LprCardDetails'
 import { LocalPurchasePanel } from '@/components/facility/LocalPurchasePanel'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -115,6 +116,8 @@ export function PurchaseRequisition() {
       detailSupplement={({ request }) => (
         <LocalPurchasePanel request={request} fallback={<PurchaseOperationsPanel request={request} />} />
       )}
+      // An LPR shows its details like the BC Purchase Requisition Card (Store Request, General).
+      detailOverride={({ request, details }) => <LprCardDetails request={request} fallback={details} />}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={purchaseHeaderSchema}
       headerDefaults={{
@@ -483,6 +486,13 @@ export function PurchaseRequisition() {
               return text
             },
           },
+          {
+            // BC No. (Item / G/L / FA) once the Procurement Officer maps the line, as on the LPR card.
+            key: 'itemNo',
+            header: 'No.',
+            visibleWhen: (lines) => lines.some((line) => hasText(line.itemNo)),
+            format: (value) => String(value ?? '').trim() || '—',
+          },
           { key: 'itemName', header: 'Item / Service Name' },
           { key: 'description', header: 'Description' },
           {
@@ -505,6 +515,12 @@ export function PurchaseRequisition() {
               const text = String(value ?? '').trim()
               return text || '—'
             },
+          },
+          {
+            key: 'location',
+            header: 'Location Code',
+            visibleWhen: (lines) => lines.some((line) => hasText(line.location)),
+            format: (value) => String(value ?? '').trim() || '—',
           },
           { key: 'quantity', header: 'Qty' },
           {

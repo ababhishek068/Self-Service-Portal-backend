@@ -296,6 +296,8 @@ export interface LocalPurchaseState {
   chain: {
     documentNo?: string
     storeRequisitionNo?: string
+    /** BC 1.0.3.567+: the store requisition behind the LPR (Store Request group of the card). */
+    storeRequest?: Record<string, unknown>
     lpr?: Record<string, unknown>
     rfq?: Record<string, unknown>
     po?: Record<string, unknown>

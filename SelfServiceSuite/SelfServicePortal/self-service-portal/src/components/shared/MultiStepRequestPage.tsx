@@ -162,6 +162,8 @@ export interface MultiStepRequestConfig {
   validateBeforeSubmit?: (request: PortalRequest) => string | null
   /** Extra block on the detail screen (e.g. Operations stock check on purchase requests). */
   detailSupplement?: (ctx: { request: PortalRequest }) => ReactNode
+  /** Replace the detail field grid for some requests (e.g. the BC-style LPR card); `details` is the default grid. */
+  detailOverride?: (ctx: { request: PortalRequest; details: ReactNode }) => ReactNode
   /** Module-specific detail actions (e.g. Post Asset Transfer). */
   extraDetailActions?: Array<{
     id: string
@@ -1235,22 +1237,27 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   approvalSteps={selected.approvalSteps}
                 />
                 {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
-                <section>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {detailFields.length ? detailFields.map(({ field, value }) => (
-                      <div key={field.label}>
-                        <p className="text-xs text-slate-500">{field.label}</p>
-                        <div className="font-semibold">{detailValue(value, field.format)}</div>
+                {(() => {
+                  const details = (
+                    <section>
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {detailFields.length ? detailFields.map(({ field, value }) => (
+                          <div key={field.label}>
+                            <p className="text-xs text-slate-500">{field.label}</p>
+                            <div className="font-semibold">{detailValue(value, field.format)}</div>
+                          </div>
+                        )) : (
+                          <>
+                            <div><p className="text-xs text-slate-500">Request No.</p><p className="font-semibold">{selected.requestNo}</p></div>
+                            <div><p className="text-xs text-slate-500">Status</p><StatusBadge status={selected.status} /></div>
+                            <div><p className="text-xs text-slate-500">Created</p><p className="font-semibold">{formatDate(selected.createdAt)}</p></div>
+                          </>
+                        )}
                       </div>
-                    )) : (
-                      <>
-                        <div><p className="text-xs text-slate-500">Request No.</p><p className="font-semibold">{selected.requestNo}</p></div>
-                        <div><p className="text-xs text-slate-500">Status</p><StatusBadge status={selected.status} /></div>
-                        <div><p className="text-xs text-slate-500">Created</p><p className="font-semibold">{formatDate(selected.createdAt)}</p></div>
-                      </>
-                    )}
-                  </div>
-                </section>
+                    </section>
+                  )
+                  return config.detailOverride ? config.detailOverride({ request: selected, details }) : details
+                })()}
 
                 {!detailFields.length && headerFields.length ? (
                   <section className="border-t border-slate-200 pt-4">
