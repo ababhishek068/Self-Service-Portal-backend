@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, ArrowLeft, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   type FieldValues,
   type Resolver,
@@ -787,7 +788,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const toast = useToast()
   const confirm = useConfirm()
   const [mode, setMode] = useState<'list' | 'create'>(config.initialMode ?? 'list')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // ?open=<request id> opens that request directly (links from My Approvals).
+  const [searchParams] = useSearchParams()
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('open'))
   const [actionId, setActionId] = useState<string | null>(null)
   const [editingHeader, setEditingHeader] = useState(false)
   const [editingLine, setEditingLine] = useState<Record<string, unknown> | null>(null)

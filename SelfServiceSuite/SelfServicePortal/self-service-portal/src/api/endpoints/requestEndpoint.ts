@@ -308,6 +308,23 @@ export interface LocalPurchaseState {
   nextActions: LocalPurchaseNextAction[]
 }
 
+export interface LocalPurchaseWaitingItem {
+  id: string
+  requestNo: string
+  title: string
+  requester: string
+  storeRequisitionNo: string
+  stage: string
+  processStep: string
+  actions: string[]
+}
+
+/** Store LPRs where the signed-in user has a step to do now (BC stage + Local Proc Setup roles). */
+export async function getLocalPurchaseWaiting() {
+  requireAuthApiUrl()
+  return authGet<{ items: LocalPurchaseWaitingItem[] }>('/api/local-purchase/waiting')
+}
+
 /** Local Purchase chain: Store Req ↔ LPR ↔ Local RFQ ↔ Vendor Quotes ↔ PO ↔ GRN ↔ Invoice. */
 export async function getLocalPurchaseState(id: string) {
   requireAuthApiUrl()

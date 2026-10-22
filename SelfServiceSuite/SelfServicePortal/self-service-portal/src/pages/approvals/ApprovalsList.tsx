@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CalendarClock, Eye, FileCheck2, Search, UserRound } from 'lucide-react'
 import { PageWrapper } from '@/components/layout/PageWrapper'
+import { LocalPurchaseWaiting } from '@/components/facility/LocalPurchaseWaiting'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
@@ -88,6 +89,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
 
   return (
     <PageWrapper title={title}>
+      {type === 'pending' ? <LocalPurchaseWaiting /> : null}
       {type === 'pending' && !approvals.isLoading ? (
         <div className="mb-5 overflow-hidden rounded-2xl border border-blue-100 bg-white/90 shadow-[0_20px_60px_-35px_rgba(0,58,112,0.5)] backdrop-blur">
           <div className="grid gap-4 bg-gradient-to-r from-[var(--portal-navy)] via-[#04a8b0] to-[var(--portal-navy-dark)] p-5 text-white md:grid-cols-[1fr_auto] md:items-center">

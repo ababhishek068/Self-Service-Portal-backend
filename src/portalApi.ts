@@ -452,7 +452,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v258 — 1.0.3.417 (FAD / Local Purchase users see every store LPR; for BC 1.0.3.566)'
+export const PORTAL_API_BUILD = 'v259 — 1.0.3.418 (My Approvals lists LPR steps waiting for you; for BC 1.0.3.566)'
 
 interface LookupSpec {
   service: string
@@ -4945,6 +4945,71 @@ export function buildPortalApiRouter() {
     }
     return rfqNo
   }
+
+  // LPRs that are finished (closed, rejected, cancelled) never need anyone again.
+  const finishedLprs = new Set<string>()
+
+  function lprFinished(chain: LocalPurchaseChain) {
+    const lprStatus = String(chain.lpr?.lprStatus ?? '').trim().toUpperCase()
+    const poStage = String(chain.po?.flowStage ?? '').trim().toUpperCase()
+    return (
+      String(chain.po?.lprClosed ?? chain.lpr?.lprClosed ?? '').toLowerCase() === 'true' ||
+      ['REJECTED', 'CANCELLED'].includes(lprStatus) ||
+      poStage === 'LPR CLOSED'
+    )
+  }
+
+  /**
+   * Store LPRs where the signed-in user has a step to do now (My Approvals → Local Purchase).
+   * LPR steps are approved on the LPR card, not through BC approval entries, so they never reach
+   * Requests to Approve; this list is how FAD, the Operations Manager, officers and the Store
+   * Keeper find them. Built from the same list and BC chain as the LPR page.
+   */
+  router.get(
+    '/local-purchase/waiting',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+      if (!access.enabled || access.roles.length === 0) {
+        res.json({ items: [] })
+        return
+      }
+      const requests = (await mappedModuleRows('purchaseRequisition', authUser)) as Array<{
+        id: string
+        requestNo: string
+        title?: string
+        makerName?: string
+      }>
+      const candidates = requests.filter((request) => !finishedLprs.has(request.requestNo.toUpperCase()))
+      const items: Array<Record<string, unknown>> = []
+      await rowsPassing(candidates, async (request) => {
+        if (!(await isStoreLprDocument(request.requestNo))) return false
+        const chain = await loadLocalPurchaseChain(request.requestNo).catch(() => null)
+        if (!chain) return false
+        if (lprFinished(chain)) {
+          finishedLprs.add(request.requestNo.toUpperCase())
+          return false
+        }
+        const actions = localPurchaseNextActions(chain, access.roles).filter((action) => action.allowed)
+        if (actions.length === 0) return false
+        const current = chain.po ?? chain.rfq ?? chain.lpr
+        items.push({
+          id: request.id,
+          requestNo: request.requestNo,
+          title: request.title ?? '',
+          requester: request.makerName ?? '',
+          storeRequisitionNo: chain.storeRequisitionNo ?? '',
+          stage: String(current?.flowStage ?? current?.lprStatus ?? ''),
+          processStep: String(current?.processStep ?? chain.lpr?.processStep ?? ''),
+          actions: actions.map((action) => action.label),
+        })
+        return true
+      })
+      items.sort((left, right) => String(left.requestNo).localeCompare(String(right.requestNo)))
+      res.json({ items })
+    }),
+  )
 
   /**
    * Local Purchase chain for one LPR / Local RFQ / Local PO: Store Req ↔ LPR ↔ RFQ ↔ Vendor Quotes ↔
