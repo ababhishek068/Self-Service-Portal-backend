@@ -6,6 +6,7 @@ import type { PortalRequest } from '@/types/erp.types'
 import { quantityLabel, storeOfferLines } from './storeOfferLines'
 import { StoreItemPickerDialog } from './StoreItemPickerDialog'
 import { RequestedSummary } from './StoreStockPill'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 
 type StoreAction = (
   actionCode: string,
@@ -167,7 +168,7 @@ export function StoreKeeperOfferSection({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
-        <p className="text-xs text-slate-600">{footerHint}</p>
+        <StatusNotice className="min-w-[16rem] flex-1">{footerHint}</StatusNotice>
         <div className="flex flex-wrap items-center gap-2">
           {/* Request for LPR only before an item is offered (the LPR buys the item instead). */}
           {offers.length === 0 ? secondaryAction : null}

@@ -13,6 +13,7 @@ import {
   updatePurchaseProcurementProcess,
 } from '@/api/endpoints/requestEndpoint'
 import type { PortalRequest } from '@/types/erp.types'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 
 type ActionOwner = 'finance' | 'stock' | 'procurement' | 'procurementOrStock' | 'audit'
 
@@ -533,12 +534,12 @@ export function PurchaseOperationsPanel({ request }: { request: PortalRequest })
       ) : null}
 
       {actions.length > 0 && allowedActions.length === 0 && !processQuery.isLoading && !processQuery.isError ? (
-        <p className="mt-2 text-xs text-slate-600">
+        <StatusNotice tone="waiting">
           Waiting for {owner || 'the assigned process owner'} to complete this stage.
-        </p>
+        </StatusNotice>
       ) : null}
       {stage === 'COMPLETED' ? (
-        <p className="mt-2 text-teal-800">Purchase receiving is complete and the posted GRV has updated inventory.</p>
+        <StatusNotice tone="success">Purchase receiving is complete and the posted GRV has updated inventory.</StatusNotice>
       ) : null}
     </section>
   )

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 
 export type LprDraftLineChange = {
   lineNo: number
@@ -56,9 +57,9 @@ export function LprDraftLineEditor({
   return (
     <div className="space-y-2 rounded-md border border-teal-100 bg-white/80 p-3">
       <p className="text-sm font-semibold text-[var(--portal-navy)]">Prepare the LPR lines</p>
-      <p className="text-xs text-slate-600">
+      <StatusNotice className="">
         Check the need, quantity and specification, save each changed line, then Submit to Operations Manager.
-      </p>
+      </StatusNotice>
       {rows.map((row) => {
         const edit = edits[row.lineNo] ?? row
         const changed =

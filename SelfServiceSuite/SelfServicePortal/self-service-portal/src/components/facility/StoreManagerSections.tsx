@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import type { PortalRequest } from '@/types/erp.types'
 import { quantityLabel, storeOfferLines, text } from './storeOfferLines'
 import { RequestedSummary, StoreStockPill } from './StoreStockPill'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 
 function CardShell({
   icon,
@@ -97,11 +98,11 @@ export function StoreManagerReviewCard({
       }
       footer={
         <>
-          <p className="text-xs text-slate-600">
+          <StatusNotice className="min-w-[16rem] flex-1">
             {canAccept
               ? 'After you accept, the requester checks the Item Borrowing Form and accepts or declines the item.'
               : 'Accept in Business Central: Store Req Header Approved → Accept Item (Store Manager).'}
-          </p>
+          </StatusNotice>
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" disabled={busy} onClick={onChangeItem}>
               <PencilLine className="h-4 w-4" /> Change the item
@@ -155,10 +156,10 @@ export function StoreManagerReviewCard({
         </div>
       </div>
       {shortItems.length ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+        <StatusNotice tone="warning" className="">
           Not enough stock for {shortItems.map((offer) => offer.itemNo).join(', ')}. Ask the store keeper to change the item,
           or use Request for LPR.
-        </p>
+        </StatusNotice>
       ) : null}
     </CardShell>
   )

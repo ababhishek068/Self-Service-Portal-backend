@@ -17,7 +17,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFormViewer'
 import { StoreKeeperOfferSection } from '@/components/facility/StoreKeeperOfferSection'
-import { StoreNotice } from '@/components/facility/StoreNotice'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StartLprCard, StoreManagerReviewCard } from '@/components/facility/StoreManagerSections'
 import type { PortalRequest } from '@/types/erp.types'
 
@@ -414,9 +414,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         <p className="text-base font-semibold text-[var(--portal-navy-dark)]">Store status</p>
       </div>
       {requesterHandoff ? (
-        <StoreNotice tone={stageHandOff === 'RECEIVED' ? 'success' : stageHandOff === 'ACCEPTED' || stageHandOff === 'TRANSIT' ? 'info' : 'waiting'}>
+        <StatusNotice tone={stageHandOff === 'RECEIVED' ? 'success' : stageHandOff === 'ACCEPTED' || stageHandOff === 'TRANSIT' ? 'info' : 'waiting'}>
           {requesterStatusText(stageHandOff, requesterDeclined, lprPath, givNo)}
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {requesterHandoff && awaitingRequester ? (
         // View Item opens the Item Borrowing Form with Accept Item / Decline Item (as on the BC card).
@@ -587,16 +587,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {atStockCheck && stockBlocked && !storeOffers ? (
-        <StoreNotice tone="warning">
+        <StatusNotice tone="warning">
           Stock is not available at {stockCheck?.issuingStore || 'the issuing store'}. Use Purchase Request — do not
           issue GIV until a posted GRV receives stock into that location.
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {atStockCheck && stageHandOff === '' && keeperStep && !processQuery.isError && !storeOffers ? (
-        <StoreNotice>
+        <StatusNotice>
           Item in store: in Business Central (Store Req Header Approved) use Add Item to Issue, then Submit to Store
           Manager{bcStoreHandOff ? ' (in BC or here)' : ''}. Item not in store: Request for LPR below.
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {showOfferSection ? (
         <StoreKeeperOfferSection
@@ -640,10 +640,10 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {atLprRequested && localPurchase.enabled && !storeManager ? (
-        <StoreNotice tone="waiting">
+        <StatusNotice tone="waiting">
           Store requisition {requestNo} is with the Store Manager for Local Purchase
           {requesterId ? ` (requester ${requesterId})` : ''}. Waiting for the Store Manager to choose Start Local Purchase (LPR).
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {canStartLpr ? (
         <StartLprCard
@@ -700,33 +700,33 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {stageHandOff === 'PREPARED' && !storeManager && !requesterHandoff ? (
-        <StoreNotice tone="waiting">Waiting for the store manager to accept the offered item.</StoreNotice>
+        <StatusNotice tone="waiting">Waiting for the store manager to accept the offered item.</StatusNotice>
       ) : null}
       {atStockCheck && stockReady ? (
-        <StoreNotice tone="success">All requested quantities are available at the issuing store.</StoreNotice>
+        <StatusNotice tone="success">All requested quantities are available at the issuing store.</StatusNotice>
       ) : null}
       {atStockCheck && !canManageStock ? (
-        <StoreNotice tone="waiting">Waiting for Operations/Store to record the stock decision.</StoreNotice>
+        <StatusNotice tone="waiting">Waiting for Operations/Store to record the stock decision.</StatusNotice>
       ) : null}
       {atStockCheck && stageHandOff === '' && storeManager ? (
-        <StoreNotice tone="waiting">
+        <StatusNotice tone="waiting">
           Waiting for the Store Keeper to add the item to issue and submit it to you. Nothing to do here yet.
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {atProcurement && !localPurchase.enabled ? (
-        <StoreNotice tone="waiting">
+        <StatusNotice tone="waiting">
           Purchase is continuing in the portal / Business Central{lprNo ? ` (${lprNo})` : ''}. After the
           GRV is posted into the issuing store, reopen this requisition — stage returns to stock check
           for GIV.
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {atProcurement && localPurchase.enabled ? (
-        <StoreNotice tone="waiting">
+        <StatusNotice tone="waiting">
           Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Procurement Officer submits →
           Operations Manager → FAD → RFQ (Operations Manager) → quotes → evaluation → FAD final supplier → PO
           (Operations Manager, FAD) → Store Keeper receives (GRN). After the GRN is posted into the issuing store, use
           Issue after LPR receive.
-        </StoreNotice>
+        </StatusNotice>
       ) : null}
       {atProcurement && localPurchase.enabled && canManageStock && !processQuery.isError ? (
         <div className="mt-3">
@@ -747,7 +747,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         </div>
       ) : null}
       {stage === 'COMPLETED' ? (
-        <StoreNotice tone="success">GIV posted — inventory reduced and requisition closed.</StoreNotice>
+        <StatusNotice tone="success">GIV posted — inventory reduced and requisition closed.</StatusNotice>
       ) : null}
     </section>
   )

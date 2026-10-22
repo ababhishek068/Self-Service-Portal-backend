@@ -22,6 +22,7 @@ import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { todayIsoDate } from '@/utils/validators'
+import { StatusNotice } from '@/components/feedback/StatusNotice'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
 const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'])
@@ -336,10 +337,10 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       </div>
 
       {poCurrency ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+        <StatusNotice tone="attention" className="">
           Currency Code is {poCurrency} on this local PO. Local purchase must keep Currency Code blank — use Fix Local
           Currency.
-        </p>
+        </StatusNotice>
       ) : null}
       {technicalComment ? (
         <p className="rounded-md border border-teal-100 bg-white/70 px-3 py-2">
@@ -350,9 +351,9 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         </p>
       ) : null}
       {text(po?.sendBackComment || rfq?.sendBackComment) ? (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+        <StatusNotice tone="warning" className="">
           Sent back: {text(po?.sendBackComment || rfq?.sendBackComment)}
-        </p>
+        </StatusNotice>
       ) : null}
 
       {rfq ? (
@@ -583,17 +584,17 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       ) : null}
 
       {issueAfterLpr ? (
-        <p className="text-xs text-teal-800">
+        <StatusNotice tone="success" className="">
           Goods received. Store Keeper: open Store Requisition {issueAfterLpr.documentNo} → Issue after LPR receive.
-        </p>
+        </StatusNotice>
       ) : null}
       {ribbon.length === 0 && waiting.length > 0 ? (
-        <p className="text-xs text-slate-600">
+        <StatusNotice tone="waiting" className="">
           Waiting for {[...new Set(waiting.map(ownerLabel))].join(' or ')}:{' '}
           {waiting.map((action) => action.label).join(' · ')}
-        </p>
+        </StatusNotice>
       ) : null}
-      {po?.lprClosed ? <p className="text-teal-800">Paid and LPR closed.</p> : null}
+      {po?.lprClosed ? <StatusNotice tone="success" className="">Paid and LPR closed.</StatusNotice> : null}
     </section>
   )
 }
