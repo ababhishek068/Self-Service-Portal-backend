@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
 import { getLocalPurchaseState } from '@/api/endpoints/requestEndpoint'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
@@ -43,10 +45,11 @@ function yesNo(value: unknown) {
   return raw === 'true' || raw === 'yes' ? 'Yes' : 'No'
 }
 
-type CardField = { label: string; value: ReactNode; emphasis?: 'user' | 'strong' }
+/** `key` fields show by default; the rest open with Show all details. */
+type CardField = { label: string; value: ReactNode; emphasis?: 'user' | 'strong'; key?: boolean }
 
 /** One BC card field: label, dotted leader, value box (blank values keep an empty box, as in BC). */
-function CardRow({ label, value, emphasis }: CardField) {
+function CardRow({ label, value, emphasis }: Omit<CardField, 'key'>) {
   const empty = value === '' || value === null || value === undefined
   return (
     <div className="flex min-w-0 items-center gap-2 py-1">
@@ -70,13 +73,24 @@ function CardRow({ label, value, emphasis }: CardField) {
   )
 }
 
-function CardSection({ title, intro, fields }: { title: string; intro?: string; fields: CardField[] }) {
+function CardSection({
+  title,
+  intro,
+  fields,
+  showAll,
+}: {
+  title: string
+  intro?: string
+  fields: CardField[]
+  showAll: boolean
+}) {
+  const visible = showAll ? fields : fields.filter((field) => field.key)
   return (
     <section>
       <h3 className="border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">{title}</h3>
-      {intro ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
+      {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
       <div className="mt-2 grid gap-x-10 md:grid-cols-2 xl:grid-cols-3">
-        {fields.map((field) => (
+        {visible.map(({ key: _key, ...field }) => (
           <CardRow key={field.label} {...field} />
         ))}
       </div>
@@ -91,6 +105,7 @@ function CardSection({ title, intro, fields }: { title: string; intro?: string; 
  */
 export function LprCardDetails({ request, fallback }: { request: PortalRequest; fallback: ReactNode }) {
   const access = useLocalPurchaseAccess()
+  const [showAll, setShowAll] = useState(false)
   // Same query as the Local Purchase panel, so BC is called once.
   const stateQuery = useQuery({
     queryKey: ['local-purchase', request.id],
@@ -110,45 +125,45 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
   const legacyOfficer = pick(lpr.assignedProcurementOfficer, payloadValue(payload, 'AssignedProcurementOfficer'))
 
   const storeFields: CardField[] = [
-    { label: 'Store Requisition No.', value: storeReqNo, emphasis: 'user' },
+    { label: 'Store Requisition No.', key: true, value: storeReqNo, emphasis: 'user' },
     { label: 'Request Date', value: dateValue(pick(store.requestDate)) },
     { label: 'Required Date', value: dateValue(pick(store.requiredDate)) },
     { label: 'Division Code', value: pick(store.divisionCode) },
     { label: 'Department Code', value: pick(store.departmentCode) },
-    { label: 'Request Description', value: pick(store.requestDescription) },
+    { label: 'Request Description', key: true, value: pick(store.requestDescription) },
     { label: 'Purpose / Justification', value: pick(store.purpose), emphasis: 'strong' },
-    { label: 'Requester ID', value: pick(store.requesterId), emphasis: 'user' },
+    { label: 'Requester ID', key: true, value: pick(store.requesterId), emphasis: 'user' },
     { label: 'Employee No', value: pick(store.employeeNo) },
     { label: 'LPR Requested By', value: pick(store.lprRequestedBy) },
-    { label: 'Issue Stage', value: pick(store.issueStage) },
-    { label: 'Issuing Store', value: pick(store.issuingStore) },
-    { label: 'Approver 1', value: pick(store.approver1), emphasis: 'user' },
+    { label: 'Issue Stage', key: true, value: pick(store.issueStage) },
+    { label: 'Issuing Store', key: true, value: pick(store.issuingStore) },
+    { label: 'Approver 1', key: true, value: pick(store.approver1), emphasis: 'user' },
     { label: 'Approver 1 Date', value: dateTimeValue(pick(store.approver1Date)) },
-    { label: 'Approver 2', value: pick(store.approver2), emphasis: 'user' },
+    { label: 'Approver 2', key: true, value: pick(store.approver2), emphasis: 'user' },
     { label: 'Approver 2 Date', value: dateTimeValue(pick(store.approver2Date)) },
   ]
 
   const generalFields: CardField[] = [
-    { label: 'No.', value: request.requestNo },
-    { label: 'Process Step', value: pick(lpr.processStep), emphasis: 'strong' },
-    { label: 'LPR Status', value: pick(lpr.lprStatus) },
-    { label: 'Procurement Source', value: pick(lpr.procurementSource) },
-    { label: 'Assigned Procurement Officer', value: officer, emphasis: 'user' },
+    { label: 'No.', key: true, value: request.requestNo },
+    { label: 'Process Step', key: true, value: pick(lpr.processStep), emphasis: 'strong' },
+    { label: 'LPR Status', key: true, value: pick(lpr.lprStatus) },
+    { label: 'Procurement Source', key: true, value: pick(lpr.procurementSource) },
+    { label: 'Assigned Procurement Officer', key: true, value: officer, emphasis: 'user' },
     { label: 'Procurement Officer Type', value: pick(lpr.procOfficerType) },
     { label: 'LPR Project No.', value: pick(lpr.projectNo) },
     { label: 'LPR Project Name', value: pick(lpr.projectName) },
-    { label: 'Priority', value: pick(lpr.priority, payloadValue(payload, 'Priority')) },
+    { label: 'Priority', key: true, value: pick(lpr.priority, payloadValue(payload, 'Priority')) },
     { label: 'Destination Store', value: pick(lpr.destinationStore) },
-    { label: 'Created RFQ No.', value: pick(lpr.createdRfqNo) },
+    { label: 'Created RFQ No.', key: true, value: pick(lpr.createdRfqNo) },
     { label: 'Quote Due Date', value: dateValue(pick(lpr.quoteDueDate)) },
     { label: 'Minimum Quotes Required', value: pick(lpr.minQuotesRequired) || '0' },
     { label: 'Document Date', value: dateValue(pick(lpr.documentDate, payloadValue(payload, 'DocumentDate', 'Document_Date'))) },
     {
-      label: 'Required By Date',
+      label: 'Required By Date', key: true,
       value: dateValue(pick(lpr.requiredByDate, payloadValue(payload, 'RequestedReceiptDate', 'Requested_Receipt_Date'))),
     },
     { label: 'Request Summary', value: pick(lpr.requestSummary, payloadValue(payload, 'PostingDescription', 'Posting_Description')) },
-    { label: 'Purpose / Justification', value: pick(lpr.justification, payloadValue(payload, 'Justification')) },
+    { label: 'Purpose / Justification', key: true, value: pick(lpr.justification, payloadValue(payload, 'Justification')) },
     {
       label: 'Technical Requirement',
       value: pick(lpr.technicalRequirement, payloadValue(payload, 'TechnicalRequirement', 'Technical_Requirement')),
@@ -207,7 +222,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     },
     { label: 'Employee No.', value: pick(lpr.employeeNo, payloadValue(payload, 'EmployeeNo', 'Employee_No')) },
     { label: 'Imprest Memo No', value: pick(lpr.imprestMemoNo, payloadValue(payload, 'ImprestMemoNo', 'Imprest_Memo_No')) },
-    { label: 'Status', value: <StatusBadge status={request.status} /> },
+    { label: 'Status', key: true, value: <StatusBadge status={request.status} /> },
     { label: 'Currency Code', value: pick(lpr.currencyCode, payloadValue(payload, 'CurrencyCode', 'Currency_Code')) },
     {
       label: 'Currency Factor',
@@ -219,6 +234,10 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     },
   ]
 
+  const hiddenCount =
+    generalFields.filter((field) => !field.key).length +
+    (storeReqNo && chain?.storeRequest ? storeFields.filter((field) => !field.key).length : 0)
+
   return (
     <div className="space-y-6">
       {storeReqNo ? (
@@ -227,9 +246,16 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           intro="Same details as Store Req Header Approved. The assigned Procurement Officer prepares the LPR and submits it; the Operations Manager, then FAD, review requester, purpose and lines and approve. RFQ starts only after FAD approval."
           // Older BC apps send only the store requisition number.
           fields={chain?.storeRequest ? storeFields : storeFields.slice(0, 1)}
+          showAll={showAll}
         />
       ) : null}
-      <CardSection title="General" fields={generalFields} />
+      <CardSection title="General" fields={generalFields} showAll={showAll} />
+      <div className="flex justify-center">
+        <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setShowAll((open) => !open)} aria-expanded={showAll}>
+          {showAll ? 'Show fewer details' : `Show all details (${hiddenCount} more)`}
+          <ChevronDown className={`h-4 w-4 transition-transform ${showAll ? 'rotate-180' : ''}`} />
+        </Button>
+      </div>
     </div>
   )
 }
