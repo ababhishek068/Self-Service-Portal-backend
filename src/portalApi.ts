@@ -453,7 +453,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v261 — 1.0.3.420 (Store requisition shows the LPR step from BC; Issue after LPR only for the Store Keeper after GRN; for BC 1.0.3.566)'
+export const PORTAL_API_BUILD = 'v262 — 1.0.3.421 (Store LPR page laid out like the BC card: ribbon, BC process step, related documents, Open Store Requisition; for BC 1.0.3.566)'
 
 interface LookupSpec {
   service: string
@@ -4173,7 +4173,13 @@ export function buildPortalApiRouter() {
         }
         throw portalError('Leave request not found', 404, 'REQUEST_NOT_FOUND')
       }
-      res.json(await requestDetail(requestId, authUser))
+      const detail = await requestDetail(requestId, authUser)
+      // A store LPR runs on its BC card actions (no draft edit / Request Approval / delete in the portal).
+      if (module === 'purchaseRequisition' && (await isStoreLprDocument(String(detail.requestNo ?? '')))) {
+        res.json({ ...detail, payload: { ...(detail.payload as Record<string, unknown>), LocalPurchaseFromStore: true } })
+        return
+      }
+      res.json(detail)
     }),
   )
 
@@ -5059,6 +5065,37 @@ export function buildPortalApiRouter() {
         ? parseSoapJson((await callSoapMethod('PortalListVendorQuotes', { rfqNo })).returnValue)
         : { rfqNo: '', quotes: [] }
       res.json({ chain, quotes, roles, nextActions: localPurchaseNextActions(chain, roles) })
+    }),
+  )
+
+  /**
+   * BC "Open Store Requisition" on the LPR card: the store requisition this LPR was started from,
+   * for anyone who may open the LPR (only that store requisition, read-only).
+   */
+  router.get(
+    '/requests/:id/local-purchase/store-requisition',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Open Store Requisition applies to a Local Purchase Requisition only.', 422)
+      }
+      await requireLocalPurchaseAccess(authUser)
+      await requestDetail(requestId, authUser)
+      const chain = await loadLocalPurchaseChain(no)
+      const storeRequisitionNo = String(chain.storeRequisitionNo ?? '').trim()
+      if (!storeRequisitionNo) {
+        throw portalError(`${no} was not started from a store requisition.`, 404, 'LPR_NO_STORE_REQUISITION')
+      }
+      res.setHeader('Cache-Control', 'private, no-store')
+      const [detail, process] = await Promise.all([
+        requestDetail(`storeRequisition-${storeRequisitionNo}`, authUser, { forApproval: true }),
+        callSoapMethod('GetStoreRequisitionProcess', { requestNo: storeRequisitionNo })
+          .then((result) => parseProcurementProcess(result.returnValue))
+          .catch(() => null),
+      ])
+      res.json({ request: detail, process })
     }),
   )
 

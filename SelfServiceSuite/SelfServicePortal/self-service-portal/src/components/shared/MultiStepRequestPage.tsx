@@ -165,6 +165,11 @@ export interface MultiStepRequestConfig {
   detailSupplement?: (ctx: { request: PortalRequest }) => ReactNode
   /** Replace the detail field grid for some requests (e.g. the BC-style LPR card); `details` is the default grid. */
   detailOverride?: (ctx: { request: PortalRequest; details: ReactNode }) => ReactNode
+  /**
+   * Documents driven by their BC card actions (e.g. a store LPR): no process banner, approval
+   * stepper, Edit / Request Approval / Cancel / Delete or line edits; `detailSupplement` holds the ribbon.
+   */
+  bcCard?: (request: PortalRequest) => boolean
   /** Module-specific detail actions (e.g. Post Asset Transfer). */
   extraDetailActions?: Array<{
     id: string
@@ -892,7 +897,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   const selected = detailQuery.data
-  const editable = selected
+  const bcCard = selected ? config.bcCard?.(selected) === true : false
+  const editable = selected && !bcCard
     ? isEditableRequestStatus(selected.status, config.module.module)
     : false
   const submittable = selected
@@ -1020,7 +1026,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
               config.detailActionsPlacement === 'bottom' && 'flex flex-col gap-6 space-y-0',
             )}
           >
-            {config.processBanner}
+            {bcCard ? null : config.processBanner}
             <div
               className={cn(
                 'flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4',
@@ -1100,7 +1106,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       Request Approval
                     </Button>
                   ) : null}
-                  {cancelStatuses.includes(selected.status) ? (
+                  {!bcCard && cancelStatuses.includes(selected.status) ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -1128,7 +1134,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       {selected.status === 'Pending Approval' ? 'Cancel Approval' : 'Cancel'}
                     </Button>
                   ) : null}
-                  {canDeleteDocumentDraft(selected.status, config.module.module) ? (
+                  {!bcCard && canDeleteDocumentDraft(selected.status, config.module.module) ? (
                     <Button
                       type="button"
                       variant="destructive"
@@ -1230,7 +1236,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                <RequestProgress
+                {bcCard ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
                   requiresLines={Boolean(config.line && config.line.required !== false)}
@@ -1238,7 +1244,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   lines={lines}
                   payload={payload}
                   approvalSteps={selected.approvalSteps}
-                />
+                />}
                 {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
                 {(() => {
                   const details = (

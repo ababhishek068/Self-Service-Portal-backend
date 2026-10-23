@@ -331,6 +331,14 @@ export async function getLocalPurchaseState(id: string) {
   return authGet<LocalPurchaseState>(`/api/requests/${encodeURIComponent(id)}/local-purchase`)
 }
 
+/** BC "Open Store Requisition" on an LPR: the store requisition it was started from (read-only). */
+export async function getLprStoreRequisition(id: string) {
+  requireAuthApiUrl()
+  return authGet<{ request: PortalRequest; process: Record<string, unknown> | null }>(
+    `/api/requests/${encodeURIComponent(id)}/local-purchase/store-requisition`,
+  )
+}
+
 export async function runLocalPurchaseAction(
   id: string,
   body: {

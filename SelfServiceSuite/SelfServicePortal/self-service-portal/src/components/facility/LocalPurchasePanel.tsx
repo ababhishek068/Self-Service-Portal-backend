@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronRight, ClipboardList, FileText, PackageCheck, Receipt, ShoppingCart, Truck } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,8 @@ import { formatCurrency } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { todayIsoDate } from '@/utils/validators'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
+import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
+import { cn } from '@/lib/utils'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
 const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'])
@@ -65,18 +68,77 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
-function DocCard({ title, children }: { title: string; children: ReactNode }) {
+function DocCard({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
   return (
-    <div className="rounded-md border border-teal-100 bg-white/70 p-3">
+    <div id={id} className="scroll-mt-24 rounded-md border border-teal-100 bg-white/70 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--portal-navy)]">{title}</p>
       <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</dl>
     </div>
   )
 }
 
+/** One document in the chain (BC related documents): Store Req → LPR → RFQ → PO → GRN → Invoice. */
+type RelatedDoc = {
+  key: string
+  label: string
+  no: string
+  state: string
+  icon: typeof FileText
+  current?: boolean
+  onOpen?: () => void
+}
+
+function RelatedDocuments({ docs }: { docs: RelatedDoc[] }) {
+  return (
+    <nav aria-label="Related documents" className="flex flex-wrap items-stretch gap-1.5">
+      {docs.map((doc, index) => {
+        const Icon = doc.icon
+        const body = (
+          <>
+            <Icon className={cn('h-4 w-4 shrink-0', doc.current ? 'text-white' : 'text-teal-600')} aria-hidden="true" />
+            <span className="min-w-0 text-left leading-tight">
+              <span className={cn('block text-[11px]', doc.current ? 'text-teal-50' : 'text-slate-500')}>{doc.label}</span>
+              <span className="block text-sm font-semibold">{doc.no}</span>
+              {doc.state ? (
+                <span className={cn('block text-[11px]', doc.current ? 'text-teal-50' : 'text-slate-500')}>{doc.state}</span>
+              ) : null}
+            </span>
+          </>
+        )
+        const chip = cn(
+          'flex items-center gap-2 rounded-lg border px-3 py-1.5 transition',
+          doc.current
+            ? 'border-[var(--portal-navy)] bg-[var(--portal-navy)] text-white shadow-sm'
+            : 'border-slate-200 bg-white text-slate-800',
+          doc.onOpen && 'hover:border-teal-400 hover:bg-teal-50',
+        )
+        return (
+          <div key={doc.key} className="flex items-center gap-1.5">
+            {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" /> : null}
+            {doc.onOpen ? (
+              <button type="button" className={chip} onClick={doc.onOpen} title={`Open ${doc.label} ${doc.no}`}>
+                {body}
+              </button>
+            ) : (
+              <div className={chip} aria-current={doc.current ? 'page' : undefined}>
+                {body}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </nav>
+  )
+}
+
+function scrollToDoc(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /**
- * Local Purchase (LPR -> RFQ -> PO) on the Purchase Requisition card: mirrors the BC Local RFQ
- * steps ribbon. Renders the 1.0.3.382 purchase panel (`fallback`) unchanged when Local Purchase
+ * Local Purchase (LPR -> RFQ -> PO) on the Purchase Requisition card: mirrors the BC card — the
+ * ribbon (Open Store Requisition and the signed-in user's step), the Process Step from BC and the
+ * related documents. Renders the 1.0.3.382 purchase panel (`fallback`) unchanged when Local Purchase
  * is not live in BC yet, or when the document is not a Local LPR.
  */
 export function LocalPurchasePanel({ request, fallback }: { request: PortalRequest; fallback: ReactNode }) {
@@ -84,6 +146,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const confirm = useConfirm()
   const queryClient = useQueryClient()
   const [actionComment, setActionComment] = useState('')
+  const [storeCardOpen, setStoreCardOpen] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
   const [quoteForm, setQuoteForm] = useState({
@@ -268,73 +331,281 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     if (action) void run(action, { linkedDocumentNo: String(quote.lineNo) })
   }
 
+  const lprNo = text(lpr?.no)
+  const poNo = text(po?.no)
+  const storeReqNo = text(state.chain.storeRequisitionNo)
+  const requestNo = request.requestNo.trim().toUpperCase()
+  const isThisLpr = lprNo.toUpperCase() === requestNo
+  const processStep = text(po?.processStep || rfq?.processStep || lpr?.processStep)
+  const flowStage = text(po?.flowStage) || text(rfq?.flowStage) || text(lpr?.flowStage)
+  const invoiceNo = text(po?.postedInvoiceNo) || text(po?.createdInvoiceNo)
+  const grnNos = receipts.map((row) => text(row.no)).filter(Boolean)
+  const cardTitle = poNo && poNo.toUpperCase() === requestNo
+    ? 'Purchase Order'
+    : rfqNo && rfqNo.toUpperCase() === requestNo
+      ? 'Local RFQ'
+      : 'Purchase Requisition Card'
+  const relatedDocs: RelatedDoc[] = [
+    ...(storeReqNo
+      ? [{
+          key: 'store',
+          label: 'Store Requisition',
+          no: storeReqNo,
+          state: 'Open card',
+          icon: ClipboardList,
+          onOpen: () => setStoreCardOpen(true),
+        }]
+      : []),
+    ...(lprNo
+      ? [{
+          key: 'lpr',
+          label: 'Purchase Requisition (LPR)',
+          no: lprNo,
+          state: text(lpr?.lprStatus),
+          icon: ShoppingCart,
+          current: isThisLpr,
+          onOpen: isThisLpr ? undefined : () => scrollToDoc('lpr-doc-lpr'),
+        }]
+      : []),
+    ...(rfqNo
+      ? [{
+          key: 'rfq',
+          label: 'Local RFQ',
+          no: rfqNo,
+          state: text(rfq?.flowStage),
+          icon: FileText,
+          current: rfqNo.toUpperCase() === requestNo,
+          onOpen: () => scrollToDoc('lpr-doc-rfq'),
+        }]
+      : []),
+    ...(poNo
+      ? [{
+          key: 'po',
+          label: 'Purchase Order',
+          no: poNo,
+          state: text(po?.flowStage),
+          icon: Truck,
+          current: poNo.toUpperCase() === requestNo,
+          onOpen: () => scrollToDoc('lpr-doc-po'),
+        }]
+      : []),
+    ...(grnNos.length
+      ? [{ key: 'grn', label: 'Goods Receipt (GRN)', no: grnNos.join(', '), state: 'Posted', icon: PackageCheck }]
+      : []),
+    ...(invoiceNo
+      ? [{
+          key: 'invoice',
+          label: 'Invoice',
+          no: invoiceNo,
+          state: po?.lprClosed ? 'Paid' : po?.invoiceVerified ? 'Verified' : '',
+          icon: Receipt,
+        }]
+      : []),
+  ]
+
   return (
-    <section className="space-y-4 rounded-lg border border-teal-200 bg-teal-50/80 p-4 text-sm text-slate-800">
-      <div>
-        <p className="font-semibold text-[var(--portal-navy)]">Local Purchase (LPR -&gt; RFQ -&gt; PO)</p>
-        <p className="mt-1 text-slate-600">
-          Full Flow Stage: <strong>{text(po?.flowStage) || text(rfq?.flowStage) || text(lpr?.flowStage)}</strong>
-          {text(po?.processStep || rfq?.processStep || lpr?.processStep)
-            ? ` · Process Step: ${text(po?.processStep || rfq?.processStep || lpr?.processStep)}`
-            : ''}
-        </p>
+    <section className="space-y-4 text-sm text-slate-800">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-2 px-4 pt-3">
+          <div>
+            <p className="text-xs text-slate-500">{cardTitle}</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">{request.requestNo}</h2>
+          </div>
+          {flowStage ? (
+            <span className="mb-1 rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800 ring-1 ring-teal-200">
+              {flowStage}
+            </span>
+          ) : null}
+        </div>
+
+        {/* BC ribbon: related card first, then the signed-in user's step(s). */}
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-y border-slate-100 bg-slate-50/70 px-4 py-2">
+          {storeReqNo ? (
+            <button
+              type="button"
+              onClick={() => setStoreCardOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-slate-800 transition hover:bg-teal-50"
+            >
+              <ClipboardList className="h-4 w-4 text-teal-600" aria-hidden="true" />
+              Open Store Requisition
+            </button>
+          ) : null}
+          {ribbon.map((action) => {
+            const isReturn = RETURN_ACTIONS.has(action.actionCode)
+            return (
+              <Button
+                key={`${action.actionCode}-${action.documentNo}`}
+                type="button"
+                size="sm"
+                variant={isReturn || action.actionCode === 'FIX_LOCAL_CURRENCY' ? 'outline' : 'gradient'}
+                className={isReturn ? 'border-red-300 text-red-700 hover:bg-red-50' : undefined}
+                disabled={busy}
+                onClick={() => void run(action)}
+              >
+                {action.label}
+              </Button>
+            )
+          })}
+        </div>
+
+        <div className="space-y-3 px-4 py-3">
+          {needsComment ? (
+            <div className="max-w-2xl space-y-1.5">
+              <Label htmlFor={`lpr-action-comment-${request.id}`}>
+                {ribbon.some((action) => action.actionCode === 'SUBMIT_TECHNICAL_REVIEW')
+                  ? 'Technical Recommendation'
+                  : 'Comment (required to reject / send back)'}
+              </Label>
+              <Textarea
+                id={`lpr-action-comment-${request.id}`}
+                value={actionComment}
+                onChange={(event) => setActionComment(event.target.value)}
+                rows={2}
+                className="min-h-16"
+                disabled={busy}
+              />
+            </div>
+          ) : null}
+          {needsVendorInvoiceNo ? (
+            <div className="max-w-md space-y-1.5">
+              <Label htmlFor={`lpr-vendor-invoice-${request.id}`}>Vendor Invoice No.</Label>
+              <Input
+                id={`lpr-vendor-invoice-${request.id}`}
+                value={vendorInvoiceNo}
+                onChange={(event) => setVendorInvoiceNo(event.target.value)}
+                placeholder="Number printed on the supplier invoice"
+                disabled={busy}
+              />
+            </div>
+          ) : null}
+          {needsBank ? (
+            <div className="max-w-md space-y-1.5">
+              <Label htmlFor={`lpr-bank-${request.id}`}>Pay from bank account</Label>
+              <Select
+                id={`lpr-bank-${request.id}`}
+                options={bankOptions}
+                placeholder={bankQuery.isLoading ? 'Loading bank accounts…' : 'Choose the bank account'}
+                value={bankAccountNo}
+                onChange={(event) => setBankAccountNo(event.target.value)}
+                disabled={busy || bankQuery.isLoading}
+              />
+              {bankQuery.isError ? (
+                <p className="text-xs text-red-700">Could not load bank accounts from Business Central.</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {po?.lprClosed ? (
+            <StatusNotice tone="success" className="">Paid and LPR closed.</StatusNotice>
+          ) : ribbon.length > 0 ? (
+            <StatusNotice tone="attention" className="">
+              <p>Your step: {ribbon.map((action) => action.label).join(' · ')}</p>
+              {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
+            </StatusNotice>
+          ) : waiting.length > 0 ? (
+            <StatusNotice tone="waiting" className="">
+              <p>
+                Waiting for {[...new Set(waiting.map(ownerLabel))].join(' or ')}:{' '}
+                {waiting.map((action) => action.label).join(' · ')}
+              </p>
+              {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
+            </StatusNotice>
+          ) : processStep ? (
+            <StatusNotice tone="info" className="">Process Step (BC): {processStep}</StatusNotice>
+          ) : null}
+          {issueAfterLpr ? (
+            <StatusNotice tone="success" className="">
+              Goods received. Store Keeper: open Store Requisition {issueAfterLpr.documentNo} → Issue after LPR receive.
+            </StatusNotice>
+          ) : null}
+
+          {relatedDocs.length > 1 ? (
+            <div className="space-y-1.5 pt-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related documents</p>
+              <RelatedDocuments docs={relatedDocs} />
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {lpr ? (
-          <DocCard title={`Purchase Requisition (LPR) ${text(lpr.no)}`}>
-            <Field label="From Store Req" value={text(state.chain.storeRequisitionNo)} />
-            <Field label="LPR Status" value={text(lpr.lprStatus)} />
-            <Field label="Status" value={text(lpr.status)} />
-            <Field label="Project" value={text(lpr.projectNo)} />
-            <Field
-              label="Procurement Officer"
-              value={[text(lpr.assignedProcUserId), text(lpr.procOfficerType)].filter(Boolean).join(' · ')}
-            />
-            <Field label="Operations Manager Approved By" value={text(lpr.opsApprovedBy)} />
-            <Field label="FAD Approved By" value={text(lpr.fadApprovedBy)} />
-            <Field label="FAD Approval Date" value={bcDate(lpr.fadApprovalDate)} />
-            <Field label="Created RFQ No." value={text(lpr.createdRfqNo)} />
-            <Field label="Destination Store" value={text(lpr.destinationStore)} />
-          </DocCard>
-        ) : null}
-        {rfq ? (
-          <DocCard title={`Local RFQ ${rfqNo}`}>
-            <Field label="From LPR No." value={text(rfq.fromLprNo)} />
-            <Field label="Full Flow Stage" value={text(rfq.flowStage)} />
-            <Field label="RFQ Approved By (Operations Manager)" value={text(rfq.opsRfqApprovedBy)} />
-            <Field label="Quote Due Date" value={bcDate(rfq.quoteDueDate)} />
-            <Field label="Minimum Quotes Required" value={minQuotes || ''} />
-            <Field label="Selected Vendor" value={text(rfq.selectedVendorNo)} />
-            <Field label="Vendor Selection Reason" value={text(rfq.selectionReason)} />
-            <Field label="Evaluation Reviewed By (Operations Manager)" value={text(rfq.opsEvalReviewedBy)} />
-            <Field label="FAD Final Approved By" value={text(rfq.fadFinalBy)} />
-            <Field label="Created PO No." value={text(rfq.createdPoNo)} />
-          </DocCard>
-        ) : null}
-        {po ? (
-          <DocCard title={`Purchase Order ${text(po.no)}`}>
-            <Field label="Full Flow Stage" value={text(po.flowStage)} />
-            <Field label="Vendor" value={text(po.vendorName) || text(po.vendorNo)} />
-            <Field
-              label="Amount Incl. VAT"
-              value={Number(po.amountIncludingVat ?? 0) > 0 ? formatCurrency(Number(po.amountIncludingVat)) : ''}
-            />
-            <Field label="Currency Code" value={poCurrency || 'Blank (local ETB)'} />
-            <Field label="Location" value={text(po.locationCode) || text(po.destinationStore)} />
-            <Field label="Operations Manager Approved PO" value={text(po.opsApprovedBy)} />
-            <Field label="FAD Approved PO" value={po.fadPoApproved ? 'Yes' : ''} />
-            <Field label="GRN" value={receipts.map((row) => text(row.no)).filter(Boolean).join(', ')} />
-            <Field label="Invoice" value={text(po.postedInvoiceNo) || text(po.createdInvoiceNo)} />
-            <Field label="Invoice Checked By (Operations Manager)" value={text(po.opsInvoiceCheckedBy)} />
-            <Field label="Invoice Verified (Finance)" value={po.invoiceVerified ? 'Yes' : ''} />
-            <Field label="Payment Approved (F&A)" value={po.ceoPayApproved ? 'Yes' : ''} />
-            <Field label="Paid From Bank" value={text(po.paymentBankNo)} />
-            <Field label="Payment Voucher" value={text(po.paymentDocNo)} />
-            <Field label="LPR Closed" value={po.lprClosed ? 'Yes' : ''} />
-          </DocCard>
-        ) : null}
-      </div>
+      {updateLprLine ? (
+        <LprDraftLineEditor
+          lines={Array.isArray(request.payload?.lines) ? (request.payload.lines as Array<Record<string, unknown>>) : []}
+          busy={busy}
+          onSave={async (change) => {
+            try {
+              await actionMutation.mutateAsync({
+                actionCode: 'UPDATE_LPR_LINE',
+                documentNo: updateLprLine.documentNo,
+                payload: change,
+              })
+              toast.success(`Line ${change.lineNo} saved on ${updateLprLine.documentNo}.`)
+              return true
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : 'Could not save the LPR line', 'Save LPR line')
+              return false
+            }
+          }}
+        />
+      ) : null}
+
+      {(lpr && !isThisLpr) || rfq || po ? (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {lpr && !isThisLpr ? (
+            <DocCard id="lpr-doc-lpr" title={`Purchase Requisition (LPR) ${lprNo}`}>
+              <Field label="From Store Req" value={storeReqNo} />
+              <Field label="LPR Status" value={text(lpr.lprStatus)} />
+              <Field label="Status" value={text(lpr.status)} />
+              <Field label="Project" value={text(lpr.projectNo)} />
+              <Field
+                label="Procurement Officer"
+                value={[text(lpr.assignedProcUserId), text(lpr.procOfficerType)].filter(Boolean).join(' · ')}
+              />
+              <Field label="Operations Manager Approved By" value={text(lpr.opsApprovedBy)} />
+              <Field label="FAD Approved By" value={text(lpr.fadApprovedBy)} />
+              <Field label="FAD Approval Date" value={bcDate(lpr.fadApprovalDate)} />
+              <Field label="Created RFQ No." value={text(lpr.createdRfqNo)} />
+              <Field label="Destination Store" value={text(lpr.destinationStore)} />
+            </DocCard>
+          ) : null}
+          {rfq ? (
+            <DocCard id="lpr-doc-rfq" title={`Local RFQ ${rfqNo}`}>
+              <Field label="From LPR No." value={text(rfq.fromLprNo)} />
+              <Field label="Full Flow Stage" value={text(rfq.flowStage)} />
+              <Field label="RFQ Approved By (Operations Manager)" value={text(rfq.opsRfqApprovedBy)} />
+              <Field label="Quote Due Date" value={bcDate(rfq.quoteDueDate)} />
+              <Field label="Minimum Quotes Required" value={minQuotes || ''} />
+              <Field label="Selected Vendor" value={text(rfq.selectedVendorNo)} />
+              <Field label="Vendor Selection Reason" value={text(rfq.selectionReason)} />
+              <Field label="Evaluation Reviewed By (Operations Manager)" value={text(rfq.opsEvalReviewedBy)} />
+              <Field label="FAD Final Approved By" value={text(rfq.fadFinalBy)} />
+              <Field label="Created PO No." value={text(rfq.createdPoNo)} />
+            </DocCard>
+          ) : null}
+          {po ? (
+            <DocCard id="lpr-doc-po" title={`Purchase Order ${poNo}`}>
+              <Field label="Full Flow Stage" value={text(po.flowStage)} />
+              <Field label="Vendor" value={text(po.vendorName) || text(po.vendorNo)} />
+              <Field
+                label="Amount Incl. VAT"
+                value={Number(po.amountIncludingVat ?? 0) > 0 ? formatCurrency(Number(po.amountIncludingVat)) : ''}
+              />
+              <Field label="Currency Code" value={poCurrency || 'Blank (local ETB)'} />
+              <Field label="Location" value={text(po.locationCode) || text(po.destinationStore)} />
+              <Field label="Operations Manager Approved PO" value={text(po.opsApprovedBy)} />
+              <Field label="FAD Approved PO" value={po.fadPoApproved ? 'Yes' : ''} />
+              <Field label="GRN" value={grnNos.join(', ')} />
+              <Field label="Invoice" value={invoiceNo} />
+              <Field label="Invoice Checked By (Operations Manager)" value={text(po.opsInvoiceCheckedBy)} />
+              <Field label="Invoice Verified (Finance)" value={po.invoiceVerified ? 'Yes' : ''} />
+              <Field label="Payment Approved (F&A)" value={po.ceoPayApproved ? 'Yes' : ''} />
+              <Field label="Paid From Bank" value={text(po.paymentBankNo)} />
+              <Field label="Payment Voucher" value={text(po.paymentDocNo)} />
+              <Field label="LPR Closed" value={po.lprClosed ? 'Yes' : ''} />
+            </DocCard>
+          ) : null}
+        </div>
+      ) : null}
 
       {poCurrency ? (
         <StatusNotice tone="attention" className="">
@@ -495,106 +766,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         </div>
       ) : null}
 
-      {updateLprLine ? (
-        <LprDraftLineEditor
-          lines={Array.isArray(request.payload?.lines) ? (request.payload.lines as Array<Record<string, unknown>>) : []}
-          busy={busy}
-          onSave={async (change) => {
-            try {
-              await actionMutation.mutateAsync({
-                actionCode: 'UPDATE_LPR_LINE',
-                documentNo: updateLprLine.documentNo,
-                payload: change,
-              })
-              toast.success(`Line ${change.lineNo} saved on ${updateLprLine.documentNo}.`)
-              return true
-            } catch (error) {
-              toast.error(error instanceof Error ? error.message : 'Could not save the LPR line', 'Save LPR line')
-              return false
-            }
-          }}
+      {storeCardOpen && storeReqNo ? (
+        <StoreRequisitionCardDialog
+          lprRequestId={request.id}
+          storeRequisitionNo={storeReqNo}
+          onClose={() => setStoreCardOpen(false)}
         />
       ) : null}
-
-      {ribbon.length > 0 ? (
-        <div className="space-y-3">
-          {needsComment ? (
-            <div className="max-w-2xl space-y-1.5">
-              <Label htmlFor={`lpr-action-comment-${request.id}`}>
-                {ribbon.some((action) => action.actionCode === 'SUBMIT_TECHNICAL_REVIEW')
-                  ? 'Technical Recommendation'
-                  : 'Comment (required to reject / send back)'}
-              </Label>
-              <Textarea
-                id={`lpr-action-comment-${request.id}`}
-                value={actionComment}
-                onChange={(event) => setActionComment(event.target.value)}
-                rows={2}
-                className="min-h-16"
-                disabled={busy}
-              />
-            </div>
-          ) : null}
-          {needsVendorInvoiceNo ? (
-            <div className="max-w-md space-y-1.5">
-              <Label htmlFor={`lpr-vendor-invoice-${request.id}`}>Vendor Invoice No.</Label>
-              <Input
-                id={`lpr-vendor-invoice-${request.id}`}
-                value={vendorInvoiceNo}
-                onChange={(event) => setVendorInvoiceNo(event.target.value)}
-                placeholder="Number printed on the supplier invoice"
-                disabled={busy}
-              />
-            </div>
-          ) : null}
-          {needsBank ? (
-            <div className="max-w-md space-y-1.5">
-              <Label htmlFor={`lpr-bank-${request.id}`}>Pay from bank account</Label>
-              <Select
-                id={`lpr-bank-${request.id}`}
-                options={bankOptions}
-                placeholder={bankQuery.isLoading ? 'Loading bank accounts…' : 'Choose the bank account'}
-                value={bankAccountNo}
-                onChange={(event) => setBankAccountNo(event.target.value)}
-                disabled={busy || bankQuery.isLoading}
-              />
-              {bankQuery.isError ? (
-                <p className="text-xs text-red-700">Could not load bank accounts from Business Central.</p>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            {ribbon.map((action) => {
-              const isReturn = RETURN_ACTIONS.has(action.actionCode)
-              return (
-                <Button
-                  key={`${action.actionCode}-${action.documentNo}`}
-                  type="button"
-                  variant={isReturn || action.actionCode === 'FIX_LOCAL_CURRENCY' ? 'outline' : 'gradient'}
-                  className={isReturn ? 'border-red-300 text-red-700 hover:bg-red-50' : undefined}
-                  disabled={busy}
-                  onClick={() => void run(action)}
-                >
-                  {action.label}
-                </Button>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {issueAfterLpr ? (
-        <StatusNotice tone="success" className="">
-          Goods received. Store Keeper: open Store Requisition {issueAfterLpr.documentNo} → Issue after LPR receive.
-        </StatusNotice>
-      ) : null}
-      {ribbon.length === 0 && waiting.length > 0 ? (
-        <StatusNotice tone="waiting" className="">
-          Waiting for {[...new Set(waiting.map(ownerLabel))].join(' or ')}:{' '}
-          {waiting.map((action) => action.label).join(' · ')}
-        </StatusNotice>
-      ) : null}
-      {po?.lprClosed ? <StatusNotice tone="success" className="">Paid and LPR closed.</StatusNotice> : null}
     </section>
   )
 }

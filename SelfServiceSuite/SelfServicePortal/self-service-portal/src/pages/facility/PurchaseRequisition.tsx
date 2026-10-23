@@ -118,6 +118,8 @@ export function PurchaseRequisition() {
       )}
       // An LPR shows its details like the BC Purchase Requisition Card (Store Request, General).
       detailOverride={({ request, details }) => <LprCardDetails request={request} fallback={details} />}
+      // A store LPR runs on its BC card actions (the Local Purchase panel), not the draft buttons.
+      bcCard={(request) => request.payload?.LocalPurchaseFromStore === true}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={purchaseHeaderSchema}
       headerDefaults={{

@@ -5,97 +5,21 @@ import { Button } from '@/components/ui/button'
 import { getLocalPurchaseState } from '@/api/endpoints/requestEndpoint'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { formatDate } from '@/utils/formatters'
+import { CardSection, type CardField } from '@/components/facility/BcCard'
+import { dateTimeValue, dateValue, pick, text } from '@/components/facility/bcCardValues'
+import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
+import { storeRequestFromRequisition, useLprStoreRequisition } from '@/components/facility/lprStoreRequisition'
 import type { PortalRequest } from '@/types/erp.types'
 
 type Row = Record<string, unknown>
-
-function text(value: unknown) {
-  const raw = String(value ?? '').trim()
-  return raw.startsWith('0001-01-01') || raw === '0' || raw === '_' ? '' : raw
-}
-
-/** First non-blank value: the LPR chain from BC first, then the purchase header payload. */
-function pick(...values: unknown[]) {
-  for (const value of values) {
-    const found = text(value)
-    if (found) return found
-  }
-  return ''
-}
 
 function payloadValue(payload: Row, ...keys: string[]) {
   return pick(...keys.map((key) => payload[key]))
 }
 
-function dateValue(value: string) {
-  return value ? formatDate(value.slice(0, 10)) : ''
-}
-
-function dateTimeValue(value: string) {
-  if (!value) return ''
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-}
-
 function yesNo(value: unknown) {
   const raw = text(value).toLowerCase()
   return raw === 'true' || raw === 'yes' ? 'Yes' : 'No'
-}
-
-/** `key` fields show by default; the rest open with Show all details. */
-type CardField = { label: string; value: ReactNode; emphasis?: 'user' | 'strong'; key?: boolean }
-
-/** One BC card field: label, dotted leader, value box (blank values keep an empty box, as in BC). */
-function CardRow({ label, value, emphasis }: Omit<CardField, 'key'>) {
-  const empty = value === '' || value === null || value === undefined
-  return (
-    <div className="flex min-w-0 items-center gap-2 py-1">
-      <span className="flex min-w-0 shrink-0 basis-[45%] items-center gap-1 text-sm text-slate-600">
-        <span className="truncate">{label}</span>
-        <span className="mb-1 h-px min-w-3 flex-1 border-b border-dotted border-slate-300" aria-hidden="true" />
-      </span>
-      <span
-        className={`min-h-[2rem] min-w-0 flex-1 truncate rounded bg-slate-100 px-2.5 py-1.5 text-sm ${
-          emphasis === 'user'
-            ? 'font-semibold text-teal-700'
-            : emphasis === 'strong'
-              ? 'font-semibold text-slate-900'
-              : 'text-slate-800'
-        }`}
-        title={typeof value === 'string' ? value : undefined}
-      >
-        {empty ? '' : value}
-      </span>
-    </div>
-  )
-}
-
-function CardSection({
-  title,
-  intro,
-  fields,
-  showAll,
-}: {
-  title: string
-  intro?: string
-  fields: CardField[]
-  showAll: boolean
-}) {
-  const visible = showAll ? fields : fields.filter((field) => field.key)
-  return (
-    <section>
-      <h3 className="border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">{title}</h3>
-      {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
-      <div className="mt-2 grid gap-x-10 md:grid-cols-2 xl:grid-cols-3">
-        {visible.map(({ key: _key, ...field }) => (
-          <CardRow key={field.label} {...field} />
-        ))}
-      </div>
-    </section>
-  )
 }
 
 /**
@@ -106,6 +30,7 @@ function CardSection({
 export function LprCardDetails({ request, fallback }: { request: PortalRequest; fallback: ReactNode }) {
   const access = useLocalPurchaseAccess()
   const [showAll, setShowAll] = useState(false)
+  const [storeCardOpen, setStoreCardOpen] = useState(false)
   // Same query as the Local Purchase panel, so BC is called once.
   const stateQuery = useQuery({
     queryKey: ['local-purchase', request.id],
@@ -116,16 +41,37 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
   const chain = stateQuery.data?.chain
   const lpr = (chain?.lpr ?? {}) as Row
   const isThisLpr = Boolean(chain?.lpr) && text(lpr.no).toUpperCase() === request.requestNo.trim().toUpperCase()
+  const chainStoreReqNo = pick(chain?.storeRequisitionNo, lpr.storeRequisitionNo)
+  // BC apps without the chain's storeRequest: read the store requisition itself.
+  const storeQuery = useLprStoreRequisition(request.id, access.enabled && isThisLpr && Boolean(chainStoreReqNo) && !chain?.storeRequest)
   if (!access.enabled || !isThisLpr) return <>{fallback}</>
 
   const payload = (request.payload ?? {}) as Row
-  const store = (chain?.storeRequest ?? {}) as Row
-  const storeReqNo = pick(chain?.storeRequisitionNo, store.no, lpr.storeRequisitionNo)
+  const store = (chain?.storeRequest ??
+    (storeQuery.data ? storeRequestFromRequisition(storeQuery.data.request, storeQuery.data.process as Row | null) : {})) as Row
+  const storeReqNo = pick(chainStoreReqNo, store.no)
+  const hasStoreDetails = Boolean(chain?.storeRequest || storeQuery.data)
   const officer = pick(lpr.assignedProcUserId)
   const legacyOfficer = pick(lpr.assignedProcurementOfficer, payloadValue(payload, 'AssignedProcurementOfficer'))
 
   const storeFields: CardField[] = [
-    { label: 'Store Requisition No.', key: true, value: storeReqNo, emphasis: 'user' },
+    {
+      label: 'Store Requisition No.',
+      key: true,
+      emphasis: 'user',
+      value: storeReqNo ? (
+        <button
+          type="button"
+          onClick={() => setStoreCardOpen(true)}
+          className="font-semibold text-teal-700 underline-offset-2 hover:underline"
+          title="Open Store Requisition"
+        >
+          {storeReqNo}
+        </button>
+      ) : (
+        ''
+      ),
+    },
     { label: 'Request Date', value: dateValue(pick(store.requestDate)) },
     { label: 'Required Date', value: dateValue(pick(store.requiredDate)) },
     { label: 'Division Code', value: pick(store.divisionCode) },
@@ -236,7 +182,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
 
   const hiddenCount =
     generalFields.filter((field) => !field.key).length +
-    (storeReqNo && chain?.storeRequest ? storeFields.filter((field) => !field.key).length : 0)
+    (storeReqNo && hasStoreDetails ? storeFields.filter((field) => !field.key).length : 0)
 
   return (
     <div className="space-y-6">
@@ -244,8 +190,8 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
         <CardSection
           title="Store Request (review before Approve)"
           intro="Same details as Store Req Header Approved. The assigned Procurement Officer prepares the LPR and submits it; the Operations Manager, then FAD, review requester, purpose and lines and approve. RFQ starts only after FAD approval."
-          // Older BC apps send only the store requisition number.
-          fields={chain?.storeRequest ? storeFields : storeFields.slice(0, 1)}
+          // Until the store requisition loads, only its number.
+          fields={hasStoreDetails ? storeFields : storeFields.slice(0, 1)}
           showAll={showAll}
         />
       ) : null}
@@ -256,6 +202,13 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           <ChevronDown className={`h-4 w-4 transition-transform ${showAll ? 'rotate-180' : ''}`} />
         </Button>
       </div>
+      {storeCardOpen && storeReqNo ? (
+        <StoreRequisitionCardDialog
+          lprRequestId={request.id}
+          storeRequisitionNo={storeReqNo}
+          onClose={() => setStoreCardOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }
