@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Warehouse } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -100,7 +101,8 @@ function requesterStatusText(stage: string, declined: boolean, lprPath: boolean,
   }
 }
 
-function issueStageLabel(stage: string) {
+function issueStageLabel(stage: string, lprRunning: boolean) {
+  if (stage === '' && lprRunning) return 'Local Purchase (LPR) in progress'
   switch (stage) {
     case 'PREPARED':
       return 'Prepared by store — waiting for the store manager'
@@ -257,6 +259,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const atStockCheck = stage === 'STOCK_CHECK'
   const atProcurement = stage === 'PROCUREMENT_REQUEST'
   const atLprRequested = stage === 'LPR_REQUESTED'
+  // BC Purchase Requisition Card of the running LPR (null on older BC apps or if it cannot load).
+  const lprProgress = (processQuery.data?.localPurchase ?? null) as LprProgress | null
+  const canOpenLpr = localPurchase.enabled && localPurchase.roles.length > 0 && Boolean(lprNo)
   const stockReady = stockCheck?.allAvailable === true
   const needsBcPrep = stockCheck?.needsBcPrep === true
   const stockBlocked = stockCheck?.allAvailable === false && !needsBcPrep
@@ -518,7 +523,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 font-semibold text-[var(--portal-navy-dark)] shadow-sm ring-1 ring-teal-200">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--portal-navy)]" />
-          {issueStageLabel(stageHandOff)}
+          {issueStageLabel(stageHandOff, atProcurement)}
         </span>
         {storeName ? <MetaChip label="Store" value={storeName} /> : null}
         {canViewProcess && !processQuery.isError && processQuery.data ? (
@@ -720,15 +725,53 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           for GIV.
         </StatusNotice>
       ) : null}
-      {atProcurement && localPurchase.enabled ? (
-        <StatusNotice tone="waiting">
-          Issue Stage: LPR Started{lprNo ? ` (${lprNo})` : ''}. Local Purchase continues: Procurement Officer submits →
-          Operations Manager → FAD → RFQ (Operations Manager) → quotes → evaluation → FAD final supplier → PO
-          (Operations Manager, FAD) → Store Keeper receives (GRN). After the GRN is posted into the issuing store, use
-          Issue after LPR receive.
+      {atProcurement && localPurchase.enabled && lprProgress?.received ? (
+        <StatusNotice tone="success">
+          The goods for {lprProgress.lprNo || lprNo} are received into the store (GRN).{' '}
+          {keeperStep ? 'Use Issue after LPR receive to issue them to the requester.' : 'Waiting for the Store Keeper to issue them to the requester.'}
         </StatusNotice>
       ) : null}
-      {atProcurement && localPurchase.enabled && canManageStock && !processQuery.isError ? (
+      {atProcurement && localPurchase.enabled && lprProgress && !lprProgress.received ? (
+        <StatusNotice tone="waiting">
+          <p>
+            Local Purchase {lprProgress.lprNo || lprNo}
+            {lprProgress.lprStatus ? ` · LPR Status ${lprProgress.lprStatus}` : ''}
+            {lprProgress.currentDocumentNo && lprProgress.currentDocumentNo !== lprProgress.lprNo
+              ? ` · now on ${lprProgress.currentDocumentNo}${lprProgress.flowStage ? ` (${lprProgress.flowStage})` : ''}`
+              : ''}
+          </p>
+          <p className="mt-1 font-semibold">
+            Now: {lprProgress.processStep || lprProgress.flowStage || 'in Business Central'}
+          </p>
+          {lprProgress.assignedProcUserId ? (
+            <p className="mt-1 text-xs font-normal">Assigned Procurement Officer: {lprProgress.assignedProcUserId}</p>
+          ) : null}
+          <p className="mt-1 text-xs font-normal">
+            The store issues the item after the goods are received into the store (GRN).
+          </p>
+        </StatusNotice>
+      ) : null}
+      {atProcurement && localPurchase.enabled && !lprProgress ? (
+        <StatusNotice tone="waiting">
+          Local Purchase{lprNo ? ` ${lprNo}` : ''} is running in Business Central. The store issues the item after the
+          goods are received into the store (GRN).
+        </StatusNotice>
+      ) : null}
+      {atProcurement && canOpenLpr ? (
+        <div className="mt-3">
+          <Button asChild variant="outline">
+            <Link to={`/facility/local-purchase-request?open=${encodeURIComponent(`purchaseRequisition-${lprNo}`)}`}>
+              Open LPR {lprNo}
+            </Link>
+          </Button>
+        </div>
+      ) : null}
+      {/* Store Keeper only, once the LPR goods are received (or when BC cannot say, on older apps). */}
+      {atProcurement &&
+      localPurchase.enabled &&
+      keeperStep &&
+      !processQuery.isError &&
+      (lprProgress ? lprProgress.received : true) ? (
         <div className="mt-3">
           <Button
             type="button"
@@ -751,6 +794,16 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
       ) : null}
     </section>
   )
+}
+
+type LprProgress = {
+  lprNo: string
+  lprStatus: string
+  assignedProcUserId: string
+  currentDocumentNo: string
+  flowStage: string
+  processStep: string
+  received: boolean
 }
 
 function MetaChip({ label, value }: { label: string; value: string }) {

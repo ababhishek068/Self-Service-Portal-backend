@@ -7,6 +7,7 @@ import {
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
   localPurchaseNextActions,
+  localPurchaseProgress,
   parseBcLocalPurchaseRoles,
   resolveLocalPurchaseAccess,
   LOCAL_PURCHASE_ACTIONS,
@@ -279,6 +280,28 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
   it('lists chain document numbers for the POST guard', () => {
     const nos = localPurchaseChainDocumentNos(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' }))
     assert.deepEqual([...new Set(nos)].sort(), ['ABH-PO000008', 'ABH-PQ000092', 'ABH-PQ000093'])
+  })
+
+  it('reports the BC step on the store requisition, and received only after the GRN', () => {
+    const draft = demoChain({ lprStatus: 'Draft', lprStage: 'LPR Draft' })
+    draft.lpr = {
+      ...draft.lpr,
+      processStep: '2. Procurement Officer prepares the LPR, then Submit to Operations Manager',
+      assignedProcUserId: 'TSION_GEREMEW',
+    }
+    assert.deepEqual(localPurchaseProgress(draft), {
+      lprNo: 'ABH-PQ000092',
+      lprStatus: 'Draft',
+      assignedProcUserId: 'TSION_GEREMEW',
+      currentDocumentNo: 'ABH-PQ000092',
+      flowStage: 'LPR Draft',
+      processStep: '2. Procurement Officer prepares the LPR, then Submit to Operations Manager',
+      received: false,
+    })
+    assert.equal(localPurchaseProgress(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' })).received, false)
+    const received = localPurchaseProgress(demoChain({ rfqStage: 'PO Created', poStage: 'Goods Received' }))
+    assert.equal(received.received, true)
+    assert.equal(received.currentDocumentNo, 'ABH-PO000008')
   })
 })
 

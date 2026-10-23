@@ -190,6 +190,28 @@ function stageKey(value: unknown) {
   return chainText(value).toUpperCase().replace(/\s+/g, ' ')
 }
 
+/** True once the Local PO's goods are received (GRN posted), so the store can issue them. */
+export function localPurchaseReceived(chain: LocalPurchaseChain) {
+  return RECEIVED_PO_STAGES.has(stageKey(chain.po?.flowStage))
+}
+
+/**
+ * Where a store requisition's LPR is now, as on the BC Purchase Requisition Card: LPR Status,
+ * Process Step (from template) and the furthest document in the chain (PO, else RFQ, else LPR).
+ */
+export function localPurchaseProgress(chain: LocalPurchaseChain) {
+  const current = chain.po ?? chain.rfq ?? chain.lpr
+  return {
+    lprNo: chainText(chain.lpr?.no),
+    lprStatus: chainText(chain.lpr?.lprStatus),
+    assignedProcUserId: chainText(chain.lpr?.assignedProcUserId),
+    currentDocumentNo: chainText(current?.no),
+    flowStage: chainText(current?.flowStage),
+    processStep: chainText(current?.processStep) || chainText(chain.lpr?.processStep),
+    received: localPurchaseReceived(chain),
+  }
+}
+
 /**
  * Next Local Purchase step(s) from BC Full Flow Stage. The current step lives on the
  * furthest document in the chain (PO, else RFQ, else LPR), matching the BC ribbon.
@@ -239,7 +261,7 @@ export function localPurchaseNextActions(
   }
 
   const storeReqNo = chainText(chain.storeRequisitionNo)
-  if (storeReqNo && RECEIVED_PO_STAGES.has(poStage)) {
+  if (storeReqNo && localPurchaseReceived(chain)) {
     codes.push({ code: 'ISSUE_AFTER_LPR', target: 'storeRequisition', documentNo: storeReqNo })
   }
 

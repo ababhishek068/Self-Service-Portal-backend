@@ -53,6 +53,7 @@ import {
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
   localPurchaseNextActions,
+  localPurchaseProgress,
   parseSoapJson,
   resolveLocalPurchaseAccess,
   type LocalPurchaseChain,
@@ -452,7 +453,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v260 — 1.0.3.419 (Store Keeper no longer sees the store-manager line on a prepared item; for BC 1.0.3.566)'
+export const PORTAL_API_BUILD = 'v261 — 1.0.3.420 (Store requisition shows the LPR step from BC; Issue after LPR only for the Store Keeper after GRN; for BC 1.0.3.566)'
 
 interface LookupSpec {
   service: string
@@ -4580,7 +4581,15 @@ export function buildPortalApiRouter() {
         detail.payload as ODataRecord,
         requestDetailLines(detail as Record<string, unknown>),
       )
-      res.json({ ...process, stockCheck })
+      // While the LPR runs, show its BC step and whether the goods are received yet.
+      const lprNo = String((process.links as Record<string, unknown> | undefined)?.lprNo ?? '').trim()
+      const localPurchase =
+        lprNo && procurementStageCode(process) === 'PROCUREMENT_REQUEST'
+          ? await loadLocalPurchaseChain(lprNo)
+              .then(localPurchaseProgress)
+              .catch(() => null)
+          : null
+      res.json({ ...process, stockCheck, ...(localPurchase ? { localPurchase } : {}) })
     }),
   )
 
@@ -4784,8 +4793,26 @@ export function buildPortalApiRouter() {
       if (requestedAction === 'REQUEST_FOR_LPR' && !storeRoles.keeperStep) {
         throw portalError('Only the storekeeper can send Request for LPR to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
+      if (requestedAction === 'ISSUE_AFTER_LPR' && !storeRoles.keeperStep) {
+        throw portalError('Only the storekeeper can issue after the LPR is received.', 403, 'PROCESS_ACTION_FORBIDDEN')
+      }
       const currentResult = await callSoapMethod('GetStoreRequisitionProcess', { requestNo: no })
       const currentProcess = parseProcurementProcess(currentResult.returnValue)
+      if (requestedAction === 'ISSUE_AFTER_LPR' && procurementStageCode(currentProcess) === 'PROCUREMENT_REQUEST') {
+        const lprNo = String((currentProcess.links as Record<string, unknown> | undefined)?.lprNo ?? '').trim()
+        const progress = lprNo
+          ? await loadLocalPurchaseChain(lprNo)
+              .then(localPurchaseProgress)
+              .catch(() => null)
+          : null
+        if (progress && !progress.received) {
+          throw portalError(
+            `The goods for ${progress.lprNo || lprNo} are not received yet${progress.processStep ? ` (now: ${progress.processStep})` : ''}. Issue after the GRN is posted into the store.`,
+            409,
+            'LPR_NOT_RECEIVED',
+          )
+        }
+      }
       const actionComment = String(req.body?.actionComment ?? '').trim()
       // A Store Keeper / Manager assigned in BC acts as Operations/Store for these steps.
       const storeActor = storeRoles.keeper
