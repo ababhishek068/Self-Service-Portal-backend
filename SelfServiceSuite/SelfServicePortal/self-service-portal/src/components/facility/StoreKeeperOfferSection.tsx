@@ -46,13 +46,11 @@ export function StoreKeeperOfferSection({
   const withManager = stage === 'PREPARED'
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const footerHint = withManager
-    ? 'With the store manager. You can still change the item until they accept it.'
-    : declined
-      ? 'The requester declined the last item. Offer another item, or close the request.'
-      : offers.length
-        ? 'Check the items, then submit them to the store manager. Stock does not move yet.'
-        : 'Add the item you will issue, then submit it to the store manager.'
+  const footerHint = declined
+    ? 'The requester declined the last item. Offer another item, or close the request.'
+    : offers.length
+      ? 'Check the items, then submit them to the store manager. Stock does not move yet.'
+      : 'Add the item you will issue, then submit it to the store manager.'
 
   return (
     <div className="mt-4 overflow-hidden rounded-xl border border-[var(--portal-card-border)] bg-white shadow-sm">
@@ -167,62 +165,65 @@ export function StoreKeeperOfferSection({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
-        <StatusNotice className="min-w-[16rem] flex-1">{footerHint}</StatusNotice>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Request for LPR only before an item is offered (the LPR buys the item instead). */}
-          {offers.length === 0 ? secondaryAction : null}
-          {withManager ? null : declined ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                className="border-red-200 text-red-700 hover:bg-red-50"
-                onClick={() =>
-                  void run(
-                    'CLOSE_REQUEST',
-                    'Close Request',
-                    `Close store requisition ${requestNo}? The requester declined the item. No goods issue voucher will be created.`,
-                  )
-                }
-              >
-                Close Request
-              </Button>
+      {/* With the store manager the panel shows one waiting line below, so no footer here. */}
+      {withManager ? null : (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+          <StatusNotice className="min-w-[16rem] flex-1">{footerHint}</StatusNotice>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Request for LPR only before an item is offered (the LPR buys the item instead). */}
+            {offers.length === 0 ? secondaryAction : null}
+            {declined ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  className="border-red-200 text-red-700 hover:bg-red-50"
+                  onClick={() =>
+                    void run(
+                      'CLOSE_REQUEST',
+                      'Close Request',
+                      `Close store requisition ${requestNo}? The requester declined the item. No goods issue voucher will be created.`,
+                    )
+                  }
+                >
+                  Close Request
+                </Button>
+                <Button
+                  type="button"
+                  variant="gradient"
+                  disabled={busy || offers.length === 0}
+                  onClick={() =>
+                    void run(
+                      'OFFER_ANOTHER_ITEM',
+                      'Offer Another Item',
+                      `Send the changed item on store requisition ${requestNo} to the store manager? After the manager accepts, the requester can accept or decline it.`,
+                    )
+                  }
+                >
+                  Offer Another Item
+                </Button>
+              </>
+            ) : (
               <Button
                 type="button"
                 variant="gradient"
                 disabled={busy || offers.length === 0}
+                title={offers.length === 0 ? 'Add the item to issue first.' : undefined}
                 onClick={() =>
                   void run(
-                    'OFFER_ANOTHER_ITEM',
-                    'Offer Another Item',
-                    `Send the changed item on store requisition ${requestNo} to the store manager? After the manager accepts, the requester can accept or decline it.`,
+                    'PREPARE_ISSUE',
+                    'Submit to Store Manager',
+                    `Send the item on store requisition ${requestNo} to the store manager? Stock does not move yet.`,
                   )
                 }
               >
-                Offer Another Item
+                Submit to Store Manager
               </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              variant="gradient"
-              disabled={busy || offers.length === 0}
-              title={offers.length === 0 ? 'Add the item to issue first.' : undefined}
-              onClick={() =>
-                void run(
-                  'PREPARE_ISSUE',
-                  'Submit to Store Manager',
-                  `Send the item on store requisition ${requestNo} to the store manager? Stock does not move yet.`,
-                )
-              }
-            >
-              Submit to Store Manager
-            </Button>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {pickerOpen ? (
         <StoreItemPickerDialog
