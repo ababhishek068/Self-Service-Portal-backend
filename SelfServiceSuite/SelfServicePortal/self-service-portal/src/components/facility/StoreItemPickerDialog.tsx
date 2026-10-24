@@ -109,7 +109,7 @@ export function StoreItemPickerDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`Add Item to Issue — ${requestNo}`}
-        className="relative flex max-h-[92vh] w-[min(96vw,60rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="relative flex max-h-[94vh] w-[min(96vw,96rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
         <div className="h-1.5 w-full shrink-0 bg-gradient-to-r from-[var(--portal-navy)] to-[var(--portal-green)]" />
 
@@ -194,7 +194,7 @@ export function StoreItemPickerDialog({
 
         <div className="min-h-[16rem] flex-1 overflow-y-auto bg-slate-50/60 px-5 py-4">
           {loading ? (
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2.5">
               {[0, 1, 2, 3, 4, 5].map((index) => (
                 <div key={index} className="h-24 animate-pulse rounded-xl border border-slate-100 bg-white" />
               ))}
@@ -207,7 +207,7 @@ export function StoreItemPickerDialog({
               </Button>
             </div>
           ) : visibleItems.length ? (
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2.5">
               {visibleItems.map((item) => {
                 const atStore = Number(item.available ?? 0)
                 const onHand = item.onHand === undefined ? undefined : Number(item.onHand)
