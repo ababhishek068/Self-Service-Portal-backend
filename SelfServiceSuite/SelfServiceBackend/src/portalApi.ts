@@ -52,7 +52,7 @@ import {
   cachedLocalPurchaseAccess,
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
-  localPurchaseCardEditable,
+  localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseProgress,
   parseSoapJson,
@@ -454,7 +454,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v267 — 1.0.3.426 (LPR card and lines editable like BC for the Procurement Officer; for BC 1.0.3.568)'
+export const PORTAL_API_BUILD = 'v268 — 1.0.3.427 (Edit at every Local Purchase step like BC: RFQ, vendor quotes, PO, receive; for BC 1.0.3.569)'
 
 interface LookupSpec {
   service: string
@@ -5075,14 +5075,15 @@ export function buildPortalApiRouter() {
       const quotes = rfqNo
         ? parseSoapJson((await callSoapMethod('PortalListVendorQuotes', { rfqNo })).returnValue)
         : { rfqNo: '', quotes: [] }
+      const editing = localPurchaseEditing(chain, roles)
       res.json({
         chain,
         quotes,
         roles,
         nextActions: localPurchaseNextActions(chain, roles),
-        // The assigned Procurement Officer edits the card as in BC (BC checks the officer again).
-        cardEditable:
-          localPurchaseCardEditable(chain) && roles.some((role) => role === 'procurement' || role === 'projectProcurement'),
+        // The assigned Procurement Officer edits the cards as in BC (BC checks the officer again).
+        cardEditable: editing.lpr,
+        editing,
       })
     }),
   )
@@ -5173,7 +5174,7 @@ export function buildPortalApiRouter() {
       }).catch((error: unknown) => {
         if (error instanceof Error && /Unsupported Local Purchase action/i.test(error.message)) {
           throw portalError(
-            'Editing the LPR card from the portal needs Business Central 1.0.3.568. Until it is published, edit it on the BC Purchase Requisition Card.',
+            'This change from the portal needs Business Central 1.0.3.569. Until it is published, make it on the card in Business Central.',
             409,
             'BC_UPDATE_REQUIRED',
           )

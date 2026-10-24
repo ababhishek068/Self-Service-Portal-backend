@@ -308,6 +308,8 @@ export interface LocalPurchaseState {
   nextActions: LocalPurchaseNextAction[]
   /** BC card rule + Procurement role: the card (General and lines) can be edited (BC 1.0.3.568). */
   cardEditable?: boolean
+  /** BC 1.0.3.569: which cards the signed-in user may edit now (BC's rule per card + the owning role). */
+  editing?: { lpr: boolean; rfq: boolean; po: boolean; receive: boolean }
 }
 
 export interface LocalPurchaseWaitingItem {

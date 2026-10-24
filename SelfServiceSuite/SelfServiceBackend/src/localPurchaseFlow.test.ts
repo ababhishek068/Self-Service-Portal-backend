@@ -7,6 +7,7 @@ import {
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
   localPurchaseCardEditable,
+  localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseProgress,
   parseBcLocalPurchaseRoles,
@@ -66,6 +67,16 @@ describe('assertLocalPurchaseActionAllowed', () => {
       'UPDATE_LPR_HEADER',
       'ADD_LPR_LINE',
       'DELETE_LPR_LINE',
+      'UPDATE_RFQ_HEADER',
+      'UPDATE_RFQ_LINE',
+      'ADD_RFQ_LINE',
+      'DELETE_RFQ_LINE',
+      'DELETE_VENDOR_QUOTE',
+      'UPDATE_PO_HEADER',
+      'UPDATE_PO_LINE',
+      'ADD_PO_LINE',
+      'DELETE_PO_LINE',
+      'UPDATE_PO_RECEIVE',
       'APPROVE_LPR_OPS',
       'APPROVE_LPR_FAD',
       'REJECT_LPR',
@@ -299,6 +310,27 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
     assert.equal(localPurchaseCardEditable(lpr('Approved', 'Released', 'ABH-PQ000112')), false)
     assert.equal(localPurchaseCardEditable(lpr('Converted to RFQ', 'Released', 'ABH-PQ000112')), false)
     assert.equal(localPurchaseCardEditable({}), false)
+  })
+
+  it('opens the Local RFQ, PO and receive edits only where BC does, for the owning role', () => {
+    const chain = (rfqLocked: boolean | undefined, poStage = '', poLocked?: boolean): LocalPurchaseChain => ({
+      lpr: { no: 'ABH-PQ000092', lprStatus: 'Converted to RFQ', status: 'Released', createdRfqNo: 'ABH-PQ000093' },
+      rfq: { no: 'ABH-PQ000093', flowStage: 'RFQ Open', linesLocked: rfqLocked, ...(rfqLocked === undefined ? {} : { lines: [] }) },
+      ...(poStage
+        ? { po: { no: 'ABH-PO000008', flowStage: poStage, linesLocked: poLocked, ...(poLocked === undefined ? {} : { lines: [] }) } }
+        : {}),
+    })
+    const procurement: LocalPurchaseRole[] = ['procurement']
+    assert.deepEqual(localPurchaseEditing(chain(false), procurement), { lpr: false, rfq: true, po: false, receive: false })
+    assert.equal(localPurchaseEditing(chain(true), procurement).rfq, false)
+    // BC before 1.0.3.569 sends no lock state or lines: nothing opens.
+    assert.equal(localPurchaseEditing(chain(undefined), procurement).rfq, false)
+    assert.equal(localPurchaseEditing(chain(false), ['operationsManager']).rfq, false)
+    assert.equal(localPurchaseEditing(chain(true, 'PO Created', false), procurement).po, true)
+    assert.equal(localPurchaseEditing(chain(true, 'Pending FAD PO', true), procurement).po, false)
+    assert.equal(localPurchaseEditing(chain(true, 'PO Released', true), ['operations']).receive, true)
+    assert.equal(localPurchaseEditing(chain(true, 'PO Released', true), procurement).receive, false)
+    assert.equal(localPurchaseEditing(chain(true, 'Goods Received', true), ['operations']).receive, false)
   })
 
   it('reports the BC step on the store requisition, and received only after the GRN', () => {

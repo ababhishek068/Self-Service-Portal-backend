@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Pencil } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { getLocalPurchaseState, runLocalPurchaseAction } from '@/api/endpoints/requestEndpoint'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { CardEditor, CardSection, type CardEditorKind, type CardField } from '@/components/facility/BcCard'
+import { CardSection, type CardField } from '@/components/facility/BcCard'
+import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { dateTimeValue, dateValue, pick, text } from '@/components/facility/bcCardValues'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
 import { storeRequestFromRequisition, useLprStoreRequisition } from '@/components/facility/lprStoreRequisition'
@@ -40,9 +41,6 @@ function priorityCode(caption: string) {
   return String(index < 0 ? 1 : index)
 }
 
-/** An editable General field: BC payload key, editor and its value now. */
-type EditSpec = { key: string; kind: CardEditorKind; initial: string; options?: Array<{ value: string; label: string }> }
-
 /**
  * Purchase Requisition (LPR) details laid out like the BC Purchase Requisition Card: Store Request
  * (review before Approve) and General, in the same field order. Other purchase requests keep the
@@ -52,8 +50,6 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
   const access = useLocalPurchaseAccess()
   const [showAll, setShowAll] = useState(false)
   const [storeCardOpen, setStoreCardOpen] = useState(false)
-  // General being edited: payload key → value (null when not editing).
-  const [draft, setDraft] = useState<Record<string, string> | null>(null)
   const toast = useToast()
   const queryClient = useQueryClient()
   const saveMutation = useMutation({
@@ -121,7 +117,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     { label: 'Approver 2 Date', value: dateTimeValue(pick(store.approver2Date)) },
   ]
 
-  const generalFields: CardField[] = [
+  const generalFields = (editing: boolean): CardField[] => [
     { label: 'No.', key: true, value: request.requestNo },
     { label: 'Process Step', key: true, value: pick(lpr.processStep), emphasis: 'strong' },
     { label: 'LPR Status', key: true, value: pick(lpr.lprStatus) },
@@ -189,7 +185,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
       label: 'Department',
       value: pick(lpr.department, payloadValue(payload, 'ShortcutDimension3Code', 'Shortcut_Dimension_3_Code')),
     },
-    ...((legacyOfficer && legacyOfficer !== officer) || draft
+    ...((legacyOfficer && legacyOfficer !== officer) || editing
       ? [{ label: 'Procurement Officer (Requisition)', value: legacyOfficer, emphasis: 'user' as const }]
       : []),
     { label: 'Requisition No.', value: pick(lpr.requisitionNo, payloadValue(payload, 'RequisitionNo', 'Requisition_No')) },
@@ -244,64 +240,19 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     },
   }
   const canEdit = stateQuery.data?.cardEditable === true
-  const startEdit = () =>
-    setDraft(Object.fromEntries(Object.values(editSpecs).map((spec) => [spec.key, spec.initial])))
-  const shownGeneral: CardField[] = draft
-    ? generalFields.map((field) => {
-        const spec = editSpecs[field.label]
-        if (!spec) return field
-        return {
-          ...field,
-          editor: (
-            <CardEditor
-              kind={spec.kind}
-              label={field.label}
-              options={spec.options}
-              value={draft[spec.key] ?? ''}
-              disabled={saveMutation.isPending}
-              onChange={(value) => setDraft((current) => (current ? { ...current, [spec.key]: value } : current))}
-            />
-          ),
-        }
-      })
-    : generalFields
-  const saveGeneral = async () => {
-    if (!draft) return
-    const changed = Object.fromEntries(
-      Object.values(editSpecs)
-        .filter((spec) => (draft[spec.key] ?? '') !== spec.initial)
-        .map((spec) => [spec.key, draft[spec.key] ?? '']),
-    )
-    if (Object.keys(changed).length === 0) {
-      setDraft(null)
-      return
-    }
+  const saveGeneral = async (changed: Record<string, string>) => {
     try {
       await saveMutation.mutateAsync({ actionCode: 'UPDATE_LPR_HEADER', documentNo: text(lpr.no), payload: changed })
-      setDraft(null)
       toast.success(`${text(lpr.no)} saved in Business Central.`)
+      return true
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save the LPR card', 'Save LPR card')
+      return false
     }
   }
-  const generalAction = draft ? (
-    <div className="flex gap-2">
-      <Button type="button" size="sm" variant="outline" disabled={saveMutation.isPending} onClick={() => setDraft(null)}>
-        Cancel
-      </Button>
-      <Button type="button" size="sm" variant="gradient" disabled={saveMutation.isPending} onClick={() => void saveGeneral()}>
-        {saveMutation.isPending ? 'Saving…' : 'Save'}
-      </Button>
-    </div>
-  ) : canEdit ? (
-    <Button type="button" size="sm" variant="outline" onClick={startEdit}>
-      <Pencil className="h-4 w-4" />
-      Edit
-    </Button>
-  ) : null
 
   // Store Request shows in full, as on the BC card; General opens with Show all details.
-  const hiddenCount = generalFields.filter((field) => !field.key).length
+  const hiddenCount = generalFields(false).filter((field) => !field.key).length
 
   return (
     <div className="space-y-6">
@@ -314,7 +265,14 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           showAll
         />
       ) : null}
-      <CardSection title="General" fields={shownGeneral} showAll={showAll || Boolean(draft)} action={generalAction} />
+      <EditableCardSection
+        title="General"
+        fields={generalFields}
+        specs={editSpecs}
+        canEdit={canEdit}
+        showAll={showAll}
+        onSave={saveGeneral}
+      />
       <div className="flex justify-center">
         <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setShowAll((open) => !open)} aria-expanded={showAll}>
           {showAll ? 'Show fewer details' : `Show all details (${hiddenCount} more)`}

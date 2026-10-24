@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ClipboardList, FileText, PackageCheck, Receipt, ShoppingCart, Truck } from 'lucide-react'
+import { ChevronRight, ClipboardList, FileText, PackageCheck, Pencil, Receipt, ShoppingCart, Trash2, Truck } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,12 @@ import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { todayIsoDate } from '@/utils/validators'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
+import type { CardField } from '@/components/facility/BcCard'
+import { BcLinesTable } from '@/components/facility/BcLinesTable'
+import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
+import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
+import { dateValue } from '@/components/facility/bcCardValues'
+import { ORDER_LINE_COLUMNS, RECEIVE_LINE_COLUMNS, type PurchaseLine } from '@/components/facility/bcPurchaseLines'
 import { cn } from '@/lib/utils'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
@@ -51,6 +57,19 @@ function text(value: unknown) {
 function bcDate(value: unknown) {
   const raw = text(value)
   return raw && !raw.startsWith('0001-01-01') ? raw : ''
+}
+
+function isoDate(value: unknown) {
+  return bcDate(value).slice(0, 10)
+}
+
+function linesOf(doc: Record<string, unknown> | undefined) {
+  return Array.isArray(doc?.lines) ? (doc.lines as PurchaseLine[]) : null
+}
+
+/** A document in the chain laid out as its BC card (Local RFQ / Purchase Order): card, lines, extras. */
+function ChainDocBlock({ id, children }: { id: string; children: ReactNode }) {
+  return <div id={id} className="scroll-mt-24 space-y-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">{children}</div>
 }
 
 function ownerLabel(action: LocalPurchaseNextAction) {
@@ -149,7 +168,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const [storeCardOpen, setStoreCardOpen] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
-  const [quoteForm, setQuoteForm] = useState({
+  const [quoteForm, setQuoteForm] = useState<{
+    lineNo?: number
+    vendorNo: string
+    quotedAmount: string
+    leadTimeDays: string
+    quoteDate: string
+    notes: string
+  }>({
     vendorNo: '',
     quotedAmount: '',
     leadTimeDays: '',
@@ -308,9 +334,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         leadTimeDays: Number.isFinite(leadTimeDays) ? leadTimeDays : 0,
         quoteDate: quoteForm.quoteDate,
         notes: quoteForm.notes.trim(),
+        ...(quoteForm.lineNo ? { lineNo: quoteForm.lineNo } : {}),
       })
       setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
-      toast.success(`Vendor quote saved for ${vendorNo}. Attach the quote file before Auto Select Winner.`)
+      toast.success(
+        quoteForm.lineNo
+          ? `Vendor quote for ${vendorNo} saved.`
+          : `Vendor quote saved for ${vendorNo}. Attach the quote file before Auto Select Winner.`,
+      )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save the vendor quote', 'Vendor quote')
     }
@@ -323,6 +354,44 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       toast.success(`Quote file attached for ${quote.vendorName || quote.vendorNo}.`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not attach the quote file', 'Attachments')
+    }
+  }
+
+  const editQuote = (quote: LocalPurchaseVendorQuote) =>
+    setQuoteForm({
+      lineNo: quote.lineNo,
+      vendorNo: quote.vendorNo,
+      quotedAmount: String(quote.quotedAmount ?? ''),
+      leadTimeDays: String(quote.leadTimeDays ?? ''),
+      quoteDate: bcDate(quote.quoteDate).slice(0, 10) || todayIsoDate(),
+      notes: quote.notes ?? '',
+    })
+
+  /** Runs a card edit (save / line / delete) on a chain document and reports the result. */
+  const saveDoc = async (actionCode: string, documentNo: string, payload: Record<string, unknown>, success: string) => {
+    try {
+      await actionMutation.mutateAsync({ actionCode, documentNo, payload })
+      toast.success(success)
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save the change', documentNo)
+      return false
+    }
+  }
+
+  const deleteQuote = async (quote: LocalPurchaseVendorQuote) => {
+    const name = quote.vendorName || quote.vendorNo
+    const yes = await confirm({
+      title: 'Delete vendor quote',
+      message: `Delete the quote from ${name} on ${rfqNo}?`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!yes) return
+    if (await saveDoc('DELETE_VENDOR_QUOTE', rfqNo, { lineNo: quote.lineNo }, `Quote from ${name} deleted.`)) {
+      if (quoteForm.lineNo === quote.lineNo) {
+        setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
+      }
     }
   }
 
@@ -402,6 +471,103 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         }]
       : []),
   ]
+
+  // What the signed-in user may change now, by BC's rule for each card (BC 1.0.3.569 for RFQ / PO / receive).
+  const editing = state.editing ?? { lpr: state.cardEditable === true, rfq: false, po: false, receive: false }
+  const rfqLines = linesOf(rfq)
+  const poLines = linesOf(po)
+  const editHints = [
+    editing.lpr && isThisLpr ? 'the LPR card (Edit on General, and New Line / edit / delete in the Purchase Requisition Subform)' : '',
+    editing.rfq ? `Local RFQ ${rfqNo} (Edit, and its lines)` : '',
+    canEditQuotes ? 'the vendor quotes (add, edit, delete)' : '',
+    editing.po ? `Purchase Order ${poNo} (Edit, and its lines)` : '',
+    editing.receive ? `what is received on ${poNo} (Receive → Edit)` : '',
+  ].filter(Boolean)
+  const editHint = editHints.length ? (
+    <p className="mt-1 text-xs font-normal">You can change {editHints.join('; ')} below, as in Business Central.</p>
+  ) : null
+
+  // Local RFQ card (ABH Local RFQ Card Ext → Local RFQ steps), in the card's order.
+  const rfqFields: CardField[] = rfq
+    ? [
+        { label: 'No.', value: rfqNo, emphasis: 'strong' },
+        { label: 'Process Step', value: text(rfq.processStep), emphasis: 'strong' },
+        { label: 'Full Flow Stage', value: text(rfq.flowStage) },
+        { label: 'From LPR No.', value: text(rfq.fromLprNo) },
+        { label: 'From Store Req.', value: text(rfq.storeRequisitionNo) },
+        { label: 'Request Description', value: text(rfq.requestSummary) },
+        { label: 'Document Date', value: dateValue(bcDate(rfq.documentDate)) },
+        { label: 'Requested Receipt Date', value: dateValue(bcDate(rfq.requiredByDate)) },
+        { label: 'Quote Due Date', value: dateValue(bcDate(rfq.quoteDueDate)) },
+        { label: 'Minimum Quotes Required', value: String(minQuotes) },
+        { label: 'Selected Vendor', value: text(rfq.selectedVendorNo), emphasis: 'user' },
+        { label: 'Vendor Selection Reason', value: text(rfq.selectionReason) },
+        { label: 'RFQ Approved By (Operations Manager)', value: text(rfq.opsRfqApprovedBy), emphasis: 'user' },
+        { label: 'Evaluation Reviewed By (Operations Manager)', value: text(rfq.opsEvalReviewedBy), emphasis: 'user' },
+        { label: 'Technical Comment', value: technicalComment },
+        { label: 'Tech Reviewed By', value: text(rfq.techReviewedBy), emphasis: 'user' },
+        { label: 'FAD Final By', value: text(rfq.fadFinalBy), emphasis: 'user' },
+        { label: 'Created PO No.', value: text(rfq.createdPoNo) },
+        { label: 'Send Back Comment', value: text(rfq.sendBackComment) },
+      ]
+    : []
+  const rfqSpecs: Record<string, EditSpec> = rfq
+    ? {
+        'Request Description': { key: 'requestSummary', kind: 'text', initial: text(rfq.requestSummary) },
+        'Document Date': { key: 'documentDate', kind: 'date', initial: isoDate(rfq.documentDate) },
+        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(rfq.requiredByDate) },
+        'Quote Due Date': { key: 'quoteDueDate', kind: 'date', initial: isoDate(rfq.quoteDueDate) },
+        'Minimum Quotes Required': { key: 'minQuotesRequired', kind: 'number', initial: String(minQuotes) },
+      }
+    : {}
+
+  // Purchase Order card: General, Invoice / payment progress of the local purchase.
+  const poFields: CardField[] = po
+    ? [
+        { label: 'No.', value: poNo, emphasis: 'strong' },
+        { label: 'Process Step', value: text(po.processStep), emphasis: 'strong' },
+        { label: 'Full Flow Stage', value: text(po.flowStage) },
+        { label: 'Vendor No.', value: text(po.vendorNo) },
+        { label: 'Vendor Name', value: text(po.vendorName), emphasis: 'user' },
+        { label: 'Request Description', value: text(po.requestSummary) },
+        { label: 'Document Date', value: dateValue(bcDate(po.documentDate)) },
+        { label: 'Order Date', value: dateValue(bcDate(po.orderDate)) },
+        { label: 'Requested Receipt Date', value: dateValue(bcDate(po.requiredByDate)) },
+        { label: 'Expected Receipt Date', value: dateValue(bcDate(po.expectedReceiptDate)) },
+        { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
+        { label: 'Vendor Shipment No.', value: text(po.vendorShipmentNo) },
+        { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
+        {
+          label: 'Amount Incl. VAT',
+          value: Number(po.amountIncludingVat ?? 0) > 0 ? formatCurrency(Number(po.amountIncludingVat)) : '',
+          emphasis: 'strong',
+        },
+        { label: 'Currency Code', value: poCurrency || 'Blank (local ETB)' },
+        { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
+        { label: 'FAD Approved PO', value: po.fadPoApproved ? 'Yes' : 'No' },
+        { label: 'GRN', value: grnNos.join(', ') },
+        { label: 'Invoice', value: invoiceNo },
+        { label: 'Invoice Checked By (Operations Manager)', value: text(po.opsInvoiceCheckedBy), emphasis: 'user' },
+        { label: 'Invoice Verified (Finance)', value: po.invoiceVerified ? 'Yes' : 'No' },
+        { label: 'Payment Approved (F&A)', value: po.ceoPayApproved ? 'Yes' : 'No' },
+        { label: 'Paid From Bank', value: text(po.paymentBankNo) },
+        { label: 'Payment Voucher', value: text(po.paymentDocNo) },
+        { label: 'LPR Closed', value: po.lprClosed ? 'Yes' : 'No' },
+        { label: 'Send Back Comment', value: text(po.sendBackComment) },
+      ]
+    : []
+  const poSpecs: Record<string, EditSpec> = po
+    ? {
+        'Request Description': { key: 'requestSummary', kind: 'text', initial: text(po.requestSummary) },
+        'Document Date': { key: 'documentDate', kind: 'date', initial: isoDate(po.documentDate) },
+        'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
+        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
+        'Expected Receipt Date': { key: 'expectedReceiptDate', kind: 'date', initial: isoDate(po.expectedReceiptDate) },
+        'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
+        'Vendor Shipment No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
+        'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) },
+      }
+    : {}
 
   return (
     <section className="space-y-4 text-sm text-slate-800">
@@ -500,12 +666,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           ) : ribbon.length > 0 ? (
             <StatusNotice tone="attention" className="">
               <p>Your step: {ribbon.map((action) => action.label).join(' · ')}</p>
-              {state.cardEditable ? (
-                <p className="mt-1 text-xs font-normal">
-                  You can change the card below first, as in Business Central: Edit on General, and New Line / edit /
-                  delete in the Purchase Requisition Subform.
-                </p>
-              ) : null}
+              {editHint}
               {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
             </StatusNotice>
           ) : waiting.length > 0 ? (
@@ -514,10 +675,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                 Waiting for {[...new Set(waiting.map(ownerLabel))].join(' or ')}:{' '}
                 {waiting.map((action) => action.label).join(' · ')}
               </p>
+              {editHint}
               {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
             </StatusNotice>
-          ) : processStep ? (
-            <StatusNotice tone="info" className="">Process Step (BC): {processStep}</StatusNotice>
+          ) : processStep || editHint ? (
+            <StatusNotice tone="info" className="">
+              {processStep ? <p>Process Step (BC): {processStep}</p> : null}
+              {editHint}
+            </StatusNotice>
           ) : null}
           {issueAfterLpr ? (
             <StatusNotice tone="success" className="">
@@ -556,62 +721,50 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         />
       ) : null}
 
-      {(lpr && !isThisLpr) || rfq || po ? (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {lpr && !isThisLpr ? (
-            <DocCard id="lpr-doc-lpr" title={`Purchase Requisition (LPR) ${lprNo}`}>
-              <Field label="From Store Req" value={storeReqNo} />
-              <Field label="LPR Status" value={text(lpr.lprStatus)} />
-              <Field label="Status" value={text(lpr.status)} />
-              <Field label="Project" value={text(lpr.projectNo)} />
-              <Field
-                label="Procurement Officer"
-                value={[text(lpr.assignedProcUserId), text(lpr.procOfficerType)].filter(Boolean).join(' · ')}
-              />
-              <Field label="Operations Manager Approved By" value={text(lpr.opsApprovedBy)} />
-              <Field label="FAD Approved By" value={text(lpr.fadApprovedBy)} />
-              <Field label="FAD Approval Date" value={bcDate(lpr.fadApprovalDate)} />
-              <Field label="Created RFQ No." value={text(lpr.createdRfqNo)} />
-              <Field label="Destination Store" value={text(lpr.destinationStore)} />
-            </DocCard>
+      {lpr && !isThisLpr ? (
+        <DocCard id="lpr-doc-lpr" title={`Purchase Requisition (LPR) ${lprNo}`}>
+          <Field label="From Store Req" value={storeReqNo} />
+          <Field label="LPR Status" value={text(lpr.lprStatus)} />
+          <Field label="Status" value={text(lpr.status)} />
+          <Field label="Project" value={text(lpr.projectNo)} />
+          <Field
+            label="Procurement Officer"
+            value={[text(lpr.assignedProcUserId), text(lpr.procOfficerType)].filter(Boolean).join(' · ')}
+          />
+          <Field label="Operations Manager Approved By" value={text(lpr.opsApprovedBy)} />
+          <Field label="FAD Approved By" value={text(lpr.fadApprovedBy)} />
+          <Field label="FAD Approval Date" value={bcDate(lpr.fadApprovalDate)} />
+          <Field label="Created RFQ No." value={text(lpr.createdRfqNo)} />
+          <Field label="Destination Store" value={text(lpr.destinationStore)} />
+        </DocCard>
+      ) : null}
+
+      {rfq ? (
+        <ChainDocBlock id="lpr-doc-rfq">
+          <EditableCardSection
+            title={`Local RFQ ${rfqNo}`}
+            fields={rfqFields}
+            specs={rfqSpecs}
+            canEdit={editing.rfq}
+            showAll
+            onSave={(changed) => saveDoc('UPDATE_RFQ_HEADER', rfqNo, changed, `${rfqNo} saved in Business Central.`)}
+          />
+          {rfqLines ? (
+            <BcLinesTable
+              title="Lines"
+              lines={rfqLines}
+              columns={ORDER_LINE_COLUMNS}
+              docNo={rfqNo}
+              editable={editing.rfq}
+              busy={busy}
+              totalHeader="Line Amount"
+              onSave={(isNew, payload) =>
+                saveDoc(isNew ? 'ADD_RFQ_LINE' : 'UPDATE_RFQ_LINE', rfqNo, payload, isNew ? `Line added to ${rfqNo}.` : `Line saved on ${rfqNo}.`)
+              }
+              onDelete={(line) => saveDoc('DELETE_RFQ_LINE', rfqNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${rfqNo}.`)}
+            />
           ) : null}
-          {rfq ? (
-            <DocCard id="lpr-doc-rfq" title={`Local RFQ ${rfqNo}`}>
-              <Field label="From LPR No." value={text(rfq.fromLprNo)} />
-              <Field label="Full Flow Stage" value={text(rfq.flowStage)} />
-              <Field label="RFQ Approved By (Operations Manager)" value={text(rfq.opsRfqApprovedBy)} />
-              <Field label="Quote Due Date" value={bcDate(rfq.quoteDueDate)} />
-              <Field label="Minimum Quotes Required" value={minQuotes || ''} />
-              <Field label="Selected Vendor" value={text(rfq.selectedVendorNo)} />
-              <Field label="Vendor Selection Reason" value={text(rfq.selectionReason)} />
-              <Field label="Evaluation Reviewed By (Operations Manager)" value={text(rfq.opsEvalReviewedBy)} />
-              <Field label="FAD Final Approved By" value={text(rfq.fadFinalBy)} />
-              <Field label="Created PO No." value={text(rfq.createdPoNo)} />
-            </DocCard>
-          ) : null}
-          {po ? (
-            <DocCard id="lpr-doc-po" title={`Purchase Order ${poNo}`}>
-              <Field label="Full Flow Stage" value={text(po.flowStage)} />
-              <Field label="Vendor" value={text(po.vendorName) || text(po.vendorNo)} />
-              <Field
-                label="Amount Incl. VAT"
-                value={Number(po.amountIncludingVat ?? 0) > 0 ? formatCurrency(Number(po.amountIncludingVat)) : ''}
-              />
-              <Field label="Currency Code" value={poCurrency || 'Blank (local ETB)'} />
-              <Field label="Location" value={text(po.locationCode) || text(po.destinationStore)} />
-              <Field label="Operations Manager Approved PO" value={text(po.opsApprovedBy)} />
-              <Field label="FAD Approved PO" value={po.fadPoApproved ? 'Yes' : ''} />
-              <Field label="GRN" value={grnNos.join(', ')} />
-              <Field label="Invoice" value={invoiceNo} />
-              <Field label="Invoice Checked By (Operations Manager)" value={text(po.opsInvoiceCheckedBy)} />
-              <Field label="Invoice Verified (Finance)" value={po.invoiceVerified ? 'Yes' : ''} />
-              <Field label="Payment Approved (F&A)" value={po.ceoPayApproved ? 'Yes' : ''} />
-              <Field label="Paid From Bank" value={text(po.paymentBankNo)} />
-              <Field label="Payment Voucher" value={text(po.paymentDocNo)} />
-              <Field label="LPR Closed" value={po.lprClosed ? 'Yes' : ''} />
-            </DocCard>
-          ) : null}
-        </div>
+        </ChainDocBlock>
       ) : null}
 
       {poCurrency ? (
@@ -619,14 +772,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           Currency Code is {poCurrency} on this local PO. Local purchase must keep Currency Code blank — use Fix Local
           Currency.
         </StatusNotice>
-      ) : null}
-      {technicalComment ? (
-        <p className="rounded-md border border-teal-100 bg-white/70 px-3 py-2">
-          <span className="text-xs text-slate-500">Technical Recommendation</span>
-          <br />
-          {technicalComment}
-          {text(rfq?.techReviewedBy) ? ` — ${text(rfq?.techReviewedBy)}` : ''}
-        </p>
       ) : null}
       {text(po?.sendBackComment || rfq?.sendBackComment) ? (
         <StatusNotice tone="warning" className="">
@@ -653,12 +798,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                   <th className="px-3 py-2 font-medium">Quote Received Date</th>
                   <th className="px-3 py-2 font-medium">Attachments</th>
                   <th className="px-3 py-2 font-medium">Winner</th>
+                  {canEditQuotes ? <th className="px-3 py-2" aria-label="Quote actions" /> : null}
                 </tr>
               </thead>
               <tbody>
                 {quotes.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-3 text-slate-500">
+                    <td colSpan={canEditQuotes ? 8 : 7} className="px-3 py-3 text-slate-500">
                       No vendor quotes yet.
                     </td>
                   </tr>
@@ -707,13 +853,46 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                         </Button>
                       ) : null}
                     </td>
+                    {canEditQuotes ? (
+                      <td className="whitespace-nowrap px-2 py-1 text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => editQuote(quote)}
+                          aria-label={`Edit quote from ${quote.vendorName || quote.vendorNo}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-600 hover:bg-red-50"
+                          disabled={busy}
+                          onClick={() => void deleteQuote(quote)}
+                          aria-label={`Delete quote from ${quote.vendorName || quote.vendorNo}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           {canEditQuotes ? (
-            <div className="grid grid-cols-1 gap-2 rounded-md border border-teal-100 bg-white/70 p-3 sm:grid-cols-5">
+            <div
+              className={cn(
+                'grid grid-cols-1 gap-2 rounded-md border bg-white/70 p-3 sm:grid-cols-5',
+                quoteForm.lineNo ? 'border-teal-300 bg-teal-50/50' : 'border-teal-100',
+              )}
+            >
+              {quoteForm.lineNo ? (
+                <p className="text-sm font-semibold text-slate-900 sm:col-span-5">Edit the quote from {quoteForm.vendorNo}</p>
+              ) : null}
               <div className="space-y-1">
                 <Label htmlFor={`lpr-quote-vendor-${request.id}`}>Vendor No.</Label>
                 <Input
@@ -763,14 +942,63 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                   disabled={busy}
                 />
               </div>
-              <div className="sm:col-span-5">
-                <Button type="button" variant="outline" disabled={busy} onClick={() => void saveQuote()}>
-                  Save vendor quote
+              <div className="flex gap-2 sm:col-span-5">
+                {quoteForm.lineNo ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
+                    }
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button type="button" variant={quoteForm.lineNo ? 'gradient' : 'outline'} disabled={busy} onClick={() => void saveQuote()}>
+                  {quoteForm.lineNo ? 'Save changes' : 'Save vendor quote'}
                 </Button>
               </div>
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {po ? (
+        <ChainDocBlock id="lpr-doc-po">
+          <EditableCardSection
+            title={`Purchase Order ${poNo}`}
+            fields={poFields}
+            specs={poSpecs}
+            canEdit={editing.po}
+            showAll
+            onSave={(changed) => saveDoc('UPDATE_PO_HEADER', poNo, changed, `${poNo} saved in Business Central.`)}
+          />
+          {poLines ? (
+            <BcLinesTable
+              title="Lines"
+              lines={poLines}
+              columns={[...ORDER_LINE_COLUMNS, ...RECEIVE_LINE_COLUMNS]}
+              docNo={poNo}
+              editable={editing.po}
+              busy={busy}
+              totalHeader="Line Amount"
+              onSave={(isNew, payload) =>
+                saveDoc(isNew ? 'ADD_PO_LINE' : 'UPDATE_PO_LINE', poNo, payload, isNew ? `Line added to ${poNo}.` : `Line saved on ${poNo}.`)
+              }
+              onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
+            />
+          ) : null}
+          {editing.receive && poLines ? (
+            <PoReceiveEditor
+              poNo={poNo}
+              lines={poLines}
+              vendorShipmentNo={text(po.vendorShipmentNo)}
+              busy={busy}
+              onSave={(payload) => saveDoc('UPDATE_PO_RECEIVE', poNo, payload, `Receive quantities saved on ${poNo}.`)}
+            />
+          ) : null}
+        </ChainDocBlock>
       ) : null}
 
       {storeCardOpen && storeReqNo ? (

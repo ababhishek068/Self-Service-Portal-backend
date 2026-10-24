@@ -41,6 +41,17 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   UPDATE_LPR_HEADER: { roles: PROCUREMENT, needsPayload: true },
   ADD_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
   DELETE_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
+  /** BC 1.0.3.569: Local RFQ card and lines, vendor quote delete, Local PO card and lines, receive quantities. */
+  UPDATE_RFQ_HEADER: { roles: PROCUREMENT, needsPayload: true },
+  UPDATE_RFQ_LINE: { roles: PROCUREMENT, needsPayload: true },
+  ADD_RFQ_LINE: { roles: PROCUREMENT, needsPayload: true },
+  DELETE_RFQ_LINE: { roles: PROCUREMENT, needsPayload: true },
+  DELETE_VENDOR_QUOTE: { roles: PROCUREMENT, needsPayload: true },
+  UPDATE_PO_HEADER: { roles: PROCUREMENT, needsPayload: true },
+  UPDATE_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
+  ADD_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
+  DELETE_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
+  UPDATE_PO_RECEIVE: { roles: ['operations'], needsPayload: true },
   APPROVE_LPR_OPS: { roles: ['operationsManager'] },
   APPROVE_LPR_FAD: { roles: ['fad'] },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
@@ -78,6 +89,16 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   UPDATE_LPR_HEADER: 'Save LPR card',
   ADD_LPR_LINE: 'Add LPR line',
   DELETE_LPR_LINE: 'Delete LPR line',
+  UPDATE_RFQ_HEADER: 'Save Local RFQ',
+  UPDATE_RFQ_LINE: 'Save RFQ line',
+  ADD_RFQ_LINE: 'Add RFQ line',
+  DELETE_RFQ_LINE: 'Delete RFQ line',
+  DELETE_VENDOR_QUOTE: 'Delete vendor quote',
+  UPDATE_PO_HEADER: 'Save Purchase Order',
+  UPDATE_PO_LINE: 'Save PO line',
+  ADD_PO_LINE: 'Add PO line',
+  DELETE_PO_LINE: 'Delete PO line',
+  UPDATE_PO_RECEIVE: 'Save receive quantities',
   APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
@@ -209,6 +230,24 @@ export function localPurchaseCardEditable(chain: LocalPurchaseChain) {
   const status = stageKey((lpr as Record<string, unknown>).status)
   if (lprStatus === 'DRAFT') return status === '' || status === 'OPEN'
   return (lprStatus === 'APPROVED' || status === 'RELEASED') && !chainText(lpr.createdRfqNo) && !chain.rfq
+}
+
+/**
+ * Which cards in the chain the signed-in user may edit now, by BC's rule for each card: the LPR
+ * (localPurchaseCardEditable), the Local RFQ and the Local PO while BC reports their lines unlocked
+ * (BC 1.0.3.569 sends linesLocked; older apps never unlock), and the receive quantities at PO Released.
+ * Procurement edits the documents; the Store Keeper enters what is received. BC checks again on save.
+ */
+export function localPurchaseEditing(chain: LocalPurchaseChain, roles: LocalPurchaseRole[]) {
+  const procurement = roles.some((role) => PROCUREMENT.includes(role))
+  const unlocked = (doc: Record<string, unknown> | undefined) =>
+    Boolean(doc) && String(doc?.linesLocked ?? '').toLowerCase() === 'false' && Array.isArray(doc?.lines)
+  return {
+    lpr: procurement && localPurchaseCardEditable(chain),
+    rfq: procurement && unlocked(chain.rfq) && !chainText(chain.rfq?.createdPoNo),
+    po: procurement && unlocked(chain.po),
+    receive: roles.includes('operations') && stageKey(chain.po?.flowStage) === 'PO RELEASED' && Array.isArray(chain.po?.lines),
+  }
 }
 
 /** True once the Local PO's goods are received (GRN posted), so the store can issue them. */
