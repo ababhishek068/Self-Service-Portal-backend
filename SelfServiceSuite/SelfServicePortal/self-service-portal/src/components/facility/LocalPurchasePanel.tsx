@@ -18,6 +18,8 @@ import {
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
+import { useLookupOptions } from '@/hooks/useLookupOptions'
+import { LookupCombobox } from '@/components/shared/LookupCombobox'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
@@ -190,6 +192,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     retry: false,
   })
   const isFinanceChecker = access.roles.includes('financeChecker')
+  // BC Vendor list for the quote form's Vendor No. lookup (Procurement only).
+  const vendors = useLookupOptions(
+    'vendors',
+    [],
+    access.enabled && access.roles.some((role) => role === 'procurement' || role === 'projectProcurement'),
+  )
   const bankQuery = useQuery({
     queryKey: ['local-purchase', 'bank-accounts'],
     queryFn: getLocalPurchaseBankAccounts,
@@ -886,21 +894,23 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           {canEditQuotes ? (
             <div
               className={cn(
-                'grid grid-cols-1 gap-2 rounded-md border bg-white/70 p-3 sm:grid-cols-5',
+                'grid grid-cols-1 gap-2 rounded-md border bg-white/70 p-3 sm:grid-cols-3 lg:grid-cols-6',
                 quoteForm.lineNo ? 'border-teal-300 bg-teal-50/50' : 'border-teal-100',
               )}
             >
               {quoteForm.lineNo ? (
-                <p className="text-sm font-semibold text-slate-900 sm:col-span-5">Edit the quote from {quoteForm.vendorNo}</p>
+                <p className="text-sm font-semibold text-slate-900 sm:col-span-3 lg:col-span-6">Edit the quote from {quoteForm.vendorNo}</p>
               ) : null}
-              <div className="space-y-1">
+              <div className="space-y-1 sm:col-span-3 lg:col-span-2">
                 <Label htmlFor={`lpr-quote-vendor-${request.id}`}>Vendor No.</Label>
-                <Input
+                <LookupCombobox
                   id={`lpr-quote-vendor-${request.id}`}
+                  options={vendors.options}
+                  loading={vendors.isLoading}
                   value={quoteForm.vendorNo}
-                  onChange={(event) => setQuoteForm({ ...quoteForm, vendorNo: event.target.value })}
-                  placeholder="ABH-VEN000001"
-                  disabled={busy}
+                  onChange={(vendorNo) => setQuoteForm((current) => ({ ...current, vendorNo }))}
+                  placeholder="Type vendor no. or name"
+                  disabled={busy || Boolean(quoteForm.lineNo)}
                 />
               </div>
               <div className="space-y-1">
@@ -942,7 +952,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                   disabled={busy}
                 />
               </div>
-              <div className="flex gap-2 sm:col-span-5">
+              <div className="flex gap-2 sm:col-span-3 lg:col-span-6">
                 {quoteForm.lineNo ? (
                   <Button
                     type="button"

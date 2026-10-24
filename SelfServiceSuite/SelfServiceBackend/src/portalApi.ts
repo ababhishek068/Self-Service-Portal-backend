@@ -454,7 +454,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v268 — 1.0.3.427 (Edit at every Local Purchase step like BC: RFQ, vendor quotes, PO, receive; for BC 1.0.3.569)'
+export const PORTAL_API_BUILD = 'v269 — 1.0.3.428 (Vendor No. lookup from BC on vendor quotes; edit at every Local Purchase step; for BC 1.0.3.569)'
 
 interface LookupSpec {
   service: string
