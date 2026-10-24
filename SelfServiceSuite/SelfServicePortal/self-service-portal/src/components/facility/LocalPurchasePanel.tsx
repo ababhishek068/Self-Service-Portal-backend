@@ -770,6 +770,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         <StoreRequisitionCardDialog
           lprRequestId={request.id}
           storeRequisitionNo={storeReqNo}
+          storeRequest={state.chain.storeRequest as Record<string, unknown> | undefined}
           onClose={() => setStoreCardOpen(false)}
         />
       ) : null}

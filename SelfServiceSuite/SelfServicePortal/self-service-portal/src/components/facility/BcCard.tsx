@@ -44,7 +44,8 @@ export function CardSection({
     <section>
       <h3 className="border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">{title}</h3>
       {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
-      <div className="mt-2 grid gap-x-10 md:grid-cols-2 xl:grid-cols-3">
+      {/* Two columns, as on the BC card. */}
+      <div className="mt-2 grid gap-x-16 md:grid-cols-2">
         {visible.map((field) => (
           <CardRow key={field.label} label={field.label} value={field.value} emphasis={field.emphasis} />
         ))}

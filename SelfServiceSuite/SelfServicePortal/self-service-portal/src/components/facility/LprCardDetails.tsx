@@ -180,9 +180,8 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     },
   ]
 
-  const hiddenCount =
-    generalFields.filter((field) => !field.key).length +
-    (storeReqNo && hasStoreDetails ? storeFields.filter((field) => !field.key).length : 0)
+  // Store Request shows in full, as on the BC card; General opens with Show all details.
+  const hiddenCount = generalFields.filter((field) => !field.key).length
 
   return (
     <div className="space-y-6">
@@ -192,7 +191,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           intro="Same details as Store Req Header Approved. The assigned Procurement Officer prepares the LPR and submits it; the Operations Manager, then FAD, review requester, purpose and lines and approve. RFQ starts only after FAD approval."
           // Until the store requisition loads, only its number.
           fields={hasStoreDetails ? storeFields : storeFields.slice(0, 1)}
-          showAll={showAll}
+          showAll
         />
       ) : null}
       <CardSection title="General" fields={generalFields} showAll={showAll} />
@@ -206,6 +205,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
         <StoreRequisitionCardDialog
           lprRequestId={request.id}
           storeRequisitionNo={storeReqNo}
+          storeRequest={chain?.storeRequest as Row | undefined}
           onClose={() => setStoreCardOpen(false)}
         />
       ) : null}

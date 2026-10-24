@@ -26,10 +26,13 @@ function requestTypeLabel(value: unknown) {
 export function StoreRequisitionCardDialog({
   lprRequestId,
   storeRequisitionNo,
+  storeRequest,
   onClose,
 }: {
   lprRequestId: string
   storeRequisitionNo: string
+  /** The LPR chain's Store Request values from BC (1.0.3.567+), used before the portal's own reading. */
+  storeRequest?: Row
   onClose: () => void
 }) {
   const query = useLprStoreRequisition(lprRequestId, true)
@@ -45,7 +48,10 @@ export function StoreRequisitionCardDialog({
   const process = (query.data?.process ?? null) as Row | null
   const payload = (request?.payload ?? {}) as Row
   const links = (process?.links ?? {}) as Row
-  const store = request ? storeRequestFromRequisition(request, process) : {}
+  const store: Row = {
+    ...(request ? storeRequestFromRequisition(request, process) : {}),
+    ...Object.fromEntries(Object.entries(storeRequest ?? {}).filter(([, value]) => pick(value))),
+  }
   const { requestedLines, offers } = request
     ? storeOfferLines(request)
     : { requestedLines: [], offers: [] }
@@ -56,10 +62,11 @@ export function StoreRequisitionCardDialog({
     { label: 'Required Date', value: dateValue(pick(store.requiredDate)) },
     { label: 'Division Code', value: pick(store.divisionCode) },
     { label: 'Department Code', value: pick(store.departmentCode) },
+    { label: 'Workstation Code', value: pick(store.workstationCode, payload.ShortcutDimension3Code) },
     { label: 'Request Description', value: pick(store.requestDescription) },
     { label: 'Purpose / Justification', value: pick(store.purpose), emphasis: 'strong' },
-    { label: 'Priority', value: PRIORITY_LABELS[pick(payload.Priority)] ?? pick(payload.Priority) },
-    { label: 'Responsibility Center', value: pick(payload.ResponsibilityCenter, payload.Responsibility_Center) },
+    { label: 'Priority', value: pick(store.priority) || PRIORITY_LABELS[pick(payload.Priority)] || pick(payload.Priority) },
+    { label: 'Responsibility Center', value: pick(store.responsibilityCenter, payload.ResponsibilityCenter, payload.Responsibility_Center) },
     { label: 'Status', value: request ? <StatusBadge status={request.status} /> : '' },
     { label: 'Linked LPR No.', value: pick(links.lprNo), emphasis: 'user' },
     { label: 'LPR Requested By', value: pick(store.lprRequestedBy) },
