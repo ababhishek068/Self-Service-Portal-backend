@@ -108,7 +108,7 @@ export function StoreRequisitionCardDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`Store Requisition ${storeRequisitionNo}`}
-        className="relative flex max-h-[94vh] w-[min(96vw,110rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="relative flex max-h-[94vh] mx-auto w-[min(97vw,84rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
         <div className="h-1.5 w-full shrink-0 bg-gradient-to-r from-[var(--portal-navy)] to-[var(--portal-green)]" />
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">

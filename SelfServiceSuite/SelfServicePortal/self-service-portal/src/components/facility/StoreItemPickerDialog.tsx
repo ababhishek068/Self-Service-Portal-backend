@@ -109,7 +109,7 @@ export function StoreItemPickerDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`Add Item to Issue — ${requestNo}`}
-        className="relative flex max-h-[94vh] w-[min(96vw,96rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="relative flex max-h-[94vh] mx-auto w-[min(97vw,84rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
         <div className="h-1.5 w-full shrink-0 bg-gradient-to-r from-[var(--portal-navy)] to-[var(--portal-green)]" />
 
