@@ -52,6 +52,7 @@ import {
   cachedLocalPurchaseAccess,
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
+  localPurchaseCardEditable,
   localPurchaseNextActions,
   localPurchaseProgress,
   parseSoapJson,
@@ -453,7 +454,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v266 — 1.0.3.425 (Store dialogs centered at 84rem, BC cards up to 3 columns; for BC 1.0.3.567)'
+export const PORTAL_API_BUILD = 'v267 — 1.0.3.426 (LPR card and lines editable like BC for the Procurement Officer; for BC 1.0.3.568)'
 
 interface LookupSpec {
   service: string
@@ -2347,6 +2348,16 @@ function mapPurchaseLine(row: ODataRecord, index: number, header?: ODataRecord) 
       'RFQ_Remarks',
     ]),
     suggestedSupplier: text(row, ['SuggestedSupplier', 'Suggested_Supplier']),
+    // Raw Purchase Requisition Subform values, for the BC-style LPR lines.
+    bcType: text(row, ['Type', 'type']),
+    bcNo: text(row, ['No', 'No_']),
+    bcDescription: itemName,
+    portalItemCode: text(row, ['PortalItemCode', 'Portal_Item_Code']),
+    requestCategory: text(row, ['RequestCategory', 'Request_Category']),
+    extendedDescription: text(row, ['ExtendedDescription', 'Extended_Description']),
+    unitOfMeasureCode: text(row, ['UnitOfMeasureCode', 'Unit_of_Measure_Code']),
+    vatProdPostingGroup: text(row, ['VATProdPostingGroup', 'VAT_Prod_Posting_Group']),
+    lineAmount: number(row, ['LineAmount', 'Line_Amount']),
     remarks: text(row, [
       'PortalRemarks',
       'Portal_Remarks',
@@ -5064,7 +5075,15 @@ export function buildPortalApiRouter() {
       const quotes = rfqNo
         ? parseSoapJson((await callSoapMethod('PortalListVendorQuotes', { rfqNo })).returnValue)
         : { rfqNo: '', quotes: [] }
-      res.json({ chain, quotes, roles, nextActions: localPurchaseNextActions(chain, roles) })
+      res.json({
+        chain,
+        quotes,
+        roles,
+        nextActions: localPurchaseNextActions(chain, roles),
+        // The assigned Procurement Officer edits the card as in BC (BC checks the officer again).
+        cardEditable:
+          localPurchaseCardEditable(chain) && roles.some((role) => role === 'procurement' || role === 'projectProcurement'),
+      })
     }),
   )
 
@@ -5151,6 +5170,15 @@ export function buildPortalApiRouter() {
         actionComment,
         actorUserID: authUser.userID,
         payloadJson,
+      }).catch((error: unknown) => {
+        if (error instanceof Error && /Unsupported Local Purchase action/i.test(error.message)) {
+          throw portalError(
+            'Editing the LPR card from the portal needs Business Central 1.0.3.568. Until it is published, edit it on the BC Purchase Requisition Card.',
+            409,
+            'BC_UPDATE_REQUIRED',
+          )
+        }
+        throw error
       })
       res.json({
         result: parseSoapJson(result.returnValue),

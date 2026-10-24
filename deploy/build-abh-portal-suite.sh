@@ -115,8 +115,11 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.567.app,
-publish with docs/ERP-Publish-1.0.3.567.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.568.app,
+publish with docs/ERP-Publish-1.0.3.568.ps1).
+1.0.3.568: the assigned Procurement Officer edits the LPR card from the portal as in BC — the
+General fields and the Purchase Requisition Subform lines (New Line / edit / Delete Line) —
+under the card's own rule (Draft and Open, or after approval until the RFQ exists).
 1.0.3.567: the portal LPR chain sends every Purchase Requisition Card field and the Store
 Request (review before Approve) values, so the portal LPR page shows the same card as BC.
 1.0.3.560: Consumable / Fixed Asset is chosen on each portal line; the header Request Type

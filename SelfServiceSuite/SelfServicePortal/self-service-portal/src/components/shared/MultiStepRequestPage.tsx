@@ -170,6 +170,8 @@ export interface MultiStepRequestConfig {
    * stepper, Edit / Request Approval / Cancel / Delete or line edits; `detailSupplement` holds the ribbon.
    */
   bcCard?: (request: PortalRequest) => boolean
+  /** Lines of a `bcCard` document, laid out like its BC subform (replaces the line section). */
+  bcCardLines?: (ctx: { request: PortalRequest }) => ReactNode
   /** Module-specific detail actions (e.g. Post Asset Transfer). */
   extraDetailActions?: Array<{
     id: string
@@ -1285,7 +1287,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 ) : null}
 
                 {/* Lines before attachments so settlement/line totals are visible without scrolling past empty attachments */}
-                {config.line ? (
+                {bcCard && config.bcCardLines ? (
+                  <div className="border-t border-slate-200 pt-4">{config.bcCardLines({ request: selected })}</div>
+                ) : config.line ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">{config.line.label}</h3>
                     {editable && config.line.canAdd !== false ? (

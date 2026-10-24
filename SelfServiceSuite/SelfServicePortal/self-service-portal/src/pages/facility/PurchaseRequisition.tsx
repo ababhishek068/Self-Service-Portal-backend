@@ -4,6 +4,7 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { PurchaseOperationsPanel } from '@/components/facility/PurchaseOperationsPanel'
 import { LprCardDetails } from '@/components/facility/LprCardDetails'
 import { LocalPurchasePanel } from '@/components/facility/LocalPurchasePanel'
+import { LprLinesSubform } from '@/components/facility/LprLinesSubform'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
@@ -120,6 +121,7 @@ export function PurchaseRequisition() {
       detailOverride={({ request, details }) => <LprCardDetails request={request} fallback={details} />}
       // A store LPR runs on its BC card actions (the Local Purchase panel), not the draft buttons.
       bcCard={(request) => request.payload?.LocalPurchaseFromStore === true}
+      bcCardLines={({ request }) => <LprLinesSubform request={request} />}
       initialMode={searchParams.get('new') === '1' ? 'create' : 'list'}
       headerSchema={purchaseHeaderSchema}
       headerDefaults={{

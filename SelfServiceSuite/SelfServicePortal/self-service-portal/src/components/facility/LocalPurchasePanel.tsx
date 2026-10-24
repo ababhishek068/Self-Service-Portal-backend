@@ -500,6 +500,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           ) : ribbon.length > 0 ? (
             <StatusNotice tone="attention" className="">
               <p>Your step: {ribbon.map((action) => action.label).join(' · ')}</p>
+              {state.cardEditable ? (
+                <p className="mt-1 text-xs font-normal">
+                  You can change the card below first, as in Business Central: Edit on General, and New Line / edit /
+                  delete in the Purchase Requisition Subform.
+                </p>
+              ) : null}
               {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
             </StatusNotice>
           ) : waiting.length > 0 ? (
@@ -528,7 +534,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         </div>
       </div>
 
-      {updateLprLine ? (
+      {/* A store LPR edits its lines in the Purchase Requisition Subform (LprLinesSubform). */}
+      {updateLprLine && request.payload?.LocalPurchaseFromStore !== true ? (
         <LprDraftLineEditor
           lines={Array.isArray(request.payload?.lines) ? (request.payload.lines as Array<Record<string, unknown>>) : []}
           busy={busy}

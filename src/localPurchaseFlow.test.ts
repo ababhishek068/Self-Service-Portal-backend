@@ -6,6 +6,7 @@ import {
   clearLocalPurchaseAccessCache,
   hasBcLocalPurchaseRole,
   localPurchaseChainDocumentNos,
+  localPurchaseCardEditable,
   localPurchaseNextActions,
   localPurchaseProgress,
   parseBcLocalPurchaseRoles,
@@ -62,6 +63,9 @@ describe('assertLocalPurchaseActionAllowed', () => {
     const expected = [
       'SUBMIT_LPR_OPS',
       'UPDATE_LPR_LINE',
+      'UPDATE_LPR_HEADER',
+      'ADD_LPR_LINE',
+      'DELETE_LPR_LINE',
       'APPROVE_LPR_OPS',
       'APPROVE_LPR_FAD',
       'REJECT_LPR',
@@ -280,6 +284,21 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
   it('lists chain document numbers for the POST guard', () => {
     const nos = localPurchaseChainDocumentNos(demoChain({ rfqStage: 'PO Created', poStage: 'PO Released' }))
     assert.deepEqual([...new Set(nos)].sort(), ['ABH-PO000008', 'ABH-PQ000092', 'ABH-PQ000093'])
+  })
+
+  it('lets the LPR card be edited only where the BC card does', () => {
+    const lpr = (lprStatus: string, status: string, createdRfqNo = '') => ({
+      storeRequisitionNo: 'ABH-SR000210',
+      lpr: { no: 'ABH-PQ000111', lprStatus, status, createdRfqNo },
+    })
+    assert.equal(localPurchaseCardEditable(lpr('Draft', 'Open')), true)
+    assert.equal(localPurchaseCardEditable(lpr('Draft', 'Released')), false)
+    assert.equal(localPurchaseCardEditable(lpr('Pending Operations Manager', 'Open')), false)
+    assert.equal(localPurchaseCardEditable(lpr('Pending Finance & Admin', 'Open')), false)
+    assert.equal(localPurchaseCardEditable(lpr('Approved', 'Released')), true)
+    assert.equal(localPurchaseCardEditable(lpr('Approved', 'Released', 'ABH-PQ000112')), false)
+    assert.equal(localPurchaseCardEditable(lpr('Converted to RFQ', 'Released', 'ABH-PQ000112')), false)
+    assert.equal(localPurchaseCardEditable({}), false)
   })
 
   it('reports the BC step on the store requisition, and received only after the GRN', () => {

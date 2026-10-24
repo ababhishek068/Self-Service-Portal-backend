@@ -35,8 +35,12 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   // Owners mirror ABH Local Procurement's TestIs* checks (ABH Local Proc Setup user IDs).
   // Workflow per "ERP & BC – Staff Item-Asset Request to Payment Workflow" (meeting 18 Oct).
   SUBMIT_LPR_OPS: { roles: PROCUREMENT },
-  /** Step 7: quantity / description / specification on a Draft LPR line. */
+  /** Step 7: a Purchase Requisition Subform line (BC 1.0.3.568: every subform column). */
   UPDATE_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
+  /** BC 1.0.3.568: Purchase Requisition Card General fields, New Line and Delete Line. */
+  UPDATE_LPR_HEADER: { roles: PROCUREMENT, needsPayload: true },
+  ADD_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
+  DELETE_LPR_LINE: { roles: PROCUREMENT, needsPayload: true },
   APPROVE_LPR_OPS: { roles: ['operationsManager'] },
   APPROVE_LPR_FAD: { roles: ['fad'] },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
@@ -71,6 +75,9 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
 export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   SUBMIT_LPR_OPS: 'Submit to Operations Manager',
   UPDATE_LPR_LINE: 'Save LPR line',
+  UPDATE_LPR_HEADER: 'Save LPR card',
+  ADD_LPR_LINE: 'Add LPR line',
+  DELETE_LPR_LINE: 'Delete LPR line',
   APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
@@ -188,6 +195,20 @@ function chainText(value: unknown) {
 
 function stageKey(value: unknown) {
   return chainText(value).toUpperCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * Whether the LPR card (General and lines) can be edited now — the BC card's rule (Internal
+ * Requisitions U, UpdateControls): Draft while Open, or after approval until the RFQ exists.
+ * BC also checks that the user is the assigned Procurement Officer.
+ */
+export function localPurchaseCardEditable(chain: LocalPurchaseChain) {
+  const lpr = chain.lpr
+  if (!lpr) return false
+  const lprStatus = stageKey(lpr.lprStatus)
+  const status = stageKey((lpr as Record<string, unknown>).status)
+  if (lprStatus === 'DRAFT') return status === '' || status === 'OPEN'
+  return (lprStatus === 'APPROVED' || status === 'RELEASED') && !chainText(lpr.createdRfqNo) && !chain.rfq
 }
 
 /** True once the Local PO's goods are received (GRN posted), so the store can issue them. */

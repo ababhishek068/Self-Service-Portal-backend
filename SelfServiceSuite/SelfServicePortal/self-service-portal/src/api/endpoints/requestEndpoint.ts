@@ -306,6 +306,8 @@ export interface LocalPurchaseState {
   quotes: { rfqNo?: string; quotes?: LocalPurchaseVendorQuote[] }
   roles: string[]
   nextActions: LocalPurchaseNextAction[]
+  /** BC card rule + Procurement role: the card (General and lines) can be edited (BC 1.0.3.568). */
+  cardEditable?: boolean
 }
 
 export interface LocalPurchaseWaitingItem {

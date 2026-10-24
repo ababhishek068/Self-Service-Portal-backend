@@ -1,11 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
-import { ChevronDown } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, Pencil } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { getLocalPurchaseState } from '@/api/endpoints/requestEndpoint'
+import { getLocalPurchaseState, runLocalPurchaseAction } from '@/api/endpoints/requestEndpoint'
+import { useToast } from '@/components/feedback/ToastProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { CardSection, type CardField } from '@/components/facility/BcCard'
+import { CardEditor, CardSection, type CardEditorKind, type CardField } from '@/components/facility/BcCard'
 import { dateTimeValue, dateValue, pick, text } from '@/components/facility/bcCardValues'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
 import { storeRequestFromRequisition, useLprStoreRequisition } from '@/components/facility/lprStoreRequisition'
@@ -22,6 +23,26 @@ function yesNo(value: unknown) {
   return raw === 'true' || raw === 'yes' ? 'Yes' : 'No'
 }
 
+const SOURCE_OPTIONS = [
+  { value: '0', label: ' ' },
+  { value: '1', label: 'Local (Inhouse Local)' },
+  { value: '2', label: 'Foreign (Inhouse / Salable Foreign)' },
+]
+const PRIORITY_OPTIONS = ['Low', 'Normal', 'High', 'Urgent'].map((label, index) => ({ value: String(index), label }))
+
+function sourceCode(caption: string) {
+  if (/foreign/i.test(caption)) return '2'
+  return /local/i.test(caption) ? '1' : '0'
+}
+
+function priorityCode(caption: string) {
+  const index = PRIORITY_OPTIONS.findIndex((option) => caption.toLowerCase().startsWith(option.label.toLowerCase()))
+  return String(index < 0 ? 1 : index)
+}
+
+/** An editable General field: BC payload key, editor and its value now. */
+type EditSpec = { key: string; kind: CardEditorKind; initial: string; options?: Array<{ value: string; label: string }> }
+
 /**
  * Purchase Requisition (LPR) details laid out like the BC Purchase Requisition Card: Store Request
  * (review before Approve) and General, in the same field order. Other purchase requests keep the
@@ -31,6 +52,17 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
   const access = useLocalPurchaseAccess()
   const [showAll, setShowAll] = useState(false)
   const [storeCardOpen, setStoreCardOpen] = useState(false)
+  // General being edited: payload key → value (null when not editing).
+  const [draft, setDraft] = useState<Record<string, string> | null>(null)
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const saveMutation = useMutation({
+    mutationFn: (body: Parameters<typeof runLocalPurchaseAction>[1]) => runLocalPurchaseAction(request.id, body),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['local-purchase', request.id] })
+      await queryClient.invalidateQueries({ queryKey: ['facility', 'purchase-requisition'] })
+    },
+  })
   // Same query as the Local Purchase panel, so BC is called once.
   const stateQuery = useQuery({
     queryKey: ['local-purchase', request.id],
@@ -157,7 +189,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
       label: 'Department',
       value: pick(lpr.department, payloadValue(payload, 'ShortcutDimension3Code', 'Shortcut_Dimension_3_Code')),
     },
-    ...(legacyOfficer && legacyOfficer !== officer
+    ...((legacyOfficer && legacyOfficer !== officer) || draft
       ? [{ label: 'Procurement Officer (Requisition)', value: legacyOfficer, emphasis: 'user' as const }]
       : []),
     { label: 'Requisition No.', value: pick(lpr.requisitionNo, payloadValue(payload, 'RequisitionNo', 'Requisition_No')) },
@@ -180,6 +212,94 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     },
   ]
 
+  // The fields the BC card lets the user edit (Internal Requisitions U, General), with their values now.
+  const isoDate = (value: unknown) => text(value).slice(0, 10)
+  const editSpecs: Record<string, EditSpec> = {
+    'Procurement Source': { key: 'procurementSource', kind: 'select', options: SOURCE_OPTIONS, initial: sourceCode(pick(lpr.procurementSource)) },
+    Priority: { key: 'priority', kind: 'select', options: PRIORITY_OPTIONS, initial: priorityCode(pick(lpr.priority)) },
+    'Destination Store': { key: 'destinationStore', kind: 'code', initial: pick(lpr.destinationStore) },
+    'Quote Due Date': { key: 'quoteDueDate', kind: 'date', initial: isoDate(lpr.quoteDueDate) },
+    'Minimum Quotes Required': { key: 'minQuotesRequired', kind: 'number', initial: pick(lpr.minQuotesRequired) || '0' },
+    'Document Date': { key: 'documentDate', kind: 'date', initial: isoDate(pick(lpr.documentDate, payload.DocumentDate)) },
+    'Required By Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(pick(lpr.requiredByDate, payload.RequestedReceiptDate)) },
+    'Request Summary': { key: 'requestSummary', kind: 'text', initial: pick(lpr.requestSummary, payload.PostingDescription) },
+    'Purpose / Justification': { key: 'justification', kind: 'text', initial: pick(lpr.justification, payload.Justification) },
+    'Technical Requirement': { key: 'technicalRequirement', kind: 'text', initial: pick(lpr.technicalRequirement, payload.TechnicalRequirement) },
+    'Other Requirements / Notes': { key: 'otherRequirements', kind: 'text', initial: pick(lpr.otherRequirements, payload.OtherRequirements) },
+    'Approval Comments': { key: 'approvalComments', kind: 'text', initial: pick(lpr.approvalComments) },
+    'Rejection Reason': { key: 'rejectionReason', kind: 'text', initial: pick(lpr.rejectionReason) },
+    'Cancellation Reason': { key: 'cancellationReason', kind: 'text', initial: pick(lpr.cancellationReason) },
+    'Responsibility Center': { key: 'responsibilityCenter', kind: 'code', initial: pick(lpr.responsibilityCenter, payload.ResponsibilityCenter) },
+    'Division Code': { key: 'divisionCode', kind: 'code', initial: pick(lpr.divisionCode, payload.ShortcutDimension1Code) },
+    'Department Code': { key: 'departmentCode', kind: 'code', initial: pick(lpr.departmentCode, payload.ShortcutDimension2Code) },
+    Department: { key: 'department', kind: 'code', initial: pick(lpr.department, payload.ShortcutDimension3Code) },
+    'Procurement Officer (Requisition)': { key: 'assignedProcurementOfficer', kind: 'code', initial: legacyOfficer },
+    'Employee No.': { key: 'employeeNo', kind: 'code', initial: pick(lpr.employeeNo, payload.EmployeeNo) },
+    'Imprest Memo No': { key: 'imprestMemoNo', kind: 'code', initial: pick(lpr.imprestMemoNo, payload.ImprestMemoNo) },
+    'Currency Code': { key: 'currencyCode', kind: 'code', initial: pick(lpr.currencyCode, payload.CurrencyCode) },
+    'Prices Including Tax': {
+      key: 'pricesIncludingVat',
+      kind: 'boolean',
+      initial: yesNo(lpr.pricesIncludingVat ?? payload.PricesIncludingVAT) === 'Yes' ? 'true' : 'false',
+    },
+  }
+  const canEdit = stateQuery.data?.cardEditable === true
+  const startEdit = () =>
+    setDraft(Object.fromEntries(Object.values(editSpecs).map((spec) => [spec.key, spec.initial])))
+  const shownGeneral: CardField[] = draft
+    ? generalFields.map((field) => {
+        const spec = editSpecs[field.label]
+        if (!spec) return field
+        return {
+          ...field,
+          editor: (
+            <CardEditor
+              kind={spec.kind}
+              label={field.label}
+              options={spec.options}
+              value={draft[spec.key] ?? ''}
+              disabled={saveMutation.isPending}
+              onChange={(value) => setDraft((current) => (current ? { ...current, [spec.key]: value } : current))}
+            />
+          ),
+        }
+      })
+    : generalFields
+  const saveGeneral = async () => {
+    if (!draft) return
+    const changed = Object.fromEntries(
+      Object.values(editSpecs)
+        .filter((spec) => (draft[spec.key] ?? '') !== spec.initial)
+        .map((spec) => [spec.key, draft[spec.key] ?? '']),
+    )
+    if (Object.keys(changed).length === 0) {
+      setDraft(null)
+      return
+    }
+    try {
+      await saveMutation.mutateAsync({ actionCode: 'UPDATE_LPR_HEADER', documentNo: text(lpr.no), payload: changed })
+      setDraft(null)
+      toast.success(`${text(lpr.no)} saved in Business Central.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save the LPR card', 'Save LPR card')
+    }
+  }
+  const generalAction = draft ? (
+    <div className="flex gap-2">
+      <Button type="button" size="sm" variant="outline" disabled={saveMutation.isPending} onClick={() => setDraft(null)}>
+        Cancel
+      </Button>
+      <Button type="button" size="sm" variant="gradient" disabled={saveMutation.isPending} onClick={() => void saveGeneral()}>
+        {saveMutation.isPending ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+  ) : canEdit ? (
+    <Button type="button" size="sm" variant="outline" onClick={startEdit}>
+      <Pencil className="h-4 w-4" />
+      Edit
+    </Button>
+  ) : null
+
   // Store Request shows in full, as on the BC card; General opens with Show all details.
   const hiddenCount = generalFields.filter((field) => !field.key).length
 
@@ -194,7 +314,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           showAll
         />
       ) : null}
-      <CardSection title="General" fields={generalFields} showAll={showAll} />
+      <CardSection title="General" fields={shownGeneral} showAll={showAll || Boolean(draft)} action={generalAction} />
       <div className="flex justify-center">
         <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setShowAll((open) => !open)} aria-expanded={showAll}>
           {showAll ? 'Show fewer details' : `Show all details (${hiddenCount} more)`}
