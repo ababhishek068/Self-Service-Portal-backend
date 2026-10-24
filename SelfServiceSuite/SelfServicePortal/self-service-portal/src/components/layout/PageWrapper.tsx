@@ -18,7 +18,7 @@ export function PageWrapper({ title, description, actions, children, showPageHea
 
   return (
     <div className="px-3 py-4 sm:px-4 sm:py-5 lg:px-6">
-      <div className="mx-auto max-w-7xl">
+      <div className="w-full">
         {(showPageHeading || actions) && (
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             {showPageHeading ? (

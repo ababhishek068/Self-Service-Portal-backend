@@ -13,7 +13,7 @@ export function PortalFormCard({ title, children, className, allowOverflow }: Po
   return (
     <div
       className={cn(
-        'portal-form-card animate-page-in mx-auto w-full max-w-5xl',
+        'portal-form-card animate-page-in w-full',
         allowOverflow && 'portal-form-card-overflow',
         className,
       )}

@@ -486,7 +486,7 @@ export function IctHelpdesk() {
       ) : null}
 
       {mode === 'detail' && selected ? (
-        <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <section className="space-y-4 rounded-2xl border border-[var(--portal-card-border)] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>

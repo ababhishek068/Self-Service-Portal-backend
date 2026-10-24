@@ -1163,7 +1163,7 @@ export function LeaveRequest() {
     >
       <form
         onSubmit={handleSubmit}
-        className="portal-form-card portal-leave-request-form animate-page-in relative z-20 mx-auto w-full max-w-5xl"
+        className="portal-form-card portal-leave-request-form animate-page-in relative z-20 w-full"
       >
         <div className="portal-form-card-header relative px-4 py-3 text-center text-sm font-semibold tracking-wide text-white sm:text-base">
           New Leave Request
