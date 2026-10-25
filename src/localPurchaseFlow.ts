@@ -507,3 +507,18 @@ export function parseSoapJson(returnValue: unknown): Record<string, unknown> {
     return { raw }
   }
 }
+
+/** BC vendors for the vendor-quote Vendor No. lookup: codeunit rows ({no, name}) or OData rows ({No, Name}). */
+export function normalizeLprVendors(rows: unknown): Array<{ no: string; name: string }> {
+  const seen = new Set<string>()
+  const vendors: Array<{ no: string; name: string }> = []
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row !== 'object') continue
+    const record = row as Record<string, unknown>
+    const no = String(record.no ?? record.No ?? '').trim()
+    if (!no || seen.has(no.toUpperCase())) continue
+    seen.add(no.toUpperCase())
+    vendors.push({ no, name: String(record.name ?? record.Name ?? '').trim() })
+  }
+  return vendors
+}

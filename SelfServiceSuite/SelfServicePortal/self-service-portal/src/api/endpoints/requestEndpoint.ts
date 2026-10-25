@@ -422,6 +422,17 @@ export async function getLocalPurchaseProjects() {
   return authGet<{ projects: LocalPurchaseProject[] }>('/api/local-purchase/projects')
 }
 
+export interface LocalPurchaseVendor {
+  no: string
+  name?: string
+}
+
+/** BC vendors for the vendor-quote Vendor No. lookup (Procurement). */
+export async function getLocalPurchaseVendors() {
+  requireAuthApiUrl()
+  return authGet<{ vendors: LocalPurchaseVendor[] }>('/api/local-purchase/vendors')
+}
+
 /** BC bank accounts for Pay Vendor & Close LPR (Finance Checker). */
 export async function getLocalPurchaseBankAccounts() {
   requireAuthApiUrl()

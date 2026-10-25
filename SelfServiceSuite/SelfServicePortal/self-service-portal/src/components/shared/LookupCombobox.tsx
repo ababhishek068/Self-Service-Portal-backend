@@ -18,6 +18,7 @@ export function LookupCombobox({
   placeholder,
   disabled,
   loading,
+  emptyText,
 }: {
   id?: string
   options: LookupOption[]
@@ -26,6 +27,8 @@ export function LookupCombobox({
   placeholder?: string
   disabled?: boolean
   loading?: boolean
+  /** Shown in the list when the lookup returned nothing (typed codes are then kept as entered). */
+  emptyText?: string
 }) {
   const listId = useId()
   // Text being typed (null when showing the chosen value).
@@ -96,14 +99,17 @@ export function LookupCombobox({
         }}
       />
       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-      {open && !disabled && (options.length > 0 || loading) ? (
+      {open && !disabled && (options.length > 0 || loading || emptyText) ? (
         <ul
           id={listId}
           role="listbox"
           className="absolute z-30 mt-1 max-h-72 w-full min-w-[18rem] overflow-y-auto rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
         >
           {loading ? <li className="px-3 py-2 text-slate-500">Loading from Business Central…</li> : null}
-          {!loading && matches.length === 0 ? <li className="px-3 py-2 text-slate-500">No match in Business Central.</li> : null}
+          {!loading && options.length === 0 ? <li className="px-3 py-2 text-amber-700">{emptyText}</li> : null}
+          {!loading && options.length > 0 && matches.length === 0 ? (
+            <li className="px-3 py-2 text-slate-500">No match in Business Central.</li>
+          ) : null}
           {matches.map((option, index) => (
             <li
               key={option.value}

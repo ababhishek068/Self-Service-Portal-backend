@@ -55,6 +55,7 @@ import {
   localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseProgress,
+  normalizeLprVendors,
   parseSoapJson,
   resolveLocalPurchaseAccess,
   type LocalPurchaseChain,
@@ -454,7 +455,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v269 — 1.0.3.428 (Vendor No. lookup from BC on vendor quotes; edit at every Local Purchase step; for BC 1.0.3.569)'
+export const PORTAL_API_BUILD = 'v270 — 1.0.3.429 (BC Vendor list for vendor-quote Vendor No.; edit at every Local Purchase step; for BC 1.0.3.570)'
 
 interface LookupSpec {
   service: string
@@ -4967,6 +4968,32 @@ export function buildPortalApiRouter() {
       const bankAccounts = parseSoapJson(result.returnValue).bankAccounts
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({ bankAccounts: Array.isArray(bankAccounts) ? bankAccounts : [] })
+    }),
+  )
+
+  /**
+   * BC vendors for the vendor-quote Vendor No. lookup. Read through the procurement codeunit
+   * (Business Central 1.0.3.570+, no web service to publish); older BC falls back to QyVendorsList.
+   */
+  router.get(
+    '/local-purchase/vendors',
+    safe(async (req, res) => {
+      const { roles } = await requireLocalPurchaseAccess(user(req))
+      if (!roles.some((role) => role === 'procurement' || role === 'projectProcurement')) {
+        throw portalError('Only Procurement can list vendors for vendor quotes.', 403, 'LPR_ACTION_FORBIDDEN')
+      }
+      let vendors: Array<{ no: string; name: string }> = []
+      try {
+        const result = await callSoapMethod('PortalLprVendors', {})
+        vendors = normalizeLprVendors(parseSoapJson(result.returnValue).vendors)
+      } catch {
+        // Business Central before 1.0.3.570: try the OData vendor list below.
+      }
+      if (vendors.length === 0) {
+        vendors = normalizeLprVendors(await fetchOData('QyVendorsList', {}).catch(() => []))
+      }
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ vendors })
     }),
   )
 

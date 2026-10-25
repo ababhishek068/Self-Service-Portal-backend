@@ -10,6 +10,7 @@ import {
   localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseProgress,
+  normalizeLprVendors,
   parseBcLocalPurchaseRoles,
   resolveLocalPurchaseAccess,
   LOCAL_PURCHASE_ACTIONS,
@@ -412,5 +413,24 @@ describe('Local Purchase access from Business Central', () => {
     const access = await resolveLocalPurchaseAccess({ userID: '' }, async () => { called = true; return {} }, 1_000)
     assert.equal(access.enabled, false)
     assert.equal(called, false)
+  })
+})
+
+describe('normalizeLprVendors', () => {
+  it('reads codeunit and OData vendor rows, skipping blanks and duplicates', () => {
+    assert.deepEqual(
+      normalizeLprVendors([
+        { no: 'ABH-VEN000001', name: ' Alpha Supplies ' },
+        { No: 'ABH-VEN000002', Name: 'Beta Trading' },
+        { no: 'abh-ven000001', name: 'Duplicate' },
+        { no: '', name: 'No number' },
+        null,
+      ]),
+      [
+        { no: 'ABH-VEN000001', name: 'Alpha Supplies' },
+        { no: 'ABH-VEN000002', name: 'Beta Trading' },
+      ],
+    )
+    assert.deepEqual(normalizeLprVendors(undefined), [])
   })
 })

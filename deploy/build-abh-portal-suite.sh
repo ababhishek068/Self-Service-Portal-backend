@@ -115,8 +115,10 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.569.app,
-publish with docs/ERP-Publish-1.0.3.569.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.570.app,
+publish with docs/ERP-Publish-1.0.3.570.ps1).
+1.0.3.570: the vendor-quote Vendor No. lookup reads the BC Vendor list through the portal
+codeunit (PortalLprVendors), so no Vendor web service has to be published.
 1.0.3.569: every later step is edited from the portal as in BC — Local RFQ card and lines
 (until evaluation), vendor quotes (edit / delete), Local PO card and lines (before approval or
 after send-back), and Vendor Shipment No. / Qty. to Receive before Post Receive (GRN).

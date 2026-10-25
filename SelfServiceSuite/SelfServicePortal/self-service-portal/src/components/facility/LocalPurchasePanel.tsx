@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   getLocalPurchaseBankAccounts,
   getLocalPurchaseState,
+  getLocalPurchaseVendors,
   runLocalPurchaseAction,
   uploadLocalPurchaseQuoteAttachment,
   upsertLocalPurchaseVendorQuote,
@@ -18,7 +19,6 @@ import {
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { useLookupOptions } from '@/hooks/useLookupOptions'
 import { LookupCombobox } from '@/components/shared/LookupCombobox'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
@@ -193,11 +193,17 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   })
   const isFinanceChecker = access.roles.includes('financeChecker')
   // BC Vendor list for the quote form's Vendor No. lookup (Procurement only).
-  const vendors = useLookupOptions(
-    'vendors',
-    [],
-    access.enabled && access.roles.some((role) => role === 'procurement' || role === 'projectProcurement'),
-  )
+  const vendorQuery = useQuery({
+    queryKey: ['local-purchase', 'vendors'],
+    queryFn: getLocalPurchaseVendors,
+    enabled: access.enabled && access.roles.some((role) => role === 'procurement' || role === 'projectProcurement'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const vendorOptions = (vendorQuery.data?.vendors ?? []).map((vendor) => ({
+    value: vendor.no,
+    label: vendor.name ? `${vendor.no} - ${vendor.name}` : vendor.no,
+  }))
   const bankQuery = useQuery({
     queryKey: ['local-purchase', 'bank-accounts'],
     queryFn: getLocalPurchaseBankAccounts,
@@ -905,8 +911,9 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                 <Label htmlFor={`lpr-quote-vendor-${request.id}`}>Vendor No.</Label>
                 <LookupCombobox
                   id={`lpr-quote-vendor-${request.id}`}
-                  options={vendors.options}
-                  loading={vendors.isLoading}
+                  options={vendorOptions}
+                  loading={vendorQuery.isLoading}
+                  emptyText="Vendor list not available from Business Central. Type the exact Vendor No.; BC checks it on save."
                   value={quoteForm.vendorNo}
                   onChange={(vendorNo) => setQuoteForm((current) => ({ ...current, vendorNo }))}
                   placeholder="Type vendor no. or name"
