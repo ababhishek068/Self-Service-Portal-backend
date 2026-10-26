@@ -113,8 +113,10 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
     { label: 'Issuing Store', key: true, value: pick(store.issuingStore) },
     { label: 'Approver 1', key: true, value: pick(store.approver1), emphasis: 'user' },
     { label: 'Approver 1 Date', value: dateTimeValue(pick(store.approver1Date)) },
+    { label: 'Approver 1 Comment', key: true, value: pick(store.approver1Comment), emphasis: 'strong' },
     { label: 'Approver 2', key: true, value: pick(store.approver2), emphasis: 'user' },
     { label: 'Approver 2 Date', value: dateTimeValue(pick(store.approver2Date)) },
+    { label: 'Approver 2 Comment', key: true, value: pick(store.approver2Comment), emphasis: 'strong' },
   ]
 
   const generalFields = (editing: boolean): CardField[] => [

@@ -42,7 +42,9 @@ export function storeRequestFromRequisition(request: PortalRequest, process: Row
     issuingStore: pick(payload.IssuingStore, payload.Issuing_Store, payload.StoreCode),
     approver1: pick(approver1?.actorName, approver1?.actorEmployeeNo),
     approver1Date: pick(approver1?.timestamp),
+    approver1Comment: pick(approver1?.note),
     approver2: pick(approver2?.actorName, approver2?.actorEmployeeNo),
     approver2Date: pick(approver2?.timestamp),
+    approver2Comment: pick(approver2?.note),
   }
 }

@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { Check, CheckCircle2, ClipboardList, PackageCheck, PackagePlus, Pencil, Trash2, X } from 'lucide-react'
+import { CheckCircle2, ClipboardList, PackageCheck, PackagePlus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { PortalRequest } from '@/types/erp.types'
 import { quantityLabel, storeOfferLines } from './storeOfferLines'
@@ -19,9 +18,8 @@ type StoreAction = (
 
 /**
  * Store Keeper on an approved store requisition — the BC Store Req Header Approved steps:
- * Add Item to Issue (the real item in stock, picked in a dialog), change its quantity, Submit to
- * Store Manager; after the requester declines, Offer Another Item or Close Request. The quantity
- * can change until the store manager accepts (only down once it is with the store manager).
+ * Add Item to Issue (the real item in stock, picked in a dialog), Submit to Store Manager; after
+ * the requester declines, Offer Another Item or Close Request.
  */
 export function StoreKeeperOfferSection({
   request,
@@ -30,7 +28,6 @@ export function StoreKeeperOfferSection({
   available,
   busy,
   run,
-  canChangeQty,
   secondaryAction,
 }: {
   request: PortalRequest
@@ -41,8 +38,6 @@ export function StoreKeeperOfferSection({
   available: Record<string, number>
   busy: boolean
   run: StoreAction
-  /** BC 1.0.3.571: change the quantity on an offered item. */
-  canChangeQty: boolean
   /** Extra footer action, e.g. Request for LPR when nothing similar is in store. */
   secondaryAction?: ReactNode
 }) {
@@ -50,18 +45,6 @@ export function StoreKeeperOfferSection({
   const requestNo = request.requestNo
   const withManager = stage === 'PREPARED'
   const [pickerOpen, setPickerOpen] = useState(false)
-  // Offer line whose quantity is being changed, and the quantity typed.
-  const [qtyEdit, setQtyEdit] = useState<{ lineNo: string; value: string } | null>(null)
-
-  const saveQty = async (lineNo: string, current: number) => {
-    const quantity = Number(qtyEdit?.value ?? '')
-    if (!(quantity > 0)) return
-    if (quantity === current) {
-      setQtyEdit(null)
-      return
-    }
-    if (await run('SET_OFFER_QTY', 'Change quantity', '', { lineNo: Number(lineNo), quantity }, false)) setQtyEdit(null)
-  }
 
   const footerHint = declined
     ? 'The requester declined the last item. Offer another item, or close the request.'
@@ -131,7 +114,6 @@ export function StoreKeeperOfferSection({
               {offers.map((offer) => {
                 const onHand = available[offer.itemNo.toUpperCase()]
                 const short = onHand !== undefined && onHand < offer.quantity
-                const editingQty = qtyEdit?.lineNo === offer.lineNo
                 return (
                   <li key={offer.lineNo} className="flex items-start gap-2 py-1.5 first:pt-0 last:pb-0">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
@@ -140,55 +122,7 @@ export function StoreKeeperOfferSection({
                         {offer.itemName || offer.itemNo}
                         <span className="ml-1.5 font-mono text-[11px] font-normal text-slate-500">{offer.itemNo}</span>
                       </p>
-                      {editingQty ? (
-                        <form
-                          className="mt-1 flex items-center gap-1.5"
-                          onSubmit={(event) => {
-                            event.preventDefault()
-                            void saveQty(offer.lineNo, offer.quantity)
-                          }}
-                        >
-                          <span className="text-xs text-slate-500">Issue</span>
-                          <Input
-                            autoFocus
-                            type="number"
-                            min={1}
-                            max={withManager ? offer.quantity : undefined}
-                            step="any"
-                            inputMode="decimal"
-                            aria-label={`Quantity to issue for ${offer.itemNo}`}
-                            className="h-8 w-24"
-                            value={qtyEdit.value}
-                            disabled={busy}
-                            onChange={(event) => setQtyEdit({ lineNo: offer.lineNo, value: event.target.value })}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Escape') setQtyEdit(null)
-                            }}
-                          />
-                          <span className="text-xs text-slate-500">{offer.unitOfMeasure}</span>
-                          <button
-                            type="submit"
-                            disabled={busy || !(Number(qtyEdit.value) > 0) || (withManager && Number(qtyEdit.value) > offer.quantity)}
-                            aria-label="Save quantity"
-                            className="rounded-md p-1.5 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-40"
-                          >
-                            <Check className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            aria-label="Cancel"
-                            className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 disabled:opacity-40"
-                            onClick={() => setQtyEdit(null)}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </form>
-                      ) : null}
-                      {editingQty && withManager ? (
-                        <p className="text-[11px] text-slate-500">With the store manager the quantity can only go down.</p>
-                      ) : null}
-                      <p className={cn('text-xs text-slate-500', editingQty && 'hidden')}>
+                      <p className="text-xs text-slate-500">
                         Issue {quantityLabel(offer.quantity)} {offer.unitOfMeasure}
                         {offer.brandModel ? ` · ${offer.brandModel}` : ''}
                         {onHand !== undefined ? (
@@ -199,18 +133,6 @@ export function StoreKeeperOfferSection({
                       </p>
                       {offer.specification ? <p className="truncate text-xs text-slate-500">{offer.specification}</p> : null}
                     </div>
-                    {canChangeQty && !editingQty ? (
-                      <button
-                        type="button"
-                        disabled={busy || qtyEdit !== null}
-                        aria-label={`Change quantity of ${offer.itemNo}`}
-                        title="Change quantity"
-                        className="rounded-md p-1.5 text-slate-400 transition hover:bg-teal-50 hover:text-[var(--portal-navy-dark)] disabled:opacity-50"
-                        onClick={() => setQtyEdit({ lineNo: offer.lineNo, value: String(offer.quantity) })}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                    ) : null}
                     <button
                       type="button"
                       disabled={busy}

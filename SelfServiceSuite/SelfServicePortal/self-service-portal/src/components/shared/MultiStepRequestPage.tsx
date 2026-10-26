@@ -26,6 +26,7 @@ import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
+import { ApproverComments } from './ApproverComments'
 import {
   normalizeAndValidateSelectValues,
   type DetailFieldConfig,
@@ -1238,6 +1239,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
+                <ApproverComments steps={selected.approvalSteps} skipRejected={selected.status === 'Rejected'} />
                 {bcCard ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
@@ -1456,7 +1458,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   />
                 ) : null}
 
-                {shouldShowApprovalHistory(selected.status) ? (
+                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
                     <ApprovalHistory steps={selected.approvalSteps} />

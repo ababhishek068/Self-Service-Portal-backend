@@ -74,8 +74,10 @@ export function StoreRequisitionCardDialog({
     { label: 'Employee No', value: pick(store.employeeNo) },
     { label: 'Approver 1', value: pick(store.approver1), emphasis: 'user' },
     { label: 'Approver 1 Date', value: dateTimeValue(pick(store.approver1Date)) },
+    { label: 'Approver 1 Comment', value: pick(store.approver1Comment), emphasis: 'strong' },
     { label: 'Approver 2', value: pick(store.approver2), emphasis: 'user' },
     { label: 'Approver 2 Date', value: dateTimeValue(pick(store.approver2Date)) },
+    { label: 'Approver 2 Comment', value: pick(store.approver2Comment), emphasis: 'strong' },
   ]
   const issue: CardField[] = [
     { label: 'Request Type', value: requestTypeLabel(pick(payload.StoreRequisitionType, payload.RequisitionType)) },

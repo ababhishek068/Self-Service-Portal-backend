@@ -21,12 +21,16 @@ export function isPendingApprovalStatus(status: string | undefined) {
   return status === 'Pending Approval'
 }
 
-/** ESS show blades only include approvers after approval has been requested. */
-export function shouldShowApprovalHistory(status: string | undefined) {
+/**
+ * ESS show blades only include approvers after approval has been requested. Once there are
+ * approval entries they stay visible at every later status (released, posted, LPR…), with comments.
+ */
+export function shouldShowApprovalHistory(status: string | undefined, steps?: unknown[]) {
   return (
     status === 'Pending Approval' ||
     status === 'Approved' ||
-    status === 'Rejected'
+    status === 'Rejected' ||
+    (steps?.length ?? 0) > 0
   )
 }
 
