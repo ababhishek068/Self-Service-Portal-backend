@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
+import { ApproverQuantityCell } from '@/components/facility/ApproverQuantityCell'
+import { getStoreRequisitionOptions } from '@/api/endpoints/requestEndpoint'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
@@ -311,6 +314,18 @@ export function ApprovalDetail() {
   const lineKeys = preferredLineKeys(request?.requestType, lines)
   const metric = request ? approvalMetric(request.requestType, request.amount, payload, lines) : null
   const headerFacts = request ? approvalHeaderFacts(request.requestType, payload) : []
+  // Store requisitions: the approver may reduce the requested quantity before approving (BC 1.0.3.571).
+  const isStoreApproval = request?.requestType === 'storeRequisition' && canApprove
+  const storeOptions = useQuery({
+    queryKey: ['store-requisition', 'options'],
+    queryFn: getStoreRequisitionOptions,
+    enabled: isStoreApproval,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const approverQty = isStoreApproval && storeOptions.data?.features?.includes('approverQty') === true
+  const qtyEditable = (line: Record<string, unknown>) =>
+    approverQty && !/offer/i.test(String(line.lineRole ?? '')) && Number(line.lineNo) > 0 && Number(line.quantity) > 0
 
   useEffect(() => {
     // The requester's application reason is source-document context, not an
@@ -463,6 +478,11 @@ export function ApprovalDetail() {
               {lines.length && lineKeys.length ? (
                 <div className="border-t border-slate-200 pt-4">
                   <p className="mb-2 text-sm font-semibold text-slate-900">Document lines</p>
+                  {approverQty ? (
+                    <p className="mb-2 text-xs text-slate-500">
+                      You can reduce a requested quantity with the pencil before you approve. The requester sees the change in the request history.
+                    </p>
+                  ) : null}
                   <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
                     <table className="min-w-full border-collapse text-left text-sm">
                       <thead className="border-b border-slate-200 bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
@@ -489,7 +509,17 @@ export function ApprovalDetail() {
                                   lines.every((row) => isBlankLineValue(row[key]) || isNumericLineValue(row[key])) ? 'text-right' : 'text-left'
                                 }`}
                               >
-                                {formatLineValue(line[key])}
+                                {key === 'quantity' && qtyEditable(line) && request ? (
+                                  <ApproverQuantityCell
+                                    requestId={request.id}
+                                    lineNo={Number(line.lineNo)}
+                                    quantity={Number(line.quantity)}
+                                    display={formatLineValue(line[key])}
+                                    onSaved={() => detail.refetch()}
+                                  />
+                                ) : (
+                                  formatLineValue(line[key])
+                                )}
                               </td>
                             ))}
                           </tr>

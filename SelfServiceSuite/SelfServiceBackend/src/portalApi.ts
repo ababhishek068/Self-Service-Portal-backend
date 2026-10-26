@@ -455,7 +455,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v270 — 1.0.3.429 (BC Vendor list for vendor-quote Vendor No.; edit at every Local Purchase step; for BC 1.0.3.570)'
+export const PORTAL_API_BUILD = 'v271 — 1.0.3.430 (approvers reduce Store Requisition quantity; store keeper / manager change the offer quantity; BC Vendor list; for BC 1.0.3.571)'
 
 interface LookupSpec {
   service: string
@@ -1084,7 +1084,38 @@ async function approvedStoreDocument(requestId: string, authUser: AuthUser) {
 }
 
 /** Store Keeper actions on the Store Offer (BC 1.0.3.545 portal methods). */
-const STORE_KEEPER_OFFER_ACTIONS = ['ADD_STORE_OFFER', 'REMOVE_STORE_OFFER', 'OFFER_ANOTHER_ITEM', 'CLOSE_REQUEST']
+const STORE_KEEPER_OFFER_ACTIONS = ['ADD_STORE_OFFER', 'REMOVE_STORE_OFFER', 'SET_OFFER_QTY', 'OFFER_ANOTHER_ITEM', 'CLOSE_REQUEST']
+
+/** Store quantity changes (Business Central 1.0.3.571): a missing SOAP method means BC is older. */
+async function callStoreQuantityMethod(method: string, params: Record<string, unknown>) {
+  try {
+    return await callSoapMethod(method, params)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/no action|soapaction|not published|could not find|unknown method/i.test(message)) {
+      throw portalError(
+        `Changing the quantity from the portal needs Business Central 1.0.3.571. The portal is calling ${method}.`,
+        502,
+        'BC_UPDATE_REQUIRED',
+      )
+    }
+    throw error
+  }
+}
+
+/** Line number and quantity of a store quantity change (quantity > 0). */
+function storeQuantityBody(body: unknown) {
+  const record = (body ?? {}) as Record<string, unknown>
+  const lineNo = Number(record.lineNo ?? 0)
+  const quantity = Number(record.quantity ?? 0)
+  if (!Number.isInteger(lineNo) || lineNo <= 0) {
+    throw portalError('Choose the line to change.', 422, 'STORE_QUANTITY_INVALID')
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw portalError('The quantity must be more than 0.', 422, 'STORE_QUANTITY_INVALID')
+  }
+  return { lineNo, quantity }
+}
 
 function sendPdf(res: Response, pdf: Buffer, fileName: string) {
   res.setHeader('Content-Type', 'application/pdf')
@@ -4583,6 +4614,31 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  /**
+   * Approver: reduce the requested quantity on a store requisition line while it waits for their
+   * approval (e.g. 4 to 2). Business Central checks the open approval entry and logs the change.
+   */
+  router.post(
+    '/requests/:id/approver-quantity',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'storeRequisition') {
+        throw portalError('Approvers change the quantity on Store Requisitions only.', 422)
+      }
+      const { lineNo, quantity } = storeQuantityBody(req.body)
+      await callStoreQuantityMethod('PortalStoreApproverSetQty', {
+        requestNo: no,
+        actorUserID: authUser.userID,
+        lineNo,
+        quantity,
+      })
+      // The approver reloads the approval detail (the request detail is the requester's view).
+      res.json({ ok: true, requestId, lineNo, quantity })
+    }),
+  )
+
   router.get(
     '/requests/:id/store-process',
     safe(async (req, res) => {
@@ -4677,6 +4733,9 @@ export function buildPortalApiRouter() {
               throw portalError('Choose the store offer line to remove.', 422, 'STORE_OFFER_INVALID')
             }
             await callStoreIssueHandoff('RemovePortalStoreOffer', no, authUser.userID, { lineNo })
+          } else if (requestedAction === 'SET_OFFER_QTY') {
+            const { lineNo, quantity } = storeQuantityBody(req.body)
+            await callStoreQuantityMethod('SetPortalStoreOfferQty', { requestNo: no, actorUserID: authUser.userID, lineNo, quantity })
           } else if (requestedAction === 'OFFER_ANOTHER_ITEM') {
             await callStoreIssueHandoff('OfferAnotherPortalStoreItem', no, authUser.userID)
           } else {

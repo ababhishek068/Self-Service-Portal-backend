@@ -213,6 +213,8 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const bcStoreHandOff = storeOptionsQuery.data?.storesFromBc === true
   // BC 1.0.3.545: Add Item to Issue, Offer Another Item and Close Request from the portal.
   const storeOffers = storeOptionsQuery.data?.features?.includes('storeOffers') === true
+  // BC 1.0.3.571: change the quantity on an offered item until the store manager accepts.
+  const offerQty = storeOptionsQuery.data?.features?.includes('offerQty') === true
   const [borrowingFormUrl, setBorrowingFormUrl] = useState<string | null>(null)
   const [borrowingFormLoading, setBorrowingFormLoading] = useState(false)
   // Free the PDF blob when the viewer closes or the panel unmounts.
@@ -299,6 +301,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         PREPARE_ISSUE: `Store requisition ${requestNo} is with the store manager. The requester's line and the store offer line are both there. Stock has not moved.`,
         ADD_STORE_OFFER: 'Item added to issue. Submit to Store Manager when the offer is complete.',
         REMOVE_STORE_OFFER: 'Store offer removed.',
+        SET_OFFER_QTY: 'Quantity changed on the item to issue.',
         OFFER_ANOTHER_ITEM: `The new item on store requisition ${requestNo} is with the store manager. After the manager accepts, the requester can accept or decline it.`,
         CLOSE_REQUEST: `Store requisition ${requestNo} is closed. Nothing was issued.`,
         ACCEPT_ISSUE: `Store requisition ${requestNo} accepted. The requester must accept the borrowing form before the goods issue voucher is created.`,
@@ -611,6 +614,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
           available={offerAvailable}
           busy={mutation.isPending}
           run={run}
+          canChangeQty={offerQty}
           secondaryAction={
             atStockCheck && stageHandOff === '' && !processQuery.isError ? requestLprButton : null
           }

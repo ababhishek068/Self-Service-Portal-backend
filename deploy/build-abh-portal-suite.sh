@@ -115,8 +115,12 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.570.app,
-publish with docs/ERP-Publish-1.0.3.570.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.571.app,
+publish with docs/ERP-Publish-1.0.3.571.ps1).
+1.0.3.571: Store Requisition quantity (operations, 26 Oct) — the approver whose approval is
+open reduces the requested quantity before approving (PortalStoreApproverSetQty, logged on the
+request history); the Store Keeper / Store Manager change the store offer quantity until the
+Store Manager accepts (SetPortalStoreOfferQty; only down once submitted). Then it is locked.
 1.0.3.570: the vendor-quote Vendor No. lookup reads the BC Vendor list through the portal
 codeunit (PortalLprVendors), so no Vendor web service has to be published.
 1.0.3.569: every later step is edited from the portal as in BC — Local RFQ card and lines

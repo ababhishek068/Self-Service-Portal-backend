@@ -202,6 +202,12 @@ export async function getStoreRequisitionOptions() {
  * `linkedDocumentNo` on START_LPR is the BC project No. (blank = non-project purchase);
  * `options` carries the Start LPR source and officer (procurementSource, officerType).
  */
+/** Approver: reduce the requested quantity on a store requisition line while it waits for their approval. */
+export async function setStoreApproverQuantity(id: string, lineNo: number, quantity: number) {
+  requireAuthApiUrl()
+  return authPost<{ ok: boolean }>(`/api/requests/${encodeURIComponent(id)}/approver-quantity`, { lineNo, quantity })
+}
+
 export async function updateStoreRequisitionProcess(
   id: string,
   actionCode: string,
