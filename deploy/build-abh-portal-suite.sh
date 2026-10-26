@@ -115,8 +115,11 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.572.app,
-publish with docs/ERP-Publish-1.0.3.572.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.574.app,
+publish with docs/ERP-Publish-1.0.3.574.ps1).
+1.0.3.574: approvers' Approval Comments are shown in BC at the next steps — Store Req Header
+Approved (Approvals group: Approver 1/2, date, comment) and the Purchase Requisition Card's Store
+Request section (Approver 1 / Approver 2 Comment). Includes 1.0.3.573 (Nitish) and 1.0.3.572.
 1.0.3.572: removes the Store Requisition quantity edits of 1.0.3.571 (operations: not needed);
 the code is 1.0.3.570. Approval comments come from BC Approval Comments (no AL change).
 1.0.3.570: the vendor-quote Vendor No. lookup reads the BC Vendor list through the portal
