@@ -7,6 +7,7 @@ import {
   CircleX,
   ClipboardCheck,
   ClipboardCopy,
+  Eye,
   Home,
   ShoppingCart,
   Sparkles,
@@ -124,6 +125,21 @@ const tiles: DashboardTile[] = [
   },
 ]
 
+/** Recent Activity modules and their pages (each opens a request with ?open=<id>). */
+const ACTIVITY_PAGES: Partial<Record<string, string>> = {
+  imprest: '/finance/imprest',
+  imprestSurrender: '/finance/imprest-surrender',
+  staffClaim: '/finance/staff-claim',
+  pettyCash: '/finance/petty-cash',
+  purchaseRequisition: '/facility/local-purchase-request',
+  storeRequisition: '/facility/store-requisition',
+}
+
+function activityHref(row: PortalRequest) {
+  const page = ACTIVITY_PAGES[row.requestType]
+  return page ? `${page}?open=${encodeURIComponent(row.id)}` : null
+}
+
 export function Dashboard() {
   const { employee, isAuthenticated, bootstrapped } = useAuth()
   const { has, canApprove, primaryRoleLabel, capabilitySummary, quickLinks } = usePermissions()
@@ -152,11 +168,40 @@ export function Dashboard() {
   const pendingCount = tileValues.pendingApprovals ?? 0
 
   const activityColumns: DataTableColumn<PortalRequest>[] = [
-    { id: 'requestNo', header: 'No.', cell: (row) => row.requestNo },
+    {
+      id: 'requestNo',
+      header: 'No.',
+      cell: (row) => {
+        const href = activityHref(row)
+        return href ? (
+          <Link to={href} className="font-semibold text-[var(--portal-navy-dark)] underline-offset-2 hover:underline">
+            {row.requestNo}
+          </Link>
+        ) : (
+          row.requestNo
+        )
+      },
+    },
     { id: 'title', header: 'Request', cell: (row) => row.title },
     { id: 'date', header: 'Date', cell: (row) => formatDateTime(row.createdAt) },
     { id: 'amount', header: 'Amount', cell: (row) => formatCurrency(row.amount) },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
+    {
+      id: 'view',
+      header: 'View',
+      cell: (row) => {
+        const href = activityHref(row)
+        return href ? (
+          <Link
+            to={href}
+            aria-label={`View ${row.requestNo}`}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-[var(--portal-navy-dark)] hover:bg-teal-50"
+          >
+            <Eye className="h-3.5 w-3.5" /> View
+          </Link>
+        ) : null
+      },
+    },
   ]
 
   return (
