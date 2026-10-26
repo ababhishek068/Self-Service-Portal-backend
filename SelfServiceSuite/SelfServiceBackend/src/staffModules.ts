@@ -2287,6 +2287,19 @@ export function purchaseDuplicateBlockingStatus(status: string) {
   return duplicateBlockingStatus(status)
 }
 
+/** A header BC left on Pending Approval after a reject is read from its approval entries. */
+async function resolveDuplicateCheckStatus(
+  spec: ModuleSpec,
+  header: ODataRecord,
+  docNo: string,
+  module: 'purchaseRequisition' | 'storeRequisition',
+) {
+  const status = resolveModuleRequestStatus(header, module)
+  if (status !== 'Pending Approval') return status
+  const entries = await fetchPortalApprovalEntries(spec, docNo, header).catch(() => [] as ODataRecord[])
+  return entries.length ? resolveModuleRequestStatus(header, module, entries) : status
+}
+
 export function storeDuplicateBlockingStatus(status: string) {
   return duplicateBlockingStatus(status)
 }
@@ -2336,7 +2349,7 @@ export async function assertNoDuplicatePurchaseLine(
   for (const header of headers) {
     const docNo = fieldText(header, ['No', 'No_', 'DocumentNo'])
     if (docNo.trim().toUpperCase() === currentKey) continue
-    const status = resolveModuleRequestStatus(header, 'purchaseRequisition')
+    const status = await resolveDuplicateCheckStatus(spec, header, docNo, 'purchaseRequisition')
     if (!purchaseDuplicateBlockingStatus(status)) continue
     if (headerActivityTimestamp(header) < cutoff) continue
     const lines = await listPortalModuleLines(spec, header, docNo)
@@ -2390,7 +2403,7 @@ export async function assertNoDuplicateStoreLine(
   for (const header of headers) {
     const docNo = fieldText(header, ['No', 'No_'])
     if (docNo.trim().toUpperCase() === currentKey) continue
-    const status = resolveModuleRequestStatus(header, 'storeRequisition')
+    const status = await resolveDuplicateCheckStatus(spec, header, docNo, 'storeRequisition')
     if (!storeDuplicateBlockingStatus(status)) continue
     if (storeFilter && headerIssuingStore(header) && headerIssuingStore(header) !== storeFilter) {
       continue

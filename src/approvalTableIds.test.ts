@@ -2513,6 +2513,18 @@ describe('mapRequest status', () => {
     )
   })
 
+  it('lists a store requisition BC left on Pending Approval as Rejected once an approver rejected it', () => {
+    const header = { No: 'ABH-SR000215', Status: 'Pending Approval' }
+    assert.equal(resolveModuleRequestStatus(header, 'storeRequisition'), 'Pending Approval')
+    assert.equal(
+      resolveModuleRequestStatus(header, 'storeRequisition', [
+        { EntryNo: 1, DocumentNo: 'ABH-SR000215', SequenceNo: 1, Status: 'Approved' },
+        { EntryNo: 2, DocumentNo: 'ABH-SR000215', SequenceNo: 2, Status: 'Rejected' },
+      ]),
+      'Rejected',
+    )
+  })
+
   it('maps petty cash 1st Approval BC status to Pending Approval', () => {
     assert.equal(
       mapRequest({ No: 'ABH-PCP000008', Status: '1st Approval' }, 'pettyCash').status,

@@ -320,7 +320,7 @@ const FINANCE_APPROVAL_WORKFLOW_MODULES = new Set<PortalModuleKey>([
   'salaryAdvance',
 ])
 
-function moduleUsesApprovalEntryPromotion(requestType: PortalModuleKey) {
+export function moduleUsesApprovalEntryPromotion(requestType: PortalModuleKey) {
   return (
     OPEN_APPROVAL_WORKFLOW_MODULES.has(requestType) ||
     FINANCE_APPROVAL_WORKFLOW_MODULES.has(requestType)

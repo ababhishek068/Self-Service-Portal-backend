@@ -91,7 +91,7 @@ import {
   financeSessionHints,
   isFinanceDetailModule,
 } from './financeRequestEnrichment.js'
-import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, promoteDetailAfterApprovalSubmit, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
+import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, moduleUsesApprovalEntryPromotion, promoteDetailAfterApprovalSubmit, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import { sortNewestFirst } from './sortNewestFirst.js'
 import { employeeAnnualLeaveBalance, parseEmployeeLeaveBalancesReturn } from './leaveBalance.js'
 import {
@@ -455,7 +455,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v274 — 1.0.3.433 (approver comments in My Approvals and at every later step; quantity edit removed; for BC 1.0.3.572)'
+export const PORTAL_API_BUILD = 'v275 — 1.0.3.434 (rejected requests listed as Rejected, not Pending Approval; for BC 1.0.3.574)'
 
 interface LookupSpec {
   service: string
@@ -2416,6 +2416,19 @@ export function mapModuleLines(
   return rows
 }
 
+/**
+ * List status as on the request detail: a header BC left on Pending Approval is checked against its
+ * approval entries, so a rejected (or fully approved) request is not listed as Pending Approval.
+ */
+async function listRowStatus(spec: ModuleSpec, row: ODataRecord, module: PortalModuleKey) {
+  const status = resolveModuleRequestStatus(row, module)
+  if (status !== 'Pending Approval' || !moduleUsesApprovalEntryPromotion(module)) return status
+  const no = text(row, ['No', 'No_', 'DocumentNo', 'Document_No', 'ApplicationCode', 'RequisitionNo'])
+  if (!no) return status
+  const entries = await fetchPortalApprovalEntries(spec, no, row).catch(() => [] as ODataRecord[])
+  return entries.length ? resolveModuleRequestStatus(row, module, entries) : status
+}
+
 async function mappedModuleRows(
   module: SupportedFrontendModule,
   authUser: AuthUser,
@@ -2479,7 +2492,7 @@ async function mappedModuleRows(
           // Never render Employee No./User ID in the Requested By field.
           makerName: requesterName || 'Employee',
           ...(amount > 0 ? { amount } : {}),
-          status: resolveModuleRequestStatus(row, module),
+          status: await listRowStatus(spec, row, module),
         }
       }),
     )
@@ -2506,21 +2519,19 @@ async function mappedModuleRows(
         )
         return {
           ...mapped,
-          status: resolveModuleRequestStatus(row, module as PortalModuleKey),
+          status: await listRowStatus(spec, row, module as PortalModuleKey),
         }
       }),
     )
     return enrichedRows.filter((row) => true)
   }
-  return rows
-    .map((row) => {
-      const mapped = mapRequest(row, module as PortalModuleKey)
-      return {
-        ...mapped,
-        status: resolveModuleRequestStatus(row, module as PortalModuleKey),
-      }
-    })
-    .filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
+  const mappedRows = await Promise.all(
+    rows.map(async (row) => ({
+      ...mapRequest(row, module as PortalModuleKey),
+      status: await listRowStatus(spec, row, module as PortalModuleKey),
+    })),
+  )
+  return mappedRows.filter((row) => (module === 'gatePass' ? Boolean(row.requestNo) : true))
 }
 
 interface LeaveLookupHints {
