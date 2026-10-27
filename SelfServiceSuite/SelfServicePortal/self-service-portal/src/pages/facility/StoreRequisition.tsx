@@ -386,6 +386,8 @@ export function StoreRequisition() {
             name: 'itemName',
             label: 'What do you need?',
             type: 'text',
+            // BC Store Requisition Line Description is Text[70].
+            maxLength: 70,
             placeholder: 'Type the item or asset, for example All in one Desktop',
             valuePaths: ['itemName', 'ItemName', 'Description'],
           },
@@ -393,6 +395,9 @@ export function StoreRequisition() {
             name: 'description',
             label: 'Additional specification (optional)',
             type: 'textarea',
+            // BC Store Requisition Line Remarks is Text[200].
+            maxLength: 200,
+            hint: 'Business Central keeps up to 200 characters. For a longer specification, attach it below as a Specification Document.',
             placeholder: 'Add extra detail if needed. Attach a file only when a spec document is required.',
             valuePaths: ['remarks', 'Remarks', 'lineDescription'],
           },
@@ -409,6 +414,8 @@ export function StoreRequisition() {
             name: 'preferredBrandModel',
             label: 'Preferred Brand / Model (optional)',
             type: 'text',
+            // BC Store Requisition Line Description 2 is Text[50].
+            maxLength: 50,
             valuePaths: ['preferredBrandModel', 'Description2', 'Description_2'],
           },
         ],

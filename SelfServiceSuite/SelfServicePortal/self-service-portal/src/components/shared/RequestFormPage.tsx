@@ -68,6 +68,8 @@ export interface FieldConfig {
   fullWidth?: boolean
   /** Short help shown under the field. */
   hint?: string
+  /** Business Central field length: typing stops there and a textarea shows a character counter. */
+  maxLength?: number
 }
 
 export interface LineItemsConfig {

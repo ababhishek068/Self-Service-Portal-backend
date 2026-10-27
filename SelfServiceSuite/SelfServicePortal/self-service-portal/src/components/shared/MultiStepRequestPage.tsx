@@ -354,14 +354,22 @@ function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedVal
       >
         {field.type !== 'checkbox' ? <Label htmlFor={inputId}>{field.label}</Label> : null}
         {field.type === 'textarea' ? (
-          <Textarea
-            id={inputId}
-            placeholder={field.placeholder}
-            readOnly={readOnly}
-            rows={3}
-            className="min-h-[4.5rem]"
-            {...form.register(name)}
-          />
+          <>
+            <Textarea
+              id={inputId}
+              placeholder={field.placeholder}
+              readOnly={readOnly}
+              rows={3}
+              maxLength={field.maxLength}
+              className="min-h-[4.5rem]"
+              {...form.register(name)}
+            />
+            {field.maxLength ? (
+              <p className="text-right text-xs tabular-nums text-slate-500">
+                {String(pathValue(watchedValues, field.name) ?? '').length}/{field.maxLength}
+              </p>
+            ) : null}
+          </>
         ) : null}
         {field.type === 'select' ? (
           <Select
@@ -389,6 +397,7 @@ function fieldRenderer(form: UseFormReturn<FieldValues>, prefix = '', watchedVal
             type={field.type}
             placeholder={field.placeholder}
             readOnly={readOnly}
+            maxLength={field.type === 'text' ? field.maxLength : undefined}
             min={field.type === 'number' ? 0 : undefined}
             step={field.type === 'number' ? 'any' : undefined}
             {...form.register(
