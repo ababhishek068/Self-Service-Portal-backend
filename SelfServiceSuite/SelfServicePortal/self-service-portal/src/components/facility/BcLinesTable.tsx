@@ -4,9 +4,43 @@ import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { CardEditor } from '@/components/facility/BcCard'
+import { LookupCombobox } from '@/components/shared/LookupCombobox'
+import { useLookupOptions } from '@/hooks/useLookupOptions'
 import { pick, text } from '@/components/facility/bcCardValues'
 import { TYPE_OPTIONS, lineValues, type LineColumn, type PurchaseLine } from '@/components/facility/bcPurchaseLines'
 import { formatCurrency } from '@/utils/formatters'
+
+/** BC lookup behind Item / Service Code for each line Type (G/L Account, Item, Fixed Asset). */
+const CODE_CATALOGS: Record<string, string> = { '1': 'services', '2': 'items', '4': 'purchase-assets' }
+
+/** Item / Service Code picked from the BC list of the line's Type, as the lookup on the subform. */
+function CatalogCodeField({
+  catalog,
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  catalog: string
+  label: string
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  const lookup = useLookupOptions(catalog)
+  return (
+    <LookupCombobox
+      id={`line-code-${catalog}`}
+      options={lookup.options}
+      value={value}
+      onChange={onChange}
+      loading={lookup.isLoading}
+      disabled={disabled}
+      placeholder={`Search ${label.toLowerCase()} by code or name`}
+      emptyText="Could not load the list from Business Central. Type the code."
+    />
+  )
+}
 
 /**
  * A BC lines subform: the same columns, read-only for everyone, and New Line / Edit / Delete Line
@@ -56,6 +90,15 @@ export function BcLinesTable({
     }
     if (isNew && !draft.description?.trim() && !draft.no?.trim()) {
       toast.error('Enter the Item / Service Name or Code.', title)
+      return
+    }
+    // BC validates an Item / G/L Account / Fixed Asset line against that card, so it needs the code.
+    if (columns.some((column) => column.key === 'type') && (draft.type ?? '0') !== '0' && !draft.no?.trim()) {
+      const typeLabel = TYPE_OPTIONS.find((option) => option.value === draft.type)?.label ?? 'this Type'
+      toast.error(
+        `A ${typeLabel} line needs its Item / Service Code. Pick it from the list, or set Type to blank for a free-text line.`,
+        title,
+      )
       return
     }
     const changed = Object.fromEntries(
@@ -175,14 +218,31 @@ export function BcLinesTable({
             {editColumns.map((column) => (
               <label key={column.key} className="block space-y-1">
                 <span className="text-xs font-medium text-slate-600">{column.header}</span>
-                <CardEditor
-                  kind={column.kind}
-                  label={column.header}
-                  options={column.key === 'type' ? TYPE_OPTIONS : undefined}
-                  value={draft[column.key] ?? ''}
-                  disabled={busy}
-                  onChange={(value) => setDraft((current) => ({ ...current, [column.key]: value }))}
-                />
+                {column.key === 'no' && CODE_CATALOGS[draft.type ?? ''] ? (
+                  <CatalogCodeField
+                    catalog={CODE_CATALOGS[draft.type ?? '']!}
+                    label={TYPE_OPTIONS.find((option) => option.value === draft.type)?.label ?? 'code'}
+                    value={draft.no ?? ''}
+                    disabled={busy}
+                    onChange={(value) => setDraft((current) => ({ ...current, no: value }))}
+                  />
+                ) : (
+                  <CardEditor
+                    kind={column.kind}
+                    label={column.header}
+                    options={column.key === 'type' ? TYPE_OPTIONS : undefined}
+                    value={draft[column.key] ?? ''}
+                    disabled={busy}
+                    onChange={(value) =>
+                      setDraft((current) =>
+                        // A code belongs to its Type: changing the Type clears it.
+                        column.key === 'type' && value !== current.type
+                          ? { ...current, type: value, no: '' }
+                          : { ...current, [column.key]: value },
+                      )
+                    }
+                  />
+                )}
               </label>
             ))}
           </div>
