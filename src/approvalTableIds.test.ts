@@ -210,6 +210,8 @@ import {
   resolveLeaveStatus,
   leaveIsPendingInBc,
   resolveModuleRequestStatus,
+  approvalsKeptAfterSendBack,
+  sentBackApprovalEntry,
   resolveSalaryAdvanceAmount,
   statusFromBc,
 } from './erpMappings.js'
@@ -2511,6 +2513,57 @@ describe('mapRequest status', () => {
       ),
       'Pending Approval',
     )
+  })
+
+  describe('send back for correction', () => {
+    const cycle = '{AAAA-1}'
+    const entries = [
+      { EntryNo: 10, SequenceNo: 1, ApproverID: 'HERMON', Status: 'Approved', WorkflowStepInstanceID: cycle, LastDateTimeModified: '2026-10-26T10:53:00Z' },
+      { EntryNo: 11, SequenceNo: 2, ApproverID: 'TESFAYE', Status: 'Rejected', WorkflowStepInstanceID: cycle, Comment: '[RETURNED] Use 2 not 3' },
+      { EntryNo: 12, SequenceNo: 3, ApproverID: 'KALKIDAN', Status: 'Rejected', WorkflowStepInstanceID: cycle },
+    ]
+    const header = { No: 'ABH-SR000216', Status: 'Pending Approval' }
+
+    it('lists the request as Returned, also when BC rejected a later step with it', () => {
+      assert.equal(resolveModuleRequestStatus(header, 'storeRequisition', entries), 'Returned')
+      assert.equal(sentBackApprovalEntry(entries)?.EntryNo, 11)
+    })
+
+    it('keeps a real rejection as Rejected', () => {
+      const rejected = entries.map((entry) => (entry.EntryNo === 11 ? { ...entry, Comment: 'Not required' } : entry))
+      assert.equal(resolveModuleRequestStatus(header, 'storeRequisition', rejected), 'Rejected')
+      assert.equal(sentBackApprovalEntry(rejected), undefined)
+    })
+
+    it('is Pending Approval again once the corrected request is resubmitted', () => {
+      const resubmitted = [...entries, { EntryNo: 13, SequenceNo: 1, ApproverID: 'HERMON', Status: 'Open', WorkflowStepInstanceID: '{BBBB-2}' }]
+      assert.equal(resolveModuleRequestStatus(header, 'storeRequisition', resubmitted), 'Pending Approval')
+      assert.equal(sentBackApprovalEntry(resubmitted), undefined)
+    })
+
+    it('keeps the approvals given before the step that sent it back', () => {
+      assert.deepEqual(approvalsKeptAfterSendBack(entries, entries[1]!), [
+        { sequenceNo: 1, approverId: 'HERMON', approvedAt: '2026-10-26T10:53:00Z' },
+      ])
+    })
+
+    it('shows the step as Returned with its comment, and steps not reached as Cancelled', () => {
+      const steps = mapApprovalSteps(entries)
+      assert.deepEqual(
+        steps.map((step) => [step.sequenceNo, step.status, step.note]),
+        [
+          [1, 'Approved', ''],
+          [2, 'Returned', 'Use 2 not 3'],
+          [3, 'Cancelled', ''],
+        ],
+      )
+    })
+
+    it('limits the comment to what a BC Approval Comment line holds', () => {
+      assert.throws(() => parseApprovalDecision('Returned', 'x'.repeat(70)), /69 characters/)
+      assert.equal(parseApprovalDecision('Returned', 'x'.repeat(69)).soapComment.length, 80)
+      assert.throws(() => parseApprovalDecision('Rejected', 'x'.repeat(81)), /80 characters/)
+    })
   })
 
   it('lists a store requisition BC left on Pending Approval as Rejected once an approver rejected it', () => {

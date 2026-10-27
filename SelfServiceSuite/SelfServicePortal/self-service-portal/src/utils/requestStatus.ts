@@ -16,6 +16,39 @@ export function isEditableRequestStatus(
   )
 }
 
+/** Send Back for Correction details the backend adds to a Returned request. */
+export type SentBackInfo = {
+  comment: string
+  by: string
+  at: string
+  sequenceNo?: number
+  /** BC still holds the header as pending: the requester reopens it (Cancel Approval) before editing. */
+  reopenRequired: boolean
+}
+
+export function sentBackInfo(
+  request: { status?: string; payload?: Record<string, unknown> } | undefined,
+): SentBackInfo | null {
+  if (request?.status !== 'Returned') return null
+  const value = request.payload?.sentBack as Partial<SentBackInfo> | undefined
+  return {
+    comment: String(value?.comment ?? ''),
+    by: String(value?.by ?? ''),
+    at: String(value?.at ?? ''),
+    sequenceNo: Number(value?.sequenceNo) || undefined,
+    reopenRequired: value?.reopenRequired !== false,
+  }
+}
+
+/**
+ * The status that decides header, line and attachment editing: a sent-back request is edited like an
+ * open draft once Business Central has reopened it.
+ */
+export function editingStatus(request: { status?: string; payload?: Record<string, unknown> } | undefined) {
+  const sentBack = sentBackInfo(request)
+  return sentBack && !sentBack.reopenRequired ? 'Open' : request?.status
+}
+
 /** Submitted documents awaiting checker action — cancel only, no line/header edits. */
 export function isPendingApprovalStatus(status: string | undefined) {
   return status === 'Pending Approval'
@@ -30,6 +63,7 @@ export function shouldShowApprovalHistory(status: string | undefined, steps?: un
     status === 'Pending Approval' ||
     status === 'Approved' ||
     status === 'Rejected' ||
+    status === 'Returned' ||
     (steps?.length ?? 0) > 0
   )
 }

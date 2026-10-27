@@ -6,6 +6,7 @@ import {
 } from '@/api/endpoints/approvals'
 import { useToast } from '@/components/feedback/ToastProvider'
 import type { ApprovalListType } from '@/types/approval'
+import type { ApprovalDecision } from '@/types/erp.types'
 
 export function useApprovals(type: ApprovalListType = 'pending') {
   return useQuery({
@@ -29,7 +30,7 @@ export function useApprovalDecision(id: string) {
   const queryClient = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: ({ decision, comment }: { decision: 'Approved' | 'Rejected'; comment: string }) =>
+    mutationFn: ({ decision, comment }: { decision: ApprovalDecision; comment: string }) =>
       decideApproval(id, decision, comment),
     onSuccess: async (request, variables) => {
       // Do not seed the detail cache with the decision response — it is only
@@ -39,7 +40,9 @@ export function useApprovalDecision(id: string) {
       await queryClient.invalidateQueries({ queryKey: ['approvals'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       toast.success(
-        `${request.requestNo || id} marked as ${variables.decision.toLowerCase()}.`,
+        variables.decision === 'Returned'
+          ? `${request.requestNo || id} sent back to the requester for correction.`
+          : `${request.requestNo || id} marked as ${variables.decision.toLowerCase()}.`,
         'Approval updated',
       )
     },

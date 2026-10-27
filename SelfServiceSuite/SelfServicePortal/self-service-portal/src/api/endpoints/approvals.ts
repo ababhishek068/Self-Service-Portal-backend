@@ -1,7 +1,7 @@
 import { authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
 import type { ApprovalListType } from '@/types/approval'
-import type { ApprovalQueueItem, PortalRequest } from '@/types/erp.types'
+import type { ApprovalDecision, ApprovalQueueItem, PortalRequest } from '@/types/erp.types'
 
 export const listApprovals = async (type: ApprovalListType = 'pending') => {
   requireAuthApiUrl()
@@ -18,7 +18,7 @@ export const getApprovalDetail = async (id: string) => {
   return authGet<PortalRequest>(`/api/approvals/${encodeURIComponent(id)}`)
 }
 
-export const decideApproval = async (id: string, decision: 'Approved' | 'Rejected', comment: string) => {
+export const decideApproval = async (id: string, decision: ApprovalDecision, comment: string) => {
   requireAuthApiUrl()
   return authPost<PortalRequest>(`/api/approvals/${encodeURIComponent(id)}/decide`, { decision, comment })
 }

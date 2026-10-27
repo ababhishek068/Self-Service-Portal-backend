@@ -28,6 +28,7 @@ import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
 import { ApproverComments } from './ApproverComments'
+import { SentBackNotice } from './SentBackNotice'
 import {
   cancelModuleRequest,
   deleteModuleRequest,
@@ -37,15 +38,7 @@ import {
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import {
-  canDeleteDocumentDraft,
-  canDeleteRequestItems,
-  canRequestApproval,
-  canUploadRequestAttachments,
-  isEditableRequestStatus,
-  PORTAL_ATTACHMENT_MODULES,
-  shouldShowApprovalHistory,
-} from '@/utils/requestStatus'
+import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 type BasicFieldType = 'text' | 'number' | 'date' | 'textarea' | 'select' | 'checkbox' | 'files'
@@ -386,6 +379,22 @@ export function RequestFormPage({
     }
   }
 
+  /** A sent-back request BC still holds as pending: Cancel Approval reopens it for correction. */
+  const handleReopen = async (id: string) => {
+    if (!moduleConfig) return
+    setActionId(id)
+    try {
+      await cancelModuleRequest(moduleConfig, id)
+      await refreshLists()
+      await detailQuery.refetch()
+      toast.success('Request reopened. Correct it, then press Request Approval.')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Reopen failed', 'Action failed')
+    } finally {
+      setActionId(null)
+    }
+  }
+
   const handleDeleteDraft = async (id: string, requestNo: string) => {
     if (!moduleConfig) return
     const yes = await confirm({
@@ -652,7 +661,7 @@ export function RequestFormPage({
               </Button>
               {selected ? (
                 <div className="flex flex-wrap gap-2">
-                  {isEditableRequestStatus(selected.status) && !listOnly && fields.length > 0 ? (
+                  {isEditableRequestStatus(editingStatus(selected)) && !listOnly && fields.length > 0 ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -675,7 +684,7 @@ export function RequestFormPage({
                       Edit
                     </Button>
                   ) : null}
-                  {isEditableRequestStatus(selected.status) &&
+                  {isEditableRequestStatus(editingStatus(selected)) &&
                   canRequestApproval(moduleConfig?.module, selected.payload) ? (
                     <Button
                       type="button"
@@ -719,6 +728,16 @@ export function RequestFormPage({
             ) : null}
             {selected ? (
               <>
+                {(() => {
+                  const sentBack = sentBackInfo(selected)
+                  return sentBack ? (
+                    <SentBackNotice
+                      sentBack={sentBack}
+                      busy={actionId === selected.id}
+                      onReopen={() => void handleReopen(selected.id)}
+                    />
+                  ) : null
+                })()}
                 <ApproverComments steps={selected.approvalSteps} />
                 <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} />
                 <section>
@@ -784,8 +803,8 @@ export function RequestFormPage({
                   <RequestAttachments
                     requestId={selected.id}
                     attachments={selected.attachments}
-                    canUpload={canUploadRequestAttachments(selected.status)}
-                    canDelete={canDeleteRequestItems(selected.status)}
+                    canUpload={canUploadRequestAttachments(editingStatus(selected))}
+                    canDelete={canDeleteRequestItems(editingStatus(selected))}
                     onUpdated={() => {
                       void refreshLists()
                       void detailQuery.refetch()

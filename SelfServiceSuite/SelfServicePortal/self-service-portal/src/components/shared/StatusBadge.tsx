@@ -10,6 +10,7 @@ const variants: Record<string, 'green' | 'red' | 'yellow' | 'gray' | 'blue' | 'o
   Fail: 'red',
   Error: 'red',
   Cancelled: 'red',
+  Returned: 'orange',
   Draft: 'gray',
   'Pending Approval': 'blue',
   'Pending HR Approval': 'blue',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Check, CornerUpLeft, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
 import { ApproverComments } from '@/components/shared/ApproverComments'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
@@ -18,6 +18,31 @@ import { extractApplicationReason } from '@/utils/applicationReason'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import { isMakerAllowedToApprove } from '@/utils/validators'
 import { useToast } from '@/components/feedback/ToastProvider'
+import type { ApprovalDecision } from '@/types/erp.types'
+
+/** Business Central keeps an approval comment in one Approval Comment line of 80 characters. */
+const COMMENT_MAX = 80
+/** Send Back is saved as "[RETURNED] <comment>", which leaves 69 characters. */
+const SEND_BACK_COMMENT_MAX = 69
+
+const DECISION_COPY: Record<ApprovalDecision, { title: string; description: string; confirmLabel: string }> = {
+  Approved: {
+    title: 'Approve request',
+    description: 'This action writes an approval decision against the source document and cannot be performed by the maker.',
+    confirmLabel: 'Approve',
+  },
+  Rejected: {
+    title: 'Reject request',
+    description: 'The request is closed as rejected. The requester sees your reason.',
+    confirmLabel: 'Reject',
+  },
+  Returned: {
+    title: 'Send back for correction',
+    description:
+      'The requester sees your comment, corrects the request and sends it again. The approvals already given are kept, and the request comes back to you.',
+    confirmLabel: 'Send Back',
+  },
+}
 
 const hiddenLineFields = new Set([
   'id',
@@ -262,7 +287,7 @@ export function ApprovalDetail() {
   const { employee } = useAuth()
   const { canApprove: hasApproverRole } = usePermissions()
   const [comment, setComment] = useState('')
-  const [decision, setDecision] = useState<'Approved' | 'Rejected' | null>(null)
+  const [decision, setDecision] = useState<ApprovalDecision | null>(null)
   const detail = useApprovalDetail(id ?? '')
   const approval = useApprovalDecision(id ?? '')
   const toast = useToast()
@@ -276,8 +301,8 @@ export function ApprovalDetail() {
   // Prefer the document outcome from BC. Do not force "Approved" from the queue
   // query when a later step rejected the same document.
   const displayStatus =
-    request?.status === 'Rejected'
-      ? 'Rejected'
+    request?.status === 'Rejected' || request?.status === 'Returned'
+      ? request.status
       : request?.status === 'Approved'
         ? 'Approved'
         : queueType === 'approved'
@@ -288,6 +313,7 @@ export function ApprovalDetail() {
   const isReadOnly =
     displayStatus === 'Approved' ||
     displayStatus === 'Rejected' ||
+    displayStatus === 'Returned' ||
     displayStatus === 'Cancelled'
   const isNotMaker = request && employee ? isMakerAllowedToApprove(request.makerEmployeeNo, employee.employeeNo) : false
   const assignedPendingApprover = Boolean(
@@ -305,6 +331,7 @@ export function ApprovalDetail() {
       }),
   )
   const canApprove = (hasApproverRole || assignedPendingApprover) && isNotMaker && !isReadOnly
+  const canSendBack = request?.payload?.sendBackSupported === true
   const payload = request?.payload ?? {}
   const lines = Array.isArray(payload.lines)
     ? (payload.lines as Record<string, unknown>[])
@@ -531,15 +558,21 @@ export function ApprovalDetail() {
                     </p>
                     <Textarea
                       value={comment}
+                      maxLength={COMMENT_MAX}
                       onChange={(event) => setComment(event.target.value)}
                       placeholder={
                         request.requestType === 'hrServiceLetter'
                           ? 'Enter HR remarks (shown to the employee)'
                           : request.requestType === 'employeeExit'
                             ? 'Add a note. A reason is required to reject.'
-                            : 'Add an approval note. A new reason is required to reject.'
+                            : canSendBack
+                              ? 'Add an approval note. A comment is required to send back or reject.'
+                              : 'Add an approval note. A new reason is required to reject.'
                       }
                     />
+                    <p className="mt-1 text-right text-xs tabular-nums text-slate-500">
+                      {comment.length}/{COMMENT_MAX}
+                    </p>
                     {request.requestType === 'hrServiceLetter' ? (
                       <p className="mt-2 text-xs text-slate-500">
                         Remarks are required for both approve and reject, the same as Hijra letter processing.
@@ -548,6 +581,12 @@ export function ApprovalDetail() {
                       <p className="mt-2 text-xs text-slate-500">
                         Transfer and resignation go to the Immediate Supervisor first, then HR. Exit forms do not
                         appear here.
+                      </p>
+                    ) : canSendBack ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Send Back for Correction returns the request to the requester with your comment (up to{' '}
+                        {SEND_BACK_COMMENT_MAX} characters). After the correction it comes back to you, and the approvals
+                        already given are kept. Reject closes the request.
                       </p>
                     ) : (
                       <p className="mt-2 text-xs text-slate-500">
@@ -569,6 +608,17 @@ export function ApprovalDetail() {
                       <Check className="h-4 w-4" />
                       Approve
                     </Button>
+                    {canSendBack ? (
+                      <Button
+                        variant="outline"
+                        className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                        disabled={!canApprove || approval.isPending}
+                        onClick={() => setDecision('Returned')}
+                      >
+                        <CornerUpLeft className="h-4 w-4" />
+                        Send Back for Correction
+                      </Button>
+                    ) : null}
                     <Button
                       variant="destructive"
                       disabled={!canApprove || approval.isPending}
@@ -597,9 +647,9 @@ export function ApprovalDetail() {
 
       <ConfirmDialog
         open={Boolean(decision)}
-        title={`${decision ?? 'Submit'} request`}
-        description="This action writes an approval decision against the source document and cannot be performed by the maker."
-        confirmLabel={decision ?? 'Submit'}
+        title={decision ? DECISION_COPY[decision].title : 'Submit request'}
+        description={decision ? DECISION_COPY[decision].description : ''}
+        confirmLabel={decision ? DECISION_COPY[decision].confirmLabel : 'Submit'}
         onCancel={() => setDecision(null)}
         onConfirm={() => {
           const chosen = decision
@@ -607,8 +657,17 @@ export function ApprovalDetail() {
             setDecision(null)
             return
           }
-          if (chosen === 'Rejected' && comment.trim().length < 3) {
-            toast.error('Enter a reason of at least 3 characters to reject or return this request.')
+          if ((chosen === 'Rejected' || chosen === 'Returned') && comment.trim().length < 3) {
+            toast.error(
+              chosen === 'Returned'
+                ? 'Enter a comment of at least 3 characters that tells the requester what to correct.'
+                : 'Enter a reason of at least 3 characters to reject this request.',
+            )
+            setDecision(null)
+            return
+          }
+          if (chosen === 'Returned' && comment.trim().length > SEND_BACK_COMMENT_MAX) {
+            toast.error(`Keep the send-back comment to ${SEND_BACK_COMMENT_MAX} characters.`)
             setDecision(null)
             return
           }
@@ -625,9 +684,10 @@ export function ApprovalDetail() {
               // document drops out of the pending-approval query straight
               // away, so staying here renders an unloadable blank screen.
               onSuccess: () => {
-                navigate(chosen === 'Approved' ? '/approvals/approved' : '/approvals/rejected', {
-                  replace: true,
-                })
+                navigate(
+                  chosen === 'Approved' ? '/approvals/approved' : chosen === 'Rejected' ? '/approvals/rejected' : '/approvals',
+                  { replace: true },
+                )
               },
             },
           )

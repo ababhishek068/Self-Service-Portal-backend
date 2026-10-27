@@ -4,6 +4,7 @@ import { itemMaster } from '@/data/items'
 import { moduleLabels } from '@/data/moduleLabels'
 import type { ApprovalListType } from '@/types/approval'
 import type {
+  ApprovalDecision,
   ApprovalQueueItem,
   Employee,
   PortalModuleKey,
@@ -287,7 +288,7 @@ export async function mockListApprovals(
   return delay(rows)
 }
 
-export async function mockDecideApproval(id: string, decision: 'Approved' | 'Rejected', comment: string) {
+export async function mockDecideApproval(id: string, decision: ApprovalDecision, comment: string) {
   const request = mockRequests.find((item) => item.id === id)
   if (!request) throw new Error('Approval item was not found')
   if (request.makerEmployeeNo === currentEmployee.employeeNo) {

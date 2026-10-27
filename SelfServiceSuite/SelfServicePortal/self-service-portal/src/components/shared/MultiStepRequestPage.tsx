@@ -27,6 +27,7 @@ import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
 import { ApprovalHistory } from './ApprovalHistory'
 import { ApproverComments } from './ApproverComments'
+import { SentBackNotice } from './SentBackNotice'
 import {
   normalizeAndValidateSelectValues,
   type DetailFieldConfig,
@@ -49,7 +50,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
-import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, shouldShowApprovalHistory } from '@/utils/requestStatus'
+import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
@@ -901,8 +902,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
   const selected = detailQuery.data
   const bcCard = selected ? config.bcCard?.(selected) === true : false
+  const sentBack = bcCard ? null : sentBackInfo(selected)
   const editable = selected && !bcCard
-    ? isEditableRequestStatus(selected.status, config.module.module)
+    ? isEditableRequestStatus(editingStatus(selected), config.module.module)
     : false
   const submittable = selected
     ? editable && canRequestApproval(config.module.module, selected.payload as Record<string, unknown> | undefined)
@@ -1218,6 +1220,20 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
             {selected ? (
               <>
+                {sentBack ? (
+                  <SentBackNotice
+                    sentBack={sentBack}
+                    busy={actionId === selected.id}
+                    onReopen={() =>
+                      void runAction(
+                        selected.id,
+                        () => cancelModuleRequest(config.module, selected.id),
+                        'Reopen failed',
+                        'Request reopened. Correct it, then press Request Approval.',
+                      )
+                    }
+                  />
+                ) : null}
                 {(() => {
                   const rejectionNote =
                     String(
@@ -1448,8 +1464,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   <RequestAttachments
                     requestId={selected.id}
                     attachments={selected.attachments}
-                    canUpload={canUploadRequestAttachments(selected.status, config.module.module)}
-                    canDelete={canDeleteRequestItems(selected.status, config.module.module)}
+                    canUpload={canUploadRequestAttachments(editingStatus(selected), config.module.module)}
+                    canDelete={canDeleteRequestItems(editingStatus(selected), config.module.module)}
                     categoryOptions={config.attachmentCategoryOptions}
                     categoryHint={config.attachmentCategoryHint}
                     onUpdated={() => {

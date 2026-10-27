@@ -92,7 +92,9 @@ function storeRequisitionSteps(
         }`
   const approvalNote = rejected
     ? status
-    : approvalDone
+    : normalizedStatus === 'returned'
+      ? 'Sent back for correction'
+      : approvalDone
       ? 'Approved in Business Central'
       : approvalPending
         ? `With ${currentApprover?.actorName || currentApprover?.actorEmployeeNo || 'the current approver'}`
@@ -151,7 +153,7 @@ function storeRequisitionSteps(
     {
       label: 'Approval',
       note: approvalNote,
-      tone: rejected ? 'stopped' : approvalDone ? 'complete' : approvalPending ? 'active' : 'pending',
+      tone: rejected ? 'stopped' : approvalDone ? 'complete' : approvalPending || normalizedStatus === 'returned' ? 'active' : 'pending',
       icon: Send,
     },
     {
@@ -198,7 +200,8 @@ export function RequestProgress({
 }: RequestProgressProps) {
   const approvalRequested = ['Pending Approval', 'Submitted', 'Approved', 'Rejected', 'Cancelled', 'Posted'].includes(status)
   const detailReady = !requiresLines || hasLines
-  const workflowNote = approvalRequested ? status : 'Not requested yet'
+  const workflowNote =
+    status === 'Returned' ? 'Sent back for correction' : approvalRequested ? status : 'Not requested yet'
   const genericSteps: ProgressStep[] = [
     { label: 'Draft created', note: 'Header saved in Business Central', tone: 'complete', icon: FileCheck2 },
     {
@@ -214,7 +217,7 @@ export function RequestProgress({
         ? 'complete'
         : ['Rejected', 'Cancelled'].includes(status)
           ? 'stopped'
-          : ['Pending Approval', 'Submitted'].includes(status)
+          : ['Pending Approval', 'Submitted', 'Returned'].includes(status)
             ? 'active'
             : 'pending',
       icon: Send,

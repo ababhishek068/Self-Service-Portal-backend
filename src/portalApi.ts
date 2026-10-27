@@ -67,6 +67,7 @@ import {
   leaveDocumentNoCandidates,
   mapApprovalSteps,
   mapApprovalStepsWithSequence,
+  mergeApprovalComments,
   newestApprovalEntry,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
@@ -91,7 +92,7 @@ import {
   financeSessionHints,
   isFinanceDetailModule,
 } from './financeRequestEnrichment.js'
-import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, mapSalaryAdvanceLine, moduleUsesApprovalEntryPromotion, promoteDetailAfterApprovalSubmit, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
+import { documentStatusFromBc, injectSalaryAdvanceSalaryHint, mapItem, mapRequest, approvalsKeptAfterSendBack, mapSalaryAdvanceLine, moduleUsesApprovalEntryPromotion, promoteDetailAfterApprovalSubmit, SENT_BACK_COMMENT_PREFIX, sentBackApprovalEntry, resolveLeaveStatus, resolveModuleRequestStatus, resolveSalaryAdvanceAmount, statusFromBc, type PortalModuleKey } from './erpMappings.js'
 import { sortNewestFirst } from './sortNewestFirst.js'
 import { employeeAnnualLeaveBalance, parseEmployeeLeaveBalancesReturn } from './leaveBalance.js'
 import {
@@ -358,11 +359,29 @@ export function parseApprovalDecision(
       'APPROVAL_REASON_REQUIRED',
     )
   }
-  return {
-    decision,
-    comment,
-    soapComment: decision === 'Returned' ? `[RETURNED] ${comment}` : comment,
+  const soapComment = decision === 'Returned' ? `${SENT_BACK_COMMENT_PREFIX} ${comment}` : comment
+  if (soapComment.length > BC_APPROVAL_COMMENT_MAX) {
+    const room = BC_APPROVAL_COMMENT_MAX - (soapComment.length - comment.length)
+    throw portalError(
+      `Keep the comment to ${room} characters. Business Central stores an approval comment in up to ${BC_APPROVAL_COMMENT_MAX} characters.`,
+      422,
+      'APPROVAL_COMMENT_TOO_LONG',
+    )
   }
+  return { decision, comment, soapComment }
+}
+
+/** Approval Comment Line.Comment is Text[80] in Business Central. */
+export const BC_APPROVAL_COMMENT_MAX = 80
+
+/**
+ * Send Back for Correction needs the requester to reopen (Cancel Approval) and send the document
+ * again (Request Approval) from the portal, so only modules with both actions offer it.
+ */
+export function sendBackSupported(module: string) {
+  if (module === 'leave') return false
+  const spec = findFrontendModuleSpec(module as SupportedFrontendModule)
+  return Boolean(spec?.soap.submit && spec.soap.cancel)
 }
 
 export function approvalDecisionSoapRequest(
@@ -455,7 +474,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v275 — 1.0.3.434 (rejected requests listed as Rejected, not Pending Approval; for BC 1.0.3.574)'
+export const PORTAL_API_BUILD = 'v276 — 1.0.3.435 (Send Back for Correction in My Approvals; requester corrects and resubmits, earlier approvals kept; for BC 1.0.3.574)'
 
 interface LookupSpec {
   service: string
@@ -1725,6 +1744,7 @@ function approvalEntryStatus(row: ODataRecord) {
 
 /** Document outcome from all approval entries — Rejected wins over personal Approved. */
 function documentOutcomeFromApprovalEntries(entries: ODataRecord[]) {
+  if (sentBackApprovalEntry(entries)) return 'Returned'
   if (entries.some((row) => approvalEntryStatus(row) === 'Rejected')) return 'Rejected'
   if (
     entries.length > 0 &&
@@ -2417,16 +2437,92 @@ export function mapModuleLines(
 }
 
 /**
+ * Approval entries with their Approval Comments merged in, which tell a send back ([RETURNED]) from a
+ * rejection. Comments are only read when the document has a rejected entry.
+ */
+async function approvalEntriesWithComments(spec: ModuleSpec, no: string, row?: ODataRecord) {
+  const entries = await fetchPortalApprovalEntries(spec, no, row)
+  if (!entries.some((entry) => /reject/i.test(text(entry, ['Status'])))) return entries
+  const comments = (await fetchOData('QyApprovalCommentLine', {
+    $filter: `DocumentNo eq '${odataString(no)}'`,
+    $top: 200,
+  }).catch(() => [])) as ODataRecord[] | null
+  return mergeApprovalComments(entries, Array.isArray(comments) ? comments : [])
+}
+
+/**
  * List status as on the request detail: a header BC left on Pending Approval is checked against its
- * approval entries, so a rejected (or fully approved) request is not listed as Pending Approval.
+ * approval entries, so a rejected (or fully approved) request is not listed as Pending Approval. An
+ * open header is listed as Returned while it is with the requester after a send back.
  */
 async function listRowStatus(spec: ModuleSpec, row: ODataRecord, module: PortalModuleKey) {
   const status = resolveModuleRequestStatus(row, module)
-  if (status !== 'Pending Approval' || !moduleUsesApprovalEntryPromotion(module)) return status
+  if (!['Pending Approval', 'Open', 'Draft'].includes(status) || !moduleUsesApprovalEntryPromotion(module)) {
+    return status
+  }
   const no = text(row, ['No', 'No_', 'DocumentNo', 'Document_No', 'ApplicationCode', 'RequisitionNo'])
   if (!no) return status
-  const entries = await fetchPortalApprovalEntries(spec, no, row).catch(() => [] as ODataRecord[])
-  return entries.length ? resolveModuleRequestStatus(row, module, entries) : status
+  const entries = await approvalEntriesWithComments(spec, no, row).catch(() => [] as ODataRecord[])
+  if (!entries.length) return status
+  const resolved = resolveModuleRequestStatus(row, module, entries)
+  return status === 'Pending Approval' || resolved === 'Returned' ? resolved : status
+}
+
+/**
+ * Before a request that was sent back is sent for approval again: the send back and the approvals
+ * already given in that cycle.
+ */
+async function sendBackResubmission(spec: ModuleSpec, no: string) {
+  const entries = await approvalEntriesWithComments(spec, no)
+  const sentBack = sentBackApprovalEntry(entries)
+  return sentBack ? { sentBack, kept: approvalsKeptAfterSendBack(entries, sentBack) } : null
+}
+
+/**
+ * BC starts a resubmitted request at step 1 again. The steps the same approvers had already approved
+ * before the send back are approved again for them (the portal records every approval for the
+ * approver in the same way), so the request goes straight back to the approver who sent it back.
+ * Stops at a step whose approver differs (e.g. after an amount change) and never approves the last
+ * open step.
+ */
+async function keepApprovalsAfterCorrection(
+  spec: ModuleSpec,
+  module: string,
+  no: string,
+  plan: NonNullable<Awaited<ReturnType<typeof sendBackResubmission>>>,
+) {
+  const entryNo = (entry: ODataRecord) => Number(text(entry, ['EntryNo', 'Entry_No'])) || 0
+  const sequenceNo = (entry: ODataRecord) => number(entry, ['SequenceNo', 'Sequence_No'])
+  const sentBackNo = entryNo(plan.sentBack)
+  const sentBackStep = sequenceNo(plan.sentBack)
+  let kept = 0
+  for (let step = 0; step < 10; step += 1) {
+    const active = (await fetchPortalApprovalEntries(spec, no))
+      .filter((entry) => entryNo(entry) > sentBackNo)
+      .filter((entry) => ['open', 'created'].includes(text(entry, ['Status']).toLowerCase()))
+    const next = active
+      .filter((entry) => text(entry, ['Status']).toLowerCase() === 'open')
+      .sort((left, right) => sequenceNo(left) - sequenceNo(right))[0]
+    if (!next || sequenceNo(next) >= sentBackStep) break
+    const approverId = text(next, ['ApproverID'])
+    const previous = plan.kept.find(
+      (approval) =>
+        approval.sequenceNo === sequenceNo(next) && approval.approverId.toUpperCase() === approverId.toUpperCase(),
+    )
+    if (!previous || !active.some((entry) => sequenceNo(entry) > sequenceNo(next))) break
+    const approvedOn = previous.approvedAt ? previous.approvedAt.slice(0, 10) : ''
+    const request = approvalDecisionSoapRequest(module, {
+      entryNo: text(next, ['EntryNo', 'Entry_No']),
+      docNo: no,
+      userID: approverId,
+      isApprove: true,
+      comments: `Approval kept after correction${approvedOn ? ` (approved ${approvedOn})` : ''}.`,
+    })
+    const result = await callSoapMethod(request.method, request.params).catch(() => null)
+    if (!result?.returnValue || String(result.returnValue).toLowerCase() === 'false') break
+    kept += 1
+  }
+  return kept
 }
 
 async function mappedModuleRows(
@@ -2974,6 +3070,7 @@ async function requestDetail(
       ? await resolvePurchaseRequesterDisplayName(headerForMapping, authUser)
       : ''
   const resolvedStatus = resolveModuleRequestStatus(headerForMapping, module as PortalModuleKey, approvers)
+  const sentBack = resolvedStatus === 'Returned' ? sentBackDetails(approvers, mapped.status) : null
   const salaryAdvanceAmount =
     module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
   const purchaseLinesAmount =
@@ -3027,10 +3124,27 @@ async function requestDetail(
             gatePassLinkTo: GATE_PASS_SOURCE_SPECS[gatePassBinding.source].linkTo,
           }
         : {}),
+      ...(sentBack ? { sentBack } : {}),
       lines: mappedLines,
     },
     approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
     attachments: mapAttachments(attachments),
+  }
+}
+
+/**
+ * A request an approver sent back for correction: who, why and when, and whether BC still holds the
+ * header as pending (the requester first reopens it with Cancel Approval, then edits and resubmits).
+ */
+function sentBackDetails(approvers: ODataRecord[], headerStatus: string) {
+  const entry = sentBackApprovalEntry(approvers)
+  if (!entry) return null
+  return {
+    comment: text(entry, ['Comment']).replace(/^\[RETURNED\]\s*/i, ''),
+    by: text(entry, ['ApproverName', 'ApproverID']),
+    at: text(entry, ['ApprovalCommentDateTime', 'LastDateTimeModified', 'Last_Date_Time_Modified']),
+    sequenceNo: number(entry, ['SequenceNo', 'Sequence_No']),
+    reopenRequired: !['Draft', 'Open', 'New'].includes(headerStatus),
   }
 }
 
@@ -3042,7 +3156,8 @@ function resolveRequestApprovalSteps(
   if (
     mappedStatus !== 'Pending Approval' &&
     mappedStatus !== 'Approved' &&
-    mappedStatus !== 'Rejected'
+    mappedStatus !== 'Rejected' &&
+    mappedStatus !== 'Returned'
   ) {
     return []
   }
@@ -4168,7 +4283,13 @@ export function buildPortalApiRouter() {
       const spec = findFrontendModuleSpec(module)
       if (!spec) throw portalError(`${module} is not supported`, 501)
       await requireOwnedPortalRequest(requestId, authUser)
+      const resubmission = await sendBackResubmission(spec, no).catch(() => null)
       await submitPortalModuleRequest(spec, authUser, no)
+      if (resubmission?.kept.length) {
+        await keepApprovalsAfterCorrection(spec, module, no, resubmission).catch((error) =>
+          console.warn(`Could not keep the earlier approvals of ${no} after correction`, error),
+        )
+      }
       const detail = promoteDetailAfterApprovalSubmit(
         module as PortalModuleKey,
         await requestDetail(requestId, authUser).catch(() => ({
@@ -5556,6 +5677,7 @@ export function buildPortalApiRouter() {
         res.json({
           ...source,
           status: resolvedStatus,
+          payload: { ...(source.payload as Record<string, unknown> | undefined), sendBackSupported: sendBackSupported(module) },
           makerEmployeeNo: queueItem.makerEmployeeNo || source.makerEmployeeNo,
           makerName: queueItem.makerName || source.makerName,
           submittedAt: queueItem.submittedAt || source.submittedAt,
@@ -5645,6 +5767,13 @@ export function buildPortalApiRouter() {
       }
 
       const { requestId, module, no, entryRows } = await resolveApprovalReference(rawId, authUser)
+      if (decision === 'Returned' && !sendBackSupported(module)) {
+        throw portalError(
+          'Send Back for Correction is not available for this request type. Reject it with a reason instead.',
+          422,
+          'RETURN_NOT_SUPPORTED',
+        )
+      }
       // resolveApprovalReference already limits rows to identities belonging to
       // this authenticated employee. Pick the newest exact Open entry instead
       // of letting OData `$top=1` select an arbitrary historical workflow run.

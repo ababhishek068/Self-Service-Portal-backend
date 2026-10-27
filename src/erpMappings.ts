@@ -364,11 +364,71 @@ function hasActiveApprovalEntries(entries: ODataRecord[]) {
   })
 }
 
-function approvalEntryIsReturned(entry: ODataRecord) {
+/** Comment prefix of a "Send Back for Correction" decision (BC records it as a rejection). */
+export const SENT_BACK_COMMENT_PREFIX = '[RETURNED]'
+
+export function approvalEntryIsReturned(entry: ODataRecord) {
   const status = approvalEntryStatus(entry)
   if (status.includes('return')) return true
   const comment = text(entry, ['Comment', 'Comments', 'ApprovalComment']).trim()
   return /^\[RETURNED\](?:\s|$)/i.test(comment)
+}
+
+function approvalEntryNo(entry: ODataRecord) {
+  return Number(text(entry, ['EntryNo', 'Entry_No'])) || 0
+}
+
+/**
+ * The send-back entry of the approval cycle that `terminal` closed. BC rejects the not yet reached
+ * steps of the same cycle together with the send back, so `terminal` can be one of those (with no
+ * comment); they share the Workflow Step Instance ID, or else the same modified time.
+ */
+function sentBackEntryOfCycle(entries: ODataRecord[], terminal: ODataRecord) {
+  if (approvalEntryIsReturned(terminal)) return terminal
+  if (!approvalEntryStatus(terminal).includes('reject')) return undefined
+  const cycle = text(terminal, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
+  const closedAt = Date.parse(text(terminal, ['LastDateTimeModified', 'Last_Date_Time_Modified']))
+  return entries.find((entry) => {
+    if (!approvalEntryIsReturned(entry)) return false
+    const entryCycle = text(entry, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
+    if (cycle && entryCycle) return cycle === entryCycle
+    const at = Date.parse(text(entry, ['LastDateTimeModified', 'Last_Date_Time_Modified']))
+    return Number.isFinite(at) && Number.isFinite(closedAt) && Math.abs(at - closedAt) <= 120_000
+  })
+}
+
+/**
+ * When the document's last approval outcome is a send back (and nothing is pending again), the
+ * entry of the approver who sent it back. Needs the Approval Comments merged into the entries.
+ */
+export function sentBackApprovalEntry(approvalEntries: ODataRecord[]) {
+  if (hasActiveApprovalEntries(approvalEntries)) return undefined
+  const latestTerminal = latestTerminalApprovalEntry(approvalEntries)
+  return latestTerminal ? sentBackEntryOfCycle(approvalEntries, latestTerminal) : undefined
+}
+
+/**
+ * The approvals given in the sent-back cycle before the step that sent it back, which are kept when
+ * the corrected document is sent for approval again.
+ */
+export function approvalsKeptAfterSendBack(approvalEntries: ODataRecord[], sentBack: ODataRecord) {
+  const cycle = text(sentBack, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
+  const sequenceNo = Number(text(sentBack, ['SequenceNo', 'Sequence_No'])) || 0
+  const sentBackNo = approvalEntryNo(sentBack)
+  return approvalEntries
+    .filter((entry) => {
+      if (!approvalEntryStatus(entry).includes('approve')) return false
+      const entrySequence = Number(text(entry, ['SequenceNo', 'Sequence_No'])) || 0
+      if (!(entrySequence > 0 && entrySequence < sequenceNo)) return false
+      const entryCycle = text(entry, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
+      if (cycle && entryCycle) return entryCycle === cycle
+      return approvalEntryNo(entry) < sentBackNo
+    })
+    .map((entry) => ({
+      sequenceNo: Number(text(entry, ['SequenceNo', 'Sequence_No'])) || 0,
+      approverId: text(entry, ['ApproverID']),
+      approvedAt: text(entry, ['LastDateTimeModified', 'Last_Date_Time_Modified']),
+    }))
 }
 
 function latestTerminalApprovalEntry(entries: ODataRecord[]) {
@@ -425,7 +485,7 @@ export function resolveModuleRequestStatus(
 
   const latestTerminal = latestTerminalApprovalEntry(approvalEntries)
   if (latestTerminal) {
-    if (approvalEntryIsReturned(latestTerminal)) return 'Returned'
+    if (sentBackEntryOfCycle(approvalEntries, latestTerminal)) return 'Returned'
     const latestStatus = approvalEntryStatus(latestTerminal)
     if (latestStatus.includes('reject')) return 'Rejected'
     if (latestStatus.includes('approve')) return 'Approved'

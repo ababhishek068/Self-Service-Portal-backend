@@ -7,7 +7,12 @@ export const requestStatuses = [
   'Rejected',
   'Cancelled',
   'Posted',
+  // Sent back by an approver for correction (BC: a rejection with a [RETURNED] comment).
+  'Returned',
 ] as const
+
+/** An approver's decision in My Approvals; Returned is Send Back for Correction. */
+export type ApprovalDecision = 'Approved' | 'Rejected' | 'Returned'
 
 export type RequestStatus = (typeof requestStatuses)[number]
 

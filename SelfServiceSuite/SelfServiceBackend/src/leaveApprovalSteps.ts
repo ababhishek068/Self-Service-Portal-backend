@@ -27,19 +27,35 @@ function approvalNote(row: ODataRecord) {
   return typeof approvalComment === 'string' ? approvalComment.trim() : ''
 }
 
+const SENT_BACK_NOTE = /^\[RETURNED\]\s*/i
+
+function workflowCycle(row: ODataRecord) {
+  return text(row, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
+}
+
 export function mapApprovalSteps(value: unknown) {
   const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
+  // "Send Back for Correction" is a BC rejection with a [RETURNED] comment; BC rejects the steps
+  // the request had not reached yet in the same cycle, which are shown as Cancelled.
+  const sentBackCycles = new Set(
+    rows.filter((row) => SENT_BACK_NOTE.test(approvalNote(row))).map(workflowCycle).filter(Boolean),
+  )
   return rows
     .map((row, index) => {
       const rawStatus = text(row, ['Status'], 'Pending Approval')
       const approverId = text(row, ['ApproverID', 'ApproverEmployeeNo'])
       const senderId = text(row, ['SenderID', 'UserID'])
-      const status =
-        rawStatus === 'Open'
-          ? 'Pending Approval'
-          : rawStatus === 'Created'
-            ? 'Waiting'
-            : rawStatus
+      const rawNote = approvalNote(row)
+      const sentBack = SENT_BACK_NOTE.test(rawNote)
+      const status = sentBack
+        ? 'Returned'
+        : rawStatus === 'Rejected' && !rawNote && sentBackCycles.has(workflowCycle(row))
+          ? 'Cancelled'
+          : rawStatus === 'Open'
+            ? 'Pending Approval'
+            : rawStatus === 'Created'
+              ? 'Waiting'
+              : rawStatus
       return {
         id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
         actorEmployeeNo: approverId || senderId,
@@ -59,7 +75,7 @@ export function mapApprovalSteps(value: unknown) {
           'DueDate',
           'Date',
         ]),
-        note: approvalNote(row),
+        note: sentBack ? rawNote.replace(SENT_BACK_NOTE, '') : rawNote,
         sequenceNo: number(row, ['SequenceNo', 'Sequence_No'], index + 1),
       }
     })
