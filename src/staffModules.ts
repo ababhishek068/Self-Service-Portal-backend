@@ -1107,7 +1107,8 @@ const storeRequisition: ModuleSpec = {
         quantity,
         location: headerStore,
         description: requestedItem.slice(0, 70),
-        remarks: lineDescription && lineDescription !== requestedItem ? lineDescription.slice(0, 200) : '',
+        // BC Store Requisition Line Remarks (Additional specification) is Text[1000] from BC 1.0.3.577.
+        remarks: lineDescription && lineDescription !== requestedItem ? lineDescription.slice(0, 1000) : '',
         unitOfMeasure: unitOfMeasure.slice(0, 20),
         preferredBrandModel: String(
           req.body?.preferredBrandModel ?? req.body?.preferredBrand ?? req.body?.brandModel ?? '',

@@ -76,7 +76,7 @@ export function CardSection({
   )
 }
 
-export type CardEditorKind = 'text' | 'code' | 'date' | 'number' | 'select' | 'boolean'
+export type CardEditorKind = 'text' | 'longtext' | 'code' | 'date' | 'number' | 'select' | 'boolean'
 
 /** An editable BC card value: same height as the value box; codes are upper-case as in BC. */
 export function CardEditor({
@@ -120,6 +120,18 @@ export function CardEditor({
           </option>
         ))}
       </select>
+    )
+  }
+  if (kind === 'longtext') {
+    return (
+      <textarea
+        aria-label={label}
+        className={`${box} h-auto min-h-[4.5rem] py-1.5`}
+        rows={3}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
     )
   }
   return (

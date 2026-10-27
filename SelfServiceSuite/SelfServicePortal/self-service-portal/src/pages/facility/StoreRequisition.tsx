@@ -395,9 +395,9 @@ export function StoreRequisition() {
             name: 'description',
             label: 'Additional specification (optional)',
             type: 'textarea',
-            // BC Store Requisition Line Remarks is Text[200].
-            maxLength: 200,
-            hint: 'Business Central keeps up to 200 characters. For a longer specification, attach it below as a Specification Document.',
+            // BC Store Requisition Line Remarks is Text[1000] from BC 1.0.3.577 (copied to the LPR / RFQ Specification).
+            maxLength: 1000,
+            hint: 'Up to 1000 characters. Procurement, the Operations Manager and the LPR / RFQ see this specification. Attach a Specification Document for anything longer.',
             placeholder: 'Add extra detail if needed. Attach a file only when a spec document is required.',
             valuePaths: ['remarks', 'Remarks', 'lineDescription'],
           },

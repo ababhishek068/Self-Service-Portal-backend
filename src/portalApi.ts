@@ -474,7 +474,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v279 — 1.0.3.438 (Store Requisition line: BC length limits shown with a counter instead of cutting the text; for BC 1.0.3.576)'
+export const PORTAL_API_BUILD = 'v280 — 1.0.3.439 (store request specification up to 1000 characters, shown in full on approvals, LPR and RFQ; for BC 1.0.3.577)'
 
 interface LookupSpec {
   service: string

@@ -158,7 +158,11 @@ export function BcLinesTable({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    className={`max-w-[16rem] truncate whitespace-nowrap px-3 py-2 ${column.numeric ? 'text-right tabular-nums' : ''}`}
+                    className={`px-3 py-2 ${
+                      column.wrap
+                        ? 'min-w-[16rem] max-w-[28rem] whitespace-pre-wrap align-top'
+                        : `max-w-[16rem] truncate whitespace-nowrap ${column.numeric ? 'text-right tabular-nums' : ''}`
+                    }`}
                     title={column.value(line)}
                   >
                     {(column.display ?? column.value)(line)}
@@ -216,7 +220,7 @@ export function BcLinesTable({
           </p>
           <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] gap-x-4 gap-y-3">
             {editColumns.map((column) => (
-              <label key={column.key} className="block space-y-1">
+              <label key={column.key} className={`block space-y-1 ${column.kind === 'longtext' ? 'sm:col-span-2' : ''}`}>
                 <span className="text-xs font-medium text-slate-600">{column.header}</span>
                 {column.key === 'no' && CODE_CATALOGS[draft.type ?? ''] ? (
                   <CatalogCodeField

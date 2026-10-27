@@ -115,8 +115,10 @@ if [[ -n "${BC_PACKAGE_DIR:-}" ]]; then
   cat > "$PENDING_AL_DIR/README.txt" <<'PENDEOF'
 NOT PUBLISHED YET — keep running the BC app in the parent folder.
 These are the Local Purchase and Store Requisition files changed for the portal; the full
-source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.576.app,
-publish with docs/ERP-Publish-1.0.3.576.ps1).
+source is ABH-LIVE-AL main (compiled: Technology Associates EA Ltd_BC24_TA App_1.0.3.577.app,
+publish with docs/ERP-Publish-1.0.3.577.ps1).
+1.0.3.577: the requester's Additional specification (store line Remarks, now 1000 characters) is
+the LPR line Specification (Request Summary, now 1000) and so the RFQ's. Includes Nitish's 1.0.3.576.
 1.0.3.576 (Nitish): Local Procurement approvals — a comment on every approve / send back / reject,
 Send Back and Reject at every LPR / RFQ / PO / invoice step, Resubmit RFQ and Resubmit Invoice, and
 the Approval History (ABH LPR Approval Log). The portal (1.0.3.436) asks for the comment, offers the

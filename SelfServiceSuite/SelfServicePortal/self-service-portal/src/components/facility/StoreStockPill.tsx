@@ -39,7 +39,7 @@ export function RequestedSummary({
             {quantityLabel(line.quantity)} {line.unitOfMeasure}
             {line.brand ? ` · ${line.brand}` : ''}
           </span>
-          {line.details ? <span className="basis-full text-xs text-slate-500">{line.details}</span> : null}
+          {line.details ? <span className="basis-full whitespace-pre-wrap text-sm text-slate-700">{line.details}</span> : null}
         </li>
       ))}
     </ul>

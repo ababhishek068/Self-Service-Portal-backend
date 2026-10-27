@@ -280,6 +280,9 @@ function approvalMetric(
   return { label: 'Amount', value: formatCurrency(amount) }
 }
 
+/** Line fields that hold the requester's description / specification: wrapped, never cut off. */
+const LONG_TEXT_LINE_KEYS = new Set(['description', 'specification', 'remarks', 'lineDescription', 'requestSummary'])
+
 export function ApprovalDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -516,7 +519,9 @@ export function ApprovalDetail() {
                             {lineKeys.map((key) => (
                               <td
                                 key={key}
-                                className={`whitespace-nowrap px-3 py-2 align-middle tabular-nums ${
+                                className={`px-3 py-2 align-middle tabular-nums ${
+                                  LONG_TEXT_LINE_KEYS.has(key) ? 'min-w-[16rem] max-w-[28rem] whitespace-pre-wrap' : 'whitespace-nowrap'
+                                } ${
                                   lines.every((row) => isBlankLineValue(row[key]) || isNumericLineValue(row[key])) ? 'text-right' : 'text-left'
                                 }`}
                               >

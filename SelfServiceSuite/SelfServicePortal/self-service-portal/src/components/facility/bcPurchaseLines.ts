@@ -46,6 +46,8 @@ export type LineColumn = {
   display?: (line: PurchaseLine) => string
   numeric?: boolean
   readOnly?: boolean
+  /** Long text (e.g. the specification) wraps in the table instead of being cut off. */
+  wrap?: boolean
 }
 
 /** The Purchase Requisition Subform columns; Local RFQ / PO lines use the same keys (BC chain lines). */
@@ -61,7 +63,8 @@ export const PURCHASE_LINE_COLUMNS: LineColumn[] = [
   { header: 'Typed Code', key: 'portalItemCode', kind: 'text', value: (line) => text(line.portalItemCode) },
   { header: 'Item / Service Name', key: 'description', kind: 'text', value: (line) => pick(line.bcDescription, line.itemName) },
   { header: 'Category', key: 'category', kind: 'text', value: (line) => pick(line.requestCategory, line.category) },
-  { header: 'Specification', key: 'specification', kind: 'text', value: (line) => text(line.specification) },
+  // The requester's Additional specification (BC Request Summary, up to 1000 characters from BC 1.0.3.577).
+  { header: 'Specification', key: 'specification', kind: 'longtext', wrap: true, value: (line) => text(line.specification) },
   { header: 'Preferred Brand / Model', key: 'brandModel', kind: 'text', value: (line) => text(line.preferredBrandModel) },
   {
     header: 'Required Date',
