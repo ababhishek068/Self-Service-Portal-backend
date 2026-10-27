@@ -302,6 +302,8 @@ export interface LocalPurchaseState {
     rfq?: Record<string, unknown>
     po?: Record<string, unknown>
     receipts?: Array<Record<string, unknown>>
+    /** BC 1.0.3.576: Approval History (ABH LPR Approval Log) of the whole chain, oldest first. */
+    approvalHistory?: Array<Record<string, unknown>>
   }
   quotes: { rfqNo?: string; quotes?: LocalPurchaseVendorQuote[] }
   roles: string[]

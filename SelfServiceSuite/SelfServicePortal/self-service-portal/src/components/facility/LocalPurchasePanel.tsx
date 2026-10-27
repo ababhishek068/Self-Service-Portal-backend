@@ -20,6 +20,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import { LookupCombobox } from '@/components/shared/LookupCombobox'
+import { LprApprovalHistory } from '@/components/facility/LprApprovalHistory'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
@@ -37,7 +38,15 @@ import { cn } from '@/lib/utils'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
 const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'])
-const RETURN_ACTIONS = new Set(['REJECT_LPR', 'SEND_BACK_RFQ', 'SEND_BACK_PO'])
+const RETURN_ACTIONS = new Set([
+  'REJECT_LPR',
+  'SEND_BACK_LPR',
+  'SEND_BACK_RFQ',
+  'REJECT_RFQ',
+  'SEND_BACK_PO',
+  'REJECT_PO',
+  'SEND_BACK_INVOICE',
+])
 
 const ROLE_LABELS: Record<string, string> = {
   operations: 'Store Keeper',
@@ -281,7 +290,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       toast.error(
         action.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
           ? 'Write the technical recommendation before submitting.'
-          : 'Enter a reason before sending this back.',
+          : 'Enter your comment first. Every approve, send back and reject is recorded with it in the Approval History.',
         'Comment required',
       )
       return
@@ -634,7 +643,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               <Label htmlFor={`lpr-action-comment-${request.id}`}>
                 {ribbon.some((action) => action.actionCode === 'SUBMIT_TECHNICAL_REVIEW')
                   ? 'Technical Recommendation'
-                  : 'Comment (required to reject / send back)'}
+                  : 'Comment (required to approve, send back or reject)'}
               </Label>
               <Textarea
                 id={`lpr-action-comment-${request.id}`}
@@ -710,6 +719,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               <RelatedDocuments docs={relatedDocs} />
             </div>
           ) : null}
+          <LprApprovalHistory entries={state.chain.approvalHistory} />
         </div>
       </div>
 

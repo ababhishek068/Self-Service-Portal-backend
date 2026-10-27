@@ -52,34 +52,41 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   ADD_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
   DELETE_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
   UPDATE_PO_RECEIVE: { roles: ['operations'], needsPayload: true },
-  APPROVE_LPR_OPS: { roles: ['operationsManager'] },
-  APPROVE_LPR_FAD: { roles: ['fad'] },
+  APPROVE_LPR_OPS: { roles: ['operationsManager'], commentRequired: true },
+  APPROVE_LPR_FAD: { roles: ['fad'], commentRequired: true },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
   CONVERT_TO_RFQ: { roles: PROCUREMENT },
-  APPROVE_RFQ_OPS: { roles: ['operationsManager'] },
+  APPROVE_RFQ_OPS: { roles: ['operationsManager'], commentRequired: true },
   UPSERT_VENDOR_QUOTE: { roles: PROCUREMENT, needsPayload: true },
   AUTO_SELECT_WINNER: { roles: PROCUREMENT },
   SEND_FOR_OPS_REVIEW: { roles: PROCUREMENT },
-  SEND_TO_TECHNICAL: { roles: ['operationsManager'] },
-  SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'] },
+  SEND_TO_TECHNICAL: { roles: ['operationsManager'], commentRequired: true },
+  SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'], commentRequired: true },
   SUBMIT_TECHNICAL_REVIEW: { roles: ['technical'], commentRequired: true },
   SELECT_WINNER_FAD: { roles: ['fad'] },
-  APPROVE_WINNER_FAD_FINAL: { roles: ['fad'] },
+  APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentRequired: true },
   CREATE_PO: { roles: PROCUREMENT },
-  APPROVE_PO_OPS: { roles: ['operationsManager'] },
-  APPROVE_PO_FAD: { roles: ['fad'] },
+  APPROVE_PO_OPS: { roles: ['operationsManager'], commentRequired: true },
+  APPROVE_PO_FAD: { roles: ['fad'], commentRequired: true },
   // Steps 20–21: the Store Keeper receives the goods and records the GRN.
   PREPARE_LOCAL_RECEIVE: { roles: ['operations'] },
   POST_LOCAL_RECEIVE: { roles: ['operations'] },
   CREATE_LOCAL_INVOICE: { roles: PROCUREMENT },
-  APPROVE_INVOICE_OPS: { roles: ['operationsManager'] },
-  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'] },
-  APPROVE_PAYMENT_FAD: { roles: ['fad'] },
+  APPROVE_INVOICE_OPS: { roles: ['operationsManager'], commentRequired: true },
+  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'], commentRequired: true },
+  APPROVE_PAYMENT_FAD: { roles: ['fad'], commentRequired: true },
   CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'], needsPayload: true },
   FIX_LOCAL_CURRENCY: { roles: [...PROCUREMENT, 'financeChecker'] },
-  SEND_BACK_RFQ: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  SEND_BACK_RFQ: { roles: ['operationsManager', 'technical', 'fad'], commentRequired: true },
   SEND_BACK_PO: { roles: ['operationsManager', 'fad'], commentRequired: true },
   RESUBMIT_PO: { roles: PROCUREMENT },
+  /** BC 1.0.3.576: Send Back / Reject at every approval step, with the approver's comment. */
+  SEND_BACK_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  REJECT_RFQ: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  RESUBMIT_RFQ: { roles: PROCUREMENT },
+  REJECT_PO: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  SEND_BACK_INVOICE: { roles: ['operationsManager', 'financeChecker', 'fad'], commentRequired: true },
+  RESUBMIT_INVOICE: { roles: PROCUREMENT },
 }
 
 /** BC captions from the Local RFQ / Purchase Order ribbons. */
@@ -118,6 +125,12 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   APPROVE_PO_FAD: 'Approve Local PO (FAD)',
   SEND_BACK_PO: 'Send back PO to Procurement',
   RESUBMIT_PO: 'Resubmit PO to Operations Manager',
+  SEND_BACK_LPR: 'Send back to Procurement',
+  REJECT_RFQ: 'Reject RFQ',
+  RESUBMIT_RFQ: 'Resubmit RFQ to Operations Manager',
+  REJECT_PO: 'Reject PO',
+  SEND_BACK_INVOICE: 'Send back invoice to Procurement',
+  RESUBMIT_INVOICE: 'Resubmit invoice to Operations Manager',
   PREPARE_LOCAL_RECEIVE: 'Prepare Local Receive',
   POST_LOCAL_RECEIVE: 'Post Receive (GRN)',
   FIX_LOCAL_CURRENCY: 'Fix Local Currency',
@@ -139,6 +152,8 @@ export type LocalPurchaseChain = {
   rfq?: ChainDoc & Record<string, unknown>
   po?: ChainDoc & Record<string, unknown>
   receipts?: Array<Record<string, unknown>>
+  /** BC 1.0.3.576 ABH LPR Approval Log: every approve / send back / reject with its comment, oldest first. */
+  approvalHistory?: Array<Record<string, unknown>>
 }
 
 export type LocalPurchaseNextAction = {
@@ -159,40 +174,63 @@ type StageAction = string | { code: string; roles: LocalPurchaseRole[] }
  * Keyed by BC Flow Stage. BC sends the caption (Format), so both the member name and the
  * caption are listed (e.g. "Pending Ops RFQ" / "Pending Operations Manager RFQ").
  */
+const RFQ_OPS_APPROVAL: StageAction[] = [
+  'APPROVE_RFQ_OPS',
+  { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
+  { code: 'REJECT_RFQ', roles: ['operationsManager'] },
+]
+const RFQ_OPS_EVALUATION: StageAction[] = [
+  'SEND_TO_TECHNICAL',
+  'SEND_FOR_FAD_APPROVAL',
+  { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
+  { code: 'REJECT_RFQ', roles: ['operationsManager'] },
+]
+
 const RFQ_STAGE_ACTIONS: Record<string, StageAction[]> = {
-  'PENDING OPS RFQ': ['APPROVE_RFQ_OPS'],
-  'PENDING OPERATIONS MANAGER RFQ': ['APPROVE_RFQ_OPS'],
+  'PENDING OPS RFQ': RFQ_OPS_APPROVAL,
+  'PENDING OPERATIONS MANAGER RFQ': RFQ_OPS_APPROVAL,
+  // BC 1.0.3.576: the Operations Manager sent the RFQ back before quotations.
+  'RFQ RETURNED': ['RESUBMIT_RFQ'],
+  'RFQ RETURNED TO PROCUREMENT': ['RESUBMIT_RFQ'],
   'RFQ OPEN': ['UPSERT_VENDOR_QUOTE', 'AUTO_SELECT_WINNER'],
   'WINNER SELECTED': ['UPSERT_VENDOR_QUOTE', 'AUTO_SELECT_WINNER', 'SEND_FOR_OPS_REVIEW'],
-  'PENDING OPS EVALUATION': [
-    'SEND_TO_TECHNICAL',
-    'SEND_FOR_FAD_APPROVAL',
-    { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
+  'PENDING OPS EVALUATION': RFQ_OPS_EVALUATION,
+  'PENDING OPERATIONS MANAGER EVALUATION': RFQ_OPS_EVALUATION,
+  'PENDING TECHNICAL': ['SUBMIT_TECHNICAL_REVIEW', { code: 'SEND_BACK_RFQ', roles: ['technical'] }],
+  'PENDING FAD FINAL': [
+    'SELECT_WINNER_FAD',
+    'APPROVE_WINNER_FAD_FINAL',
+    { code: 'SEND_BACK_RFQ', roles: ['fad'] },
+    { code: 'REJECT_RFQ', roles: ['fad'] },
   ],
-  'PENDING OPERATIONS MANAGER EVALUATION': [
-    'SEND_TO_TECHNICAL',
-    'SEND_FOR_FAD_APPROVAL',
-    { code: 'SEND_BACK_RFQ', roles: ['operationsManager'] },
-  ],
-  'PENDING TECHNICAL': ['SUBMIT_TECHNICAL_REVIEW'],
-  'PENDING FAD FINAL': ['SELECT_WINNER_FAD', 'APPROVE_WINNER_FAD_FINAL', { code: 'SEND_BACK_RFQ', roles: ['fad'] }],
   'READY FOR PO': ['CREATE_PO', { code: 'SEND_BACK_RFQ', roles: ['fad'] }],
 }
 
 /** Operations Manager approves first, then FAD (BC ApproveLocalPurchaseOrder → ApprovePOAsFad). */
+const PO_OPS_APPROVAL: StageAction[] = ['APPROVE_PO_OPS', 'SEND_BACK_PO', { code: 'REJECT_PO', roles: ['operationsManager'] }]
+const OPS_INVOICE_CHECK: StageAction[] = ['APPROVE_INVOICE_OPS', { code: 'SEND_BACK_INVOICE', roles: ['operationsManager'] }]
+const FAD_PAYMENT_APPROVAL: StageAction[] = ['APPROVE_PAYMENT_FAD', { code: 'SEND_BACK_INVOICE', roles: ['fad'] }]
+
 const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
-  'PO CREATED': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
-  'PENDING FINANCE PO': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
-  'PENDING OPERATIONS MANAGER PO': ['APPROVE_PO_OPS', 'SEND_BACK_PO'],
-  'PENDING FAD PO': ['APPROVE_PO_FAD', { code: 'SEND_BACK_PO', roles: ['fad'] }],
+  'PO CREATED': PO_OPS_APPROVAL,
+  'PENDING FINANCE PO': PO_OPS_APPROVAL,
+  'PENDING OPERATIONS MANAGER PO': PO_OPS_APPROVAL,
+  'PENDING FAD PO': [
+    'APPROVE_PO_FAD',
+    { code: 'SEND_BACK_PO', roles: ['fad'] },
+    { code: 'REJECT_PO', roles: ['fad'] },
+  ],
   'RETURNED TO PROCUREMENT': ['RESUBMIT_PO', 'FIX_LOCAL_CURRENCY'],
   'PO RELEASED': ['PREPARE_LOCAL_RECEIVE', 'POST_LOCAL_RECEIVE', 'FIX_LOCAL_CURRENCY'],
   'GOODS RECEIVED': ['CREATE_LOCAL_INVOICE'],
-  'PENDING OPS INVOICE': ['APPROVE_INVOICE_OPS'],
-  'PENDING OPERATIONS MANAGER INVOICE': ['APPROVE_INVOICE_OPS'],
-  'PENDING INVOICE CHECK': ['VERIFY_PO_GRN_INVOICE'],
-  'PENDING CEO PAYMENT': ['APPROVE_PAYMENT_FAD'],
-  'PENDING F&A PAYMENT APPROVAL': ['APPROVE_PAYMENT_FAD'],
+  'PENDING OPS INVOICE': OPS_INVOICE_CHECK,
+  'PENDING OPERATIONS MANAGER INVOICE': OPS_INVOICE_CHECK,
+  'PENDING INVOICE CHECK': ['VERIFY_PO_GRN_INVOICE', { code: 'SEND_BACK_INVOICE', roles: ['financeChecker'] }],
+  'PENDING CEO PAYMENT': FAD_PAYMENT_APPROVAL,
+  'PENDING F&A PAYMENT APPROVAL': FAD_PAYMENT_APPROVAL,
+  // BC 1.0.3.576: an invoice step sent the invoice back; Procurement corrects it and resubmits.
+  'INVOICE RETURNED': ['RESUBMIT_INVOICE'],
+  'INVOICE RETURNED TO PROCUREMENT': ['RESUBMIT_INVOICE'],
   'PAYMENT APPROVED': ['CLOSE_LPR_AFTER_PAYMENT'],
 }
 
@@ -311,9 +349,11 @@ export function localPurchaseNextActions(
       lprStage === 'PENDING OPERATIONS MANAGER'
     ) {
       push('APPROVE_LPR_OPS', 'lpr', lprNo)
+      push({ code: 'SEND_BACK_LPR', roles: ['operationsManager'] }, 'lpr', lprNo)
       push({ code: 'REJECT_LPR', roles: ['operationsManager'] }, 'lpr', lprNo)
     } else if (lprStatus === 'PENDING FINANCE' || lprStatus === 'PENDING FINANCE & ADMIN' || lprStage === 'PENDING FAD') {
       push('APPROVE_LPR_FAD', 'lpr', lprNo)
+      push({ code: 'SEND_BACK_LPR', roles: ['fad'] }, 'lpr', lprNo)
       push({ code: 'REJECT_LPR', roles: ['fad'] }, 'lpr', lprNo)
     } else if (!rfqNo && (lprStatus === 'APPROVED' || lprStage === 'READY FOR RFQ')) {
       codes.push({ code: 'CONVERT_TO_RFQ', target: 'lpr', documentNo: lprNo })
