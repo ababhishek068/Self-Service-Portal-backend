@@ -127,6 +127,8 @@ export interface BaseRequest extends BusinessCentralEntity {
   approvalSteps: ApprovalStep[]
   /** Every round of a request that was sent back and sent again, in order (absent with one round). */
   approvalTrail?: ApprovalStep[]
+  /** Approval detail: how long the approver's comment may be (BC 1.0.3.581 keeps 200 characters). */
+  approvalComment?: { max: number; sendBackMax: number }
   attachments: Attachment[]
   /** Raw form payload retained for list filtering and ERP replay. */
   payload?: Record<string, unknown>

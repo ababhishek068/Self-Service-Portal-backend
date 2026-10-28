@@ -242,6 +242,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         queryKey: ['facility', 'store-requisition'],
         exact: true,
       })
+      await queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 

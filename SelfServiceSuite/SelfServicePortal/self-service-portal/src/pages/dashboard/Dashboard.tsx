@@ -7,13 +7,19 @@ import {
   CircleX,
   ClipboardCheck,
   ClipboardCopy,
+  CornerUpLeft,
   Eye,
   Home,
+  PackageCheck,
+  PackageOpen,
   ShoppingCart,
   Sparkles,
   Store,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { PortalNotificationKind } from '@/api/endpoints/notifications'
+import { useNotifications } from '@/hooks/useNotifications'
+import { notificationHref, requestPageHref } from '@/utils/requestLinks'
 import { getToken, resolveApiBaseUrl } from '@/api/client/authClient'
 import { BACKEND_NOT_CONFIGURED } from '@/api/requireBackend'
 import { getDashboardSummary } from '@/api/endpoints/employee'
@@ -125,19 +131,18 @@ const tiles: DashboardTile[] = [
   },
 ]
 
-/** Recent Activity modules and their pages (each opens a request with ?open=<id>). */
-const ACTIVITY_PAGES: Partial<Record<string, string>> = {
-  imprest: '/finance/imprest',
-  imprestSurrender: '/finance/imprest-surrender',
-  staffClaim: '/finance/staff-claim',
-  pettyCash: '/finance/petty-cash',
-  purchaseRequisition: '/facility/local-purchase-request',
-  storeRequisition: '/facility/store-requisition',
+/** Recent Activity opens each request on its module page. */
+function activityHref(row: PortalRequest) {
+  return requestPageHref(row.requestType, row.id)
 }
 
-function activityHref(row: PortalRequest) {
-  const page = ACTIVITY_PAGES[row.requestType]
-  return page ? `${page}?open=${encodeURIComponent(row.id)}` : null
+/** Dashboard banners besides the approval one: store hand-off steps and requests sent back. */
+const BANNER_ICONS: Partial<Record<PortalNotificationKind, LucideIcon>> = {
+  returned: CornerUpLeft,
+  storeIssue: Store,
+  storeAccept: PackageCheck,
+  storeLpr: ShoppingCart,
+  storeReceive: PackageOpen,
 }
 
 export function Dashboard() {
@@ -166,6 +171,8 @@ export function Dashboard() {
     return !tile.roles || has(tile.roles)
   })
   const pendingCount = tileValues.pendingApprovals ?? 0
+  const notifications = useNotifications()
+  const banners = (notifications.data?.items ?? []).filter((item) => item.kind !== 'approvals')
 
   const activityColumns: DataTableColumn<PortalRequest>[] = [
     {
@@ -301,6 +308,41 @@ export function Dashboard() {
               <ArrowRight className="h-5 w-5 shrink-0 text-[var(--portal-green)] transition-transform duration-200 group-hover:translate-x-1" />
             </Link>
           ) : null}
+
+          {banners.map((item) => {
+            const Icon = BANNER_ICONS[item.kind] ?? Store
+            const returned = item.kind === 'returned'
+            return (
+              <Link
+                key={item.id}
+                to={notificationHref(item)}
+                className={`group flex items-center justify-between gap-4 rounded-xl border p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
+                  returned
+                    ? 'border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50'
+                    : 'border-[var(--portal-green)]/25 bg-gradient-to-r from-emerald-50 to-sky-50'
+                }`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div
+                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${
+                      returned ? 'bg-orange-100 text-orange-700' : 'bg-[var(--portal-green)]/15 text-[var(--portal-green)]'
+                    }`}
+                  >
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                    {item.description ? <p className="truncate text-xs text-slate-600">{item.description}</p> : null}
+                  </div>
+                </div>
+                <ArrowRight
+                  className={`h-5 w-5 shrink-0 transition-transform duration-200 group-hover:translate-x-1 ${
+                    returned ? 'text-orange-600' : 'text-[var(--portal-green)]'
+                  }`}
+                />
+              </Link>
+            )
+          })}
 
           <div className="portal-stagger grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
             {visibleTiles.map((tile) => {

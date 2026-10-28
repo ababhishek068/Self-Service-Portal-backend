@@ -32,8 +32,11 @@ import {
 import { soapFaultMessage } from './bcClient.js'
 import { correctionChanges, correctionLine } from './approvalCorrections.js'
 import {
+  approverDocumentOutcome,
   buildApprovalTrail,
+  joinApprovalCommentLines,
   mapApprovalStepsWithSequence,
+  newestRoundClosingStep,
   normalizeSequentialApprovalStatuses,
   mergeApprovalComments,
   newestApprovalStepsPerSlot,
@@ -2656,6 +2659,104 @@ describe('mapRequest status', () => {
       )
       assert.equal(trail[1]?.timestamp, '2026-10-28T06:21:00Z')
       assert.deepEqual(buildApprovalTrail(roundOne), [])
+    })
+  })
+
+  describe('Approved and Rejected Documents of each approver (UAT 28 Oct, ABH-028)', () => {
+    // Hermon is step 1, Tesfaye step 2. BC rejects the steps a send back or rejection did not reach.
+    const entry = (doc: string, no: number, step: number, approver: string, status: string, round: number, comment?: string) => ({
+      EntryNo: no,
+      DocumentNo: doc,
+      SequenceNo: step,
+      ApproverID: approver,
+      SenderID: 'ZERIHUN_SISAY',
+      Status: status,
+      WorkflowStepInstanceID: `{${doc}-${round}}`,
+      ...(comment ? { Comment: comment } : {}),
+    })
+    const hermon = (id: string) => id === 'HERMON'
+    const tesfaye = (id: string) => id === 'TESFAYE'
+
+    it('SR000228: returned twice, then approved, is approved for both approvers', () => {
+      const entries = [
+        entry('ABH-SR000228', 1, 1, 'HERMON', 'Rejected', 1, '[RETURNED] The Requested Quantity must be Adjusted'),
+        entry('ABH-SR000228', 2, 2, 'TESFAYE', 'Rejected', 1),
+        entry('ABH-SR000228', 3, 1, 'HERMON', 'Approved', 2),
+        entry('ABH-SR000228', 4, 2, 'TESFAYE', 'Rejected', 2, '[RETURNED] Please Correct the Qty'),
+        entry('ABH-SR000228', 5, 1, 'HERMON', 'Approved', 3, 'Approval kept after correction (approved 2026-10-28).'),
+        entry('ABH-SR000228', 6, 2, 'TESFAYE', 'Approved', 3),
+      ]
+      assert.equal(approverDocumentOutcome(entries, hermon), 'Approved')
+      assert.equal(approverDocumentOutcome(entries, tesfaye), 'Approved')
+      assert.equal(newestRoundClosingStep(entries), null)
+    })
+
+    it('SR000229: rejected by the first approver is not shown to the second', () => {
+      const entries = [
+        entry('ABH-SR000229', 7, 1, 'HERMON', 'Rejected', 1, 'Not Now'),
+        entry('ABH-SR000229', 8, 2, 'TESFAYE', 'Rejected', 1),
+      ]
+      assert.equal(approverDocumentOutcome(entries, hermon), 'Rejected')
+      assert.equal(approverDocumentOutcome(entries, tesfaye), null)
+      assert.deepEqual(
+        mapApprovalStepsWithSequence(entries).map((step) => [step.actorEmployeeNo, step.status]),
+        [
+          ['HERMON', 'Rejected'],
+          ['TESFAYE', 'Cancelled'],
+        ],
+      )
+    })
+
+    it('SR000231: rejected by the second approver is rejected for both (the first had approved)', () => {
+      const entries = [
+        entry('ABH-SR000231', 9, 1, 'HERMON', 'Approved', 1),
+        entry('ABH-SR000231', 10, 2, 'TESFAYE', 'Rejected', 1, 'Budget not available'),
+      ]
+      assert.equal(approverDocumentOutcome(entries, hermon), 'Rejected')
+      assert.equal(approverDocumentOutcome(entries, tesfaye), 'Rejected')
+    })
+
+    it('a request with the requester for correction is Returned for who sent it back and who approved before', () => {
+      const entries = [
+        entry('ABH-SR000232', 11, 1, 'HERMON', 'Approved', 1),
+        entry('ABH-SR000232', 12, 2, 'TESFAYE', 'Rejected', 1, '[RETURNED] Reduce to 4 units'),
+      ]
+      assert.equal(approverDocumentOutcome(entries, hermon), 'Returned')
+      assert.equal(approverDocumentOutcome(entries, tesfaye), 'Returned')
+      assert.equal(newestRoundClosingStep(entries)?.note, 'Reduce to 4 units')
+    })
+  })
+
+  describe('approval comments longer than one BC line (BC 1.0.3.581)', () => {
+    const line = (entryNo: number, comment: string, at = '2026-10-28T09:12:44.123Z') => ({
+      EntryNo: entryNo,
+      DocumentNo: 'ABH-SR000233',
+      UserID: 'TESFAYE',
+      SequenceNo: 2,
+      DateandTime: at,
+      Comment: comment,
+    })
+
+    it('reads the lines written together as one comment, in Entry No. order', () => {
+      const joined = joinApprovalCommentLines([
+        line(52, 'and keep the brand the same as the last purchase.'),
+        line(51, '[RETURNED] Reduce the quantity to 4 units because the budget for this quarter is'),
+        line(53, 'Second comment', '2026-10-28T09:30:00.000Z'),
+      ])
+      assert.deepEqual(
+        joined.map((row) => row.Comment),
+        [
+          '[RETURNED] Reduce the quantity to 4 units because the budget for this quarter is and keep the brand the same as the last purchase.',
+          'Second comment',
+        ],
+      )
+    })
+
+    it('allows 200 characters when BC keeps long comments, and one line of 80 before', () => {
+      const long = 'x'.repeat(200)
+      assert.equal(parseApprovalDecision('Returned', long, true).soapComment.length, 211)
+      assert.throws(() => parseApprovalDecision('Approved', `${long}x`, true), /200 characters/)
+      assert.throws(() => parseApprovalDecision('Approved', 'x'.repeat(81)), /80 characters/)
     })
   })
 

@@ -117,7 +117,9 @@ export function normalizeSequentialApprovalStatuses(
 }
 
 export function mapApprovalStepsWithSequence(value: unknown) {
-  return normalizeSequentialApprovalStatuses(newestApprovalStepsPerSlot(mapApprovalSteps(value)))
+  return normalizeSequentialApprovalStatuses(
+    withUnreachedStepsCancelled(newestApprovalStepsPerSlot(mapApprovalSteps(value))),
+  )
 }
 
 /**
@@ -188,9 +190,12 @@ export type ApprovalTrailStep = ReturnType<typeof mapApprovalSteps>[number] & {
   changes?: string[]
 }
 
-/** BC rejects the steps a round had not reached together with a send back or rejection. */
-function withUnreachedStepsCancelled(steps: ReturnType<typeof mapApprovalSteps>) {
-  const closing = steps.find((step) => step.status === 'Returned' || (step.status === 'Rejected' && step.note))
+/**
+ * BC rejects the steps a round had not reached together with a send back or rejection: they are
+ * the later steps rejected without a comment, shown as Cancelled (the approver never decided).
+ */
+function withUnreachedStepsCancelled<T extends ReturnType<typeof mapApprovalSteps>[number]>(steps: T[]) {
+  const closing = roundClosingStep(steps)
   if (!closing) return steps
   return steps.map((step) =>
     step !== closing && step.status === 'Rejected' && !step.note && step.sequenceNo > closing.sequenceNo
@@ -249,6 +254,79 @@ export function buildApprovalTrail(
     trail.push(...shown.map((step) => ({ ...step, round: index })))
   })
   return trail
+}
+
+export type ApproverListOutcome = 'Approved' | 'Rejected' | 'Returned'
+
+/**
+ * Where a document belongs in one approver's Approved / Rejected Documents, from its newest round
+ * only (an earlier send back that was corrected and approved is history, not a rejection). A send
+ * back or rejection ends the round at one step: the approver of that step, and the approvers who
+ * approved before it, see the outcome; the steps BC closed without reaching them see nothing.
+ * Null when the approver made no decision in the newest round.
+ */
+export function approverDocumentOutcome(
+  entries: ODataRecord[],
+  isApprover: (approverId: string) => boolean,
+): ApproverListOutcome | null {
+  const round = approvalRounds(entries).at(-1)
+  if (!round) return null
+  const steps = mapApprovalSteps(round)
+  const mine = steps.filter((step) => isApprover(step.actorEmployeeNo))
+  const closing = roundClosingStep(steps)
+  if (!closing) return mine.some((step) => step.status === 'Approved') ? 'Approved' : null
+  const decided = mine.some((step) =>
+    step.status === 'Approved'
+      ? step.sequenceNo < closing.sequenceNo
+      : step.status === closing.status && step.sequenceNo === closing.sequenceNo,
+  )
+  return decided ? (closing.status as ApproverListOutcome) : null
+}
+
+/** The send back or rejection that ended a round (its first such step), if any. */
+function roundClosingStep<T extends ReturnType<typeof mapApprovalSteps>[number]>(steps: T[]) {
+  return [...steps]
+    .sort((left, right) => left.sequenceNo - right.sequenceNo)
+    .find((step) => step.status === 'Returned' || step.status === 'Rejected')
+}
+
+/** The send back or rejection that ended the newest round of a document (null while it runs). */
+export function newestRoundClosingStep(entries: ODataRecord[]) {
+  const round = approvalRounds(entries).at(-1)
+  return (round && roundClosingStep(mapApprovalSteps(round))) || null
+}
+
+/**
+ * Business Central keeps an approval comment in lines of 80 characters, so the portal writes a
+ * longer comment as several lines with the same user, step and time (BC 1.0.3.581). One comment
+ * again, in Entry No. order.
+ */
+export function joinApprovalCommentLines(rows: ODataRecord[]) {
+  const joined: ODataRecord[] = []
+  const byKey = new Map<string, ODataRecord>()
+  const ordered = [...rows].sort((left, right) => approvalEntryNo(left) - approvalEntryNo(right))
+  for (const row of ordered) {
+    const writtenAt = text(row, ['DateandTime', 'Date_and_Time'])
+    const key = writtenAt
+      ? [
+          normalizedApprovalValue(text(row, ['DocumentNo', 'Document_No'])),
+          normalizedApprovalValue(text(row, ['UserID', 'User_Id', 'User_ID'])),
+          approvalRecordId(row),
+          number(row, ['SequenceNo', 'Sequence_No'], 0),
+          writtenAt,
+        ].join('|')
+      : ''
+    const first = key ? byKey.get(key) : undefined
+    const comment = text(row, ['Comment'])
+    if (first) {
+      if (comment) first.Comment = [text(first, ['Comment']), comment].filter(Boolean).join(' ')
+      continue
+    }
+    const copy = { ...row }
+    joined.push(copy)
+    if (key) byKey.set(key, copy)
+  }
+  return joined
 }
 
 function normalizedApprovalValue(value: unknown) {
@@ -479,8 +557,9 @@ export function selectApprovalWorkflowEntries(
  */
 export function mergeApprovalComments(
   entries: ODataRecord[],
-  commentRows: ODataRecord[],
+  commentLines: ODataRecord[],
 ) {
+  const commentRows = joinApprovalCommentLines(commentLines)
   const unused = new Set(commentRows.map((_row, index) => index))
 
   return entries.map((entry) => {

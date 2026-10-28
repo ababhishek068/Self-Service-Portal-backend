@@ -39,6 +39,7 @@ export function useApprovalDecision(id: string) {
       // detail query refetch instead.
       await queryClient.invalidateQueries({ queryKey: ['approvals'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      await queryClient.invalidateQueries({ queryKey: ['notifications'] })
       toast.success(
         variables.decision === 'Returned'
           ? `${request.requestNo || id} sent back to the requester for correction.`

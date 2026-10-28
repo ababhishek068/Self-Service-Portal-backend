@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { brand } from '@/config/brand'
 import { BrandLogo } from '@/components/brand/BrandLogo'
+import { NotificationBell } from './NotificationBell'
 
 export function Topbar() {
   const { pageTitle, toggleSidebar, sidebarOpen, toggleMobileNav, mobileNavOpen } = useLayout()
@@ -77,11 +78,13 @@ export function Topbar() {
 
         <p
           key={pageTitle}
-          className="animate-title-in ml-auto min-w-0 max-w-[55vw] truncate rounded-md border border-slate-200 bg-slate-50/80 px-3 py-1.5 text-xs font-semibold text-[var(--portal-navy-dark)] sm:max-w-none sm:text-sm lg:mr-6"
+          className="animate-title-in ml-auto min-w-0 max-w-[42vw] truncate rounded-md border border-slate-200 bg-slate-50/80 px-3 py-1.5 text-xs font-semibold text-[var(--portal-navy-dark)] sm:max-w-none sm:text-sm lg:mr-3"
           title={pageTitle}
         >
           <span>{pageTitle}</span>
         </p>
+
+        <NotificationBell />
 
         <div className="flex items-center gap-2 border-l border-slate-200/80 pl-2 transition-all duration-200 sm:pl-3">
           <div className="hidden h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-[var(--portal-navy)] shadow-inner ring-2 ring-white transition-all duration-300 hover:scale-105 hover:ring-[var(--portal-green)]/40 hover:shadow-md sm:flex">

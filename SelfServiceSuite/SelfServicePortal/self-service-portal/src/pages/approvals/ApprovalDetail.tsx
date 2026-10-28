@@ -21,10 +21,12 @@ import { isMakerAllowedToApprove } from '@/utils/validators'
 import { useToast } from '@/components/feedback/ToastProvider'
 import type { ApprovalDecision } from '@/types/erp.types'
 
-/** Business Central keeps an approval comment in one Approval Comment line of 80 characters. */
-const COMMENT_MAX = 80
-/** Send Back is saved as "[RETURNED] <comment>", which leaves 69 characters. */
-const SEND_BACK_COMMENT_MAX = 69
+/**
+ * Business Central 1.0.3.581 keeps a comment of up to 200 characters (several Approval Comment
+ * lines); the server says so. Older BC keeps one line of 80, and Send Back is saved as
+ * "[RETURNED] <comment>", which leaves 69.
+ */
+const COMMENT_LIMITS = { max: 80, sendBackMax: 69 }
 
 const DECISION_COPY: Record<ApprovalDecision, { title: string; description: string; confirmLabel: string }> = {
   Approved: {
@@ -296,6 +298,7 @@ export function ApprovalDetail() {
   const approval = useApprovalDecision(id ?? '')
   const toast = useToast()
   const request = detail.data
+  const commentLimits = request?.approvalComment ?? COMMENT_LIMITS
   const applicationReason = request
     ? request.requestType === 'hrServiceLetter'
       ? ''
@@ -564,7 +567,7 @@ export function ApprovalDetail() {
                     </p>
                     <Textarea
                       value={comment}
-                      maxLength={COMMENT_MAX}
+                      maxLength={commentLimits.max}
                       onChange={(event) => setComment(event.target.value)}
                       placeholder={
                         request.requestType === 'hrServiceLetter'
@@ -577,7 +580,7 @@ export function ApprovalDetail() {
                       }
                     />
                     <p className="mt-1 text-right text-xs tabular-nums text-slate-500">
-                      {comment.length}/{COMMENT_MAX}
+                      {comment.length}/{commentLimits.max}
                     </p>
                     {request.requestType === 'hrServiceLetter' ? (
                       <p className="mt-2 text-xs text-slate-500">
@@ -591,7 +594,7 @@ export function ApprovalDetail() {
                     ) : canSendBack ? (
                       <p className="mt-2 text-xs text-slate-500">
                         Send Back for Correction returns the request to the requester with your comment (up to{' '}
-                        {SEND_BACK_COMMENT_MAX} characters). After the correction it comes back to you, and the approvals
+                        {commentLimits.sendBackMax} characters). After the correction it comes back to you, and the approvals
                         already given are kept. Reject closes the request.
                       </p>
                     ) : (
@@ -672,8 +675,8 @@ export function ApprovalDetail() {
             setDecision(null)
             return
           }
-          if (chosen === 'Returned' && comment.trim().length > SEND_BACK_COMMENT_MAX) {
-            toast.error(`Keep the send-back comment to ${SEND_BACK_COMMENT_MAX} characters.`)
+          if (chosen === 'Returned' && comment.trim().length > commentLimits.sendBackMax) {
+            toast.error(`Keep the send-back comment to ${commentLimits.sendBackMax} characters.`)
             setDecision(null)
             return
           }

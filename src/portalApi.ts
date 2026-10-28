@@ -63,6 +63,7 @@ import {
 } from './localPurchaseFlow.js'
 import { approvalCorrections, recordCorrection, rememberSentBackLines } from './approvalCorrections.js'
 import {
+  approverDocumentOutcome,
   buildApprovalTrail,
   enrichLeaveApprovalEntries,
   fallbackApprovalStepsFromHeader,
@@ -336,6 +337,7 @@ export type PortalApprovalDecision = 'Approved' | 'Rejected' | 'Returned'
 export function parseApprovalDecision(
   value: unknown,
   commentValue: unknown,
+  longComments = false,
 ): { decision: PortalApprovalDecision; comment: string; soapComment: string } {
   const normalized = String(value ?? '').trim().toLowerCase()
   const decision =
@@ -362,6 +364,16 @@ export function parseApprovalDecision(
     )
   }
   const soapComment = decision === 'Returned' ? `${SENT_BACK_COMMENT_PREFIX} ${comment}` : comment
+  if (longComments) {
+    if (comment.length > PORTAL_APPROVAL_COMMENT_MAX) {
+      throw portalError(
+        `Keep the comment to ${PORTAL_APPROVAL_COMMENT_MAX} characters.`,
+        422,
+        'APPROVAL_COMMENT_TOO_LONG',
+      )
+    }
+    return { decision, comment, soapComment }
+  }
   if (soapComment.length > BC_APPROVAL_COMMENT_MAX) {
     const room = BC_APPROVAL_COMMENT_MAX - (soapComment.length - comment.length)
     throw portalError(
@@ -375,6 +387,32 @@ export function parseApprovalDecision(
 
 /** Approval Comment Line.Comment is Text[80] in Business Central. */
 export const BC_APPROVAL_COMMENT_MAX = 80
+/**
+ * From BC 1.0.3.581 a longer comment is kept as several Approval Comment lines (DocumentApproval
+ * takes up to 250 characters, the send back prefix included).
+ */
+export const PORTAL_APPROVAL_COMMENT_MAX = 200
+
+let longApprovalComments: { supported: boolean; at: number } | null = null
+const LONG_COMMENTS_RETRY_MS = 5 * 60_000
+
+/** Whether BC keeps comments longer than one 80-character line (asked once, again after a miss). */
+async function bcTakesLongApprovalComments(now = Date.now()) {
+  if (longApprovalComments && (longApprovalComments.supported || now - longApprovalComments.at < LONG_COMMENTS_RETRY_MS)) {
+    return longApprovalComments.supported
+  }
+  const result = await callSoapMethod('PortalApprovalCommentMaxLength', {}).catch(() => null)
+  const supported = Number(result?.returnValue ?? 0) >= PORTAL_APPROVAL_COMMENT_MAX + SENT_BACK_COMMENT_PREFIX.length + 1
+  longApprovalComments = { supported, at: now }
+  return supported
+}
+
+/** The comment an approver may write: 200 characters, or one BC line (80, a send back 69) on older BC. */
+async function approvalCommentLimits() {
+  return (await bcTakesLongApprovalComments())
+    ? { max: PORTAL_APPROVAL_COMMENT_MAX, sendBackMax: PORTAL_APPROVAL_COMMENT_MAX }
+    : { max: BC_APPROVAL_COMMENT_MAX, sendBackMax: BC_APPROVAL_COMMENT_MAX - SENT_BACK_COMMENT_PREFIX.length - 1 }
+}
 
 /**
  * Send Back for Correction needs the requester to reopen (Cancel Approval) and send the document
@@ -476,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v281 — 1.0.3.440 (send back history: every round, the return comments and what the requester corrected shown to every approver; a returned request no longer shows as Rejected; for BC 1.0.3.577)'
+export const PORTAL_API_BUILD = 'v282 — 1.0.3.441 (Approved / Rejected Documents by the newest round, only for the approvers who decided; a rejected request listed as Rejected; notification bell and store keeper / manager banners; approval comments up to 200 characters; for BC 1.0.3.581)'
 
 interface LookupSpec {
   service: string
@@ -1761,23 +1799,92 @@ function documentOutcomeFromApprovalEntries(entries: ODataRecord[]) {
   return ''
 }
 
-/** Docs the user approved that a later approver rejected. */
-async function documentNosLaterRejected(documentNos: string[]) {
+/** Every Approval Entry of these documents with its Approval Comments, by document No. */
+async function approvalEntriesByDocument(documentNos: string[]) {
   const unique = [...new Set(documentNos.map((no) => no.trim()).filter(Boolean))]
-  const rejected = new Set<string>()
-  for (let offset = 0; offset < unique.length; offset += 15) {
-    const chunk = unique.slice(offset, offset + 15)
+  const chunks: string[][] = []
+  for (let offset = 0; offset < unique.length; offset += 15) chunks.push(unique.slice(offset, offset + 15))
+  const byDocument = new Map<string, ODataRecord[]>()
+  const loadChunk = async (chunk: string[]) => {
     const docFilter = chunk.map((no) => `DocumentNo eq '${odataString(no)}'`).join(' or ')
-    const rows = (await fetchOData('QyApprovalEntry', {
-      $filter: `Status eq 'Rejected' and (${docFilter})`,
-      $top: 500,
-    }).catch(() => [])) as ODataRecord[] | null
-    for (const row of Array.isArray(rows) ? rows : []) {
-      const no = text(row, ['DocumentNo', 'Document_No'])
-      if (no) rejected.add(normalizedApprovalDocKey(no))
+    const rows = ((await fetchOData('QyApprovalEntry', {
+      $filter: `(${docFilter})`,
+      $top: 1000,
+    }).catch(() => null)) as ODataRecord[] | null) ?? []
+    // Comments tell a send back from a rejection; only documents with a rejected entry need them.
+    const rejectedNos = [
+      ...new Set(
+        rows
+          .filter((row) => approvalEntryStatus(row) === 'Rejected')
+          .map((row) => text(row, ['DocumentNo', 'Document_No'])),
+      ),
+    ].filter(Boolean)
+    const comments = rejectedNos.length
+      ? (((await fetchOData('QyApprovalCommentLine', {
+          $filter: `(${rejectedNos.map((no) => `DocumentNo eq '${odataString(no)}'`).join(' or ')})`,
+          $top: 1000,
+        }).catch(() => null)) as ODataRecord[] | null) ?? [])
+      : []
+    const group = (list: ODataRecord[]) => {
+      const grouped = new Map<string, ODataRecord[]>()
+      for (const row of list) {
+        const key = normalizedApprovalDocKey(text(row, ['DocumentNo', 'Document_No']))
+        if (key) grouped.set(key, [...(grouped.get(key) ?? []), row])
+      }
+      return grouped
+    }
+    const commentsByDocument = group(comments)
+    for (const [key, entries] of group(rows)) {
+      byDocument.set(key, mergeApprovalComments(entries, commentsByDocument.get(key) ?? []))
     }
   }
-  return rejected
+  for (let index = 0; index < chunks.length; index += 4) {
+    await Promise.all(chunks.slice(index, index + 4).map(loadChunk))
+  }
+  return byDocument
+}
+
+/**
+ * Approved and Rejected Documents of one approver, one row per document, from each document's
+ * newest round: a request sent back and then approved is approved, and an approver BC closed
+ * without reaching (the request was rejected before their step) does not see it.
+ */
+async function decidedApprovalQueues(authUser: AuthUser) {
+  const ids = await approverIdCandidates(authUser)
+  const clause = approverIdFilterClause(ids)
+  const [approvedRows, rejectedRows] = await Promise.all(
+    ['Approved', 'Rejected'].map(
+      async (status) =>
+        ((await fetchOData('QyApprovalEntry', {
+          $filter: `Status eq '${status}' and ${clause}`,
+          $top: 1000,
+        }).catch(() => null)) as ODataRecord[] | null) ?? [],
+    ),
+  )
+  const liveRows = await filterApprovalEntriesWithExistingSource(
+    [...approvedRows!, ...rejectedRows!].filter((row) => !isEmployeeExitApprovalEntry(row)),
+  )
+  const mine = new Map<string, ODataRecord[]>()
+  for (const row of liveRows) {
+    const key = normalizedApprovalDocKey(text(row, ['DocumentNo', 'Document_No']))
+    if (key) mine.set(key, [...(mine.get(key) ?? []), row])
+  }
+  const byDocument = await approvalEntriesByDocument(
+    [...mine.values()].map((rows) => text(rows[0]!, ['DocumentNo', 'Document_No'])),
+  )
+  const approverIds = new Set(ids.map((id) => id.trim().toUpperCase()).filter(Boolean))
+  const isApprover = (id: string) => approverIds.has(id.trim().toUpperCase())
+  const approved: ReturnType<typeof approvalQueueItem>[] = []
+  const rejected: ReturnType<typeof approvalQueueItem>[] = []
+  for (const [key, rows] of mine) {
+    const outcome = approverDocumentOutcome(byDocument.get(key) ?? rows, isApprover)
+    if (!outcome) continue
+    const item = { ...approvalQueueItem(newestApprovalEntry(rows)!), status: outcome }
+    if (!item.requestNo) continue
+    if (outcome === 'Approved') approved.push(item)
+    else rejected.push(item)
+  }
+  return { approved, rejected }
 }
 
 /** ESS uses plain document numbers (e.g. LV00077); the portal also accepts module-prefixed ids. */
@@ -2455,7 +2562,8 @@ async function approvalEntriesWithComments(spec: ModuleSpec, no: string, row?: O
 /**
  * List status as on the request detail: a header BC left on Pending Approval is checked against its
  * approval entries, so a rejected (or fully approved) request is not listed as Pending Approval. An
- * open header is listed as Returned while it is with the requester after a send back.
+ * open header is listed as Returned while it is with the requester after a send back, and as
+ * Rejected after a rejection.
  */
 async function listRowStatus(spec: ModuleSpec, row: ODataRecord, module: PortalModuleKey) {
   const status = resolveModuleRequestStatus(row, module)
@@ -2467,7 +2575,206 @@ async function listRowStatus(spec: ModuleSpec, row: ODataRecord, module: PortalM
   const entries = await approvalEntriesWithComments(spec, no, row).catch(() => [] as ODataRecord[])
   if (!entries.length) return status
   const resolved = resolveModuleRequestStatus(row, module, entries)
-  return status === 'Pending Approval' || resolved === 'Returned' ? resolved : status
+  if (status === 'Pending Approval' || resolved === 'Returned') return resolved
+  // BC reopens a rejected header (Open): listed as Rejected, as on the request itself, unless the
+  // requester sent it again and cancelled that request (the newest entries are Canceled).
+  if (resolved === 'Rejected' && !/cancel/i.test(text(newestApprovalEntry(entries) ?? {}, ['Status']))) {
+    return resolved
+  }
+  return status
+}
+
+export interface PortalNotification {
+  id: string
+  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive'
+  count: number
+  title: string
+  description: string
+  /** The page of the documents; with requestId, the one document. */
+  module?: string
+  requestId?: string
+}
+
+const notificationCache = new Map<string, { at: number; value: { total: number; items: PortalNotification[] } }>()
+const NOTIFICATION_CACHE_MS = 30_000
+
+function notificationUserKey(authUser: AuthUser) {
+  return String(authUser.userID || authUser.employeeNo || '').trim().toUpperCase()
+}
+
+/** After the user acts, the bell is worked out again on the next request. */
+function forgetNotifications(authUser: AuthUser) {
+  notificationCache.delete(notificationUserKey(authUser))
+}
+
+function plural(count: number, one: string, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+async function approvalNotification(authUser: AuthUser): Promise<PortalNotification> {
+  const clause = approverIdFilterClause(await approverIdCandidates(authUser))
+  const [rows, soapQueue] = await Promise.all([
+    fetchOData('QyApprovalEntry', { $filter: `Status eq 'Open' and ${clause}`, $top: 1000 }).catch(
+      () => null,
+    ) as Promise<ODataRecord[] | null>,
+    soapApprovalQueues(authUser),
+  ])
+  const live = await filterApprovalEntriesWithExistingSource(
+    (rows ?? []).filter((row) => !isEmployeeExitApprovalEntry(row)),
+  )
+  const ids = [
+    ...live.map((row) => approvalQueueItem(row)).filter((item) => item.requestNo).map((item) => item.id),
+    ...soapQueue.queueItems.filter((item) => item.requestNo).map((item) => item.id),
+  ]
+  return {
+    id: 'approvals',
+    kind: 'approvals',
+    count: ids.length,
+    title: `${plural(ids.length, 'document')} awaiting your approval`,
+    description: 'Review and approve, send back or reject.',
+    ...(ids.length === 1 ? { requestId: ids[0] } : {}),
+  }
+}
+
+const SENT_BACK_NOTIFICATION_MODULES: PortalModuleKey[] = [
+  'storeRequisition',
+  'purchaseRequisition',
+  'imprest',
+  'imprestSurrender',
+  'staffClaim',
+  'pettyCash',
+]
+
+/** The user's own requests an approver sent back, still waiting for the correction. */
+async function sentBackNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
+  const perModule = await Promise.all(
+    SENT_BACK_NOTIFICATION_MODULES.filter((module) => sendBackSupported(module)).map(async (module) => {
+      const spec = findFrontendModuleSpec(module as SupportedFrontendModule)
+      if (!spec || !moduleUsesApprovalEntryPromotion(module)) return []
+      const rows = ((await listPortalModuleRows(spec, authUser).catch(() => [])) as ODataRecord[]).filter((row) =>
+        ['Pending Approval', 'Open'].includes(resolveModuleRequestStatus(row, module)),
+      )
+      const found: PortalNotification[] = []
+      await rowsPassing(rows, async (row) => {
+        const no = text(row, ['No', 'No_', 'DocumentNo', 'Document_No', 'ApplicationCode', 'RequisitionNo'])
+        if (!no) return false
+        const entries = await approvalEntriesWithComments(spec, no, row).catch(() => [] as ODataRecord[])
+        if (!entries.length || resolveModuleRequestStatus(row, module, entries) !== 'Returned') return false
+        const sentBack = sentBackDetails(entries, 'Open')
+        const requestId = mapRequest(row, module).id
+        found.push({
+          id: `returned:${requestId}`,
+          kind: 'returned',
+          count: 1,
+          title: `${no} was sent back to you for correction`,
+          description: sentBack ? [sentBack.by, sentBack.comment].filter(Boolean).join(': ') : '',
+          module,
+          requestId,
+        })
+        return true
+      })
+      return found
+    }),
+  )
+  return perModule.flat().slice(0, 10)
+}
+
+/** BC Issue Stage of a store requisition, the Local Purchase stages included. */
+function storeHandOffStage(row: ODataRecord) {
+  const value = text(row, ['IssueStage', 'Issue_Stage'])
+    .replace(/_x0020_/gi, ' ')
+    .replace(/_/g, ' ')
+    .trim()
+    .toLowerCase()
+  if (value.includes('lpr requested') || value === '5') return 'LPR_REQUESTED'
+  if (value.includes('lpr started') || value === '6') return 'LPR_STARTED'
+  return storeIssueStageCode(value)
+}
+
+/**
+ * The store hand-off steps waiting for the user: the Store Keeper adds the item to issue (or asks
+ * for an LPR) on approved requests of their stores, the Store Manager accepts what the keeper
+ * prepared and starts the LPRs asked for, and the requester accepts the item and confirms receipt.
+ */
+async function storeNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
+  const spec = findModuleSpec('store-requisition')
+  if (!spec) return []
+  const roles = await storeUserRoles(authUser)
+  const storeUser = roles.keeper || roles.manager
+  const rows = ((await listPortalModuleRows(spec, authUser, { includeAll: storeUser }).catch(() => [])) as ODataRecord[])
+  const bcRoles = cachedStoreRoles(String(authUser.userID ?? ''))
+  const locations = new Set((bcRoles?.locations ?? []).map((code) => code.trim().toUpperCase()))
+  // BC (Warehouse Employees) says who keeps which store; an Operations job title alone may do the
+  // keeper's step, but is not told about every store's requests.
+  const keeperNotified = roles.keeperStep && (bcRoles ? bcRoles.storeKeeper : true)
+  const groups: Record<'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive', ODataRecord[]> = {
+    storeIssue: [],
+    storeAccept: [],
+    storeLpr: [],
+    storeReceive: [],
+  }
+  for (const row of rows) {
+    const status = statusFromBc(documentStatusFromBc(row, 'storeRequisition'))
+    if (status !== 'Approved') continue
+    const stage = storeHandOffStage(row)
+    if (portalModuleDocumentOwnedByUser(row, spec, authUser) && (stage === 'ACCEPTED' || stage === 'TRANSIT')) {
+      groups.storeReceive.push(row)
+    }
+    if (keeperNotified && stage === '' && !text(row, ['StoreIssueNo', 'Store_Issue_No'])) {
+      const store = text(row, ['IssuingStore', 'Issuing_Store']).trim().toUpperCase()
+      if (!locations.size || !store || locations.has(store)) groups.storeIssue.push(row)
+    }
+    if (roles.manager && stage === 'PREPARED') groups.storeAccept.push(row)
+    if (roles.manager && stage === 'LPR_REQUESTED') groups.storeLpr.push(row)
+  }
+  const copy = {
+    storeIssue: (count: number) => ({
+      title: `${plural(count, 'store requisition')} to issue`,
+      description: 'Approved: add the item to issue, or Request for LPR when it is not in the store.',
+    }),
+    storeAccept: (count: number) => ({
+      title: `${plural(count, 'store requisition')} to accept`,
+      description: 'The store keeper prepared the item: accept it, or change the item.',
+    }),
+    storeLpr: (count: number) => ({
+      title: `${plural(count, 'Request')} for LPR to start`,
+      description: 'Not in stock: start the Local Purchase Requisition.',
+    }),
+    storeReceive: (count: number) => ({
+      title: `${plural(count, 'store item')} waiting for you`,
+      description: 'Accept the item from the store, or confirm that you received it.',
+    }),
+  }
+  return (Object.keys(groups) as Array<keyof typeof groups>)
+    .filter((kind) => groups[kind].length > 0)
+    .map((kind) => {
+      const list = groups[kind]
+      return {
+        id: kind,
+        kind,
+        count: list.length,
+        ...copy[kind](list.length),
+        module: 'storeRequisition',
+        ...(list.length === 1 ? { requestId: mapRequest(list[0]!, 'storeRequisition').id } : {}),
+      }
+    })
+}
+
+async function portalNotifications(authUser: AuthUser) {
+  const key = notificationUserKey(authUser)
+  const cached = notificationCache.get(key)
+  if (cached && Date.now() - cached.at < NOTIFICATION_CACHE_MS) return cached.value
+  const [approvals, returned, store] = await Promise.all([
+    approvalNotification(authUser).catch(() => null),
+    sentBackNotifications(authUser).catch(() => []),
+    storeNotifications(authUser).catch(() => []),
+  ])
+  const items = [approvals, ...returned, ...store].filter(
+    (item): item is PortalNotification => Boolean(item && item.count > 0),
+  )
+  const value = { total: items.reduce((sum, item) => sum + item.count, 0), items }
+  notificationCache.set(key, { at: Date.now(), value })
+  return value
 }
 
 /**
@@ -4293,6 +4600,7 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
+      forgetNotifications(authUser)
       const { module, no } = parseRequestId(requestId)
       if (module === 'leave') {
         throw portalError('Leave requests are submitted when they are created', 422)
@@ -4776,6 +5084,7 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
+      forgetNotifications(authUser)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'storeRequisition') {
         throw portalError('Store process applies to Store Requisition only', 422)
@@ -5574,75 +5883,25 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       const type = typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'pending'
-      const status = type === 'approved' ? 'Approved' : type === 'rejected' ? 'Rejected' : 'Open'
-      const wanted =
-        type === 'approved' ? 'Approved' : type === 'rejected' ? 'Rejected' : 'Pending Approval'
+      if (type === 'approved' || type === 'rejected') {
+        const queues = await decidedApprovalQueues(authUser)
+        res.json({ rows: sortNewestFirst(type === 'approved' ? queues.approved : queues.rejected) })
+        return
+      }
       const clause = approverIdFilterClause(await approverIdCandidates(authUser))
       const [rows, soapQueue] = await Promise.all([
         fetchOData('QyApprovalEntry', {
-          $filter: `Status eq '${status}' and ${clause}`,
+          $filter: `Status eq 'Open' and ${clause}`,
           $top: 1000,
         }) as Promise<ODataRecord[] | null>,
         soapApprovalQueues(authUser),
       ])
-      let liveRows = await filterApprovalEntriesWithExistingSource(
+      const liveRows = await filterApprovalEntriesWithExistingSource(
         (Array.isArray(rows) ? rows : []).filter((row) => !isEmployeeExitApprovalEntry(row)),
       )
-
-      // Prior approvers who Approved must still see docs rejected later — move them
-      // into the Rejected queue and off the Approved queue.
-      if (type === 'approved' || type === 'rejected') {
-        const approvedForUser =
-          type === 'approved'
-            ? liveRows
-            : ((await fetchOData('QyApprovalEntry', {
-                $filter: `Status eq 'Approved' and ${clause}`,
-                $top: 1000,
-              }).catch(() => [])) as ODataRecord[] | null) || []
-        const approvedLive =
-          type === 'approved'
-            ? liveRows
-            : await filterApprovalEntriesWithExistingSource(
-                (Array.isArray(approvedForUser) ? approvedForUser : []).filter(
-                  (row) => !isEmployeeExitApprovalEntry(row),
-                ),
-              )
-        const laterRejected = await documentNosLaterRejected(
-          approvedLive.map((row) => text(row, ['DocumentNo', 'Document_No'])),
-        )
-        if (type === 'approved') {
-          liveRows = liveRows.filter(
-            (row) => !laterRejected.has(normalizedApprovalDocKey(text(row, ['DocumentNo', 'Document_No']))),
-          )
-        } else {
-          const already = new Set(
-            liveRows.map((row) => normalizedApprovalDocKey(text(row, ['DocumentNo', 'Document_No']))),
-          )
-          for (const row of approvedLive) {
-            const docNo = text(row, ['DocumentNo', 'Document_No'])
-            const key = normalizedApprovalDocKey(docNo)
-            if (!laterRejected.has(key) || already.has(key)) continue
-            already.add(key)
-            liveRows.push(row)
-          }
-        }
-      }
-
-      const financeItems = liveRows
-        .map((row) => {
-          const item = approvalQueueItem(row)
-          if (type === 'rejected' && item.status !== 'Rejected') {
-            return { ...item, status: 'Rejected' as const }
-          }
-          return item
-        })
-        .filter((item) => item.requestNo)
-      const soapItems =
-        wanted === 'Pending Approval'
-          ? soapQueue.queueItems.filter((item) => item.requestNo)
-          : []
+      const financeItems = liveRows.map((row) => approvalQueueItem(row)).filter((item) => item.requestNo)
       res.json({
-        rows: sortNewestFirst([...financeItems, ...soapItems]),
+        rows: sortNewestFirst([...financeItems, ...soapQueue.queueItems.filter((item) => item.requestNo)]),
       })
     }),
   )
@@ -5701,10 +5960,12 @@ export function buildPortalApiRouter() {
         documentOutcome === 'Rejected' || source?.status === 'Rejected'
           ? 'Rejected'
           : documentOutcome || source?.status || queueItem.status
+      const approvalComment = await approvalCommentLimits()
       if (source) {
         res.json({
           ...source,
           status: resolvedStatus,
+          approvalComment,
           payload: { ...(source.payload as Record<string, unknown> | undefined), sendBackSupported: sendBackSupported(module) },
           makerEmployeeNo: queueItem.makerEmployeeNo || source.makerEmployeeNo,
           makerName: queueItem.makerName || source.makerName,
@@ -5727,6 +5988,7 @@ export function buildPortalApiRouter() {
         requestType: module,
         title: queueItem.title || `${module} approval`,
         status: resolvedStatus,
+        approvalComment,
         makerEmployeeNo: queueItem.makerEmployeeNo,
         makerName: queueItem.makerName,
         departmentCode: '',
@@ -5762,9 +6024,11 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const rawId = String(req.params.id)
       const soapRef = parseSoapApprovalId(rawId)
+      // HR letters and Employee Exit keep their remarks elsewhere: one line, as before.
       const { decision, comment, soapComment } = parseApprovalDecision(
         req.body?.decision,
         req.body?.comment ?? req.body?.comments,
+        !soapRef && (await bcTakesLongApprovalComments()),
       )
       if (soapRef) {
         if (decision === 'Returned') {
@@ -5829,6 +6093,7 @@ export function buildPortalApiRouter() {
       if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
         throw portalError(`Business Central did not mark ${no} as ${decision.toLowerCase()}`, 502)
       }
+      forgetNotifications(authUser)
       if (sentBackLines) {
         try {
           rememberSentBackLines(module, no, Number(text(entry, ['EntryNo', 'Entry_No'])) || 0, sentBackLines)
@@ -5891,15 +6156,14 @@ export function buildPortalApiRouter() {
       ]
       const [
         pendingApprovals,
-        approvedDocuments,
-        rejectedDocuments,
+        decidedQueues,
         leaveApplications,
         moduleRows,
         soapQueue,
       ] = await Promise.all([
         countLiveApprovalEntries('Open'),
-        countLiveApprovalEntries('Approved'),
-        countLiveApprovalEntries('Rejected'),
+        // The same documents as Approved / Rejected Documents (one per document, newest round).
+        decidedApprovalQueues(authUser),
         fetchODataCount('QyHRLeaveApplications', {
           $filter: `UserID eq '${odataString(authUser.userID)}'`,
         }),
@@ -5916,8 +6180,8 @@ export function buildPortalApiRouter() {
       ).length
       res.json({
         pendingApprovals: pendingApprovals + soapQueue.queueItems.length,
-        approvedDocuments,
-        rejectedDocuments,
+        approvedDocuments: decidedQueues.approved.length,
+        rejectedDocuments: decidedQueues.rejected.length,
         leaveApplications,
         staffClaims: claims.length,
         imprestRequisitions: imprest.length,
@@ -5930,6 +6194,15 @@ export function buildPortalApiRouter() {
         unresolved: openRequests,
         recentActivity,
       })
+    }),
+  )
+
+  /** What is waiting for the signed-in user: the bell in the top bar and the dashboard banners. */
+  router.get(
+    '/notifications',
+    safe(async (req, res) => {
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await portalNotifications(user(req)))
     }),
   )
 
