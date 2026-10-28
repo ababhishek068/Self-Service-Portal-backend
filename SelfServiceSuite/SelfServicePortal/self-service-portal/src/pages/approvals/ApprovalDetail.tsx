@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { extractApplicationReason } from '@/utils/applicationReason'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
+import { approvalHistorySteps } from '@/utils/requestStatus'
 import { isMakerAllowedToApprove } from '@/utils/validators'
 import { useToast } from '@/components/feedback/ToastProvider'
 import type { ApprovalDecision } from '@/types/erp.types'
@@ -492,7 +493,7 @@ export function ApprovalDetail() {
               ) : null}
 
               {/* Earlier approvers' comments (BC Approval Comments), next to the lines the next approver decides on. */}
-              <ApproverComments steps={request.approvalSteps} />
+              <ApproverComments steps={approvalHistorySteps(request)} />
 
               {lines.length && lineKeys.length ? (
                 <div className="border-t border-slate-200 pt-4">
@@ -644,7 +645,7 @@ export function ApprovalDetail() {
               <CardDescription>Audit trail with timestamps.</CardDescription>
             </CardHeader>
             <CardContent className="p-5">
-              <ApprovalTimeline steps={request.approvalSteps} />
+              <ApprovalTimeline steps={approvalHistorySteps(request)} />
             </CardContent>
           </Card>
         </div>

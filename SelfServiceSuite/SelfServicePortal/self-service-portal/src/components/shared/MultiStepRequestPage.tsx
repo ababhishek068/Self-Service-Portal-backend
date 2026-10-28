@@ -50,7 +50,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
-import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
+import { approvalHistorySteps, canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { PortalRequest } from '@/types/erp.types'
 
 export interface LineColumn {
@@ -1264,7 +1264,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                <ApproverComments steps={selected.approvalSteps} skipRejected={selected.status === 'Rejected'} />
+                <ApproverComments steps={approvalHistorySteps(selected)} skipRejected={selected.status === 'Rejected'} />
                 {bcCard ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
@@ -1486,7 +1486,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={selected.approvalSteps} />
+                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
                   </section>
                 ) : null}
               </>

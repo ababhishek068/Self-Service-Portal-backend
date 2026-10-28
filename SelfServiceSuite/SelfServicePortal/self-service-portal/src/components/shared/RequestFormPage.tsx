@@ -38,7 +38,7 @@ import {
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import { formatCurrency, formatDate } from '@/utils/formatters'
-import { canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
+import { approvalHistorySteps, canDeleteDocumentDraft, canDeleteRequestItems, canRequestApproval, canUploadRequestAttachments, editingStatus, isEditableRequestStatus, PORTAL_ATTACHMENT_MODULES, sentBackInfo, shouldShowApprovalHistory } from '@/utils/requestStatus'
 import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 type BasicFieldType = 'text' | 'number' | 'date' | 'textarea' | 'select' | 'checkbox' | 'files'
@@ -740,7 +740,7 @@ export function RequestFormPage({
                     />
                   ) : null
                 })()}
-                <ApproverComments steps={selected.approvalSteps} />
+                <ApproverComments steps={approvalHistorySteps(selected)} />
                 <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -817,7 +817,7 @@ export function RequestFormPage({
                 {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={selected.approvalSteps} />
+                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
                   </section>
                 ) : null}
               </>

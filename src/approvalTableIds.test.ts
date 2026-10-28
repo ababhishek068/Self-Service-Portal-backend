@@ -30,7 +30,10 @@ import {
   uniqueExactMasterNoByName,
 } from './staffModules.js'
 import { soapFaultMessage } from './bcClient.js'
+import { correctionChanges, correctionLine } from './approvalCorrections.js'
 import {
+  buildApprovalTrail,
+  mapApprovalStepsWithSequence,
   normalizeSequentialApprovalStatuses,
   mergeApprovalComments,
   newestApprovalStepsPerSlot,
@@ -2563,6 +2566,117 @@ describe('mapRequest status', () => {
       assert.throws(() => parseApprovalDecision('Returned', 'x'.repeat(70)), /69 characters/)
       assert.equal(parseApprovalDecision('Returned', 'x'.repeat(69)).soapComment.length, 80)
       assert.throws(() => parseApprovalDecision('Rejected', 'x'.repeat(81)), /80 characters/)
+    })
+  })
+
+  describe('a request sent back and sent again', () => {
+    // Round 1: Hermon sends it back (BC rejects Tesfaye's step with it). Round 2: the corrected
+    // request. Portal comments carry no Workflow Step Instance ID.
+    const entry = (no: number, step: number, approver: string, status: string, round: 1 | 2, modified: string) => ({
+      EntryNo: no,
+      DocumentNo: 'ABH-SR000230',
+      SequenceNo: step,
+      ApproverID: approver,
+      SenderID: 'ABEBE',
+      Status: status,
+      WorkflowStepInstanceID: round === 1 ? '{R1}' : '{R2}',
+      DateTimeSentforApproval: round === 1 ? '2026-10-28T06:00:00Z' : '2026-10-28T06:21:00Z',
+      LastDateTimeModified: modified,
+    })
+    const comment = (user: string, step: number, text: string, at: string) => ({
+      DocumentNo: 'ABH-SR000230',
+      UserID: user,
+      SequenceNo: step,
+      Comment: text,
+      DateandTime: at,
+    })
+    const returnedByHermon = comment('HERMON', 1, '[RETURNED] The Requested Quantity must be Adjusted based on the Budget we Have', '2026-10-28T06:19:05Z')
+    const roundOne = [
+      entry(101, 1, 'HERMON', 'Rejected', 1, '2026-10-28T06:19:04Z'),
+      entry(102, 2, 'TESFAYE', 'Rejected', 1, '2026-10-28T06:19:04Z'),
+    ]
+    const header = { No: 'ABH-SR000230', Status: 'Pending Approval' }
+
+    it('does not show the earlier send back on the approval given after the correction', () => {
+      const roundTwo = [
+        entry(103, 1, 'HERMON', 'Approved', 2, '2026-10-28T06:21:30Z'),
+        entry(104, 2, 'TESFAYE', 'Open', 2, '2026-10-28T06:21:30Z'),
+      ]
+      const all = [roundOne[0]!, roundTwo[0]!, roundOne[1]!, roundTwo[1]!]
+      const timeline = mergeApprovalComments(selectApprovalWorkflowEntries(all, roundTwo[1]), [returnedByHermon])
+      assert.deepEqual(
+        mapApprovalStepsWithSequence(timeline).map((step) => [step.sequenceNo, step.status]),
+        [
+          [1, 'Approved'],
+          [2, 'Pending Approval'],
+        ],
+      )
+      const everything = mergeApprovalComments(all, [returnedByHermon])
+      assert.equal(everything.find((row) => row.EntryNo === 101)?.Comment, returnedByHermon.Comment)
+      assert.equal(everything.find((row) => row.EntryNo === 103)?.Comment, undefined)
+    })
+
+    it('lists it as Returned when the second approver sends the corrected request back', () => {
+      const roundTwo = [
+        entry(103, 1, 'HERMON', 'Approved', 2, '2026-10-28T06:44:02Z'),
+        entry(104, 2, 'TESFAYE', 'Rejected', 2, '2026-10-28T06:47:03Z'),
+      ]
+      const merged = mergeApprovalComments(
+        [roundOne[0]!, roundTwo[0]!, roundOne[1]!, roundTwo[1]!],
+        [
+          returnedByHermon,
+          comment('HERMON', 1, 'Accepted', '2026-10-28T06:44:03Z'),
+          comment('TESFAYE', 2, '[RETURNED] Reduce to 4 units', '2026-10-28T06:47:04Z'),
+        ],
+      )
+      assert.equal(merged.find((row) => row.EntryNo === 102)?.Comment, undefined)
+      assert.equal(merged.find((row) => row.EntryNo === 104)?.Comment, '[RETURNED] Reduce to 4 units')
+      assert.equal(resolveModuleRequestStatus(header, 'storeRequisition', merged), 'Returned')
+      assert.equal(sentBackApprovalEntry(merged)?.EntryNo, 104)
+    })
+
+    it('shows every round: the send back, the resubmission with its corrections, then the new approvals', () => {
+      const roundTwo = [
+        entry(103, 1, 'HERMON', 'Approved', 2, '2026-10-28T06:21:30Z'),
+        entry(104, 2, 'TESFAYE', 'Open', 2, '2026-10-28T06:21:30Z'),
+      ]
+      const merged = mergeApprovalComments([...roundOne, ...roundTwo], [returnedByHermon])
+      const trail = buildApprovalTrail(merged, {
+        requesterName: 'Abebe Kebede',
+        corrections: [{ sentBackEntryNo: 101, at: '2026-10-28T06:20:59Z', changes: ['All In One: Qty 6 → 4'] }],
+      })
+      assert.deepEqual(
+        trail.map((step) => [step.round, step.sequenceNo, step.actorName, step.status, step.note, step.changes]),
+        [
+          [0, 1, 'HERMON', 'Returned', 'The Requested Quantity must be Adjusted based on the Budget we Have', undefined],
+          [1, 0, 'Abebe Kebede', 'Resubmitted', 'Resubmitted after correction.', ['All In One: Qty 6 → 4']],
+          [1, 1, 'HERMON', 'Approved', '', undefined],
+          [1, 2, 'TESFAYE', 'Pending Approval', '', undefined],
+        ],
+      )
+      assert.equal(trail[1]?.timestamp, '2026-10-28T06:21:00Z')
+      assert.deepEqual(buildApprovalTrail(roundOne), [])
+    })
+  })
+
+  describe('corrections after a send back', () => {
+    const line = (lineNo: string, itemName: string, quantity: number, description = itemName) =>
+      correctionLine({ lineNo, itemName, quantity, quantityRequested: quantity, description }, 0)
+
+    it('lists changed quantities, specifications and added or removed lines', () => {
+      assert.deepEqual(
+        correctionChanges(
+          [line('10000', 'All In One', 6), line('20000', 'Mouse', 3), line('30000', 'Toner', 2, 'HP 85A')],
+          [line('10000', 'All In One', 4), line('30000', 'Toner', 2, 'HP 85A or equivalent'), line('40000', 'Keyboard', 1)],
+        ),
+        ['All In One: Qty 6 → 4', 'Removed Mouse (Qty 3)', 'Toner: specification changed', 'Added Keyboard (Qty 1)'],
+      )
+    })
+
+    it('matches finance lines by amount and reports no change when nothing changed', () => {
+      const claim = (amount: number) => correctionLine({ lineNo: '1', accountName: 'Fuel', amount }, 0)
+      assert.deepEqual(correctionChanges([claim(1500)], [claim(1200)]), ['Fuel: Amount 1,500 → 1,200'])
+      assert.deepEqual(correctionChanges([line('10000', 'All In One', 6)], [line('10000', 'All In One', 6)]), [])
     })
   })
 

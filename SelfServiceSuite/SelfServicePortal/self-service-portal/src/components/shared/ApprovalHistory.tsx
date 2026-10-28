@@ -1,5 +1,6 @@
 import { StatusBadge } from './StatusBadge'
 import { formatDateTime } from '@/utils/formatters'
+import { compareApprovalSteps } from '@/utils/requestStatus'
 import type { ApprovalStep } from '@/types/erp.types'
 
 export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
@@ -7,11 +8,7 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
     return <p className="text-sm italic text-slate-500">No approval entries yet.</p>
   }
 
-  const orderedSteps = [...steps].sort((left, right) => {
-    const leftSequence = left.sequenceNo ?? Number.MAX_SAFE_INTEGER
-    const rightSequence = right.sequenceNo ?? Number.MAX_SAFE_INTEGER
-    return leftSequence - rightSequence
-  })
+  const orderedSteps = [...steps].sort(compareApprovalSteps)
 
   return (
     <div className="space-y-2">
@@ -21,7 +18,7 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
             <div className="flex min-w-0 items-center gap-2">
               <span className="inline-flex h-6 items-center justify-center rounded-full bg-slate-100 px-2 text-xs font-semibold text-slate-600">
                 {/* Show BC's workflow sequence — parallel approvers share a step number. */}
-                Step {step.sequenceNo ?? index + 1}
+                {step.status === 'Resubmitted' ? 'Requester' : `Step ${step.sequenceNo ?? index + 1}`}
               </span>
               <span className="font-medium text-slate-900">
                 {step.actorName || step.actorEmployeeNo || 'Approver'}
@@ -35,6 +32,13 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
           </p>
           {step.note ? (
             <p className="mt-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">{step.note}</p>
+          ) : null}
+          {step.changes?.length ? (
+            <ul className="mt-1 list-disc space-y-0.5 pl-6 text-xs text-slate-700">
+              {step.changes.map((change) => (
+                <li key={change}>{change}</li>
+              ))}
+            </ul>
           ) : null}
         </div>
       ))}

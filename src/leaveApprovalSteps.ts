@@ -153,6 +153,104 @@ export function newestApprovalStepsPerSlot(steps: ReturnType<typeof mapApprovalS
   return order.map((key) => selected.get(key)!).sort((left, right) => left.sequenceNo - right.sequenceNo)
 }
 
+/**
+ * Approval Entries split into the rounds of one request. Sending a request again creates the same
+ * approver's step again, so a repeated step + approver starts a new round.
+ */
+export function approvalRounds(entries: ODataRecord[]) {
+  const ordered = [...entries].sort((left, right) => approvalEntryNo(left) - approvalEntryNo(right))
+  const rounds: ODataRecord[][] = []
+  let current: ODataRecord[] = []
+  let slots = new Set<string>()
+  for (const entry of ordered) {
+    const slot = approvalSlotKey(entry)
+    if (slot && slots.has(slot) && current.length) {
+      rounds.push(current)
+      current = []
+      slots = new Set<string>()
+    }
+    current.push(entry)
+    if (slot) slots.add(slot)
+  }
+  if (current.length) rounds.push(current)
+  return rounds
+}
+
+/** What the requester changed before sending a returned request again (recorded by the portal). */
+export interface ApprovalCorrection {
+  sentBackEntryNo: number
+  at: string
+  changes: string[]
+}
+
+export type ApprovalTrailStep = ReturnType<typeof mapApprovalSteps>[number] & {
+  round: number
+  changes?: string[]
+}
+
+/** BC rejects the steps a round had not reached together with a send back or rejection. */
+function withUnreachedStepsCancelled(steps: ReturnType<typeof mapApprovalSteps>) {
+  const closing = steps.find((step) => step.status === 'Returned' || (step.status === 'Rejected' && step.note))
+  if (!closing) return steps
+  return steps.map((step) =>
+    step !== closing && step.status === 'Rejected' && !step.note && step.sequenceNo > closing.sequenceNo
+      ? { ...step, status: 'Cancelled' }
+      : step,
+  )
+}
+
+/**
+ * Every round of a request that was sent again: the decisions of the earlier rounds with their
+ * comments (e.g. the send back and why), a Resubmitted line with what the requester corrected, and
+ * the current round. Empty for a request with one round, where the approval steps tell it all.
+ */
+export function buildApprovalTrail(
+  entries: ODataRecord[],
+  options: { requesterName?: string; corrections?: ApprovalCorrection[] } = {},
+): ApprovalTrailStep[] {
+  const rounds = approvalRounds(entries)
+  if (rounds.length < 2) return []
+  const trail: ApprovalTrailStep[] = []
+  rounds.forEach((round, index) => {
+    const steps = withUnreachedStepsCancelled(mapApprovalSteps(round))
+    if (index > 0) {
+      const previous = rounds[index - 1]!
+      const afterSendBack = withUnreachedStepsCancelled(mapApprovalSteps(previous)).some(
+        (step) => step.status === 'Returned',
+      )
+      const correction = options.corrections?.find((item) =>
+        previous.some((entry) => approvalEntryNo(entry) === item.sentBackEntryNo),
+      )
+      const sent = [...round]
+        .filter((entry) => knownTime(approvalEntrySentTime(entry)))
+        .sort((left, right) => approvalEntrySentTime(left) - approvalEntrySentTime(right))[0]
+      const sender = text(round[0]!, ['SenderID'])
+      trail.push({
+        id: `resubmitted-${index}`,
+        actorEmployeeNo: sender,
+        actorName: text(round[0]!, ['SenderName']) || options.requesterName || sender || 'Requester',
+        role: 'Requester',
+        status: 'Resubmitted',
+        timestamp: sent
+          ? text(sent, ['DateTimeSentforApproval', 'Date_Time_Sent_for_Approval'])
+          : correction?.at ?? '',
+        note: afterSendBack ? 'Resubmitted after correction.' : 'Sent for approval again.',
+        sequenceNo: 0,
+        round: index,
+        ...(correction
+          ? { changes: correction.changes.length ? correction.changes : ['No change to the lines.'] }
+          : {}),
+      })
+    }
+    const shown =
+      index === rounds.length - 1
+        ? normalizeSequentialApprovalStatuses(steps)
+        : steps.filter((step) => ['Approved', 'Returned', 'Rejected'].includes(step.status))
+    trail.push(...shown.map((step) => ({ ...step, round: index })))
+  })
+  return trail
+}
+
 function normalizedApprovalValue(value: unknown) {
   return String(value ?? '')
     .trim()
@@ -207,6 +305,35 @@ function approvalEntrySentTime(row: ODataRecord) {
     ]),
   )
   return Number.isFinite(value) ? value : 0
+}
+
+function knownTime(value: number) {
+  return value > 0 ? value : 0
+}
+
+const SAME_MOMENT_MS = 1000
+
+/**
+ * Whether an Approval Comment Line can belong to `entry`. A request sent again after a send back
+ * gets new Approval Entries for the same approver and step, so a comment written before this entry
+ * was sent for approval, or after the same step was sent again, belongs to another round. Portal
+ * comments carry no Workflow Step Instance ID, so the times decide.
+ */
+function commentFitsApprovalRound(entries: ODataRecord[], entry: ODataRecord, comment: ODataRecord) {
+  const entryWorkflow = approvalWorkflowInstanceId(entry)
+  const commentWorkflow = approvalWorkflowInstanceId(comment)
+  if (entryWorkflow && commentWorkflow) return entryWorkflow === commentWorkflow
+  const writtenAt = knownTime(approvalEntryTime(comment))
+  const sentAt = knownTime(approvalEntrySentTime(entry))
+  if (!writtenAt || !sentAt) return true
+  if (writtenAt < sentAt - SAME_MOMENT_MS) return false
+  const slot = approvalSlotKey(entry)
+  if (!slot) return true
+  return !entries.some((other) => {
+    if (other === entry || approvalSlotKey(other) !== slot) return false
+    const otherSentAt = knownTime(approvalEntrySentTime(other))
+    return otherSentAt > sentAt + SAME_MOMENT_MS && otherSentAt <= writtenAt + SAME_MOMENT_MS
+  })
 }
 
 function approvalSlotKey(row: ODataRecord) {
@@ -369,7 +496,12 @@ export function mergeApprovalComments(
     let candidates = [...unused].filter((index) => {
       const row = commentRows[index]!
       const rowDocumentNo = normalizedApprovalValue(text(row, ['DocumentNo', 'Document_No']))
-      return Boolean(documentNo) && rowDocumentNo === documentNo && Boolean(text(row, ['Comment']))
+      return (
+        Boolean(documentNo) &&
+        rowDocumentNo === documentNo &&
+        Boolean(text(row, ['Comment'])) &&
+        commentFitsApprovalRound(entries, entry, row)
+      )
     })
 
     const workflowId = approvalWorkflowInstanceId(entry)

@@ -81,10 +81,14 @@ export interface ApprovalStep {
   actorEmployeeNo: string
   actorName: string
   role: 'Maker' | 'Checker' | 'Finance' | 'Facility' | 'HR' | 'System'
-  status: RequestStatus | 'Submitted' | 'Waiting'
+  status: RequestStatus | 'Submitted' | 'Waiting' | 'Resubmitted'
   timestamp: string
   note?: string
   sequenceNo?: number
+  /** Round of a request sent again after a send back (0 is the first submission). */
+  round?: number
+  /** On a Resubmitted step: what the requester corrected. */
+  changes?: string[]
 }
 
 export interface AuditTrailEntry {
@@ -121,6 +125,8 @@ export interface BaseRequest extends BusinessCentralEntity {
   approverName?: string
   auditTrail: AuditTrailEntry[]
   approvalSteps: ApprovalStep[]
+  /** Every round of a request that was sent back and sent again, in order (absent with one round). */
+  approvalTrail?: ApprovalStep[]
   attachments: Attachment[]
   /** Raw form payload retained for list filtering and ERP replay. */
   payload?: Record<string, unknown>

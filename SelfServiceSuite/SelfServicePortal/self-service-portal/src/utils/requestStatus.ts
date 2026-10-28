@@ -1,3 +1,5 @@
+import type { ApprovalStep } from '@/types/erp.types'
+
 /**
  * BC "Pending"/"Open" and application DB "Draft" are editable. Asset Transfer
  * and Training both start life at literal BC Status = "New" (see
@@ -66,6 +68,21 @@ export function shouldShowApprovalHistory(status: string | undefined, steps?: un
     status === 'Returned' ||
     (steps?.length ?? 0) > 0
   )
+}
+
+/**
+ * The approval history to show: every round of a request that was sent back and sent again (the
+ * send back, the resubmission and the new approvals), otherwise the approval steps.
+ */
+export function approvalHistorySteps(request: { approvalSteps?: ApprovalStep[]; approvalTrail?: ApprovalStep[] }) {
+  return request.approvalTrail?.length ? request.approvalTrail : request.approvalSteps ?? []
+}
+
+/** Approval history order: by round of a request sent again, then by BC step (parallel approvers share one). */
+export function compareApprovalSteps(left: ApprovalStep, right: ApprovalStep) {
+  const leftSequence = left.sequenceNo ?? Number.MAX_SAFE_INTEGER
+  const rightSequence = right.sequenceNo ?? Number.MAX_SAFE_INTEGER
+  return (left.round ?? 0) - (right.round ?? 0) || leftSequence - rightSequence
 }
 
 /** Lines and attachments can be deleted only before approval submission. */

@@ -61,7 +61,9 @@ import {
   type LocalPurchaseChain,
   type LocalPurchaseRole,
 } from './localPurchaseFlow.js'
+import { approvalCorrections, recordCorrection, rememberSentBackLines } from './approvalCorrections.js'
 import {
+  buildApprovalTrail,
   enrichLeaveApprovalEntries,
   fallbackApprovalStepsFromHeader,
   leaveDocumentNoCandidates,
@@ -474,7 +476,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v280 — 1.0.3.439 (store request specification up to 1000 characters, shown in full on approvals, LPR and RFQ; for BC 1.0.3.577)'
+export const PORTAL_API_BUILD = 'v281 — 1.0.3.440 (send back history: every round, the return comments and what the requester corrected shown to every approver; a returned request no longer shows as Rejected; for BC 1.0.3.577)'
 
 interface LookupSpec {
   service: string
@@ -3071,6 +3073,10 @@ async function requestDetail(
       : ''
   const resolvedStatus = resolveModuleRequestStatus(headerForMapping, module as PortalModuleKey, approvers)
   const sentBack = resolvedStatus === 'Returned' ? sentBackDetails(approvers, mapped.status) : null
+  const approvalTrail = buildApprovalTrail(approvers, {
+    requesterName: facilityRequesterName || mapped.makerName,
+    corrections: approvalCorrections(module, no),
+  })
   const salaryAdvanceAmount =
     module === 'salaryAdvance' ? salaryAdvanceLinesTotal(mappedLines as ODataRecord[], headerForMapping) : 0
   const purchaseLinesAmount =
@@ -3128,8 +3134,19 @@ async function requestDetail(
       lines: mappedLines,
     },
     approvalSteps: resolveRequestApprovalSteps(approvers, row, resolvedStatus),
+    ...(approvalTrail.length ? { approvalTrail } : {}),
     attachments: mapAttachments(attachments),
   }
+}
+
+/** The mapped lines of a document, as the approver sees them (to show a requester's corrections). */
+async function documentLinesForCorrection(module: SupportedFrontendModule, no: string, authUser: AuthUser) {
+  const spec = findFrontendModuleSpec(module)
+  if (!spec) return null
+  const row = await getPortalModuleDocument(spec, authUser, no, false)
+  if (!row) return null
+  const lines = await listPortalModuleLines(spec, row, no)
+  return mapModuleLines(module, row, Array.isArray(lines) ? lines : []) as Record<string, unknown>[]
 }
 
 /**
@@ -4284,7 +4301,18 @@ export function buildPortalApiRouter() {
       if (!spec) throw portalError(`${module} is not supported`, 501)
       await requireOwnedPortalRequest(requestId, authUser)
       const resubmission = await sendBackResubmission(spec, no).catch(() => null)
+      const correctedLines = resubmission
+        ? await documentLinesForCorrection(module, no, authUser).catch(() => null)
+        : null
       await submitPortalModuleRequest(spec, authUser, no)
+      if (resubmission && correctedLines) {
+        try {
+          const sentBackEntryNo = Number(text(resubmission.sentBack, ['EntryNo', 'Entry_No'])) || 0
+          recordCorrection(module, no, sentBackEntryNo, correctedLines)
+        } catch (error) {
+          console.warn(`Could not record the corrections of ${no}`, error)
+        }
+      }
       if (resubmission?.kept.length) {
         await keepApprovalsAfterCorrection(spec, module, no, resubmission).catch((error) =>
           console.warn(`Could not keep the earlier approvals of ${no} after correction`, error),
@@ -5785,6 +5813,11 @@ export function buildPortalApiRouter() {
       // Approve/reject as the User Setup identity BC recorded on the entry. The
       // entry was fetched only after that User ID was tied to this employee.
       const entryApproverId = text(entry, ['ApproverID']) || authUser.userID
+      // The lines as they were sent back, to show the requester's corrections on resubmission.
+      const sentBackLines =
+        decision === 'Returned'
+          ? await documentLinesForCorrection(module, no, authUser).catch(() => null)
+          : null
       const decisionRequest = approvalDecisionSoapRequest(module, {
         entryNo: text(entry, ['EntryNo', 'Entry_No']),
         docNo: no,
@@ -5795,6 +5828,13 @@ export function buildPortalApiRouter() {
       const result = await callSoapMethod(decisionRequest.method, decisionRequest.params)
       if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
         throw portalError(`Business Central did not mark ${no} as ${decision.toLowerCase()}`, 502)
+      }
+      if (sentBackLines) {
+        try {
+          rememberSentBackLines(module, no, Number(text(entry, ['EntryNo', 'Entry_No'])) || 0, sentBackLines)
+        } catch (error) {
+          console.warn(`Could not keep the sent-back lines of ${no}`, error)
+        }
       }
       // The source document can stop being readable through the pending-approval
       // query immediately after BC records the decision. Return an explicit
