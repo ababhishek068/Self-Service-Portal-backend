@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { Link, useLocation } from 'react-router-dom'
 import {
   Bell,
   ChevronRight,
@@ -61,6 +62,14 @@ export function NotificationBell() {
   const [dismissed, setDismissed] = useState(readDismissed)
   const rootRef = useRef<HTMLDivElement>(null)
   const showCallout = total > 0 && !open && dismissed !== currentSignature
+  const queryClient = useQueryClient()
+  const { pathname } = useLocation()
+
+  // The bell stays in the top bar while pages change, so it asks again on every page (when its
+  // answer is more than a few seconds old): opening the dashboard shows the same as the dashboard.
+  useEffect(() => {
+    void queryClient.refetchQueries({ queryKey: ['notifications'], type: 'active', stale: true }, { cancelRefetch: false })
+  }, [pathname, queryClient])
 
   useEffect(() => {
     if (!open) return
@@ -84,7 +93,10 @@ export function NotificationBell() {
   }
 
   const toggle = () => {
-    if (!open) dismiss()
+    if (!open) {
+      dismiss()
+      void notifications.refetch({ cancelRefetch: false })
+    }
     setOpen((value) => !value)
   }
 
@@ -138,12 +150,14 @@ export function NotificationBell() {
               </span>
             ) : null}
           </div>
-          {notifications.isLoading ? (
-            <p className="px-4 py-6 text-center text-sm text-slate-500">Loading…</p>
-          ) : notifications.isError ? (
-            <p className="px-4 py-6 text-center text-sm text-slate-500">Notifications could not load.</p>
+          {!notifications.data ? (
+            <p className="px-4 py-6 text-center text-sm text-slate-500">
+              {notifications.isError && !notifications.isFetching ? 'Notifications could not load.' : 'Checking…'}
+            </p>
           ) : items.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-slate-500">Nothing is waiting for you.</p>
+            <p className="px-4 py-6 text-center text-sm text-slate-500">
+              {notifications.isFetching ? 'Checking…' : 'Nothing is waiting for you.'}
+            </p>
           ) : (
             <ul className="max-h-[60vh] divide-y divide-slate-100 overflow-y-auto">
               {items.map((item) => {

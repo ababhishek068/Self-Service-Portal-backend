@@ -3,17 +3,22 @@ import { getToken, resolveApiBaseUrl } from '@/api/client/authClient'
 import { getNotifications } from '@/api/endpoints/notifications'
 import { useAuth } from '@/hooks/useAuth'
 
-/** The bell and the dashboard banners share one poll (every two minutes). */
+/**
+ * The bell and the dashboard banners share one query per signed-in user. It is asked again every
+ * minute, on every page (NotificationBell) and when the bell is opened.
+ */
 export function useNotifications() {
-  const { isAuthenticated, bootstrapped } = useAuth()
+  const { employee, isAuthenticated, bootstrapped } = useAuth()
+  const userKey = String(employee?.userID || employee?.employeeNo || '').toUpperCase()
   return useQuery({
-    queryKey: ['notifications'],
+    queryKey: ['notifications', userKey],
     queryFn: getNotifications,
-    enabled: bootstrapped && isAuthenticated && Boolean(resolveApiBaseUrl()) && Boolean(getToken()),
-    staleTime: 60_000,
+    enabled: bootstrapped && isAuthenticated && Boolean(userKey) && Boolean(resolveApiBaseUrl()) && Boolean(getToken()),
+    staleTime: 10_000,
     gcTime: 5 * 60_000,
     refetchOnMount: true,
-    refetchInterval: 120_000,
-    retry: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
+    retry: 1,
   })
 }

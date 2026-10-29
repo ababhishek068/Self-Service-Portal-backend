@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v282 — 1.0.3.441 (Approved / Rejected Documents by the newest round, only for the approvers who decided; a rejected request listed as Rejected; notification bell and store keeper / manager banners; approval comments up to 200 characters; for BC 1.0.3.581)'
+export const PORTAL_API_BUILD = 'v283 — 1.0.3.442 (notification bell up to date when the dashboard opens: asked again on every page, when opened and every minute; for BC 1.0.3.581)'
 
 interface LookupSpec {
   service: string
@@ -2595,8 +2595,12 @@ export interface PortalNotification {
   requestId?: string
 }
 
-const notificationCache = new Map<string, { at: number; value: { total: number; items: PortalNotification[] } }>()
-const NOTIFICATION_CACHE_MS = 30_000
+type PortalNotifications = { total: number; items: PortalNotification[] }
+
+// A few seconds only: the bell asks again on every page, and must agree with the dashboard.
+const notificationCache = new Map<string, { at: number; value: PortalNotifications }>()
+const notificationsInFlight = new Map<string, Promise<PortalNotifications>>()
+const NOTIFICATION_CACHE_MS = 10_000
 
 function notificationUserKey(authUser: AuthUser) {
   return String(authUser.userID || authUser.employeeNo || '').trim().toUpperCase()
@@ -2614,9 +2618,9 @@ function plural(count: number, one: string, many = `${one}s`) {
 async function approvalNotification(authUser: AuthUser): Promise<PortalNotification> {
   const clause = approverIdFilterClause(await approverIdCandidates(authUser))
   const [rows, soapQueue] = await Promise.all([
-    fetchOData('QyApprovalEntry', { $filter: `Status eq 'Open' and ${clause}`, $top: 1000 }).catch(
-      () => null,
-    ) as Promise<ODataRecord[] | null>,
+    fetchOData('QyApprovalEntry', { $filter: `Status eq 'Open' and ${clause}`, $top: 1000 }) as Promise<
+      ODataRecord[] | null
+    >,
     soapApprovalQueues(authUser),
   ])
   const live = await filterApprovalEntriesWithExistingSource(
@@ -2760,21 +2764,40 @@ async function storeNotifications(authUser: AuthUser): Promise<PortalNotificatio
     })
 }
 
-async function portalNotifications(authUser: AuthUser) {
-  const key = notificationUserKey(authUser)
-  const cached = notificationCache.get(key)
-  if (cached && Date.now() - cached.at < NOTIFICATION_CACHE_MS) return cached.value
+async function workOutNotifications(authUser: AuthUser, key: string): Promise<PortalNotifications> {
+  // A part BC could not answer is left out of this answer, which is then not kept: the next
+  // request asks BC again instead of showing "nothing" for the cache time.
+  let complete = true
+  const failed =
+    <T>(fallback: T) =>
+    (error: unknown) => {
+      complete = false
+      console.warn('Notifications: part not loaded', error instanceof Error ? error.message : error)
+      return fallback
+    }
   const [approvals, returned, store] = await Promise.all([
-    approvalNotification(authUser).catch(() => null),
-    sentBackNotifications(authUser).catch(() => []),
-    storeNotifications(authUser).catch(() => []),
+    approvalNotification(authUser).catch(failed(null)),
+    sentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
+    storeNotifications(authUser).catch(failed([] as PortalNotification[])),
   ])
   const items = [approvals, ...returned, ...store].filter(
     (item): item is PortalNotification => Boolean(item && item.count > 0),
   )
   const value = { total: items.reduce((sum, item) => sum + item.count, 0), items }
-  notificationCache.set(key, { at: Date.now(), value })
+  if (complete) notificationCache.set(key, { at: Date.now(), value })
   return value
+}
+
+async function portalNotifications(authUser: AuthUser) {
+  const key = notificationUserKey(authUser)
+  const cached = notificationCache.get(key)
+  if (cached && Date.now() - cached.at < NOTIFICATION_CACHE_MS) return cached.value
+  // Two tabs (or the bell and the dashboard) asking at once share one answer.
+  const running = notificationsInFlight.get(key)
+  if (running) return running
+  const next = workOutNotifications(authUser, key).finally(() => notificationsInFlight.delete(key))
+  notificationsInFlight.set(key, next)
+  return next
 }
 
 /**
