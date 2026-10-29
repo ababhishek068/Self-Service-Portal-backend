@@ -52,6 +52,17 @@ describe('assertLocalPurchaseActionAllowed', () => {
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'RESUBMIT_INVOICE'), 'RESUBMIT_INVOICE')
   })
 
+  it('takes a comment of up to 250 characters (BC actionComment is Text[250])', () => {
+    assert.equal(
+      assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_LPR_OPS', 'x'.repeat(250)),
+      'APPROVE_LPR_OPS',
+    )
+    assert.throws(
+      () => assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_LPR_OPS', 'x'.repeat(251)),
+      /250 characters/,
+    )
+  })
+
   it('rejects cross-role, a generic finance title, and missing comment/payload', () => {
     assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'APPROVE_LPR_FAD'), /not authorized/i)
     // A "finance" job title is not a BC setup role.
@@ -245,6 +256,8 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
     // 18 Operations Manager approves the PO, 19 then FAD
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'operationsManager')
     assert.deepEqual(s.mine, ['APPROVE_PO_OPS@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008', 'REJECT_PO@ABH-PO000008'])
+    // BC lets FAD send a PO back only from Pending FAD PO, not at the Operations Manager's step.
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'fad').mine, [])
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance PO' }), 'financeChecker').mine, [])
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending FAD PO' }), 'fad')
     assert.deepEqual(s.mine, ['APPROVE_PO_FAD@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008', 'REJECT_PO@ABH-PO000008'])

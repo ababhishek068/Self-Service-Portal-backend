@@ -33,6 +33,10 @@ export function LprLinesSubform({ request }: { request: PortalRequest }) {
   const lprNo = text(stateQuery.data?.chain.lpr?.no)
   const editable =
     stateQuery.data?.cardEditable === true && lprNo.toUpperCase() === request.requestNo.trim().toUpperCase()
+  // While the LPR is approved, its lines carry the request only; the Procurement Officer fills the
+  // item, category, VAT, prices and supplier after approval (BC lineDetailsVisible).
+  const detailsVisible = text(stateQuery.data?.chain.lpr?.lineDetailsVisible).toLowerCase() !== 'false'
+  const columns = detailsVisible ? PURCHASE_LINE_COLUMNS : PURCHASE_LINE_COLUMNS.filter((column) => !column.detail)
 
   const run = async (actionCode: string, payload: Record<string, unknown>, success: string) => {
     try {
@@ -49,7 +53,8 @@ export function LprLinesSubform({ request }: { request: PortalRequest }) {
     <BcLinesTable
       title="Purchase Requisition Subform"
       lines={lines}
-      columns={PURCHASE_LINE_COLUMNS}
+      columns={columns}
+      showTotal={detailsVisible}
       docNo={lprNo}
       editable={editable}
       busy={mutation.isPending}

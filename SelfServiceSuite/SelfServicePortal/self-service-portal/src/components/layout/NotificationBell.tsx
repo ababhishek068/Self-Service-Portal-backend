@@ -5,6 +5,7 @@ import {
   Bell,
   ChevronRight,
   ClipboardCopy,
+  ClipboardList,
   CornerUpLeft,
   PackageCheck,
   PackageOpen,
@@ -24,6 +25,7 @@ const KIND_ICONS: Record<PortalNotificationKind, LucideIcon> = {
   storeAccept: PackageCheck,
   storeLpr: ShoppingCart,
   storeReceive: PackageOpen,
+  localPurchase: ClipboardList,
 }
 
 const DISMISSED_KEY = 'abh.notifications.dismissed'

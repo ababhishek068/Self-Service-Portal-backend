@@ -207,7 +207,11 @@ const RFQ_STAGE_ACTIONS: Record<string, StageAction[]> = {
 }
 
 /** Operations Manager approves first, then FAD (BC ApproveLocalPurchaseOrder → ApprovePOAsFad). */
-const PO_OPS_APPROVAL: StageAction[] = ['APPROVE_PO_OPS', 'SEND_BACK_PO', { code: 'REJECT_PO', roles: ['operationsManager'] }]
+const PO_OPS_APPROVAL: StageAction[] = [
+  'APPROVE_PO_OPS',
+  { code: 'SEND_BACK_PO', roles: ['operationsManager'] },
+  { code: 'REJECT_PO', roles: ['operationsManager'] },
+]
 const OPS_INVOICE_CHECK: StageAction[] = ['APPROVE_INVOICE_OPS', { code: 'SEND_BACK_INVOICE', roles: ['operationsManager'] }]
 const FAD_PAYMENT_APPROVAL: StageAction[] = ['APPROVE_PAYMENT_FAD', { code: 'SEND_BACK_INVOICE', roles: ['fad'] }]
 
@@ -500,6 +504,9 @@ export function hasBcLocalPurchaseRole(access: LocalPurchaseAccess | null) {
   return Boolean(access?.enabled && access.roles.some((role) => BC_ROLE_NAMES.has(role)))
 }
 
+/** BC takes the approver's comment as Text[250] (actionComment; the LPR Approval Log keeps it). */
+export const LOCAL_PURCHASE_COMMENT_MAX = 250
+
 export function assertLocalPurchaseActionAllowed(
   roles: LocalPurchaseRole[],
   actionCode: string,
@@ -524,6 +531,12 @@ export function assertLocalPurchaseActionAllowed(
     throw Object.assign(new Error(`A comment is required for ${action}.`), {
       status: 422,
       code: 'LPR_ACTION_COMMENT_REQUIRED',
+    })
+  }
+  if (actionComment.trim().length > LOCAL_PURCHASE_COMMENT_MAX) {
+    throw Object.assign(new Error(`Keep the comment to ${LOCAL_PURCHASE_COMMENT_MAX} characters.`), {
+      status: 422,
+      code: 'LPR_ACTION_COMMENT_TOO_LONG',
     })
   }
   if (rule.needsPayload && !hasPayload) {

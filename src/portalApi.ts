@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v283 — 1.0.3.442 (notification bell up to date when the dashboard opens: asked again on every page, when opened and every minute; for BC 1.0.3.581)'
+export const PORTAL_API_BUILD = 'v284 — 1.0.3.443 (Local Purchase per the BC 1.0.3.582 handoff: comment box on every approve / send back / reject, Request Type and Purpose on LPR lines, details hidden while approved, RFQ and PO lines carry the request; the bell for every Local Purchase step and Issue after LPR; for BC 1.0.3.583)'
 
 interface LookupSpec {
   service: string
@@ -2488,6 +2488,14 @@ function mapPurchaseLine(row: ODataRecord, index: number, header?: ODataRecord) 
     unitOfMeasureCode: text(row, ['UnitOfMeasureCode', 'Unit_of_Measure_Code']),
     vatProdPostingGroup: text(row, ['VATProdPostingGroup', 'VAT_Prod_Posting_Group']),
     lineAmount: number(row, ['LineAmount', 'Line_Amount']),
+    // BC 1.0.3.583 (QyPortalPurchaseLines): Request Type and Description / Purpose of the LPR line.
+    // Left out on older BC, so the portal does not ask for fields BC cannot send.
+    ...('ABHRequestType' in row || 'requestType' in row
+      ? {
+          requestType: purchaseRequestTypeLabel(text(row, ['ABHRequestType', 'requestType'])),
+          purpose: text(row, ['ABHPurpose', 'purpose']),
+        }
+      : {}),
     remarks: text(row, [
       'PortalRemarks',
       'Portal_Remarks',
@@ -2498,6 +2506,12 @@ function mapPurchaseLine(row: ODataRecord, index: number, header?: ODataRecord) 
     ]),
     requiredDate,
   }
+}
+
+/** LPR line Request Type as BC shows it (Item, Service, Fixed Asset, Consumable); blank when not set. */
+export function purchaseRequestTypeLabel(value: string) {
+  const label = value.replace(/_x0020_/gi, ' ').replace(/_/g, ' ').trim()
+  return /^\d+$/.test(label) ? ['', 'Item', 'Service', 'Fixed Asset', 'Consumable'][Number(label)] ?? '' : label
 }
 
 function mapTransportPassenger(row: ODataRecord, index: number) {
@@ -2584,9 +2598,97 @@ async function listRowStatus(spec: ModuleSpec, row: ODataRecord, module: PortalM
   return status
 }
 
+async function loadLocalPurchaseChain(documentNo: string) {
+  const result = await callSoapMethod('PortalLocalPurchaseChain', { documentNo })
+  return parseSoapJson(result.returnValue) as LocalPurchaseChain
+}
+
+// LPRs that are finished (closed, rejected, cancelled) never need anyone again.
+const finishedLprs = new Set<string>()
+
+function lprFinished(chain: LocalPurchaseChain) {
+  const lprStatus = String(chain.lpr?.lprStatus ?? '').trim().toUpperCase()
+  const poStage = String(chain.po?.flowStage ?? '').trim().toUpperCase()
+  return (
+    String(chain.po?.lprClosed ?? chain.lpr?.lprClosed ?? '').toLowerCase() === 'true' ||
+    ['REJECTED', 'CANCELLED'].includes(lprStatus) ||
+    poStage === 'LPR CLOSED'
+  )
+}
+
+type LocalPurchaseWaitingItem = {
+  id: string
+  requestNo: string
+  title: string
+  requester: string
+  storeRequisitionNo: string
+  stage: string
+  processStep: string
+  actions: string[]
+}
+
+const lprWaitingCache = new Map<string, { at: number; items: LocalPurchaseWaitingItem[] }>()
+const LPR_WAITING_CACHE_MS = 45_000
+
+/**
+ * Store LPRs where the signed-in user has a step to do now (My Approvals → Local Purchase, and the
+ * bell). LPR steps are approved on the LPR card, not through BC approval entries, so they never
+ * reach Requests to Approve. A Procurement Officer's step is theirs only when BC assigned the LPR
+ * to them (or to nobody yet), as BC checks. Kept 45 seconds; the user's own action clears it.
+ */
+async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurchaseWaitingItem[]> {
+  const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+  if (!access.enabled || access.roles.length === 0) return []
+  const key = notificationUserKey(authUser)
+  const cached = lprWaitingCache.get(key)
+  if (cached && Date.now() - cached.at < LPR_WAITING_CACHE_MS) return cached.items
+  const spec = findFrontendModuleSpec('purchaseRequisition')
+  if (!spec) return []
+  const rows = (await listPortalModuleRows(spec, authUser, {
+    includeAll: canViewPurchaseProcess(authUser),
+  })) as ODataRecord[]
+  const myIds = new Set((await approverIdCandidates(authUser)).map((id) => id.trim().toUpperCase()))
+  const candidates = rows
+    .map((row) => ({ row, no: text(row, ['No', 'No_', 'no']).trim() }))
+    .filter(({ no }) => no && !finishedLprs.has(no.toUpperCase()))
+  const items: LocalPurchaseWaitingItem[] = []
+  await rowsPassing(candidates, async ({ row, no }) => {
+    if (!(await isStoreLprDocument(no))) return false
+    const chain = await loadLocalPurchaseChain(no).catch(() => null)
+    if (!chain) return false
+    if (lprFinished(chain)) {
+      finishedLprs.add(no.toUpperCase())
+      return false
+    }
+    const assigned = String(chain.lpr?.assignedProcUserId ?? '').trim().toUpperCase()
+    const actions = localPurchaseNextActions(chain, access.roles).filter((action) => {
+      if (!action.allowed) return false
+      const officerStep = action.ownerRoles.every((role) => role === 'procurement' || role === 'projectProcurement')
+      return !officerStep || !assigned || myIds.has(assigned)
+    })
+    if (actions.length === 0) return false
+    const mapped = mapRequest(row, 'purchaseRequisition')
+    const current = chain.po ?? chain.rfq ?? chain.lpr
+    items.push({
+      id: mapped.id,
+      requestNo: no,
+      title: String(mapped.title ?? ''),
+      requester: (await resolvePurchaseRequesterDisplayName(row, authUser).catch(() => '')) || '',
+      storeRequisitionNo: String(chain.storeRequisitionNo ?? ''),
+      stage: String(current?.flowStage ?? current?.lprStatus ?? ''),
+      processStep: String(current?.processStep ?? chain.lpr?.processStep ?? ''),
+      actions: [...new Set(actions.map((action) => action.label))],
+    })
+    return true
+  })
+  items.sort((left, right) => left.requestNo.localeCompare(right.requestNo))
+  lprWaitingCache.set(key, { at: Date.now(), items })
+  return items
+}
+
 export interface PortalNotification {
   id: string
-  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive'
+  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive' | 'localPurchase'
   count: number
   title: string
   description: string
@@ -2606,9 +2708,10 @@ function notificationUserKey(authUser: AuthUser) {
   return String(authUser.userID || authUser.employeeNo || '').trim().toUpperCase()
 }
 
-/** After the user acts, the bell is worked out again on the next request. */
+/** After the user acts, the bell (and their Local Purchase steps) are worked out again on the next request. */
 function forgetNotifications(authUser: AuthUser) {
   notificationCache.delete(notificationUserKey(authUser))
+  lprWaitingCache.delete(notificationUserKey(authUser))
 }
 
 function plural(count: number, one: string, many = `${one}s`) {
@@ -2681,6 +2784,28 @@ async function sentBackNotifications(authUser: AuthUser): Promise<PortalNotifica
     }),
   )
   return perModule.flat().slice(0, 10)
+}
+
+/**
+ * Local Purchase steps waiting for the user: the Operations Manager and FAD approvals, the
+ * Procurement Officer's steps (LPR, RFQ, quotes, PO, invoice), Technical, the Finance checker and
+ * the Store Keeper's receipt, one line per LPR.
+ */
+async function localPurchaseNotification(authUser: AuthUser): Promise<PortalNotification | null> {
+  const items = await localPurchaseWaitingItems(authUser)
+  if (!items.length) return null
+  return {
+    id: 'localPurchase',
+    kind: 'localPurchase',
+    count: items.length,
+    title: `${plural(items.length, 'Local Purchase document')} waiting for you`,
+    description: items
+      .slice(0, 3)
+      .map((item) => `${item.requestNo}: ${item.actions.join(' · ')}`)
+      .join('; '),
+    module: 'purchaseRequisition',
+    ...(items.length === 1 ? { requestId: items[0]!.id } : {}),
+  }
 }
 
 /** BC Issue Stage of a store requisition, the Local Purchase stages included. */
@@ -2775,12 +2900,13 @@ async function workOutNotifications(authUser: AuthUser, key: string): Promise<Po
       console.warn('Notifications: part not loaded', error instanceof Error ? error.message : error)
       return fallback
     }
-  const [approvals, returned, store] = await Promise.all([
+  const [approvals, returned, store, localPurchase] = await Promise.all([
     approvalNotification(authUser).catch(failed(null)),
     sentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
     storeNotifications(authUser).catch(failed([] as PortalNotification[])),
+    localPurchaseNotification(authUser).catch(failed(null)),
   ])
-  const items = [approvals, ...returned, ...store].filter(
+  const items = [approvals, ...returned, ...store, localPurchase].filter(
     (item): item is PortalNotification => Boolean(item && item.count > 0),
   )
   const value = { total: items.reduce((sum, item) => sum + item.count, 0), items }
@@ -5489,11 +5615,6 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  async function loadLocalPurchaseChain(documentNo: string) {
-    const result = await callSoapMethod('PortalLocalPurchaseChain', { documentNo })
-    return parseSoapJson(result.returnValue) as LocalPurchaseChain
-  }
-
   /** RFQ No. for vendor-quote calls: the chain's Local RFQ (or the requested one, if it belongs to the chain). */
   async function requireChainRfqNo(requestNo: string, requested: unknown) {
     const chain = await loadLocalPurchaseChain(requestNo)
@@ -5509,19 +5630,6 @@ export function buildPortalApiRouter() {
     return rfqNo
   }
 
-  // LPRs that are finished (closed, rejected, cancelled) never need anyone again.
-  const finishedLprs = new Set<string>()
-
-  function lprFinished(chain: LocalPurchaseChain) {
-    const lprStatus = String(chain.lpr?.lprStatus ?? '').trim().toUpperCase()
-    const poStage = String(chain.po?.flowStage ?? '').trim().toUpperCase()
-    return (
-      String(chain.po?.lprClosed ?? chain.lpr?.lprClosed ?? '').toLowerCase() === 'true' ||
-      ['REJECTED', 'CANCELLED'].includes(lprStatus) ||
-      poStage === 'LPR CLOSED'
-    )
-  }
-
   /**
    * Store LPRs where the signed-in user has a step to do now (My Approvals → Local Purchase).
    * LPR steps are approved on the LPR card, not through BC approval entries, so they never reach
@@ -5531,46 +5639,8 @@ export function buildPortalApiRouter() {
   router.get(
     '/local-purchase/waiting',
     safe(async (req, res) => {
-      const authUser = user(req)
       res.setHeader('Cache-Control', 'private, no-store')
-      const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
-      if (!access.enabled || access.roles.length === 0) {
-        res.json({ items: [] })
-        return
-      }
-      const requests = (await mappedModuleRows('purchaseRequisition', authUser)) as Array<{
-        id: string
-        requestNo: string
-        title?: string
-        makerName?: string
-      }>
-      const candidates = requests.filter((request) => !finishedLprs.has(request.requestNo.toUpperCase()))
-      const items: Array<Record<string, unknown>> = []
-      await rowsPassing(candidates, async (request) => {
-        if (!(await isStoreLprDocument(request.requestNo))) return false
-        const chain = await loadLocalPurchaseChain(request.requestNo).catch(() => null)
-        if (!chain) return false
-        if (lprFinished(chain)) {
-          finishedLprs.add(request.requestNo.toUpperCase())
-          return false
-        }
-        const actions = localPurchaseNextActions(chain, access.roles).filter((action) => action.allowed)
-        if (actions.length === 0) return false
-        const current = chain.po ?? chain.rfq ?? chain.lpr
-        items.push({
-          id: request.id,
-          requestNo: request.requestNo,
-          title: request.title ?? '',
-          requester: request.makerName ?? '',
-          storeRequisitionNo: chain.storeRequisitionNo ?? '',
-          stage: String(current?.flowStage ?? current?.lprStatus ?? ''),
-          processStep: String(current?.processStep ?? chain.lpr?.processStep ?? ''),
-          actions: actions.map((action) => action.label),
-        })
-        return true
-      })
-      items.sort((left, right) => String(left.requestNo).localeCompare(String(right.requestNo)))
-      res.json({ items })
+      res.json({ items: await localPurchaseWaitingItems(user(req)) })
     }),
   )
 
@@ -5643,6 +5713,7 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
+      forgetNotifications(authUser)
       const { module, no } = parseRequestId(requestId)
       if (module !== 'purchaseRequisition' && module !== 'storeRequisition') {
         throw portalError(

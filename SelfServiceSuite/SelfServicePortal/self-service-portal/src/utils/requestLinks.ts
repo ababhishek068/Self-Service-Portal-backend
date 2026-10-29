@@ -22,5 +22,8 @@ export function notificationHref(item: PortalNotification) {
   if (item.kind === 'approvals') {
     return item.requestId ? `/approvals/${item.requestId}?queue=pending` : '/approvals'
   }
+  // Several Local Purchase documents: My Approvals lists every LPR waiting for the user.
+  if (item.kind === 'localPurchase' && !item.requestId) return '/approvals'
+
   return (item.module && requestPageHref(item.module, item.requestId)) || '/'
 }

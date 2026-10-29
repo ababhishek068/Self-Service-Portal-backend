@@ -82,6 +82,7 @@ import {
   mapModuleLines,
   parseEmployeeMedicalBalancesReturn,
   parseApprovalDecision,
+  purchaseRequestTypeLabel,
   approvalDecisionSoapRequest,
   purchaseRequesterDisplayName,
   storeRequisitionIsAsset,
@@ -2725,6 +2726,13 @@ describe('mapRequest status', () => {
       assert.equal(approverDocumentOutcome(entries, tesfaye), 'Returned')
       assert.equal(newestRoundClosingStep(entries)?.note, 'Reduce to 4 units')
     })
+  })
+
+  it('reads the LPR line Request Type as BC shows it (BC 1.0.3.583)', () => {
+    assert.equal(purchaseRequestTypeLabel('Fixed_x0020_Asset'), 'Fixed Asset')
+    assert.equal(purchaseRequestTypeLabel('Consumable'), 'Consumable')
+    assert.equal(purchaseRequestTypeLabel('_x0020_'), '')
+    assert.equal(purchaseRequestTypeLabel('2'), 'Service')
   })
 
   describe('approval comments longer than one BC line (BC 1.0.3.581)', () => {

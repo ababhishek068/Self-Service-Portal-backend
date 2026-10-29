@@ -8,6 +8,7 @@ export type PortalNotificationKind =
   | 'storeAccept'
   | 'storeLpr'
   | 'storeReceive'
+  | 'localPurchase'
 
 export interface PortalNotification {
   id: string
@@ -25,7 +26,10 @@ export interface PortalNotifications {
   items: PortalNotification[]
 }
 
-/** What is waiting for the signed-in user: approvals, requests sent back, store hand-off steps. */
+/**
+ * What is waiting for the signed-in user: approvals, requests sent back, the store hand-off steps
+ * and the Local Purchase (LPR → RFQ → PO → invoice) steps of their role.
+ */
 export async function getNotifications() {
   requireAuthApiUrl()
   return authGet<PortalNotifications>('/api/notifications')

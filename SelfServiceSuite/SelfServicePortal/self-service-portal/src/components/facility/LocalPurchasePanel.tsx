@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import {
   getLocalPurchaseBankAccounts,
   getLocalPurchaseState,
@@ -21,6 +20,7 @@ import {
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
 import { LookupCombobox } from '@/components/shared/LookupCombobox'
 import { LprApprovalHistory } from '@/components/facility/LprApprovalHistory'
+import { LprCommentDialog } from '@/components/facility/LprCommentDialog'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
 import { formatCurrency } from '@/utils/formatters'
@@ -33,7 +33,12 @@ import { BcLinesTable } from '@/components/facility/BcLinesTable'
 import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
 import { dateValue } from '@/components/facility/bcCardValues'
-import { ORDER_LINE_COLUMNS, RECEIVE_LINE_COLUMNS, type PurchaseLine } from '@/components/facility/bcPurchaseLines'
+import {
+  ORDER_LINE_COLUMNS,
+  RECEIVE_LINE_COLUMNS,
+  lprLinesMissingFields,
+  type PurchaseLine,
+} from '@/components/facility/bcPurchaseLines'
 import { cn } from '@/lib/utils'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
@@ -176,6 +181,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const confirm = useConfirm()
   const queryClient = useQueryClient()
   const [actionComment, setActionComment] = useState('')
+  // The approve / send back / reject waiting for its comment (BC opens a comment dialog first).
+  const [commentAction, setCommentAction] = useState<LocalPurchaseNextAction | null>(null)
   const [storeCardOpen, setStoreCardOpen] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
@@ -223,6 +230,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['local-purchase', request.id] })
     await queryClient.invalidateQueries({ queryKey: ['facility', 'purchase-requisition'] })
+    await queryClient.invalidateQueries({ queryKey: ['local-purchase', 'waiting'] })
+    await queryClient.invalidateQueries({ queryKey: ['notifications'] })
   }
   const actionMutation = useMutation({
     mutationFn: (body: Parameters<typeof runLocalPurchaseAction>[1]) => runLocalPurchaseAction(request.id, body),
@@ -266,9 +275,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   )
   const issueAfterLpr = nextActions.find((action) => action.actionCode === 'ISSUE_AFTER_LPR')
   const updateLprLine = nextActions.find((action) => action.actionCode === 'UPDATE_LPR_LINE' && action.allowed)
-  const needsComment = ribbon.some(
-    (action) => action.commentRequired || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW',
-  )
+  const asksComment = (action: LocalPurchaseNextAction) =>
+    Boolean(action.commentRequired) || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
   const needsVendorInvoiceNo = ribbon.some((action) => action.actionCode === 'CREATE_LOCAL_INVOICE')
   const needsBank = ribbon.some((action) => action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT')
   const bankOptions = (bankQuery.data?.bankAccounts ?? []).map((bank) => ({
@@ -284,16 +292,27 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const fadSelectWinner = allowed('SELECT_WINNER_FAD')
   const canEditQuotes = allowed('UPSERT_VENDOR_QUOTE')
 
-  const run = async (action: LocalPurchaseNextAction, extra: { linkedDocumentNo?: string } = {}) => {
-    const comment = actionComment.trim()
-    if ((action.commentRequired || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW') && !comment) {
-      toast.error(
-        action.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
-          ? 'Write the technical recommendation before submitting.'
-          : 'Enter your comment first. Every approve, send back and reject is recorded with it in the Approval History.',
-        'Comment required',
-      )
+  const run = async (
+    action: LocalPurchaseNextAction,
+    extra: { linkedDocumentNo?: string; commented?: boolean } = {},
+  ) => {
+    // Approve, send back and reject open the comment box first; it is the confirmation too.
+    if (asksComment(action) && !extra.commented) {
+      setActionComment('')
+      setCommentAction(action)
       return
+    }
+    const comment = extra.commented ? actionComment.trim() : ''
+    if (asksComment(action) && !comment) return
+    // BC refuses Submit while a line misses a required field (BC 1.0.3.583 sends Request Type and
+    // Purpose with the lines; on older BC the check is left to BC).
+    if (action.actionCode === 'SUBMIT_LPR_OPS' && text(lpr?.no).toUpperCase() === request.requestNo.trim().toUpperCase()) {
+      const lprLines = Array.isArray(request.payload?.lines) ? (request.payload.lines as PurchaseLine[]) : []
+      const missing = lprLines.some((line) => 'requestType' in line) ? lprLinesMissingFields(lprLines) : []
+      if (missing.length) {
+        toast.error(`${missing.join('. ')}.`, 'Complete the LPR lines first')
+        return
+      }
     }
     if (action.actionCode === 'CREATE_LOCAL_INVOICE' && !vendorInvoiceNo.trim()) {
       toast.error('Enter the real Vendor Invoice No. from the supplier invoice.', 'Vendor Invoice No. required')
@@ -303,14 +322,16 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       toast.error('Choose the bank account this payment is made from.', 'Bank account required')
       return
     }
-    const yes = await confirm({
-      title: action.label,
-      message:
-        action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT'
-          ? `${action.label} on ${action.documentNo} from bank ${bankAccountNo}?`
-          : `${action.label} on ${action.documentNo}?`,
-      confirmLabel: action.label,
-    })
+    const yes =
+      extra.commented ||
+      (await confirm({
+        title: action.label,
+        message:
+          action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT'
+            ? `${action.label} on ${action.documentNo} from bank ${bankAccountNo}?`
+            : `${action.label} on ${action.documentNo}?`,
+        confirmLabel: action.label,
+      }))
     if (!yes) return
     try {
       const response = await actionMutation.mutateAsync({
@@ -328,6 +349,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
                 : undefined,
       })
       setActionComment('')
+      setCommentAction(null)
       setVendorInvoiceNo('')
       setBankAccountNo('')
       const resultNo = text(response.result?.resultNo)
@@ -594,6 +616,26 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
 
   return (
     <section className="space-y-4 text-sm text-slate-800">
+      <LprCommentDialog
+        open={commentAction !== null}
+        title={commentAction?.label ?? ''}
+        documentNo={commentAction?.documentNo ?? ''}
+        label={
+          commentAction?.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
+            ? 'Technical recommendation'
+            : commentAction && RETURN_ACTIONS.has(commentAction.actionCode)
+              ? 'Reason (the Procurement Officer sees it)'
+              : 'Comment'
+        }
+        value={actionComment}
+        busy={busy}
+        danger={Boolean(commentAction && RETURN_ACTIONS.has(commentAction.actionCode))}
+        onChange={setActionComment}
+        onCancel={() => setCommentAction(null)}
+        onConfirm={() => {
+          if (commentAction) void run(commentAction, { commented: true })
+        }}
+      />
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-2 px-4 pt-3">
           <div>
@@ -638,23 +680,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         </div>
 
         <div className="space-y-3 px-4 py-3">
-          {needsComment ? (
-            <div className="max-w-2xl space-y-1.5">
-              <Label htmlFor={`lpr-action-comment-${request.id}`}>
-                {ribbon.some((action) => action.actionCode === 'SUBMIT_TECHNICAL_REVIEW')
-                  ? 'Technical Recommendation'
-                  : 'Comment (required to approve, send back or reject)'}
-              </Label>
-              <Textarea
-                id={`lpr-action-comment-${request.id}`}
-                value={actionComment}
-                onChange={(event) => setActionComment(event.target.value)}
-                rows={2}
-                className="min-h-16"
-                disabled={busy}
-              />
-            </div>
-          ) : null}
           {needsVendorInvoiceNo ? (
             <div className="max-w-md space-y-1.5">
               <Label htmlFor={`lpr-vendor-invoice-${request.id}`}>Vendor Invoice No.</Label>
@@ -1015,6 +1040,22 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               }
               onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
             />
+          ) : null}
+          {editing.receive && poLines?.some((line) => String(line.needsItemSetup).toLowerCase() === 'true') ? (
+            <StatusNotice tone="attention" className="">
+              <p>
+                New item without an Item Category on{' '}
+                {poLines
+                  .filter((line) => String(line.needsItemSetup).toLowerCase() === 'true')
+                  .map((line) => `line ${text(line.lineNo)} (${text(line.bcDescription) || text(line.bcNo)})`)
+                  .join(', ')}
+                . Post Receive is blocked until it is set.
+              </p>
+              <p className="mt-1 text-xs font-normal">
+                For now set it in Business Central: Purchase Order {poNo} → Prepare Local Receive (pick an existing
+                store item, or give the item its category and VAT). Then post the receipt here.
+              </p>
+            </StatusNotice>
           ) : null}
           {editing.receive && poLines ? (
             <PoReceiveEditor

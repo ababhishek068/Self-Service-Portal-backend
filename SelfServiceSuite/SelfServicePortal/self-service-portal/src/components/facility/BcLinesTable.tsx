@@ -55,6 +55,7 @@ export function BcLinesTable({
   editable,
   busy,
   totalHeader = 'Estimated Total Price',
+  showTotal = true,
   onSave,
   onDelete,
 }: {
@@ -65,6 +66,8 @@ export function BcLinesTable({
   editable: boolean
   busy: boolean
   totalHeader?: string
+  /** False while the amounts are not part of the request (LPR line details hidden). */
+  showTotal?: boolean
   onSave: (isNew: boolean, payload: Record<string, unknown>) => Promise<boolean>
   onDelete: (line: PurchaseLine) => Promise<boolean>
 }) {
@@ -141,14 +144,14 @@ export function BcLinesTable({
                   {column.header}
                 </th>
               ))}
-              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{totalHeader}</th>
+              {showTotal ? <th className="whitespace-nowrap px-3 py-2 text-right font-medium">{totalHeader}</th> : null}
               {editable ? <th className="px-3 py-2" aria-label="Line actions" /> : null}
             </tr>
           </thead>
           <tbody>
             {lines.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 2} className="px-3 py-4 text-center text-slate-500">
+                <td colSpan={columns.length + (showTotal ? 2 : 1)} className="px-3 py-4 text-center text-slate-500">
                   No lines yet.
                 </td>
               </tr>
@@ -168,9 +171,11 @@ export function BcLinesTable({
                     {(column.display ?? column.value)(line)}
                   </td>
                 ))}
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {Number(line.lineAmount ?? line.amount ?? 0) ? formatCurrency(Number(line.lineAmount ?? line.amount)) : ''}
-                </td>
+                {showTotal ? (
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                    {Number(line.lineAmount ?? line.amount ?? 0) ? formatCurrency(Number(line.lineAmount ?? line.amount)) : ''}
+                  </td>
+                ) : null}
                 {editable ? (
                   <td className="whitespace-nowrap px-2 py-1 text-right">
                     <Button
@@ -199,7 +204,7 @@ export function BcLinesTable({
               </tr>
             ))}
           </tbody>
-          {total ? (
+          {total && showTotal ? (
             <tfoot>
               <tr className="border-t border-slate-200 bg-slate-50 font-semibold">
                 <td colSpan={columns.length} className="px-3 py-2 text-right">
@@ -234,7 +239,7 @@ export function BcLinesTable({
                   <CardEditor
                     kind={column.kind}
                     label={column.header}
-                    options={column.key === 'type' ? TYPE_OPTIONS : undefined}
+                    options={column.options ?? (column.key === 'type' ? TYPE_OPTIONS : undefined)}
                     value={draft[column.key] ?? ''}
                     disabled={busy}
                     onChange={(value) =>

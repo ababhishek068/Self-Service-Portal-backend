@@ -7,6 +7,7 @@ import {
   CircleX,
   ClipboardCheck,
   ClipboardCopy,
+  ClipboardList,
   CornerUpLeft,
   Eye,
   Home,
@@ -143,6 +144,7 @@ const BANNER_ICONS: Partial<Record<PortalNotificationKind, LucideIcon>> = {
   storeAccept: PackageCheck,
   storeLpr: ShoppingCart,
   storeReceive: PackageOpen,
+  localPurchase: ClipboardList,
 }
 
 export function Dashboard() {
