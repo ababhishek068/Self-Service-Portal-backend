@@ -109,7 +109,8 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
-  CONVERT_TO_RFQ: 'Convert to RFQ',
+  // BC creates the RFQ at Pending Operations Manager RFQ: converting is also the submission (UAT-2).
+  CONVERT_TO_RFQ: 'Convert to RFQ and submit to Operations Manager',
   APPROVE_RFQ_OPS: 'Approve RFQ (Operations Manager)',
   UPSERT_VENDOR_QUOTE: 'Vendor Quotes (Local RFQ)',
   AUTO_SELECT_WINNER: 'Auto Select Winner',

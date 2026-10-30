@@ -6,6 +6,7 @@ import { useToast } from '@/components/feedback/ToastProvider'
 import { CardEditor } from '@/components/facility/BcCard'
 import { LookupCombobox } from '@/components/shared/LookupCombobox'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
+import { useUnitOfMeasureOptions } from '@/hooks/useUnitOfMeasureOptions'
 import { pick, text } from '@/components/facility/bcCardValues'
 import { TYPE_OPTIONS, lineValues, type LineColumn, type PurchaseLine } from '@/components/facility/bcPurchaseLines'
 import { formatCurrency } from '@/utils/formatters'
@@ -40,6 +41,32 @@ function CatalogCodeField({
       emptyText="Could not load the list from Business Central. Type the code."
     />
   )
+}
+
+/** UOM from the BC Unit of Measure list; a code the list does not have stays selectable. */
+function UnitOfMeasureField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  const units = useUnitOfMeasureOptions()
+  if (!units.isLoading && units.options.length === 0) {
+    return <CardEditor kind="code" label="UOM" value={value} disabled={disabled} onChange={onChange} />
+  }
+  const current = value.trim().toUpperCase()
+  const options = [
+    { value: '', label: units.isLoading ? 'Loading…' : 'Choose the unit' },
+    ...(current && !units.options.some((option) => option.value.toUpperCase() === current)
+      ? [{ value, label: value }]
+      : []),
+    ...units.options,
+  ]
+  const selected = units.options.find((option) => option.value.toUpperCase() === current)?.value ?? value
+  return <CardEditor kind="select" label="UOM" options={options} value={selected} disabled={disabled} onChange={onChange} />
 }
 
 /**
@@ -227,7 +254,13 @@ export function BcLinesTable({
             {editColumns.map((column) => (
               <label key={column.key} className={`block space-y-1 ${column.kind === 'longtext' ? 'sm:col-span-2' : ''}`}>
                 <span className="text-xs font-medium text-slate-600">{column.header}</span>
-                {column.key === 'no' && CODE_CATALOGS[draft.type ?? ''] ? (
+                {column.key === 'unitOfMeasureCode' ? (
+                  <UnitOfMeasureField
+                    value={draft.unitOfMeasureCode ?? ''}
+                    disabled={busy}
+                    onChange={(value) => setDraft((current) => ({ ...current, unitOfMeasureCode: value }))}
+                  />
+                ) : column.key === 'no' && CODE_CATALOGS[draft.type ?? ''] ? (
                   <CatalogCodeField
                     catalog={CODE_CATALOGS[draft.type ?? '']!}
                     label={TYPE_OPTIONS.find((option) => option.value === draft.type)?.label ?? 'code'}

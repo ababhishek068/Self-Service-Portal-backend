@@ -307,7 +307,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     // BC refuses Submit while a line misses a required field (BC 1.0.3.583 sends Request Type and
     // Purpose with the lines; on older BC the check is left to BC).
     if (action.actionCode === 'SUBMIT_LPR_OPS' && text(lpr?.no).toUpperCase() === request.requestNo.trim().toUpperCase()) {
-      const lprLines = Array.isArray(request.payload?.lines) ? (request.payload.lines as PurchaseLine[]) : []
+      const chainLines = (lpr as Record<string, unknown> | undefined)?.lines
+      const lprLines = Array.isArray(chainLines)
+        ? (chainLines as PurchaseLine[])
+        : Array.isArray(request.payload?.lines)
+          ? (request.payload.lines as PurchaseLine[])
+          : []
       const missing = lprLines.some((line) => 'requestType' in line) ? lprLinesMissingFields(lprLines) : []
       if (missing.length) {
         toast.error(`${missing.join('. ')}.`, 'Complete the LPR lines first')
@@ -353,7 +358,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       setVendorInvoiceNo('')
       setBankAccountNo('')
       const resultNo = text(response.result?.resultNo)
-      toast.success(resultNo && resultNo !== action.documentNo ? `${action.label} — ${resultNo}` : `${action.label} completed.`)
+      toast.success(
+        action.actionCode === 'CONVERT_TO_RFQ'
+          ? `RFQ ${resultNo || ''} created and submitted to the Operations Manager for approval. Vendor quotes start after the approval.`
+          : resultNo && resultNo !== action.documentNo
+            ? `${action.label} — ${resultNo}`
+            : `${action.label} completed.`,
+      )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Action failed', action.label)
     }
@@ -719,6 +730,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             </StatusNotice>
           ) : waiting.length > 0 ? (
             <StatusNotice tone="waiting" className="">
+              {waiting.some((action) => action.actionCode === 'APPROVE_RFQ_OPS') ? (
+                <p className="mb-1 font-semibold">
+                  RFQ {rfqNo} is submitted to the Operations Manager (Convert to RFQ submits it). Nothing more to send.
+                </p>
+              ) : null}
               <p>
                 Waiting for {[...new Set(waiting.map(ownerLabel))].join(' or ')}:{' '}
                 {waiting.map((action) => action.label).join(' · ')}

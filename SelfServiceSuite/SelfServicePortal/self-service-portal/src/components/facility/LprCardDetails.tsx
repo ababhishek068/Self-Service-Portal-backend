@@ -12,6 +12,7 @@ import { dateTimeValue, dateValue, pick, text } from '@/components/facility/bcCa
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
 import { storeRequestFromRequisition, useLprStoreRequisition } from '@/components/facility/lprStoreRequisition'
 import type { PortalRequest } from '@/types/erp.types'
+import { LprStoreAttachments } from '@/components/facility/LprStoreAttachments'
 
 type Row = Record<string, unknown>
 
@@ -267,6 +268,7 @@ export function LprCardDetails({ request, fallback }: { request: PortalRequest; 
           showAll
         />
       ) : null}
+      {storeReqNo ? <LprStoreAttachments lprRequestId={request.id} /> : null}
       <EditableCardSection
         title="General"
         fields={generalFields}

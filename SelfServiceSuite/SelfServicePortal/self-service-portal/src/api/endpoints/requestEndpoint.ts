@@ -268,6 +268,39 @@ export async function downloadRequestAttachment(
   URL.revokeObjectURL(url)
 }
 
+export interface LprStoreAttachment {
+  id: string
+  fileName: string
+  fileType: string
+  size: number
+  description: string
+  uploadedAt: string
+}
+
+/** The requester's attachments on the store requisition behind a store LPR (specifications…). */
+export async function getLprStoreAttachments(lprRequestId: string) {
+  requireAuthApiUrl()
+  return authGet<{ storeRequisitionNo: string; attachments: LprStoreAttachment[] }>(
+    `/api/requests/${encodeURIComponent(lprRequestId)}/local-purchase/store-attachments`,
+  )
+}
+
+export async function downloadLprStoreAttachment(lprRequestId: string, attachment: LprStoreAttachment) {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>(
+    `/api/requests/${encodeURIComponent(lprRequestId)}/local-purchase/store-attachments/${encodeURIComponent(attachment.id)}/download`,
+    { params: { fileName: attachment.fileName, fileType: attachment.fileType }, responseType: 'blob' },
+  )
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = attachment.fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export interface LocalPurchaseNextAction {
   actionCode: string
   label: string

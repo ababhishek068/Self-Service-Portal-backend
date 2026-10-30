@@ -9,12 +9,21 @@ export type CardField = {
   editor?: ReactNode
 }
 
-/** One BC card field: label, dotted leader, value box (blank values keep an empty box, as in BC). */
+/** A text value longer than this wraps in its box instead of being cut off ("…"). */
+const WRAP_AFTER_CHARS = 32
+
+/**
+ * One BC card field: label, dotted leader, value box (blank values keep an empty box, as in BC).
+ * Long text (a description, purpose, process step or comment) is shown in full, wrapped.
+ */
 export function CardRow({ label, value, emphasis, editor }: Omit<CardField, 'key'>) {
   const empty = value === '' || value === null || value === undefined
+  const long = typeof value === 'string' && value.trim().length > WRAP_AFTER_CHARS
   return (
-    <div className="flex min-w-0 items-center gap-2 py-1">
-      <span className="flex min-w-0 shrink-0 basis-[42%] items-center gap-1 text-sm text-slate-600 max-w-60">
+    <div className={`flex min-w-0 gap-2 py-1 ${long ? 'items-start' : 'items-center'}`}>
+      <span
+        className={`flex min-w-0 shrink-0 basis-[42%] items-center gap-1 text-sm text-slate-600 max-w-60 ${long ? 'min-h-[2rem]' : ''}`}
+      >
         <span className="truncate">{label}</span>
         <span className="mb-1 h-px min-w-3 flex-1 border-b border-dotted border-slate-300" aria-hidden="true" />
       </span>
@@ -22,7 +31,9 @@ export function CardRow({ label, value, emphasis, editor }: Omit<CardField, 'key
         <div className="min-w-0 flex-1">{editor}</div>
       ) : (
       <span
-        className={`min-h-[2rem] min-w-0 flex-1 truncate rounded bg-slate-100 px-2.5 py-1.5 text-sm ${
+        className={`min-h-[2rem] min-w-0 flex-1 rounded bg-slate-100 px-2.5 py-1.5 text-sm ${
+          long ? 'whitespace-pre-wrap break-words' : 'truncate'
+        } ${
           emphasis === 'user'
             ? 'font-semibold text-teal-700'
             : emphasis === 'strong'

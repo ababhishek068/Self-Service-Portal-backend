@@ -29,7 +29,15 @@ export function LprLinesSubform({ request }: { request: PortalRequest }) {
     },
   })
 
-  const lines = Array.isArray(request.payload?.lines) ? (request.payload.lines as PurchaseLine[]) : []
+  // BC 1.0.3.587 sends the LPR lines with the Local Purchase chain, straight from the Purchase Lines:
+  // what the Procurement Officer saves (Request Type, Purpose, Brand, Required Date, Remarks…) shows
+  // at once, for the Operations Manager and FAD too. Older BC: the request's own lines.
+  const chainLines = stateQuery.data?.chain.lpr?.lines
+  const lines = Array.isArray(chainLines)
+    ? (chainLines as PurchaseLine[])
+    : Array.isArray(request.payload?.lines)
+      ? (request.payload.lines as PurchaseLine[])
+      : []
   const lprNo = text(stateQuery.data?.chain.lpr?.no)
   const editable =
     stateQuery.data?.cardEditable === true && lprNo.toUpperCase() === request.requestNo.trim().toUpperCase()

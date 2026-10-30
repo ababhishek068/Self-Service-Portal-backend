@@ -30,6 +30,12 @@ function amount(value: unknown) {
   return number ? formatCurrency(number) : ''
 }
 
+/** BC sends a blank date as 0001-01-01. */
+function bcDateText(value: unknown) {
+  const date = text(value).slice(0, 10)
+  return date.startsWith('0001-01-01') ? '' : date
+}
+
 function quantity(value: unknown) {
   return String(Number(value ?? 0) || '')
 }
@@ -95,14 +101,15 @@ export const PURCHASE_LINE_COLUMNS: LineColumn[] = [
     header: 'Required Date',
     key: 'requiredDate',
     kind: 'date',
-    value: (line) => text(line.requiredDate).slice(0, 10),
-    display: (line) => dateValue(text(line.requiredDate)),
+    value: (line) => bcDateText(line.requiredDate),
+    display: (line) => dateValue(bcDateText(line.requiredDate)),
   },
   { header: 'Suggested Supplier', key: 'suggestedSupplier', kind: 'text', detail: true, value: (line) => text(line.suggestedSupplier) },
   { header: 'Remarks', key: 'remarks', kind: 'text', value: (line) => pick(line.extendedDescription, line.remarks) },
   { header: 'Location Code', key: 'locationCode', kind: 'code', value: (line) => text(line.location) },
+  // UOM before Quantity (UAT-2), picked from the BC Unit of Measure list.
+  { header: 'UOM', key: 'unitOfMeasureCode', kind: 'select', value: (line) => pick(line.unitOfMeasureCode, line.unitOfMeasure) },
   { header: 'Quantity', key: 'quantity', kind: 'number', numeric: true, value: (line) => quantity(line.quantity) },
-  { header: 'UOM', key: 'unitOfMeasureCode', kind: 'code', value: (line) => pick(line.unitOfMeasureCode, line.unitOfMeasure) },
   { header: 'VAT Prod. Posting Group', key: 'vatProdPostingGroup', kind: 'code', detail: true, value: (line) => text(line.vatProdPostingGroup) },
   {
     header: 'Estimated Unit Price',
@@ -142,7 +149,7 @@ export function lprLinesMissingFields(lines: PurchaseLine[]) {
         !text(line.purpose) && 'Purpose',
         !pick(line.unitOfMeasureCode, line.unitOfMeasure) && 'UOM',
         !(Number(line.quantity ?? 0) > 0) && 'Quantity',
-        !text(line.requiredDate) && 'Required Date',
+        !bcDateText(line.requiredDate) && 'Required Date',
       ].filter(Boolean)
       return missing.length
         ? `Line ${text(line.lineNo)}${pick(line.bcDescription, line.itemName) ? ` (${pick(line.bcDescription, line.itemName)})` : ''} is missing: ${missing.join(', ')}`

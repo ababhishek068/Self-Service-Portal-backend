@@ -326,6 +326,16 @@ describe('purchase stock decision authorization', () => {
     assert.equal(assertStoreProcessActionAllowed(operations, 'LPR_REQUESTED', 'START_LPR'), 'START_LPR')
     assert.throws(() => assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'START_LPR'), /not valid/i)
     assert.throws(() => assertStoreProcessActionAllowed(procurement, 'LPR_REQUESTED', 'START_LPR'), /not authorized/i)
+    // UAT-2: the Store Manager sends the Request for LPR back to the Store Keeper, with the reason.
+    assert.equal(
+      assertStoreProcessActionAllowed(operations, 'LPR_REQUESTED', 'SEND_BACK_LPR_REQUEST', 'Item is in the IT store'),
+      'SEND_BACK_LPR_REQUEST',
+    )
+    assert.throws(() => assertStoreProcessActionAllowed(operations, 'LPR_REQUESTED', 'SEND_BACK_LPR_REQUEST'), /required/i)
+    assert.throws(
+      () => assertStoreProcessActionAllowed(operations, 'STOCK_CHECK', 'SEND_BACK_LPR_REQUEST', 'x'),
+      /not valid/i,
+    )
     assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Manager' }), true)
     assert.equal(portalUserIsStoreManager({ ...base, jobTitle: 'Store Keeper' }), false)
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Asset' }), true)

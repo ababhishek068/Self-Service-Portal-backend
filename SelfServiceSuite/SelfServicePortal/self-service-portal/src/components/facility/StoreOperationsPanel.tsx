@@ -20,6 +20,7 @@ import { StoreBorrowingFormViewer } from '@/components/facility/StoreBorrowingFo
 import { StoreKeeperOfferSection } from '@/components/facility/StoreKeeperOfferSection'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StartLprCard, StoreManagerReviewCard } from '@/components/facility/StoreManagerSections'
+import { LprCommentDialog } from '@/components/facility/LprCommentDialog'
 import type { PortalRequest } from '@/types/erp.types'
 
 function text(value: unknown) {
@@ -201,6 +202,9 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
   const [lprOfficer, setLprOfficer] = useState<'' | 'PROCUREMENT' | 'PROJECT'>('')
   // The store manager reviews the offer; "Change the item" opens the store keeper section.
   const [managerEditing, setManagerEditing] = useState(false)
+  // Store Manager: Send back the Request for LPR to the Store Keeper (with the reason).
+  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [sendBackComment, setSendBackComment] = useState('')
   const storeOptionsQuery = useQuery({
     queryKey: ['store-requisition', 'options'],
     queryFn: getStoreRequisitionOptions,
@@ -308,6 +312,7 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
         CONFIRM_RECEIPT: `Store requisition ${requestNo} marked as received.`,
         ISSUE_AFTER_LPR: 'Issued after LPR receive — the goods issue voucher is posted to the requester.',
         REQUEST_FOR_LPR: `Store requisition ${requestNo} is with the Store Manager for Local Purchase. Requester: ${requesterId || 'the employee'}. Store Manager: open this request and choose Start Local Purchase (LPR).`,
+        SEND_BACK_LPR_REQUEST: `Store requisition ${requestNo} is back with the Store Keeper with your reason. They can issue from stock, or correct it and send Request for LPR again.`,
         START_LPR: `Local Purchase Requisition ${createdLpr || '(LPR)'} created for store requisition ${requestNo}${requesterId ? ` (employee ${requesterId})` : ''}. Assigned procurement officer ${startLprOfficerId || startLprOfficerLabel} prepares it first. Project ${lprProjectNo || '(non-project)'}. Then ${lprOfficers?.operationsManager ? `Operations Manager ${lprOfficers.operationsManager}` : 'the Operations Manager'} approves, then FAD.`,
       }
       toast.success(successMessages[actionCode] ?? 'Linked Purchase Request created from this store requisition.')
@@ -680,6 +685,58 @@ export function StoreOperationsPanel({ request }: { request: PortalRequest }) {
             )
           }
         />
+      ) : null}
+      {canStartLpr ? (
+        <div className="mt-3 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-red-300 text-red-700 hover:bg-red-50"
+            disabled={mutation.isPending}
+            onClick={() => {
+              setSendBackComment('')
+              setSendBackOpen(true)
+            }}
+          >
+            Send back to Store Keeper
+          </Button>
+        </div>
+      ) : null}
+      <LprCommentDialog
+        open={sendBackOpen}
+        title="Send back to Store Keeper"
+        documentNo={`Store requisition ${requestNo}`}
+        label="Reason (the Store Keeper sees it)"
+        value={sendBackComment}
+        busy={mutation.isPending}
+        danger
+        onChange={setSendBackComment}
+        onCancel={() => setSendBackOpen(false)}
+        onConfirm={() =>
+          void run(
+            'SEND_BACK_LPR_REQUEST',
+            'Send back to Store Keeper',
+            '',
+            { actionComment: sendBackComment.trim() },
+            false,
+          ).then((done) => {
+            if (done) setSendBackOpen(false)
+          })
+        }
+      />
+      {atStockCheck && stageHandOff === '' && text(processQuery.data?.lastActionCode).toUpperCase() === 'SEND_BACK_LPR_REQUEST' ? (
+        <StatusNotice tone="attention">
+          <p>
+            The Store Manager{text(processQuery.data?.lastActor) ? ` (${text(processQuery.data?.lastActor)})` : ''} sent the Request
+            for LPR back: {text(processQuery.data?.lastComment) || 'no reason given'}
+          </p>
+          <p className="mt-1 text-xs font-normal">
+            {keeperStep
+              ? 'Issue the item from stock, or correct it and send Request for LPR again.'
+              : 'Waiting for the Store Keeper.'}
+          </p>
+        </StatusNotice>
       ) : null}
       {stageHandOff === 'PREPARED' && storeManager && !managerEditing ? (
         <StoreManagerReviewCard

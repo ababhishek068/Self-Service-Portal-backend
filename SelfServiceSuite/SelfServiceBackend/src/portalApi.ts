@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v284 — 1.0.3.443 (Local Purchase per the BC 1.0.3.582 handoff: comment box on every approve / send back / reject, Request Type and Purpose on LPR lines, details hidden while approved, RFQ and PO lines carry the request; the bell for every Local Purchase step and Issue after LPR; for BC 1.0.3.583)'
+export const PORTAL_API_BUILD = 'v285 — 1.0.3.444 (UAT-2 LPR issues: LPR lines as saved by the Procurement Officer for everyone, UOM list before Quantity, full descriptions, requester attachments on the LPR, Store Manager sends a Request for LPR back, store keeper notifications, Convert to RFQ submits to the Operations Manager; for BC 1.0.3.587)'
 
 interface LookupSpec {
   service: string
@@ -1465,6 +1465,8 @@ const STORE_PROCESS_ACTION_RULES: Record<string, Record<string, FacilityActionRu
   /** Local Purchase step 6: Store Manager starts the LPR — project first, then BC assigns the officer. */
   LPR_REQUESTED: {
     START_LPR: { roles: ['operations'] },
+    /** UAT-2 (BC 1.0.3.587): the Store Manager returns the Request for LPR to the Store Keeper, with the reason. */
+    SEND_BACK_LPR_REQUEST: { roles: ['operations'], commentRequired: true },
   },
   /** After LPR/GRN, Store Keeper issues GIV from received stock. */
   PROCUREMENT_REQUEST: {
@@ -2832,10 +2834,9 @@ async function storeNotifications(authUser: AuthUser): Promise<PortalNotificatio
   const storeUser = roles.keeper || roles.manager
   const rows = ((await listPortalModuleRows(spec, authUser, { includeAll: storeUser }).catch(() => [])) as ODataRecord[])
   const bcRoles = cachedStoreRoles(String(authUser.userID ?? ''))
+  // Every keeper who can do the keeper's step is told (UAT-2: keepers had no notification). A keeper
+  // BC restricts to stores (Warehouse Employees) is told about those stores only, as BC lets them act.
   const locations = new Set((bcRoles?.locations ?? []).map((code) => code.trim().toUpperCase()))
-  // BC (Warehouse Employees) says who keeps which store; an Operations job title alone may do the
-  // keeper's step, but is not told about every store's requests.
-  const keeperNotified = roles.keeperStep && (bcRoles ? bcRoles.storeKeeper : true)
   const groups: Record<'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive', ODataRecord[]> = {
     storeIssue: [],
     storeAccept: [],
@@ -2849,9 +2850,11 @@ async function storeNotifications(authUser: AuthUser): Promise<PortalNotificatio
     if (portalModuleDocumentOwnedByUser(row, spec, authUser) && (stage === 'ACCEPTED' || stage === 'TRANSIT')) {
       groups.storeReceive.push(row)
     }
-    if (keeperNotified && stage === '' && !text(row, ['StoreIssueNo', 'Store_Issue_No'])) {
-      const store = text(row, ['IssuingStore', 'Issuing_Store']).trim().toUpperCase()
-      if (!locations.size || !store || locations.has(store)) groups.storeIssue.push(row)
+    if (roles.keeperStep && stage === '' && !text(row, ['StoreIssueNo', 'Store_Issue_No'])) {
+      const stores = [text(row, ['IssuingStore', 'Issuing_Store']), text(row, ['StoreCode', 'Store_Code'])]
+        .map((code) => code.trim().toUpperCase())
+        .filter(Boolean)
+      if (!locations.size || !stores.length || stores.some((code) => locations.has(code))) groups.storeIssue.push(row)
     }
     if (roles.manager && stage === 'PREPARED') groups.storeAccept.push(row)
     if (roles.manager && stage === 'LPR_REQUESTED') groups.storeLpr.push(row)
@@ -2867,7 +2870,7 @@ async function storeNotifications(authUser: AuthUser): Promise<PortalNotificatio
     }),
     storeLpr: (count: number) => ({
       title: `${plural(count, 'Request')} for LPR to start`,
-      description: 'Not in stock: start the Local Purchase Requisition.',
+      description: 'Not in stock: start the Local Purchase Requisition, or send it back to the Store Keeper.',
     }),
     storeReceive: (count: number) => ({
       title: `${plural(count, 'store item')} waiting for you`,
@@ -5418,13 +5421,18 @@ export function buildPortalApiRouter() {
         })
         return
       }
-      if (requestedAction === 'REQUEST_FOR_LPR' || requestedAction === 'START_LPR' || requestedAction === 'ISSUE_AFTER_LPR') {
+      if (
+        ['REQUEST_FOR_LPR', 'START_LPR', 'SEND_BACK_LPR_REQUEST', 'ISSUE_AFTER_LPR'].includes(requestedAction)
+      ) {
         // Local Purchase store actions need the BC app with the LPR portal methods.
         await requireLocalPurchaseAccess(authUser)
       }
       const storeRoles = await storeUserRoles(authUser)
       if (requestedAction === 'START_LPR' && !storeRoles.manager) {
         throw portalError('Only the store manager can start the Local Purchase Requisition.', 403, 'PROCESS_ACTION_FORBIDDEN')
+      }
+      if (requestedAction === 'SEND_BACK_LPR_REQUEST' && !storeRoles.manager) {
+        throw portalError('Only the store manager can send a Request for LPR back to the storekeeper.', 403, 'PROCESS_ACTION_FORBIDDEN')
       }
       if (requestedAction === 'REQUEST_FOR_LPR' && !storeRoles.keeperStep) {
         throw portalError('Only the storekeeper can send Request for LPR to the store manager.', 403, 'PROCESS_ACTION_FORBIDDEN')
@@ -5466,8 +5474,7 @@ export function buildPortalApiRouter() {
       )
       // 382 behaviour for every existing action (incl. STOCK_UNAVAILABLE); only the
       // Local Purchase codes, which need the newer BC app, bypass the prep gate.
-      const skipStockGate =
-        actionCode === 'ISSUE_AFTER_LPR' || actionCode === 'REQUEST_FOR_LPR' || actionCode === 'START_LPR'
+      const skipStockGate = ['ISSUE_AFTER_LPR', 'REQUEST_FOR_LPR', 'START_LPR', 'SEND_BACK_LPR_REQUEST'].includes(actionCode)
       if (!skipStockGate && stockCheck.needsBcPrep) {
         throw portalError(formatStoreStockFailure(stockCheck), 422, 'STORE_BC_PREP_REQUIRED')
       }
@@ -5508,7 +5515,20 @@ export function buildPortalApiRouter() {
           result = await callSoapMethod('UpdateStoreRequisitionProcess', updateParams)
         }
       } else {
-        result = await callSoapMethod('UpdateStoreRequisitionProcess', updateParams)
+        result = await callSoapMethod('UpdateStoreRequisitionProcess', updateParams).catch((error: unknown) => {
+          if (
+            actionCode === 'SEND_BACK_LPR_REQUEST' &&
+            error instanceof Error &&
+            /Unsupported store requisition action/i.test(error.message)
+          ) {
+            throw portalError(
+              'Sending a Request for LPR back needs Business Central 1.0.3.587. Until it is published, tell the store keeper directly.',
+              409,
+              'BC_UPDATE_REQUIRED',
+            )
+          }
+          throw error
+        })
       }
       const process = parseProcurementProcess(result.returnValue)
       res.json({
@@ -5641,6 +5661,58 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({ items: await localPurchaseWaitingItems(user(req)) })
+    }),
+  )
+
+  /**
+   * The store requisition behind a store LPR, for its requester's attachments (specifications,
+   * drawings…): open to everyone working the LPR (Procurement Officer, Operations Manager, FAD…).
+   */
+  async function lprStoreRequisitionNo(requestId: string, authUser: AuthUser) {
+    const { module, no } = parseRequestId(requestId)
+    if (module !== 'purchaseRequisition') {
+      throw portalError('Store requisition attachments apply to a Local Purchase Requisition (LPR).', 422)
+    }
+    const { roles } = await requireLocalPurchaseAccess(authUser)
+    if (!roles.length) {
+      throw portalError('Only Local Purchase users can open the store requisition attachments.', 403, 'LPR_ACTION_FORBIDDEN')
+    }
+    await requestDetail(requestId, authUser)
+    const chain = await loadLocalPurchaseChain(no)
+    return String(chain.storeRequisitionNo ?? '').trim()
+  }
+
+  const STORE_REQUISITION_TABLE_ID = findModuleSpec('store-requisition')?.headerTableId ?? 50575
+
+  router.get(
+    '/requests/:id/local-purchase/store-attachments',
+    safe(async (req, res) => {
+      const storeRequisitionNo = await lprStoreRequisitionNo(String(req.params.id), user(req))
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({
+        storeRequisitionNo,
+        attachments: storeRequisitionNo
+          ? mapAttachments(await fetchDocumentAttachments(storeRequisitionNo, STORE_REQUISITION_TABLE_ID))
+          : [],
+      })
+    }),
+  )
+
+  router.get(
+    '/requests/:id/local-purchase/store-attachments/:attachmentId/download',
+    safe(async (req, res) => {
+      const storeRequisitionNo = await lprStoreRequisitionNo(String(req.params.id), user(req))
+      if (!storeRequisitionNo) throw portalError('This LPR has no store requisition.', 404)
+      const result = await callSoapMethod('GetDocumentAttachment', {
+        docNo: storeRequisitionNo,
+        attachmentID: req.params.attachmentId,
+        tableID: STORE_REQUISITION_TABLE_ID,
+      })
+      if (!result.returnValue) throw portalError('Attachment was not found', 404)
+      const fileName = String(req.query.fileName ?? 'attachment').replaceAll('"', '')
+      res.setHeader('Content-Type', String(req.query.fileType ?? 'application/octet-stream'))
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(Buffer.from(result.returnValue, 'base64'))
     }),
   )
 
