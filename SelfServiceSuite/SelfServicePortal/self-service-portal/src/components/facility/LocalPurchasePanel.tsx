@@ -360,8 +360,10 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       const resultNo = text(response.result?.resultNo)
       toast.success(
         action.actionCode === 'CONVERT_TO_RFQ'
-          ? `RFQ ${resultNo || ''} created and submitted to the Operations Manager for approval. Vendor quotes start after the approval.`
-          : resultNo && resultNo !== action.documentNo
+          ? `RFQ ${resultNo || ''} created. Its next step is shown below (BC 1.0.3.588: prepare it, then Submit RFQ to Operations Manager).`
+          : action.actionCode === 'SUBMIT_RFQ_OPS'
+            ? `RFQ ${action.documentNo} submitted to the Operations Manager for approval. Vendor quotes start after the approval.`
+            : resultNo && resultNo !== action.documentNo
             ? `${action.label} — ${resultNo}`
             : `${action.label} completed.`,
       )
@@ -732,7 +734,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             <StatusNotice tone="waiting" className="">
               {waiting.some((action) => action.actionCode === 'APPROVE_RFQ_OPS') ? (
                 <p className="mb-1 font-semibold">
-                  RFQ {rfqNo} is submitted to the Operations Manager (Convert to RFQ submits it). Nothing more to send.
+                  RFQ {rfqNo} is submitted to the Operations Manager. Nothing more to send.
                 </p>
               ) : null}
               <p>

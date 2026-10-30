@@ -208,6 +208,10 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
     // 10 Procurement prepares the RFQ
     s = step(demoChain({ lprStatus: 'Approved', lprStage: 'Ready for RFQ' }), 'procurement')
     assert.deepEqual(s.mine, ['CONVERT_TO_RFQ@ABH-PQ000092'])
+    // BC 1.0.3.588 (UAT-2): the RFQ is a draft until Procurement submits it to the Operations Manager.
+    s = step(demoChain({ rfqStage: 'RFQ Draft' }), 'procurement')
+    assert.deepEqual(s.mine, ['SUBMIT_RFQ_OPS@ABH-PQ000093'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'RFQ Draft' }), 'operationsManager').mine, [])
 
     // 11 Operations Manager approves the RFQ before quotations
     s = step(demoChain({ rfqStage: 'Pending Operations Manager RFQ' }), 'operationsManager')

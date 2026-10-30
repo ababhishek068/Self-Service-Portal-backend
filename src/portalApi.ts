@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v285 — 1.0.3.444 (UAT-2 LPR issues: LPR lines as saved by the Procurement Officer for everyone, UOM list before Quantity, full descriptions, requester attachments on the LPR, Store Manager sends a Request for LPR back, store keeper notifications, Convert to RFQ submits to the Operations Manager; for BC 1.0.3.587)'
+export const PORTAL_API_BUILD = 'v286 — 1.0.3.445 (UAT-2 LPR issues complete: the RFQ starts as a draft and the Procurement Officer submits it to the Operations Manager; with 1.0.3.444: LPR lines as saved, UOM list before Quantity, full descriptions, requester attachments, Store Manager send back, store keeper notifications; for BC 1.0.3.588)'
 
 interface LookupSpec {
   service: string
@@ -5522,7 +5522,7 @@ export function buildPortalApiRouter() {
             /Unsupported store requisition action/i.test(error.message)
           ) {
             throw portalError(
-              'Sending a Request for LPR back needs Business Central 1.0.3.587. Until it is published, tell the store keeper directly.',
+              'Sending a Request for LPR back needs Business Central 1.0.3.587 or later. Until it is published, tell the store keeper directly.',
               409,
               'BC_UPDATE_REQUIRED',
             )

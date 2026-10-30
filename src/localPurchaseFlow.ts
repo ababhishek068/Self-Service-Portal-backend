@@ -56,6 +56,8 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   APPROVE_LPR_FAD: { roles: ['fad'], commentRequired: true },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
   CONVERT_TO_RFQ: { roles: PROCUREMENT },
+  /** BC 1.0.3.588: the RFQ starts as a draft; Procurement prepares it, then submits it. */
+  SUBMIT_RFQ_OPS: { roles: PROCUREMENT },
   APPROVE_RFQ_OPS: { roles: ['operationsManager'], commentRequired: true },
   UPSERT_VENDOR_QUOTE: { roles: PROCUREMENT, needsPayload: true },
   AUTO_SELECT_WINNER: { roles: PROCUREMENT },
@@ -109,8 +111,8 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   APPROVE_LPR_OPS: 'Approve (Operations Manager)',
   APPROVE_LPR_FAD: 'Approve (FAD)',
   REJECT_LPR: 'Reject LPR',
-  // BC creates the RFQ at Pending Operations Manager RFQ: converting is also the submission (UAT-2).
-  CONVERT_TO_RFQ: 'Convert to RFQ and submit to Operations Manager',
+  CONVERT_TO_RFQ: 'Convert to RFQ',
+  SUBMIT_RFQ_OPS: 'Submit RFQ to Operations Manager',
   APPROVE_RFQ_OPS: 'Approve RFQ (Operations Manager)',
   UPSERT_VENDOR_QUOTE: 'Vendor Quotes (Local RFQ)',
   AUTO_SELECT_WINNER: 'Auto Select Winner',
@@ -188,6 +190,8 @@ const RFQ_OPS_EVALUATION: StageAction[] = [
 ]
 
 const RFQ_STAGE_ACTIONS: Record<string, StageAction[]> = {
+  // BC 1.0.3.588 (UAT-2): Convert to RFQ makes a draft; Procurement prepares it, then submits it.
+  'RFQ DRAFT': ['SUBMIT_RFQ_OPS'],
   'PENDING OPS RFQ': RFQ_OPS_APPROVAL,
   'PENDING OPERATIONS MANAGER RFQ': RFQ_OPS_APPROVAL,
   // BC 1.0.3.576: the Operations Manager sent the RFQ back before quotations.
