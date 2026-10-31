@@ -112,7 +112,7 @@ export function StoreKeeperOfferSection({
           {offers.length ? (
             <ul className="mt-1.5 divide-y divide-emerald-100">
               {offers.map((offer) => {
-                const onHand = available[offer.itemNo.toUpperCase()]
+                const onHand = offer.isAsset ? undefined : available[offer.itemNo.toUpperCase()]
                 const short = onHand !== undefined && onHand < offer.quantity
                 return (
                   <li key={offer.lineNo} className="flex items-start gap-2 py-1.5 first:pt-0 last:pb-0">
@@ -121,9 +121,14 @@ export function StoreKeeperOfferSection({
                       <p className="text-sm font-semibold text-slate-900">
                         {offer.itemName || offer.itemNo}
                         <span className="ml-1.5 font-mono text-[11px] font-normal text-slate-500">{offer.itemNo}</span>
+                        {offer.isAsset ? (
+                          <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">Asset</span>
+                        ) : null}
                       </p>
                       <p className="text-xs text-slate-500">
-                        Issue {quantityLabel(offer.quantity)} {offer.unitOfMeasure}
+                        {offer.isAsset
+                          ? 'Issue this asset card (the requester becomes its custodian)'
+                          : `Issue ${quantityLabel(offer.quantity)} ${offer.unitOfMeasure}`}
                         {offer.brandModel ? ` · ${offer.brandModel}` : ''}
                         {onHand !== undefined ? (
                           <span className={short ? ' font-semibold text-red-700' : ''}>

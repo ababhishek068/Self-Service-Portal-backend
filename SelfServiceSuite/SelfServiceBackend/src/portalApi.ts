@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v287 — 1.0.3.446 (UAT-2 report 31 Oct: confirmation box centred, approval history in Approver comments, View for attachments, bell links open the RFQ / PO, Finance review of the PO with G/L accounts; BC 1.0.3.590/591 service G/L, item setup at receipt, fixed asset offers; for BC 1.0.3.593)'
+export const PORTAL_API_BUILD = 'v288 — 1.0.3.447 (Nitish 1.0.3.591 fixed asset store offers: asset cards grouped first with the tag, one card per offer, Asset on offered lines, BC messages shown as they come, a request with only asset cards can be issued; with 1.0.3.446; for BC 1.0.3.593)'
 
 interface LookupSpec {
   service: string
@@ -1175,7 +1175,9 @@ async function callStoreIssueHandoff(
     return await callSoapMethod(method, { requestNo, actorUserID, ...extra })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (/not found|unknown|not published|could not find|procedure|method/i.test(message)) {
+    // Only a BC app without the method ("Method 'X' is invalid"); every other BC message (e.g. BC
+    // 1.0.3.591: the asset is with an employee / in another store) is shown as BC wrote it.
+    if (new RegExp(`Method '${method}' is invalid|${method}.*(not found|not published)`, 'i').test(message)) {
       throw portalError(
         `Publish Business Central 1.0.3.545 (store steps in the portal) before this step. The portal is calling ${method}.`,
         502,
@@ -1220,7 +1222,11 @@ export async function buildStoreRequisitionStockCheck(
   const issuingStore = text(payload, ['IssuingStore', 'Issuing_Store', 'issuingStore'])
   // As in BC: once the storekeeper added a Store Offer, only the offered items are issued.
   const offerLines = lines.filter((line) => /offer/i.test(String(line.lineRole ?? line.ABHLineRole ?? '')))
-  const itemLines = (offerLines.length ? offerLines : lines).filter((line) => storeLineIsItem(line))
+  const issueLines = offerLines.length ? offerLines : lines
+  const itemLines = issueLines.filter((line) => storeLineIsItem(line))
+  // BC 1.0.3.591: asset cards offered by the store are issued as they are (no stock to check), so a
+  // request with only Asset offer lines is ready for the issue.
+  const assetOffersOnly = offerLines.length > 0 && itemLines.length === 0
   const checks: StoreStockLineCheck[] = await Promise.all(
     itemLines.map(async (line) => {
       const itemNo = text(line as ODataRecord, ['itemNo', 'ItemNo', 'No'])
@@ -1244,13 +1250,14 @@ export async function buildStoreRequisitionStockCheck(
       }
     }),
   )
-  const needsBcPrep = !issuingStore || checks.length === 0 || checks.some((entry) => entry.needsBcMapping)
+  const needsBcPrep =
+    !issuingStore || (checks.length === 0 && !assetOffersOnly) || checks.some((entry) => entry.needsBcMapping)
   return {
     issuingStore,
     needsBcPrep,
     prepHints: storePrepHints(issuingStore, checks),
     allAvailable:
-      checks.length > 0 && !needsBcPrep && checks.every((entry) => entry.sufficient),
+      !needsBcPrep && (assetOffersOnly || (checks.length > 0 && checks.every((entry) => entry.sufficient))),
     lines: checks,
   }
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle2, Minus, PackagePlus, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,11 @@ import { StoreStockPill } from './StoreStockPill'
 
 function brandModelOf(item: StoreOfferItem) {
   return [item.brand, item.model].map(text).filter(Boolean).join(' / ')
+}
+
+/** BC 1.0.3.591: a fixed asset card held in the store (one unit, offered by its FA No.). */
+function isAssetItem(item: StoreOfferItem) {
+  return item.isFixedAsset === true || String(item.isFixedAsset).toLowerCase() === 'true'
 }
 
 function matchesFilter(item: StoreOfferItem, filter: string) {
@@ -66,7 +71,7 @@ export function StoreItemPickerDialog({
   )
   const selectedAvailable = Number(selected?.available ?? 0)
   // BC 1.0.3.591: a fixed asset card is one unit; offer 3 laptops = 3 cards.
-  const selectedIsAsset = selected?.isFixedAsset === true || String(selected?.isFixedAsset).toLowerCase() === 'true'
+  const selectedIsAsset = selected ? isAssetItem(selected) : false
   const tooMany = Boolean(selected) && !selectedIsAsset && quantity > selectedAvailable
   const loading = itemsQuery.isLoading || itemsQuery.isFetching
 
@@ -210,60 +215,69 @@ export function StoreItemPickerDialog({
             </div>
           ) : visibleItems.length ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-2.5">
-              {visibleItems.map((item) => {
+              {visibleItems.map((item, index) => {
                 const atStore = Number(item.available ?? 0)
                 const onHand = item.onHand === undefined ? undefined : Number(item.onHand)
                 const inStock = atStore > 0
                 const active = selected?.no === item.no
                 const brandModel = brandModelOf(item)
-                const isAsset = item.isFixedAsset === true || String(item.isFixedAsset).toLowerCase() === 'true'
+                const isAsset = isAssetItem(item)
+                // BC lists the asset cards first: a heading above them and above the items (BC 1.0.3.591).
+                const groupStart =
+                  visibleItems.some(isAssetItem) && (index === 0 || isAssetItem(visibleItems[index - 1]!) !== isAsset)
                 return (
-                  <button
-                    key={item.no}
-                    type="button"
-                    disabled={!inStock || busy}
-                    title={inStock ? undefined : `No stock at ${issuingStore} — use Request for LPR.`}
-                    onClick={() => {
-                      setSelected(item)
-                      setQuantity(Math.min(Math.max(requested, 1), atStore))
-                    }}
-                    className={cn(
-                      'flex flex-col gap-1 rounded-xl border bg-white p-3 text-left transition',
-                      active
-                        ? 'border-[var(--portal-navy)] ring-2 ring-[var(--portal-navy)]/25'
-                        : inStock
-                          ? 'border-slate-200 hover:-translate-y-px hover:border-teal-300 hover:shadow-md'
-                          : 'cursor-not-allowed border-slate-100 opacity-55',
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
-                        {item.no}
-                        {isAsset ? (
-                          <span className="rounded bg-sky-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-sky-800">
-                            Asset{item.assetTag ? ` · ${item.assetTag}` : ''}
-                          </span>
-                        ) : null}
-                      </span>
-                      {active ? (
-                        <CheckCircle2 className="h-4 w-4 text-[var(--portal-navy)]" />
-                      ) : (
-                        <StoreStockPill atStore={atStore} unit={item.unitOfMeasure} low={inStock && atStore < requested} />
+                  <Fragment key={item.no}>
+                    {groupStart ? (
+                      <p className="col-span-full mt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {isAsset ? 'Asset cards in this store (one card per unit)' : 'Items'}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={!inStock || busy}
+                      title={inStock ? undefined : `No stock at ${issuingStore} — use Request for LPR.`}
+                      onClick={() => {
+                        setSelected(item)
+                        setQuantity(Math.min(Math.max(requested, 1), atStore))
+                      }}
+                      className={cn(
+                        'flex flex-col gap-1 rounded-xl border bg-white p-3 text-left transition',
+                        active
+                          ? 'border-[var(--portal-navy)] ring-2 ring-[var(--portal-navy)]/25'
+                          : inStock
+                            ? 'border-slate-200 hover:-translate-y-px hover:border-teal-300 hover:shadow-md'
+                            : 'cursor-not-allowed border-slate-100 opacity-55',
                       )}
-                    </div>
-                    <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.description || 'No description'}</p>
-                    {brandModel ? (
-                      <span className="line-clamp-1 w-fit rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
-                        {brandModel}
-                      </span>
-                    ) : null}
-                    {item.specification ? (
-                      <p className="line-clamp-2 text-xs leading-snug text-slate-500">{item.specification}</p>
-                    ) : null}
-                    {onHand !== undefined && onHand !== atStore ? (
-                      <p className="mt-auto text-[11px] text-slate-400">{quantityLabel(onHand)} in all stores</p>
-                    ) : null}
-                  </button>
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
+                          {item.no}
+                          {isAsset ? (
+                            <span className="rounded bg-sky-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-sky-800">
+                              Asset{item.assetTag ? ` · ${item.assetTag}` : ''}
+                            </span>
+                          ) : null}
+                        </span>
+                        {active ? (
+                          <CheckCircle2 className="h-4 w-4 text-[var(--portal-navy)]" />
+                        ) : (
+                          <StoreStockPill atStore={atStore} unit={item.unitOfMeasure} low={inStock && atStore < requested} />
+                        )}
+                      </div>
+                      <p className="line-clamp-1 text-sm font-semibold text-slate-900">{item.description || 'No description'}</p>
+                      {brandModel ? (
+                        <span className="line-clamp-1 w-fit rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                          {brandModel}
+                        </span>
+                      ) : null}
+                      {item.specification ? (
+                        <p className="line-clamp-2 text-xs leading-snug text-slate-500">{item.specification}</p>
+                      ) : null}
+                      {onHand !== undefined && onHand !== atStore ? (
+                        <p className="mt-auto text-[11px] text-slate-400">{quantityLabel(onHand)} in all stores</p>
+                      ) : null}
+                    </button>
+                  </Fragment>
                 )
               })}
             </div>

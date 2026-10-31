@@ -82,6 +82,8 @@ export function StoreManagerReviewCard({
   const { offers, requestedLines } = storeOfferLines(request)
   const preparedBy = text(request.payload?.PreparedBy ?? request.payload?.Prepared_By)
   const shortItems = offers.filter((offer) => {
+    // An asset card is not stock: it is in the store or BC refuses the offer.
+    if (offer.isAsset) return false
     const onHand = available[offer.itemNo.toUpperCase()]
     return onHand !== undefined && onHand < offer.quantity
   })
@@ -131,18 +133,23 @@ export function StoreManagerReviewCard({
           {offers.length ? (
             <ul className="mt-1.5 space-y-2">
               {offers.map((offer) => {
-                const onHand = available[offer.itemNo.toUpperCase()]
+                const onHand = offer.isAsset ? undefined : available[offer.itemNo.toUpperCase()]
                 return (
                   <li key={offer.lineNo} className="text-sm text-slate-800">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold">{offer.itemName || offer.itemNo}</span>
                       <span className="font-mono text-[11px] text-slate-500">{offer.itemNo}</span>
+                      {offer.isAsset ? (
+                        <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">Asset</span>
+                      ) : null}
                       {onHand !== undefined ? (
                         <StoreStockPill atStore={onHand} unit={offer.unitOfMeasure} low={onHand < offer.quantity} />
                       ) : null}
                     </div>
                     <p className="text-xs text-slate-500">
-                      Issue {quantityLabel(offer.quantity)} {offer.unitOfMeasure}
+                      {offer.isAsset
+                        ? 'One asset card; the requester becomes its custodian'
+                        : `Issue ${quantityLabel(offer.quantity)} ${offer.unitOfMeasure}`}
                       {offer.brandModel ? ` · ${offer.brandModel}` : ''}
                     </p>
                     {offer.specification ? <p className="text-xs text-slate-500">{offer.specification}</p> : null}

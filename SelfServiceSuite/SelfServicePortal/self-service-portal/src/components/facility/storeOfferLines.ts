@@ -9,6 +9,8 @@ export type OfferLine = {
   brandModel: string
   unitOfMeasure: string
   quantity: number
+  /** BC 1.0.3.591: an Asset offer line, one fixed asset card (itemNo = the FA No.). */
+  isAsset: boolean
 }
 
 /** The employee's own line, as they wrote it. */
@@ -44,6 +46,8 @@ export function storeOfferLines(request: PortalRequest) {
     brandModel: text(line.preferredBrandModel),
     unitOfMeasure: text(line.unitOfMeasure),
     quantity: Number(line.quantityRequested ?? line.quantity ?? 0),
+    // Store requisition line Type: 1 = Item, 2 = Asset.
+    isAsset: text(line.type) === '2' || /asset/i.test(text(line.type)),
   }))
   const requestedLines: RequestedLine[] = lines
     .filter((line) => !isOfferLine(line))

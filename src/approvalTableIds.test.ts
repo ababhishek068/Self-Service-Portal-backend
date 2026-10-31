@@ -89,6 +89,7 @@ import {
   applyItemCardToStoreOffer,
   storeLineNeedsBcMapping,
   storePrepHints,
+  buildStoreRequisitionStockCheck,
   storeIssueStageCode,
   portalUserIsStoreManager,
   weeklyLateAttendanceSummary,
@@ -343,7 +344,7 @@ describe('purchase stock decision authorization', () => {
     assert.equal(storeRequisitionIsAsset({ StoreRequisitionType: 'Item' }), false)
   })
 
-  it('shows the item card specification and brand / model on a store offer line', () => {
+  it('shows the item card specification and brand / model on a store offer line', async () => {
     const item = { No: 'ABH-ITM000140', Brand: 'DELL', Model: '45678XC', DetailsSpecification: '1TB HD,SSD, 16GB RAM, 14-Inch' }
     const offer = applyItemCardToStoreOffer(
       { lineRole: 'Store Offer', itemNo: 'ABH-ITM000140', itemName: 'Laptop', description: 'Laptop', preferredBrandModel: '' },
@@ -356,6 +357,19 @@ describe('purchase stock decision authorization', () => {
     assert.deepEqual(applyItemCardToStoreOffer(request, item), request)
     assert.equal(storeLineNeedsBcMapping(''), true)
     assert.equal(storeLineNeedsBcMapping('PORTAL-12'), true)
+    // BC 1.0.3.591: asset cards offered by the store need no stock check, so the issue can go on.
+    const assetsOnly = await buildStoreRequisitionStockCheck({ IssuingStore: 'IT' }, [
+      { lineRole: 'Request', type: '1', itemNo: '', itemName: 'Laptop', quantity: 2 },
+      { lineRole: 'Store Offer', type: '2', itemNo: 'FA000010', quantity: 1 },
+      { lineRole: 'Store Offer', type: '2', itemNo: 'FA000011', quantity: 1 },
+    ])
+    assert.equal(assetsOnly.needsBcPrep, false)
+    assert.equal(assetsOnly.allAvailable, true)
+    // Without any offer line the employee's line still needs the store's item first.
+    const notOffered = await buildStoreRequisitionStockCheck({ IssuingStore: 'IT' }, [
+      { lineRole: 'Request', type: '1', itemNo: '', itemName: 'Laptop', quantity: 2 },
+    ])
+    assert.equal(notOffered.needsBcPrep, true)
     assert.equal(storeLineNeedsBcMapping('ITEM-100'), false)
     assert.deepEqual(storePrepHints('', [{ needsBcMapping: true }]), [
       'Set Issuing Store on the Store Requisition header.',
