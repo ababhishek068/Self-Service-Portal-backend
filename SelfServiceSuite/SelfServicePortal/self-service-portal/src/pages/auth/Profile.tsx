@@ -98,7 +98,7 @@ function sectionsForTab(profile: EmployeeProfileDetails, tab: Tab) {
 }
 function FieldGrid({fields}: {fields: {key: string; label: string; value: string}[]}) {
   if (!fields.length) return null
-  return <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{fields.map(field =>
+  return <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{fields.map(field =>
     <div key={field.key} className="rounded-xl border border-slate-200 bg-white p-4">
       <dt className="text-xs font-medium text-slate-500">{field.label}</dt>
       <dd className="mt-1 break-words text-sm font-semibold text-slate-900">{field.value}</dd>

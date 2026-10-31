@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v288 — 1.0.3.447 (Nitish 1.0.3.591 fixed asset store offers: asset cards grouped first with the tag, one card per offer, Asset on offered lines, BC messages shown as they come, a request with only asset cards can be issued; with 1.0.3.446; for BC 1.0.3.593)'
+export const PORTAL_API_BUILD = 'v289 — 1.0.3.448 (Employee Profile: field cards in 4 columns on wide screens so Bio Data and the other tabs are shorter; with 1.0.3.447; for BC 1.0.3.593)'
 
 interface LookupSpec {
   service: string
