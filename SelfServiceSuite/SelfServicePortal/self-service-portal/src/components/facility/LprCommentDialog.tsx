@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { MessageSquareText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -42,7 +43,8 @@ export function LprCommentDialog({
   if (!open) return null
   const ready = value.trim().length > 0
 
-  return (
+  // On the page body, so it is centred on the screen whatever section opens it.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
       role="dialog"
@@ -96,6 +98,7 @@ export function LprCommentDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Paperclip } from 'lucide-react'
+import { Download, Eye, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/feedback/ToastProvider'
 import {
   downloadLprStoreAttachment,
+  fetchLprStoreAttachmentBlob,
   getLprStoreAttachments,
   type LprStoreAttachment,
 } from '@/api/endpoints/requestEndpoint'
+import { AttachmentViewer } from '@/components/shared/AttachmentViewer'
+import { useAttachmentViewer } from '@/hooks/useAttachmentViewer'
 import { formatDateTime } from '@/utils/formatters'
 
 function sizeLabel(bytes: number) {
@@ -27,6 +30,7 @@ export function LprStoreAttachments({ lprRequestId }: { lprRequestId: string }) 
     queryFn: () => getLprStoreAttachments(lprRequestId),
     retry: false,
   })
+  const viewer = useAttachmentViewer((attachment: LprStoreAttachment) => fetchLprStoreAttachmentBlob(lprRequestId, attachment))
   const attachments = query.data?.attachments ?? []
   if (query.isError || !query.data?.storeRequisitionNo) return null
 
@@ -43,6 +47,17 @@ export function LprStoreAttachments({ lprRequestId }: { lprRequestId: string }) 
 
   return (
     <section>
+      {viewer.viewed ? (
+        <AttachmentViewer
+          fileName={viewer.viewed.attachment.fileName}
+          fileType={viewer.viewed.attachment.fileType}
+          blob={viewer.viewed.blob}
+          loading={viewer.viewed.loading}
+          error={viewer.viewed.error}
+          onClose={viewer.close}
+          onDownload={() => void download(viewer.viewed!.attachment)}
+        />
+      ) : null}
       <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-slate-700/80 pb-1.5">
         <h3 className="text-base font-semibold text-slate-900">
           Requester's attachments (Store Requisition {query.data.storeRequisitionNo})
@@ -71,6 +86,11 @@ export function LprStoreAttachments({ lprRequestId }: { lprRequestId: string }) 
                   </p>
                 </div>
               </div>
+              <div className="flex shrink-0 gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => void viewer.view(attachment)}>
+                <Eye className="h-4 w-4" />
+                View
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -81,6 +101,7 @@ export function LprStoreAttachments({ lprRequestId }: { lprRequestId: string }) 
                 <Download className="h-4 w-4" />
                 {downloading === attachment.id ? 'Downloading…' : 'Download'}
               </Button>
+              </div>
             </li>
           ))}
         </ul>

@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, ArrowLeft, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import {
   type FieldValues,
   type Resolver,
@@ -25,7 +25,6 @@ import { DataTable, type DataTableColumn } from './DataTable'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
-import { ApprovalHistory } from './ApprovalHistory'
 import { ApproverComments } from './ApproverComments'
 import { SentBackNotice } from './SentBackNotice'
 import {
@@ -806,8 +805,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const toast = useToast()
   const confirm = useConfirm()
   const [mode, setMode] = useState<'list' | 'create'>(config.initialMode ?? 'list')
-  // ?open=<request id> opens that request directly (links from My Approvals).
+  // ?open=<request id> opens that request directly (links from My Approvals and the bell).
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('open'))
   const [actionId, setActionId] = useState<string | null>(null)
   const [editingHeader, setEditingHeader] = useState(false)
@@ -816,6 +816,31 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const [receiveLine, setReceiveLine] = useState<Record<string, unknown> | null>(null)
   const [receiveQuantity, setReceiveQuantity] = useState('')
   const [receiveReason, setReceiveReason] = useState('')
+
+  // A link to this page while it is open (e.g. a bell notification) opens that request again, and
+  // ?focus=<section id> scrolls to that part of it (the RFQ or PO of an LPR) once it is shown.
+  const openParam = searchParams.get('open')
+  const focusParam = searchParams.get('focus')
+  useEffect(() => {
+    if (!openParam) return
+    setSelectedId(openParam)
+    setMode('list')
+    setEditingLine(null)
+    setShowLineForm(false)
+    setEditingHeader(false)
+    if (!focusParam) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    let tries = 0
+    const timer = window.setInterval(() => {
+      const target = document.getElementById(focusParam)
+      tries += 1
+      if (target || tries > 40) window.clearInterval(timer)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [location.key, openParam, focusParam])
 
   const [listSearch, setListSearch] = useState('')
   const [listStatus, setListStatus] = useState('all')
@@ -1264,7 +1289,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                <ApproverComments steps={approvalHistorySteps(selected)} skipRejected={selected.status === 'Rejected'} />
+                <ApproverComments
+                  steps={approvalHistorySteps(selected)}
+                  skipRejected={selected.status === 'Rejected'}
+                  allSteps={shouldShowApprovalHistory(selected.status, selected.approvalSteps)}
+                />
                 {bcCard ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
@@ -1483,12 +1512,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   />
                 ) : null}
 
-                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
-                  <section className="border-t border-slate-200 pt-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
-                  </section>
-                ) : null}
+                {/* The approval history is in Approver comments at the top (UAT-2: no duplicate list). */}
               </>
             ) : null}
           </div>

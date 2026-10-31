@@ -19,6 +19,8 @@ interface AttachmentPanelProps {
   canDelete?: boolean
   activeId?: string | null
   onDownload: (attachment: Attachment) => void
+  /** View the file in the portal (PDF, image) without downloading it. */
+  onView?: (attachment: Attachment) => void
   onDelete?: (attachment: Attachment) => void
   uploadSlot?: ReactNode
   title?: string
@@ -32,6 +34,7 @@ export function AttachmentPanel({
   canDelete = false,
   activeId = null,
   onDownload,
+  onView,
   onDelete,
   uploadSlot,
   title = 'Attachments',
@@ -111,6 +114,7 @@ export function AttachmentPanel({
                 state="ready"
                 active={activeId === attachment.id}
                 canDelete={canDelete}
+                onView={onView ? () => onView(attachment) : undefined}
                 onDownload={() => onDownload(attachment)}
                 onDelete={onDelete ? () => onDelete(attachment) : undefined}
               />

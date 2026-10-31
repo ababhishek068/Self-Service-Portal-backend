@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v286 — 1.0.3.445 (UAT-2 LPR issues complete: the RFQ starts as a draft and the Procurement Officer submits it to the Operations Manager; with 1.0.3.444: LPR lines as saved, UOM list before Quantity, full descriptions, requester attachments, Store Manager send back, store keeper notifications; for BC 1.0.3.588)'
+export const PORTAL_API_BUILD = 'v287 — 1.0.3.446 (UAT-2 report 31 Oct: confirmation box centred, approval history in Approver comments, View for attachments, bell links open the RFQ / PO, Finance review of the PO with G/L accounts; BC 1.0.3.590/591 service G/L, item setup at receipt, fixed asset offers; for BC 1.0.3.593)'
 
 interface LookupSpec {
   service: string
@@ -2627,6 +2627,8 @@ type LocalPurchaseWaitingItem = {
   stage: string
   processStep: string
   actions: string[]
+  /** The part of the LPR page with the step: the RFQ or the PO section. */
+  focus: string
 }
 
 const lprWaitingCache = new Map<string, { at: number; items: LocalPurchaseWaitingItem[] }>()
@@ -2680,6 +2682,11 @@ async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurch
       stage: String(current?.flowStage ?? current?.lprStatus ?? ''),
       processStep: String(current?.processStep ?? chain.lpr?.processStep ?? ''),
       actions: [...new Set(actions.map((action) => action.label))],
+      focus: actions.some((action) => action.target === 'po')
+        ? 'lpr-doc-po'
+        : actions.some((action) => action.target === 'rfq')
+          ? 'lpr-doc-rfq'
+          : '',
     })
     return true
   })
@@ -2697,6 +2704,8 @@ export interface PortalNotification {
   /** The page of the documents; with requestId, the one document. */
   module?: string
   requestId?: string
+  /** The part of the request page to scroll to (e.g. lpr-doc-rfq). */
+  focus?: string
 }
 
 type PortalNotifications = { total: number; items: PortalNotification[] }
@@ -2806,7 +2815,9 @@ async function localPurchaseNotification(authUser: AuthUser): Promise<PortalNoti
       .map((item) => `${item.requestNo}: ${item.actions.join(' · ')}`)
       .join('; '),
     module: 'purchaseRequisition',
-    ...(items.length === 1 ? { requestId: items[0]!.id } : {}),
+    ...(items.length === 1
+      ? { requestId: items[0]!.id, ...(items[0]!.focus ? { focus: items[0]!.focus } : {}) }
+      : {}),
   }
 }
 
@@ -5632,6 +5643,28 @@ export function buildPortalApiRouter() {
       }
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({ vendors })
+    }),
+  )
+
+  /**
+   * The store keeper's lists for item setup before Post Receive (SET_RECEIVE_ITEM): item categories,
+   * sub-categories, VAT product and FA posting groups (BC 1.0.3.593). `available` is false on older
+   * BC, where the item is set in Business Central (Prepare Local Receive).
+   */
+  router.get(
+    '/local-purchase/receive-item-options',
+    safe(async (req, res) => {
+      const { roles } = await requireLocalPurchaseAccess(user(req))
+      if (!roles.includes('operations')) {
+        throw portalError('Only the store keeper sets the item before receiving.', 403, 'LPR_ACTION_FORBIDDEN')
+      }
+      res.setHeader('Cache-Control', 'private, no-store')
+      try {
+        const options = parseSoapJson((await callSoapMethod('PortalReceiveItemOptions', {})).returnValue)
+        res.json({ available: true, ...options })
+      } catch {
+        res.json({ available: false, itemCategories: [], itemSubCategories: [], vatProdPostingGroups: [], faPostingGroups: [] })
+      }
     }),
   )
 

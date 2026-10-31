@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 
 export function useUnderConstruction() {
@@ -6,7 +7,7 @@ export function useUnderConstruction() {
 
   const trigger = () => setOpen(true)
 
-  const dialog = open ? (
+  const dialog = open ? createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
         <p className="text-lg font-semibold text-slate-900">Notice</p>
@@ -17,7 +18,8 @@ export function useUnderConstruction() {
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   ) : null
 
   return { trigger, dialog }

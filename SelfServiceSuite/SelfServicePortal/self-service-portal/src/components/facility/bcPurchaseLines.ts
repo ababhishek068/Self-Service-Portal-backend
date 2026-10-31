@@ -129,7 +129,7 @@ const CARRIED_REQUEST_KEYS = new Set(['requestType', 'purpose', 'remarks'])
  * Local RFQ / Purchase Order lines: the subform columns BC shows there, with Direct Unit Cost, and
  * the request carried from the LPR (Request Type, Purpose, Remarks; BC 1.0.3.580).
  */
-export const ORDER_LINE_COLUMNS: LineColumn[] = PURCHASE_LINE_COLUMNS.filter((column) =>
+const ORDER_BASE_COLUMNS: LineColumn[] = PURCHASE_LINE_COLUMNS.filter((column) =>
   ['requestType', 'type', 'no', 'description', 'purpose', 'specification', 'brandModel', 'requiredDate', 'remarks', 'locationCode', 'quantity', 'unitOfMeasureCode', 'vatProdPostingGroup', 'directUnitCost'].includes(column.key),
 ).map((column) =>
   column.key === 'directUnitCost'
@@ -137,6 +137,23 @@ export const ORDER_LINE_COLUMNS: LineColumn[] = PURCHASE_LINE_COLUMNS.filter((co
     : CARRIED_REQUEST_KEYS.has(column.key)
       ? { ...column, readOnly: true }
       : column,
+)
+
+/** The G/L account each line posts to (BC 1.0.3.592), for the Finance review; "G/L needed" on a service line without one. */
+const GL_COLUMNS: LineColumn[] = [
+  {
+    header: 'G/L Account',
+    key: 'glAccountNo',
+    kind: 'code',
+    readOnly: true,
+    value: (line) => text(line.glAccountNo),
+    display: (line) => (String(line.needsGlAccount).toLowerCase() === 'true' ? 'G/L needed' : text(line.glAccountNo)),
+  },
+  { header: 'G/L Account Name', key: 'glAccountName', kind: 'text', readOnly: true, value: (line) => text(line.glAccountName) },
+]
+
+export const ORDER_LINE_COLUMNS: LineColumn[] = ORDER_BASE_COLUMNS.flatMap((column) =>
+  column.key === 'no' ? [column, ...GL_COLUMNS] : [column],
 )
 
 /** BC SUBMIT_LPR_OPS refuses a line without these: the same check before the request goes to BC. */

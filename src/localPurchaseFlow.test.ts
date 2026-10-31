@@ -52,6 +52,38 @@ describe('assertLocalPurchaseActionAllowed', () => {
     assert.equal(assertLocalPurchaseActionAllowed(['procurement'], 'RESUBMIT_INVOICE'), 'RESUBMIT_INVOICE')
   })
 
+  it('asks for the service G/L account before the Operations Manager approves (BC 1.0.3.590)', () => {
+    const chain: LocalPurchaseChain = {
+      lpr: { no: 'ABH-PQ000092', lprStatus: 'Converted to RFQ', createdRfqNo: 'ABH-PQ000093' },
+      rfq: { no: 'ABH-PQ000093', flowStage: 'PO Created', createdPoNo: 'ABH-PO000008' },
+      po: {
+        no: 'ABH-PO000008',
+        flowStage: 'Pending Operations Manager PO',
+        lines: [{ lineNo: 10000, needsGlAccount: true }],
+      },
+    }
+    const officer = localPurchaseNextActions(chain, ['procurement'])
+    assert.deepEqual(officer.filter((action) => action.allowed).map((action) => action.actionCode), ['SET_SERVICE_GL'])
+    const ops = localPurchaseNextActions(chain, ['operationsManager']).filter((action) => action.allowed)
+    assert.deepEqual(ops.map((action) => action.actionCode), ['SEND_BACK_PO', 'REJECT_PO'])
+    assert.equal(
+      localPurchaseNextActions(chain, ['financeChecker']).find((action) => action.actionCode === 'SET_SERVICE_GL')?.allowed,
+      true,
+    )
+  })
+
+  it('asks the store keeper to set the item before Post Receive (needsItemSetup)', () => {
+    const chain: LocalPurchaseChain = {
+      lpr: { no: 'ABH-PQ000092', lprStatus: 'Converted to RFQ', createdRfqNo: 'ABH-PQ000093' },
+      rfq: { no: 'ABH-PQ000093', flowStage: 'PO Created', createdPoNo: 'ABH-PO000008' },
+      po: { no: 'ABH-PO000008', flowStage: 'PO Released', lines: [{ lineNo: 10000, needsItemSetup: true }] },
+    }
+    assert.deepEqual(
+      localPurchaseNextActions(chain, ['operations']).filter((action) => action.allowed).map((action) => action.actionCode),
+      ['SET_RECEIVE_ITEM', 'PREPARE_LOCAL_RECEIVE'],
+    )
+  })
+
   it('takes a comment of up to 250 characters (BC actionComment is Text[250])', () => {
     assert.equal(
       assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_LPR_OPS', 'x'.repeat(250)),
@@ -263,6 +295,10 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
     // BC lets FAD send a PO back only from Pending FAD PO, not at the Operations Manager's step.
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'fad').mine, [])
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance PO' }), 'financeChecker').mine, [])
+    // BC 1.0.3.592 (UAT-2): Finance reviews the PO between the Operations Manager and FAD.
+    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance Review PO' }), 'financeChecker')
+    assert.deepEqual(s.mine, ['APPROVE_PO_FINANCE@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008', 'REJECT_PO@ABH-PO000008'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Finance Review PO' }), 'fad').mine, [])
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending FAD PO' }), 'fad')
     assert.deepEqual(s.mine, ['APPROVE_PO_FAD@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008', 'REJECT_PO@ABH-PO000008'])
     assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending FAD PO' }), 'operationsManager').mine, [])

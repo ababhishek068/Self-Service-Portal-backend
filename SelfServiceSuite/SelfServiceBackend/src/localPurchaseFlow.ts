@@ -69,9 +69,15 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentRequired: true },
   CREATE_PO: { roles: PROCUREMENT },
   APPROVE_PO_OPS: { roles: ['operationsManager'], commentRequired: true },
+  /** BC 1.0.3.592 (UAT-2): Finance reviews the PO between the Operations Manager and FAD. */
+  APPROVE_PO_FINANCE: { roles: ['financeChecker'], commentRequired: true },
   APPROVE_PO_FAD: { roles: ['fad'], commentRequired: true },
+  /** BC 1.0.3.590: G/L account of a Service line, before the Operations Manager approves the PO. */
+  SET_SERVICE_GL: { roles: [...PROCUREMENT, 'financeChecker'], needsPayload: true },
   // Steps 20–21: the Store Keeper receives the goods and records the GRN.
   PREPARE_LOCAL_RECEIVE: { roles: ['operations'] },
+  /** BC 1.0.3.580/590: the store keeper picks the store item, or sets category / VAT (FA: FA cards), per line. */
+  SET_RECEIVE_ITEM: { roles: ['operations'], needsPayload: true },
   POST_LOCAL_RECEIVE: { roles: ['operations'] },
   CREATE_LOCAL_INVOICE: { roles: PROCUREMENT },
   APPROVE_INVOICE_OPS: { roles: ['operationsManager'], commentRequired: true },
@@ -80,13 +86,13 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'], needsPayload: true },
   FIX_LOCAL_CURRENCY: { roles: [...PROCUREMENT, 'financeChecker'] },
   SEND_BACK_RFQ: { roles: ['operationsManager', 'technical', 'fad'], commentRequired: true },
-  SEND_BACK_PO: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  SEND_BACK_PO: { roles: ['operationsManager', 'financeChecker', 'fad'], commentRequired: true },
   RESUBMIT_PO: { roles: PROCUREMENT },
   /** BC 1.0.3.576: Send Back / Reject at every approval step, with the approver's comment. */
   SEND_BACK_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
   REJECT_RFQ: { roles: ['operationsManager', 'fad'], commentRequired: true },
   RESUBMIT_RFQ: { roles: PROCUREMENT },
-  REJECT_PO: { roles: ['operationsManager', 'fad'], commentRequired: true },
+  REJECT_PO: { roles: ['operationsManager', 'financeChecker', 'fad'], commentRequired: true },
   SEND_BACK_INVOICE: { roles: ['operationsManager', 'financeChecker', 'fad'], commentRequired: true },
   RESUBMIT_INVOICE: { roles: PROCUREMENT },
 }
@@ -125,7 +131,9 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   SEND_BACK_RFQ: 'Send back to Procurement',
   CREATE_PO: 'Create Purchase Order',
   APPROVE_PO_OPS: 'Approve Local PO (Operations Manager)',
+  APPROVE_PO_FINANCE: 'Approve Local PO (Finance Review)',
   APPROVE_PO_FAD: 'Approve Local PO (FAD)',
+  SET_SERVICE_GL: 'Set service G/L account',
   SEND_BACK_PO: 'Send back PO to Procurement',
   RESUBMIT_PO: 'Resubmit PO to Operations Manager',
   SEND_BACK_LPR: 'Send back to Procurement',
@@ -136,6 +144,7 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   RESUBMIT_INVOICE: 'Resubmit invoice to Operations Manager',
   PREPARE_LOCAL_RECEIVE: 'Prepare Local Receive',
   POST_LOCAL_RECEIVE: 'Post Receive (GRN)',
+  SET_RECEIVE_ITEM: 'Set the item before receiving',
   FIX_LOCAL_CURRENCY: 'Fix Local Currency',
   CREATE_LOCAL_INVOICE: 'Create Local Invoice',
   APPROVE_INVOICE_OPS: 'Approve Invoice (Operations Manager)',
@@ -224,6 +233,11 @@ const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
   'PO CREATED': PO_OPS_APPROVAL,
   'PENDING FINANCE PO': PO_OPS_APPROVAL,
   'PENDING OPERATIONS MANAGER PO': PO_OPS_APPROVAL,
+  'PENDING FINANCE REVIEW PO': [
+    'APPROVE_PO_FINANCE',
+    { code: 'SEND_BACK_PO', roles: ['financeChecker'] },
+    { code: 'REJECT_PO', roles: ['financeChecker'] },
+  ],
   'PENDING FAD PO': [
     'APPROVE_PO_FAD',
     { code: 'SEND_BACK_PO', roles: ['fad'] },
@@ -242,6 +256,14 @@ const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
   'INVOICE RETURNED TO PROCUREMENT': ['RESUBMIT_INVOICE'],
   'PAYMENT APPROVED': ['CLOSE_LPR_AFTER_PAYMENT'],
 }
+
+/** PO stages before the Operations Manager approves, when BC lets a Service line get its G/L account. */
+const SERVICE_GL_PO_STAGES = new Set([
+  'PO CREATED',
+  'PENDING FINANCE PO',
+  'PENDING OPERATIONS MANAGER PO',
+  'RETURNED TO PROCUREMENT',
+])
 
 /** PO stages at which received stock exists for Store Keeper "Issue after LPR receive". */
 const RECEIVED_PO_STAGES = new Set([
@@ -341,7 +363,27 @@ export function localPurchaseNextActions(
   const poStage = stageKey(chain.po?.flowStage)
 
   if (poNo && chain.po) {
-    for (const action of PO_STAGE_ACTIONS[poStage] ?? []) push(action, 'po', poNo)
+    // BC 1.0.3.590: a Service line needs its G/L account (Procurement Officer or Finance Checker)
+    // before the Operations Manager can approve the PO; until then that approval is not offered.
+    const needsGl =
+      SERVICE_GL_PO_STAGES.has(poStage) &&
+      (Array.isArray(chain.po.lines) ? (chain.po.lines as Array<Record<string, unknown>>) : []).some(
+        (line) => String(line.needsGlAccount).toLowerCase() === 'true',
+      )
+    if (needsGl) push('SET_SERVICE_GL', 'po', poNo)
+    // BC refuses Post Receive while a new item has no category, or fixed assets are not registered.
+    const needsItemSetup =
+      poStage === 'PO RELEASED' &&
+      (Array.isArray(chain.po.lines) ? (chain.po.lines as Array<Record<string, unknown>>) : []).some(
+        (line) => String(line.needsItemSetup).toLowerCase() === 'true',
+      )
+    if (needsItemSetup) push('SET_RECEIVE_ITEM', 'po', poNo)
+    for (const action of PO_STAGE_ACTIONS[poStage] ?? []) {
+      const code = typeof action === 'string' ? action : action.code
+      if (needsGl && code === 'APPROVE_PO_OPS') continue
+      if (needsItemSetup && code === 'POST_LOCAL_RECEIVE') continue
+      push(action, 'po', poNo)
+    }
   } else if (rfqNo && chain.rfq) {
     for (const action of RFQ_STAGE_ACTIONS[stageKey(chain.rfq.flowStage)] ?? []) push(action, 'rfq', rfqNo)
   } else if (lprNo && chain.lpr) {

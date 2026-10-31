@@ -1,13 +1,4 @@
-import {
-  CheckCircle2,
-  Download,
-  File,
-  FileImage,
-  FileText,
-  Loader2,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { CheckCircle2, Download, Eye, File, FileImage, FileText, Loader2, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -44,6 +35,7 @@ export function AttachmentFileCard({
   progress,
   active,
   canDelete,
+  onView,
   onDownload,
   onDelete,
   onRemove,
@@ -55,6 +47,7 @@ export function AttachmentFileCard({
   progress?: number
   active?: boolean
   canDelete?: boolean
+  onView?: () => void
   onDownload?: () => void
   onDelete?: () => void
   onRemove?: () => void
@@ -110,6 +103,20 @@ export function AttachmentFileCard({
         </div>
         {state === 'ready' ? (
           <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-80 sm:group-hover:opacity-100">
+            {onView ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={active}
+                onClick={onView}
+                aria-label="View attachment"
+                title="View"
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+            ) : null}
             {onDownload ? (
               <Button
                 type="button"
@@ -119,6 +126,7 @@ export function AttachmentFileCard({
                 disabled={active}
                 onClick={onDownload}
                 aria-label="Download attachment"
+                title="Download"
               >
                 <Download className="h-4 w-4" />
               </Button>

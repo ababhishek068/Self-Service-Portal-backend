@@ -73,7 +73,9 @@ export function LocalPurchaseWaiting() {
               </div>
             </div>
             <Link
-              to={`/facility/local-purchase-request?open=${encodeURIComponent(item.id)}`}
+              to={`/facility/local-purchase-request?open=${encodeURIComponent(item.id)}${
+                item.focus ? `&focus=${encodeURIComponent(item.focus)}` : ''
+              }`}
               className="inline-flex items-center gap-1.5 rounded-full bg-[var(--portal-navy)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
             >
               Open LPR <ArrowUpRight className="h-4 w-4" />

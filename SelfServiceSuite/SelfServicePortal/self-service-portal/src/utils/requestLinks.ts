@@ -25,5 +25,6 @@ export function notificationHref(item: PortalNotification) {
   // Several Local Purchase documents: My Approvals lists every LPR waiting for the user.
   if (item.kind === 'localPurchase' && !item.requestId) return '/approvals'
 
-  return (item.module && requestPageHref(item.module, item.requestId)) || '/'
+  const href = (item.module && requestPageHref(item.module, item.requestId)) || '/'
+  return item.requestId && item.focus ? `${href}&focus=${encodeURIComponent(item.focus)}` : href
 }

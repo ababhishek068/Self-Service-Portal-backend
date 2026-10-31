@@ -177,6 +177,10 @@ export interface StoreOfferItem {
   /** Item card Details/Specification. */
   specification?: string
   category?: string
+  /** BC 1.0.3.591: a fixed asset card held in the issuing store (offered one card at a time). */
+  isFixedAsset?: boolean
+  assetTag?: string
+  catalogItemNo?: string
 }
 
 export async function getStoreOfferItems(id: string, search: string) {
@@ -246,7 +250,20 @@ export async function deleteRequestAttachment(id: string, attachmentId: string) 
   )
 }
 
-export async function downloadRequestAttachment(
+/** Saves a downloaded file under its name (browser download). */
+export function saveBlobAs(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** The file of a request attachment (for View and Download). */
+export async function fetchRequestAttachmentBlob(
   requestId: string,
   attachment: { id: string; fileName: string; fileType: string },
 ) {
@@ -258,14 +275,14 @@ export async function downloadRequestAttachment(
       responseType: 'blob',
     },
   )
-  const url = URL.createObjectURL(response.data)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = attachment.fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  return response.data
+}
+
+export async function downloadRequestAttachment(
+  requestId: string,
+  attachment: { id: string; fileName: string; fileType: string },
+) {
+  saveBlobAs(await fetchRequestAttachmentBlob(requestId, attachment), attachment.fileName)
 }
 
 export interface LprStoreAttachment {
@@ -285,20 +302,32 @@ export async function getLprStoreAttachments(lprRequestId: string) {
   )
 }
 
-export async function downloadLprStoreAttachment(lprRequestId: string, attachment: LprStoreAttachment) {
+export async function fetchLprStoreAttachmentBlob(lprRequestId: string, attachment: LprStoreAttachment) {
   requireAuthApiUrl()
   const response = await authHttp.get<Blob>(
     `/api/requests/${encodeURIComponent(lprRequestId)}/local-purchase/store-attachments/${encodeURIComponent(attachment.id)}/download`,
     { params: { fileName: attachment.fileName, fileType: attachment.fileType }, responseType: 'blob' },
   )
-  const url = URL.createObjectURL(response.data)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = attachment.fileName
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  return response.data
+}
+
+export async function downloadLprStoreAttachment(lprRequestId: string, attachment: LprStoreAttachment) {
+  saveBlobAs(await fetchLprStoreAttachmentBlob(lprRequestId, attachment), attachment.fileName)
+}
+
+export interface ReceiveItemOptions {
+  /** False on Business Central before 1.0.3.593: the item is then set in BC (Prepare Local Receive). */
+  available: boolean
+  itemCategories: Array<{ code: string; description: string; financeClass: string; faPostingGroup: string }>
+  itemSubCategories: Array<{ categoryCode: string; code: string; description: string }>
+  vatProdPostingGroups: Array<{ code: string; description: string }>
+  faPostingGroups: Array<{ code: string }>
+}
+
+/** Store keeper: the BC lists for setting the item of a PO line before Post Receive. */
+export async function getReceiveItemOptions() {
+  requireAuthApiUrl()
+  return authGet<ReceiveItemOptions>('/api/local-purchase/receive-item-options')
 }
 
 export interface LocalPurchaseNextAction {
@@ -356,6 +385,8 @@ export interface LocalPurchaseWaitingItem {
   stage: string
   processStep: string
   actions: string[]
+  /** The part of the LPR page to scroll to: lpr-doc-rfq or lpr-doc-po. */
+  focus?: string
 }
 
 /** Store LPRs where the signed-in user has a step to do now (BC stage + Local Proc Setup roles). */

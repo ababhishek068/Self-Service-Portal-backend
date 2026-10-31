@@ -14,7 +14,7 @@ function brandModelOf(item: StoreOfferItem) {
 
 function matchesFilter(item: StoreOfferItem, filter: string) {
   if (!filter) return true
-  const haystack = [item.no, item.description, item.brand, item.model, item.specification, item.category]
+  const haystack = [item.no, item.description, item.brand, item.model, item.specification, item.category, item.assetTag]
     .map(text)
     .join(' ')
     .toLowerCase()
@@ -65,7 +65,9 @@ export function StoreItemPickerDialog({
     (item) => matchesFilter(item, filter) && (!inStockOnly || Number(item.available ?? 0) > 0),
   )
   const selectedAvailable = Number(selected?.available ?? 0)
-  const tooMany = Boolean(selected) && quantity > selectedAvailable
+  // BC 1.0.3.591: a fixed asset card is one unit; offer 3 laptops = 3 cards.
+  const selectedIsAsset = selected?.isFixedAsset === true || String(selected?.isFixedAsset).toLowerCase() === 'true'
+  const tooMany = Boolean(selected) && !selectedIsAsset && quantity > selectedAvailable
   const loading = itemsQuery.isLoading || itemsQuery.isFetching
 
   // Esc closes; the page behind does not scroll while the dialog is open.
@@ -90,7 +92,7 @@ export function StoreItemPickerDialog({
 
   const add = async () => {
     if (!selected || !(quantity > 0) || tooMany) return
-    if (await onAdd(selected, quantity)) onClose()
+    if (await onAdd(selected, selectedIsAsset ? 1 : quantity)) onClose()
   }
 
   const requestedText = requestedLines
@@ -214,6 +216,7 @@ export function StoreItemPickerDialog({
                 const inStock = atStore > 0
                 const active = selected?.no === item.no
                 const brandModel = brandModelOf(item)
+                const isAsset = item.isFixedAsset === true || String(item.isFixedAsset).toLowerCase() === 'true'
                 return (
                   <button
                     key={item.no}
@@ -234,7 +237,14 @@ export function StoreItemPickerDialog({
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="font-mono text-[11px] text-slate-400">{item.no}</span>
+                      <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
+                        {item.no}
+                        {isAsset ? (
+                          <span className="rounded bg-sky-100 px-1.5 py-0.5 font-sans text-[10px] font-semibold text-sky-800">
+                            Asset{item.assetTag ? ` · ${item.assetTag}` : ''}
+                          </span>
+                        ) : null}
+                      </span>
                       {active ? (
                         <CheckCircle2 className="h-4 w-4 text-[var(--portal-navy)]" />
                       ) : (
@@ -285,41 +295,47 @@ export function StoreItemPickerDialog({
                   <span className="font-mono text-[11px] font-normal text-slate-400">{selected.no}</span>
                 </p>
                 <p className={cn('text-xs', tooMany ? 'font-semibold text-red-700' : 'text-slate-500')}>
-                  {tooMany
-                    ? `Only ${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} at ${issuingStore}`
-                    : `${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} available · requested ${quantityLabel(requested)}`}
+                  {selectedIsAsset
+                    ? `One asset card${selected.assetTag ? ` (tag ${selected.assetTag})` : ''} · requested ${quantityLabel(requested)}. Add each card on its own.`
+                    : tooMany
+                      ? `Only ${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} at ${issuingStore}`
+                      : `${quantityLabel(selectedAvailable)} ${selected.unitOfMeasure} available · requested ${quantityLabel(requested)}`}
                 </p>
               </div>
-              <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
-                <button
-                  type="button"
-                  aria-label="Less"
-                  disabled={quantity <= 1}
-                  onClick={() => setQuantity((current) => Math.max(1, current - 1))}
-                  className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
-                >
-                  <Minus className="h-4 w-4" />
-                </button>
-                <input
-                  type="number"
-                  min={1}
-                  step="any"
-                  value={Number.isFinite(quantity) ? quantity : ''}
-                  onChange={(event) => setQuantity(Number(event.target.value))}
-                  aria-label="Quantity to issue"
-                  className="w-14 border-x border-slate-200 py-1.5 text-center text-sm font-semibold text-slate-900 outline-none"
-                />
-                <button
-                  type="button"
-                  aria-label="More"
-                  disabled={quantity >= selectedAvailable}
-                  onClick={() => setQuantity((current) => Math.min(selectedAvailable, current + 1))}
-                  className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-              <span className="text-xs text-slate-500">{selected.unitOfMeasure}</span>
+              {selectedIsAsset ? null : (
+                <>
+                  <div className="flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <button
+                      type="button"
+                      aria-label="Less"
+                      disabled={quantity <= 1}
+                      onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                      className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      step="any"
+                      value={Number.isFinite(quantity) ? quantity : ''}
+                      onChange={(event) => setQuantity(Number(event.target.value))}
+                      aria-label="Quantity to issue"
+                      className="w-14 border-x border-slate-200 py-1.5 text-center text-sm font-semibold text-slate-900 outline-none"
+                    />
+                    <button
+                      type="button"
+                      aria-label="More"
+                      disabled={quantity >= selectedAvailable}
+                      onClick={() => setQuantity((current) => Math.min(selectedAvailable, current + 1))}
+                      className="p-2 text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <span className="text-xs text-slate-500">{selected.unitOfMeasure}</span>
+                </>
+              )}
             </>
           ) : (
             <p className="flex-1 text-xs text-slate-500">Choose the item you will issue. Out-of-stock items cannot be issued.</p>

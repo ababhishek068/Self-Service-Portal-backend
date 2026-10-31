@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import {
   deleteRequestAttachment,
   downloadRequestAttachment,
+  fetchRequestAttachmentBlob,
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
 import { fetchLeaveRequestDetail, uploadLeaveDocumentAttachment } from '@/api/endpoints/leave'
@@ -15,6 +16,8 @@ import type { Attachment, PortalRequest } from '@/types/erp.types'
 import { cn } from '@/lib/utils'
 import { AttachmentPanel } from './AttachmentPanel'
 import { attachmentVisual, formatFileSize } from './attachmentUi'
+import { AttachmentViewer } from '@/components/shared/AttachmentViewer'
+import { useAttachmentViewer } from '@/hooks/useAttachmentViewer'
 
 const ALLOWED = new Set(['pdf', 'doc', 'docx', 'jpg', 'png'])
 
@@ -163,6 +166,8 @@ export function RequestAttachments({
       setProgress(0)
     }
   }
+
+  const viewer = useAttachmentViewer((attachment: Attachment) => fetchRequestAttachmentBlob(requestId, attachment))
 
   const handleDownload = async (attachment: Attachment) => {
     setActiveId(attachment.id)
@@ -349,16 +354,30 @@ export function RequestAttachments({
     : []
 
   return (
-    <AttachmentPanel
-      attachments={attachments}
-      uploading={pendingUpload}
-      isUploading={uploading}
-      canDelete={canDelete}
-      activeId={activeId}
-      onDownload={(attachment) => void handleDownload(attachment)}
-      onDelete={(attachment) => void handleDelete(attachment)}
-      uploadSlot={uploadSlot}
-      emptyText="No attachments yet"
-    />
+    <>
+      {viewer.viewed ? (
+        <AttachmentViewer
+          fileName={viewer.viewed.attachment.fileName}
+          fileType={viewer.viewed.attachment.fileType}
+          blob={viewer.viewed.blob}
+          loading={viewer.viewed.loading}
+          error={viewer.viewed.error}
+          onClose={viewer.close}
+          onDownload={() => void handleDownload(viewer.viewed!.attachment)}
+        />
+      ) : null}
+      <AttachmentPanel
+        attachments={attachments}
+        uploading={pendingUpload}
+        isUploading={uploading}
+        canDelete={canDelete}
+        activeId={activeId}
+        onDownload={(attachment) => void handleDownload(attachment)}
+        onView={(attachment) => void viewer.view(attachment)}
+        onDelete={(attachment) => void handleDelete(attachment)}
+        uploadSlot={uploadSlot}
+        emptyText="No attachments yet"
+      />
+    </>
   )
 }

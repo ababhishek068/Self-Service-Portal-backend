@@ -19,6 +19,8 @@ export interface PortalNotification {
   /** The page of the documents; with requestId, the one document. */
   module?: string
   requestId?: string
+  /** The part of the request to scroll to (e.g. lpr-doc-rfq: the RFQ of an LPR). */
+  focus?: string
 }
 
 export interface PortalNotifications {

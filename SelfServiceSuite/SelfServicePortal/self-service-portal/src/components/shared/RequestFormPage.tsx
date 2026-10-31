@@ -26,7 +26,6 @@ import { FileUpload } from './FileUpload'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
-import { ApprovalHistory } from './ApprovalHistory'
 import { ApproverComments } from './ApproverComments'
 import { SentBackNotice } from './SentBackNotice'
 import {
@@ -740,7 +739,10 @@ export function RequestFormPage({
                     />
                   ) : null
                 })()}
-                <ApproverComments steps={approvalHistorySteps(selected)} />
+                <ApproverComments
+                  steps={approvalHistorySteps(selected)}
+                  allSteps={shouldShowApprovalHistory(selected.status, selected.approvalSteps)}
+                />
                 <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -814,12 +816,7 @@ export function RequestFormPage({
                   />
                 ) : null}
 
-                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
-                  <section className="border-t border-slate-200 pt-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
-                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
-                  </section>
-                ) : null}
+                {/* The approval history is in Approver comments at the top (UAT-2: no duplicate list). */}
               </>
             ) : null}
           </div>

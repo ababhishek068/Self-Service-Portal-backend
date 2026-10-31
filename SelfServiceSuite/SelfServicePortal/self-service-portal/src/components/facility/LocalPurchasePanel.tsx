@@ -32,6 +32,8 @@ import type { CardField } from '@/components/facility/BcCard'
 import { BcLinesTable } from '@/components/facility/BcLinesTable'
 import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
+import { PoReceiveItemSetup } from '@/components/facility/PoReceiveItemSetup'
+import { PoServiceGlEditor } from '@/components/facility/PoServiceGlEditor'
 import { dateValue } from '@/components/facility/bcCardValues'
 import {
   ORDER_LINE_COLUMNS,
@@ -42,7 +44,15 @@ import {
 import { cn } from '@/lib/utils'
 
 /** Actions rendered inline (quote form / quote rows / Store Req) instead of the ribbon. */
-const INLINE_ACTIONS = new Set(['UPSERT_VENDOR_QUOTE', 'SELECT_WINNER_FAD', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'])
+const INLINE_ACTIONS = new Set([
+  'UPSERT_VENDOR_QUOTE',
+  'SELECT_WINNER_FAD',
+  'ISSUE_AFTER_LPR',
+  'UPDATE_LPR_LINE',
+  // Per PO line: the service G/L account and the store keeper's item setup (forms under the PO lines).
+  'SET_SERVICE_GL',
+  'SET_RECEIVE_ITEM',
+])
 const RETURN_ACTIONS = new Set([
   'REJECT_LPR',
   'SEND_BACK_LPR',
@@ -1059,21 +1069,25 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
             />
           ) : null}
-          {editing.receive && poLines?.some((line) => String(line.needsItemSetup).toLowerCase() === 'true') ? (
-            <StatusNotice tone="attention" className="">
-              <p>
-                New item without an Item Category on{' '}
-                {poLines
-                  .filter((line) => String(line.needsItemSetup).toLowerCase() === 'true')
-                  .map((line) => `line ${text(line.lineNo)} (${text(line.bcDescription) || text(line.bcNo)})`)
-                  .join(', ')}
-                . Post Receive is blocked until it is set.
-              </p>
-              <p className="mt-1 text-xs font-normal">
-                For now set it in Business Central: Purchase Order {poNo} → Prepare Local Receive (pick an existing
-                store item, or give the item its category and VAT). Then post the receipt here.
-              </p>
-            </StatusNotice>
+          {allowed('SET_SERVICE_GL') && poLines ? (
+            <PoServiceGlEditor
+              poNo={poNo}
+              lines={poLines}
+              busy={busy}
+              onSave={(lineNo, glAccountNo) =>
+                saveDoc('SET_SERVICE_GL', poNo, { lineNo, glAccountNo }, `G/L ${glAccountNo} set on line ${lineNo} of ${poNo}.`)
+              }
+            />
+          ) : null}
+          {allowed('SET_RECEIVE_ITEM') && poLines ? (
+            <PoReceiveItemSetup
+              poNo={poNo}
+              lines={poLines}
+              busy={busy}
+              onSave={(payload) =>
+                saveDoc('SET_RECEIVE_ITEM', poNo, payload, `Item set on line ${String(payload.lineNo)} of ${poNo}.`)
+              }
+            />
           ) : null}
           {editing.receive && poLines ? (
             <PoReceiveEditor
