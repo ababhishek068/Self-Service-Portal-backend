@@ -595,7 +595,7 @@ export function ApprovalDetail() {
                       </p>
                     ) : (
                       <p className="mt-2 text-xs text-slate-500">
-                        A rejection reason is required and will be visible to the requester in Approval History.
+                        A rejection reason is required and will be visible to the requester in Approval and Comment History.
                       </p>
                     )}
                   </div>

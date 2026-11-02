@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v290 — 1.0.3.449 (UAT-2: Approver comments box removed; Approval History list back at the bottom of the request with the comments box background; with 1.0.3.448; for BC 1.0.3.593)'
+export const PORTAL_API_BUILD = 'v291 — 1.0.3.450 (UAT-2: the request history section is titled Approval and Comment History; with 1.0.3.449; for BC 1.0.3.593)'
 
 interface LookupSpec {
   service: string

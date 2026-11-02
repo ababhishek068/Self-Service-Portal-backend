@@ -1509,7 +1509,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
                 {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
                   <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval and Comment History</h3>
                     <ApprovalHistory steps={approvalHistorySteps(selected)} />
                   </section>
                 ) : null}
