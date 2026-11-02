@@ -13,10 +13,10 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
   return (
     <div className="space-y-2">
       {orderedSteps.map((step, index) => (
-        <div key={step.id} className="border-b border-slate-100 py-2.5 text-sm">
+        <div key={step.id} className="border-b border-amber-200/70 py-2.5 text-sm last:border-b-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex h-6 items-center justify-center rounded-full bg-slate-100 px-2 text-xs font-semibold text-slate-600">
+              <span className="inline-flex h-6 items-center justify-center rounded-full bg-white px-2 text-xs font-semibold text-slate-600">
                 {/* Show BC's workflow sequence — parallel approvers share a step number. */}
                 {step.status === 'Resubmitted' ? 'Requester' : `Step ${step.sequenceNo ?? index + 1}`}
               </span>
@@ -31,7 +31,7 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
             {step.timestamp ? formatDateTime(step.timestamp) : 'No decision timestamp yet'}
           </p>
           {step.note ? (
-            <p className="mt-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">{step.note}</p>
+            <p className="mt-1.5 rounded-md bg-white/80 px-2.5 py-1.5 text-xs text-slate-700">{step.note}</p>
           ) : null}
           {step.changes?.length ? (
             <ul className="mt-1 list-disc space-y-0.5 pl-6 text-xs text-slate-700">

@@ -25,7 +25,7 @@ import { DataTable, type DataTableColumn } from './DataTable'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
-import { ApproverComments } from './ApproverComments'
+import { ApprovalHistory } from './ApprovalHistory'
 import { SentBackNotice } from './SentBackNotice'
 import {
   normalizeAndValidateSelectValues,
@@ -1289,11 +1289,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                <ApproverComments
-                  steps={approvalHistorySteps(selected)}
-                  skipRejected={selected.status === 'Rejected'}
-                  allSteps={shouldShowApprovalHistory(selected.status, selected.approvalSteps)}
-                />
                 {bcCard ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
@@ -1512,7 +1507,12 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   />
                 ) : null}
 
-                {/* The approval history is in Approver comments at the top (UAT-2: no duplicate list). */}
+                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
+                  <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval History</h3>
+                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
+                  </section>
+                ) : null}
               </>
             ) : null}
           </div>

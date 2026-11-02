@@ -514,7 +514,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v289 — 1.0.3.448 (Employee Profile: field cards in 4 columns on wide screens so Bio Data and the other tabs are shorter; with 1.0.3.447; for BC 1.0.3.593)'
+export const PORTAL_API_BUILD = 'v290 — 1.0.3.449 (UAT-2: Approver comments box removed; Approval History list back at the bottom of the request with the comments box background; with 1.0.3.448; for BC 1.0.3.593)'
 
 interface LookupSpec {
   service: string

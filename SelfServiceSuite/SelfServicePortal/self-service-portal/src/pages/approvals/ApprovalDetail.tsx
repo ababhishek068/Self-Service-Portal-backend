@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, CornerUpLeft, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
-import { ApproverComments } from '@/components/shared/ApproverComments'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
@@ -494,9 +493,6 @@ export function ApprovalDetail() {
                   </div>
                 </div>
               ) : null}
-
-              {/* Earlier approvers' comments (BC Approval Comments), next to the lines the next approver decides on. */}
-              <ApproverComments steps={approvalHistorySteps(request)} />
 
               {lines.length && lineKeys.length ? (
                 <div className="border-t border-slate-200 pt-4">
