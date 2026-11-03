@@ -69,6 +69,8 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   SELECT_WINNER_FAD: { roles: ['fad'], commentRequired: true },
   APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentRequired: true },
   CREATE_PO: { roles: PROCUREMENT },
+  /** BC 1.0.3.597 (UAT-2): the PO starts as a draft; Procurement completes it, then submits it. */
+  SUBMIT_PO_OPS: { roles: PROCUREMENT },
   APPROVE_PO_OPS: { roles: ['operationsManager'], commentRequired: true },
   /** BC 1.0.3.592 (UAT-2): Finance reviews the PO between the Operations Manager and FAD. */
   APPROVE_PO_FINANCE: { roles: ['financeChecker'], commentRequired: true },
@@ -131,6 +133,7 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   APPROVE_WINNER_FAD_FINAL: 'Approve Winner (FAD Final)',
   SEND_BACK_RFQ: 'Send back to Procurement',
   CREATE_PO: 'Create Purchase Order',
+  SUBMIT_PO_OPS: 'Submit PO to Operations Manager',
   APPROVE_PO_OPS: 'Approve Local PO (Operations Manager)',
   APPROVE_PO_FINANCE: 'Approve Local PO (Finance Review)',
   APPROVE_PO_FAD: 'Approve Local PO (FAD)',
@@ -231,6 +234,8 @@ const OPS_INVOICE_CHECK: StageAction[] = ['APPROVE_INVOICE_OPS', { code: 'SEND_B
 const FAD_PAYMENT_APPROVAL: StageAction[] = ['APPROVE_PAYMENT_FAD', { code: 'SEND_BACK_INVOICE', roles: ['fad'] }]
 
 const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
+  // BC 1.0.3.597 (UAT-2): Procurement completes the draft PO (payment, delivery, remarks, lines), then submits it.
+  'PO DRAFT': ['SUBMIT_PO_OPS'],
   'PO CREATED': PO_OPS_APPROVAL,
   'PENDING FINANCE PO': PO_OPS_APPROVAL,
   'PENDING OPERATIONS MANAGER PO': PO_OPS_APPROVAL,
@@ -260,6 +265,7 @@ const PO_STAGE_ACTIONS: Record<string, StageAction[]> = {
 
 /** PO stages before the Operations Manager approves, when BC lets a Service line get its G/L account. */
 const SERVICE_GL_PO_STAGES = new Set([
+  'PO DRAFT',
   'PO CREATED',
   'PENDING FINANCE PO',
   'PENDING OPERATIONS MANAGER PO',

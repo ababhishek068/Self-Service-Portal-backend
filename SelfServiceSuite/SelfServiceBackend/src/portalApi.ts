@@ -515,7 +515,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v293 — 1.0.3.452 (LPR-UAT-2: FAD writes the reason when changing the winner after the technical evaluation, kept as the Vendor Selection Reason and in the Approval History; Purchase Order card as in BC with General, Lines, Totals, Invoice Details and Shipping and Payment; with 1.0.3.451; for BC 1.0.3.596)'
+export const PORTAL_API_BUILD = 'v294 — 1.0.3.453 (LPR-UAT-2 Procurement Officer: the PO starts as a draft that Procurement completes and edits, then Submit PO to Operations Manager; the Purchase Order card fields of General, Invoice Details and Shipping and Payment are editable until then; with 1.0.3.452; for BC 1.0.3.597)'
 
 interface LookupSpec {
   service: string

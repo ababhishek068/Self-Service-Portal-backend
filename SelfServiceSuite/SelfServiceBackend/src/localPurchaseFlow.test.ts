@@ -301,6 +301,11 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
       true,
     )
 
+    // BC 1.0.3.597 (UAT-2): the PO starts as a draft; Procurement completes it and submits it first.
+    s = step(demoChain({ rfqStage: 'PO Created', poStage: 'PO Draft' }), 'projectProcurement')
+    assert.deepEqual(s.mine, ['SUBMIT_PO_OPS@ABH-PO000008'])
+    assert.deepEqual(step(demoChain({ rfqStage: 'PO Created', poStage: 'PO Draft' }), 'operationsManager').mine, [])
+
     // 18 Operations Manager approves the PO, 19 then FAD
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'operationsManager')
     assert.deepEqual(s.mine, ['APPROVE_PO_OPS@ABH-PO000008', 'SEND_BACK_PO@ABH-PO000008', 'REJECT_PO@ABH-PO000008'])

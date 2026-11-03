@@ -407,7 +407,9 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             : action.actionCode === 'SELECT_WINNER_FAD'
               ? `Winner changed to ${resultNo || 'the selected vendor'}; your reason is the Vendor Selection Reason. Next: Approve Winner (FAD Final).`
             : action.actionCode === 'APPROVE_WINNER_FAD_FINAL'
-              ? `Winner approved on ${action.documentNo}. Business Central created the Purchase Order: Procurement reviews it, then the Operations Manager approves it.`
+              ? `Winner approved on ${action.documentNo}. Business Central created the Purchase Order as a draft: Procurement completes it, then submits it to the Operations Manager.`
+            : action.actionCode === 'SUBMIT_PO_OPS'
+              ? `PO ${action.documentNo} submitted to the Operations Manager for approval. It can no longer be changed unless it is sent back.`
             : resultNo && resultNo !== action.documentNo
             ? `${action.label} — ${resultNo}`
             : `${action.label} completed.`,
@@ -599,6 +601,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const paymentOptions = paymentQuery.data?.available ? paymentQuery.data : undefined
   const poCard = (po?.cardFields ?? {}) as Record<string, unknown>
   const card = (name: string) => text(poCard[name])
+  // A card field BC 1.0.3.597 saves by its BC field name (UPDATE_PO_HEADER); dates as yyyy-mm-dd.
+  const cardSpec = (name: string, kind: EditSpec['kind']): EditSpec => ({
+    key: name,
+    kind,
+    initial: kind === 'date' ? bcDate(poCard[name]).slice(0, 10) : card(name),
+  })
   const yesNo = (value: unknown) => (value === true || String(value).toLowerCase() === 'true' ? 'Yes' : 'No')
   const poTotals = (() => {
     const lines = poLines ?? []
@@ -662,6 +670,9 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'Posting Description': { key: 'requestSummary', kind: 'text', initial: text(po.requestSummary) },
         'Vendor Delivery Note No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
         'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
+        // BC 1.0.3.597: the other card fields are saved by their BC field name.
+        Contact: cardSpec('Buy-from Contact', 'text'),
+        'Vendor Invoice No.': cardSpec('Vendor Invoice No.', 'text'),
       }
     : {}
   const poTotalFields: CardField[] = [
@@ -704,6 +715,17 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'Payment Method Code': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
         'Shipment Method Code': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
         'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
+        'VAT Bus. Posting Group': cardSpec('VAT Bus. Posting Group', 'code'),
+        'Division Code': { key: 'divisionCode', kind: 'code', initial: text(po.divisionCode) },
+        'Department Code': { key: 'departmentCode', kind: 'code', initial: text(po.departmentCode) },
+        'Payment Discount %': cardSpec('Payment Discount %', 'number'),
+        'Tax Exemption No.': cardSpec('Tax Exemption No.', 'text'),
+        'Provincial Tax Area Code': cardSpec('Provincial Tax Area Code', 'code'),
+        'Payment Reference': cardSpec('Payment Reference', 'text'),
+        'Creditor No.': cardSpec('Creditor No.', 'text'),
+        'On Hold': cardSpec('On Hold', 'code'),
+        'Promised Receipt Date': cardSpec('Promised Receipt Date', 'date'),
+        'Due Date': cardSpec('Due Date', 'date'),
       }
     : {}
   const poShipping: CardField[] = po
@@ -711,7 +733,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
         { label: 'Ship-to Code', value: card('Ship-to Code') },
         { label: 'Ship-to Name', value: card('Ship-to Name') },
-        { label: 'Ship-to Address', value: [card('Ship-to Address'), card('Ship-to Address 2')].filter(Boolean).join(', ') },
+        { label: 'Ship-to Address', value: card('Ship-to Address') },
+        { label: 'Ship-to Address 2', value: card('Ship-to Address 2') },
         { label: 'Ship-to City', value: card('Ship-to City') },
         { label: 'Ship-to Post Code', value: card('Ship-to Post Code') },
         { label: 'Ship-to Country/Region', value: card('Ship-to Country/Region Code') },
@@ -723,7 +746,15 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       ]
     : []
   const poShippingSpecs: Record<string, EditSpec> = po
-    ? { 'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) } }
+    ? {
+        'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) },
+        'Ship-to Name': cardSpec('Ship-to Name', 'text'),
+        'Ship-to Address': cardSpec('Ship-to Address', 'text'),
+        'Ship-to Address 2': cardSpec('Ship-to Address 2', 'text'),
+        'Ship-to City': cardSpec('Ship-to City', 'text'),
+        'Ship-to Post Code': cardSpec('Ship-to Post Code', 'code'),
+        'Ship-to Country/Region': cardSpec('Ship-to Country/Region Code', 'code'),
+      }
     : {}
   const savePoHeader = (changed: Record<string, string>) =>
     saveDoc('UPDATE_PO_HEADER', poNo, changed, `${poNo} saved in Business Central.`)
