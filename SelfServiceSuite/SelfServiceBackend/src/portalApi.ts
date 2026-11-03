@@ -54,6 +54,7 @@ import {
   localPurchaseChainDocumentNos,
   localPurchaseEditing,
   localPurchaseNextActions,
+  localPurchaseStepWaiting,
   localPurchaseProgress,
   normalizeLprVendors,
   parseSoapJson,
@@ -514,7 +515,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v291 — 1.0.3.450 (UAT-2: the request history section is titled Approval and Comment History; with 1.0.3.449; for BC 1.0.3.593)'
+export const PORTAL_API_BUILD = 'v292 — 1.0.3.451 (LPR-UAT-2 Test Issues-3: vendor quotes with Quote No., VAT 15% / 0%, Total Amount and item prices; Print Vendor RFQ, RFQ Response Analysis and Purchase Order; FAD approval of the winner creates the PO and the bell no longer waits on Send back; PO payment terms, payment and shipment method, remarks and totals; with 1.0.3.450; for BC 1.0.3.595)'
 
 interface LookupSpec {
   service: string
@@ -2677,7 +2678,8 @@ async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurch
       const officerStep = action.ownerRoles.every((role) => role === 'procurement' || role === 'projectProcurement')
       return !officerStep || !assigned || myIds.has(assigned)
     })
-    if (actions.length === 0) return false
+    // Only Send back / Reject (e.g. FAD at Ready for PO): the document waits for someone else.
+    if (!localPurchaseStepWaiting(actions)) return false
     const mapped = mapRequest(row, 'purchaseRequisition')
     const current = chain.po ?? chain.rfq ?? chain.lpr
     items.push({
@@ -5675,6 +5677,64 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  /**
+   * Payment terms, payment methods and shipment methods for the Purchase Order card
+   * (UPDATE_PO_HEADER, BC 1.0.3.594 / SOAP 1.0.3.595). `available` is false on older BC.
+   */
+  router.get(
+    '/local-purchase/payment-options',
+    safe(async (req, res) => {
+      await requireLocalPurchaseAccess(user(req))
+      res.setHeader('Cache-Control', 'private, no-store')
+      try {
+        const options = parseSoapJson((await callSoapMethod('PortalLprPaymentOptions', {})).returnValue)
+        const list = (value: unknown) =>
+          (Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [])
+            .map((row) => ({ code: String(row?.code ?? '').trim(), description: String(row?.description ?? '').trim() }))
+            .filter((row) => row.code)
+        res.json({
+          available: true,
+          paymentTerms: list(options.paymentTerms),
+          paymentMethods: list(options.paymentMethods),
+          shipmentMethods: list(options.shipmentMethods),
+        })
+      } catch {
+        res.json({ available: false, paymentTerms: [], paymentMethods: [], shipmentMethods: [] })
+      }
+    }),
+  )
+
+  /** The BC 1.0.3.594 vendor quote keys, only those sent (older BC ignores keys it does not know). */
+  function vendorQuoteExtras(body: Record<string, unknown> | undefined) {
+    const extras: Record<string, unknown> = {}
+    if (typeof body?.vendorQuoteNo === 'string') extras.vendorQuoteNo = body.vendorQuoteNo.trim().slice(0, 50)
+    if (body?.vatPercent !== undefined && body?.vatPercent !== '') {
+      const vatPercent = Number(body.vatPercent)
+      if (!Number.isFinite(vatPercent) || vatPercent < 0 || vatPercent > 100) {
+        throw portalError('VAT % must be between 0 and 100.', 422, 'LPR_QUOTE_VAT_INVALID')
+      }
+      extras.vatPercent = vatPercent
+    }
+    if (Array.isArray(body?.lines)) {
+      extras.lines = (body.lines as Array<Record<string, unknown>>).map((line) => {
+        const rfqLineNo = Number(line?.rfqLineNo)
+        const unitPrice = Number(line?.unitPrice ?? 0)
+        if (!Number.isInteger(rfqLineNo) || rfqLineNo <= 0) {
+          throw portalError('Each item price needs its RFQ line.', 422, 'LPR_QUOTE_LINE_INVALID')
+        }
+        if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+          throw portalError('Item prices must be zero or more.', 422, 'LPR_QUOTE_PRICE_INVALID')
+        }
+        return {
+          rfqLineNo,
+          unitPrice,
+          ...(typeof line?.remarks === 'string' ? { remarks: line.remarks.trim().slice(0, 250) } : {}),
+        }
+      })
+    }
+    return extras
+  }
+
   /** RFQ No. for vendor-quote calls: the chain's Local RFQ (or the requested one, if it belongs to the chain). */
   async function requireChainRfqNo(requestNo: string, requested: unknown) {
     const chain = await loadLocalPurchaseChain(requestNo)
@@ -5786,6 +5846,61 @@ export function buildPortalApiRouter() {
         cardEditable: editing.lpr,
         editing,
       })
+    }),
+  )
+
+  /**
+   * Local Purchase documents printed by Business Central (BC 1.0.3.594 reports, SOAP 1.0.3.595):
+   * VENDOR_RFQ (the RFQ for the vendors) and RFQ_ANALYSIS (RFQ Response Analysis) of the chain's
+   * Local RFQ, PO (the Purchase Order) of its Local PO. BC marks them DRAFT until they are approved.
+   */
+  router.get(
+    '/requests/:id/local-purchase/pdf/:kind',
+    safe(async (req, res) => {
+      const requestId = String(req.params.id)
+      const authUser = user(req)
+      const { module, no } = parseRequestId(requestId)
+      if (module !== 'purchaseRequisition') {
+        throw portalError('Local Purchase documents apply to Purchase Requisition (LPR/RFQ/PO) only.', 422)
+      }
+      const kind = String(req.params.kind ?? '').trim().toUpperCase()
+      const names: Record<string, string> = {
+        VENDOR_RFQ: 'Vendor-RFQ',
+        RFQ_ANALYSIS: 'RFQ-Response-Analysis',
+        PO: 'Purchase-Order',
+      }
+      if (!names[kind]) throw portalError('Choose VENDOR_RFQ, RFQ_ANALYSIS or PO.', 422, 'LPR_DOCUMENT_KIND_INVALID')
+      await requireLocalPurchaseAccess(authUser)
+      await requestDetail(requestId, authUser)
+      const chain = await loadLocalPurchaseChain(no)
+      const documentNo =
+        kind === 'PO'
+          ? String(chain.po?.no ?? chain.rfq?.createdPoNo ?? '').trim()
+          : String(chain.rfq?.no ?? chain.lpr?.createdRfqNo ?? '').trim()
+      if (!documentNo) {
+        throw portalError(
+          kind === 'PO' ? `${no} has no Purchase Order yet.` : `${no} has no Local RFQ yet.`,
+          409,
+          'LPR_DOCUMENT_NOT_READY',
+        )
+      }
+      let pdf: Buffer | null = null
+      try {
+        const { returnValue } = await callSoapMethod('PortalLocalPurchasePdf', { documentNo, documentKind: kind })
+        const bytes = Buffer.from(String(returnValue ?? '').trim(), 'base64')
+        pdf = bytes.subarray(0, 4).toString() === '%PDF' ? bytes : null
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw /PortalLocalPurchasePdf|no action|soapaction|not published|could not find/i.test(message)
+          ? portalError(
+              'Publish Business Central 1.0.3.595 to print the Local Purchase documents from the portal.',
+              502,
+              'LPR_DOCUMENT_NOT_PUBLISHED',
+            )
+          : portalError(message, 422, 'LPR_DOCUMENT_FAILED')
+      }
+      if (!pdf) throw portalError(`Business Central did not return the PDF for ${documentNo}.`, 502, 'LPR_DOCUMENT_FAILED')
+      sendPdf(res, pdf, `${names[kind]}-${documentNo}.pdf`)
     }),
   )
 
@@ -5968,6 +6083,9 @@ export function buildPortalApiRouter() {
         quoteDate: String(req.body?.quoteDate ?? ''),
         notes: String(req.body?.notes ?? ''),
         lineNo: req.body?.lineNo ?? undefined,
+        // BC 1.0.3.594 (LPR-UAT-2 Test Issues-3): the vendor's quotation no., VAT % (15, or 0 when the
+        // vendor is not VAT registered) and item prices; with item prices BC makes the quoted amount their total.
+        ...vendorQuoteExtras(req.body),
       }
       const result = await callSoapMethod('PortalLocalPurchaseAction', {
         documentNo: rfqNo,

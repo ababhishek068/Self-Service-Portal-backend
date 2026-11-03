@@ -7,6 +7,15 @@ export const formatCurrency = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value)
 
+/** ETB with cents, for quotations, VAT and totals (e.g. ETB 1,500.00). */
+export const formatAmount = (value: number) =>
+  new Intl.NumberFormat('en-ET', {
+    style: 'currency',
+    currency: 'ETB',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-ET', { maximumFractionDigits: 0 }).format(value)
 

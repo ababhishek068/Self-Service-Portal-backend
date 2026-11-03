@@ -432,6 +432,26 @@ export function localPurchaseNextActions(
   })
 }
 
+/** Send back and reject: offered to an approver, but never the step a document is waiting for. */
+const LOCAL_PURCHASE_RETURN_ACTIONS = new Set([
+  'SEND_BACK_LPR',
+  'REJECT_LPR',
+  'SEND_BACK_RFQ',
+  'REJECT_RFQ',
+  'SEND_BACK_PO',
+  'REJECT_PO',
+  'SEND_BACK_INVOICE',
+])
+
+/**
+ * Whether the user's actions on a document are a step waiting for them: at least one is not a
+ * send back or reject. FAD may still send an RFQ back at Ready for PO, but the RFQ waits for
+ * Procurement's Create Purchase Order there, not for FAD (LPR-UAT-2 Test Issues-3).
+ */
+export function localPurchaseStepWaiting(actions: Array<Pick<LocalPurchaseNextAction, 'actionCode' | 'allowed'>>) {
+  return actions.some((action) => action.allowed && !LOCAL_PURCHASE_RETURN_ACTIONS.has(action.actionCode))
+}
+
 /** Document numbers that belong to the chain (guards POST documentNo against unrelated docs). */
 export function localPurchaseChainDocumentNos(chain: LocalPurchaseChain): string[] {
   return [chain.lpr?.no, chain.rfq?.no, chain.po?.no, chain.lpr?.createdRfqNo, chain.rfq?.createdPoNo]

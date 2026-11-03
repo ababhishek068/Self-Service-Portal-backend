@@ -10,6 +10,7 @@ import {
   localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseProgress,
+  localPurchaseStepWaiting,
   normalizeLprVendors,
   parseBcLocalPurchaseRoles,
   resolveLocalPurchaseAccess,
@@ -288,6 +289,17 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
     // 17 Procurement prepares the PO
     s = step(demoChain({ rfqStage: 'Ready for PO' }), 'projectProcurement')
     assert.deepEqual(s.mine, ['CREATE_PO@ABH-PQ000093'])
+    // LPR-UAT-2 Test Issues-3: FAD may still send it back, but the RFQ is not waiting for FAD (bell).
+    assert.deepEqual(step(demoChain({ rfqStage: 'Ready for PO' }), 'fad').mine, ['SEND_BACK_RFQ@ABH-PQ000093'])
+    assert.equal(localPurchaseStepWaiting(localPurchaseNextActions(demoChain({ rfqStage: 'Ready for PO' }), ['fad'])), false)
+    assert.equal(
+      localPurchaseStepWaiting(localPurchaseNextActions(demoChain({ rfqStage: 'Ready for PO' }), ['projectProcurement'])),
+      true,
+    )
+    assert.equal(
+      localPurchaseStepWaiting(localPurchaseNextActions(demoChain({ rfqStage: 'Pending FAD Final' }), ['fad'])),
+      true,
+    )
 
     // 18 Operations Manager approves the PO, 19 then FAD
     s = step(demoChain({ rfqStage: 'PO Created', poStage: 'Pending Operations Manager PO' }), 'operationsManager')

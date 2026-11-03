@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ClipboardList, FileText, PackageCheck, Pencil, Receipt, ShoppingCart, Trash2, Truck } from 'lucide-react'
+import { ChevronRight, ClipboardList, FileText, PackageCheck, Receipt, ShoppingCart, Truck } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import {
   getLocalPurchaseBankAccounts,
   getLocalPurchaseState,
   getLocalPurchaseVendors,
+  getLprPaymentOptions,
   runLocalPurchaseAction,
   uploadLocalPurchaseQuoteAttachment,
   upsertLocalPurchaseVendorQuote,
@@ -18,14 +19,12 @@ import {
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { LookupCombobox } from '@/components/shared/LookupCombobox'
 import { LprApprovalHistory } from '@/components/facility/LprApprovalHistory'
 import { LprCommentDialog } from '@/components/facility/LprCommentDialog'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
-import { formatCurrency } from '@/utils/formatters'
+import { formatAmount } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
-import { todayIsoDate } from '@/utils/validators'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
 import type { CardField } from '@/components/facility/BcCard'
@@ -34,6 +33,8 @@ import { EditableCardSection, type EditSpec } from '@/components/facility/Editab
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
 import { PoReceiveItemSetup } from '@/components/facility/PoReceiveItemSetup'
 import { PoServiceGlEditor } from '@/components/facility/PoServiceGlEditor'
+import { VendorQuotesSection, type VendorQuoteSave } from '@/components/facility/VendorQuotesSection'
+import { LprPrintButtons } from '@/components/facility/LprPrintButtons'
 import { dateValue } from '@/components/facility/bcCardValues'
 import {
   ORDER_LINE_COLUMNS,
@@ -91,6 +92,35 @@ function isoDate(value: unknown) {
 
 function linesOf(doc: Record<string, unknown> | undefined) {
   return Array.isArray(doc?.lines) ? (doc.lines as PurchaseLine[]) : null
+}
+
+type PaymentOption = { code: string; description: string }
+
+/** A BC code with its description from the list, e.g. "30 DAYS — Net 30 days". */
+function optionLabel(options: PaymentOption[] | undefined, value: unknown) {
+  const code = text(value)
+  const description = options?.find((option) => option.code === code)?.description
+  return code && description ? `${code} — ${description}` : code
+}
+
+/** A PO code field: a dropdown of the BC list (BC 1.0.3.595), else typed as a code. */
+function optionSpec(key: string, options: PaymentOption[] | undefined, value: unknown): EditSpec {
+  const initial = text(value)
+  if (!options?.length) return { key, kind: 'code', initial }
+  const known = options.some((option) => option.code === initial)
+  return {
+    key,
+    kind: 'select',
+    initial,
+    options: [
+      { value: '', label: '' },
+      ...(initial && !known ? [{ value: initial, label: initial }] : []),
+      ...options.map((option) => ({
+        value: option.code,
+        label: option.description ? `${option.code} — ${option.description}` : option.code,
+      })),
+    ],
+  }
 }
 
 /** A document in the chain laid out as its BC card (Local RFQ / Purchase Order): card, lines, extras. */
@@ -196,20 +226,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const [storeCardOpen, setStoreCardOpen] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
-  const [quoteForm, setQuoteForm] = useState<{
-    lineNo?: number
-    vendorNo: string
-    quotedAmount: string
-    leadTimeDays: string
-    quoteDate: string
-    notes: string
-  }>({
-    vendorNo: '',
-    quotedAmount: '',
-    leadTimeDays: '',
-    quoteDate: todayIsoDate(),
-    notes: '',
-  })
   const access = useLocalPurchaseAccess()
   const stateQuery = useQuery({
     queryKey: ['local-purchase', request.id],
@@ -236,6 +252,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     enabled: access.enabled && isFinanceChecker,
     retry: false,
     staleTime: 5 * 60_000,
+  })
+  // Payment terms / methods and shipment methods for the Purchase Order card (BC 1.0.3.595).
+  const paymentQuery = useQuery({
+    queryKey: ['local-purchase', 'payment-options'],
+    queryFn: getLprPaymentOptions,
+    enabled: access.enabled && Boolean(stateQuery.data?.chain.po),
+    staleTime: 5 * 60_000,
+    retry: false,
   })
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['local-purchase', request.id] })
@@ -280,6 +304,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const nextActions = state.nextActions
   const allowed = (code: string) => nextActions.some((action) => action.actionCode === code && action.allowed)
   const ribbon = nextActions.filter((action) => action.allowed && !INLINE_ACTIONS.has(action.actionCode))
+  // Only Send back / Reject (e.g. FAD at Ready for PO): the document waits for someone else's step.
+  const ownStep = ribbon.some((action) => !RETURN_ACTIONS.has(action.actionCode))
   const waiting = nextActions.filter(
     (action) => !action.allowed && !['UPSERT_VENDOR_QUOTE', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'].includes(action.actionCode),
   )
@@ -373,6 +399,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           ? `RFQ ${resultNo || ''} created. Its next step is shown below (BC 1.0.3.588: prepare it, then Submit RFQ to Operations Manager).`
           : action.actionCode === 'SUBMIT_RFQ_OPS'
             ? `RFQ ${action.documentNo} submitted to the Operations Manager for approval. Vendor quotes start after the approval.`
+            : action.actionCode === 'APPROVE_WINNER_FAD_FINAL'
+              ? `Winner approved on ${action.documentNo}. Business Central created the Purchase Order: Procurement reviews it, then the Operations Manager approves it.`
             : resultNo && resultNo !== action.documentNo
             ? `${action.label} — ${resultNo}`
             : `${action.label} completed.`,
@@ -382,36 +410,18 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     }
   }
 
-  const saveQuote = async () => {
-    const vendorNo = quoteForm.vendorNo.trim()
-    const quotedAmount = Number(quoteForm.quotedAmount.replace(/,/g, ''))
-    const leadTimeDays = Number(quoteForm.leadTimeDays || 0)
-    if (!vendorNo) {
-      toast.error('Vendor No. is required.', 'Vendor quote')
-      return
-    }
-    if (!Number.isFinite(quotedAmount) || quotedAmount <= 0) {
-      toast.error('Quoted Amount must be greater than zero.', 'Vendor quote')
-      return
-    }
+  const saveQuote = async (quote: VendorQuoteSave) => {
     try {
-      await quoteMutation.mutateAsync({
-        rfqNo,
-        vendorNo,
-        quotedAmount,
-        leadTimeDays: Number.isFinite(leadTimeDays) ? leadTimeDays : 0,
-        quoteDate: quoteForm.quoteDate,
-        notes: quoteForm.notes.trim(),
-        ...(quoteForm.lineNo ? { lineNo: quoteForm.lineNo } : {}),
-      })
-      setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
+      await quoteMutation.mutateAsync({ rfqNo, ...quote })
       toast.success(
-        quoteForm.lineNo
-          ? `Vendor quote for ${vendorNo} saved.`
-          : `Vendor quote saved for ${vendorNo}. Attach the quote file before Auto Select Winner.`,
+        quote.lineNo
+          ? `Vendor quote for ${quote.vendorNo} saved.`
+          : `Vendor quote saved for ${quote.vendorNo}. Attach the quote file before Auto Select Winner.`,
       )
+      return true
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not save the vendor quote', 'Vendor quote')
+      return false
     }
   }
 
@@ -424,16 +434,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       toast.error(error instanceof Error ? error.message : 'Could not attach the quote file', 'Attachments')
     }
   }
-
-  const editQuote = (quote: LocalPurchaseVendorQuote) =>
-    setQuoteForm({
-      lineNo: quote.lineNo,
-      vendorNo: quote.vendorNo,
-      quotedAmount: String(quote.quotedAmount ?? ''),
-      leadTimeDays: String(quote.leadTimeDays ?? ''),
-      quoteDate: bcDate(quote.quoteDate).slice(0, 10) || todayIsoDate(),
-      notes: quote.notes ?? '',
-    })
 
   /** Runs a card edit (save / line / delete) on a chain document and reports the result. */
   const saveDoc = async (actionCode: string, documentNo: string, payload: Record<string, unknown>, success: string) => {
@@ -455,12 +455,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       confirmLabel: 'Delete',
       tone: 'danger',
     })
-    if (!yes) return
-    if (await saveDoc('DELETE_VENDOR_QUOTE', rfqNo, { lineNo: quote.lineNo }, `Quote from ${name} deleted.`)) {
-      if (quoteForm.lineNo === quote.lineNo) {
-        setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
-      }
-    }
+    if (!yes) return false
+    return saveDoc('DELETE_VENDOR_QUOTE', rfqNo, { lineNo: quote.lineNo }, `Quote from ${name} deleted.`)
   }
 
   const selectWinner = (quote: LocalPurchaseVendorQuote) => {
@@ -589,7 +585,18 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       }
     : {}
 
-  // Purchase Order card: General, Invoice / payment progress of the local purchase.
+  // Purchase Order totals as on the BC card: BC 1.0.3.595 sends the amount excl. VAT; before, the lines' total.
+  const paymentOptions = paymentQuery.data?.available ? paymentQuery.data : undefined
+  const poTotals = (() => {
+    const inclVat = Number(po?.amountIncludingVat ?? 0)
+    const exclVat =
+      po?.amountExclVat !== undefined
+        ? Number(po.amountExclVat)
+        : (poLines ?? []).reduce((sum, line) => sum + Number(line.lineAmount ?? 0), 0)
+    return { exclVat, inclVat, vat: Math.max(0, inclVat - exclVat), hasAmounts: inclVat > 0 || exclVat > 0 }
+  })()
+
+  // Purchase Order card: General, payment / delivery, totals, then the invoice / payment progress.
   const poFields: CardField[] = po
     ? [
         { label: 'No.', value: poNo, emphasis: 'strong' },
@@ -605,11 +612,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
         { label: 'Vendor Shipment No.', value: text(po.vendorShipmentNo) },
         { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
-        {
-          label: 'Amount Incl. VAT',
-          value: Number(po.amountIncludingVat ?? 0) > 0 ? formatCurrency(Number(po.amountIncludingVat)) : '',
-          emphasis: 'strong',
-        },
+        { label: 'Payment Terms', value: optionLabel(paymentOptions?.paymentTerms, po.paymentTermsCode) },
+        { label: 'Payment Method', value: optionLabel(paymentOptions?.paymentMethods, po.paymentMethodCode) },
+        { label: 'Shipment Method', value: optionLabel(paymentOptions?.shipmentMethods, po.shipmentMethodCode) },
+        { label: 'PO Remarks / Special Terms', value: text(po.poRemarks) },
+        { label: 'Subtotal Excl. VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.exclVat) : '' },
+        { label: 'Total VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.vat) : '' },
+        { label: 'Total Incl. VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.inclVat) : '', emphasis: 'strong' },
         { label: 'Currency Code', value: poCurrency || 'Blank (local ETB)' },
         { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
         { label: 'FAD Approved PO', value: po.fadPoApproved ? 'Yes' : 'No' },
@@ -634,6 +643,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
         'Vendor Shipment No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
         'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) },
+        // BC 1.0.3.594: payment / delivery details and remarks printed on the Purchase Order.
+        'Payment Terms': optionSpec('paymentTermsCode', paymentOptions?.paymentTerms, po.paymentTermsCode),
+        'Payment Method': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
+        'Shipment Method': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
+        'PO Remarks / Special Terms': { key: 'poRemarks', kind: 'longtext', initial: text(po.poRemarks) },
       }
     : {}
 
@@ -734,7 +748,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
 
           {po?.lprClosed ? (
             <StatusNotice tone="success" className="">Paid and LPR closed.</StatusNotice>
-          ) : ribbon.length > 0 ? (
+          ) : ownStep ? (
             <StatusNotice tone="attention" className="">
               <p>Your step: {ribbon.map((action) => action.label).join(' · ')}</p>
               {editHint}
@@ -818,6 +832,15 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
 
       {rfq ? (
         <ChainDocBlock id="lpr-doc-rfq">
+          <LprPrintButtons
+            lprRequestId={request.id}
+            documents={[
+              { kind: 'VENDOR_RFQ', label: 'Print Vendor RFQ', fileName: `Vendor-RFQ-${rfqNo}.pdf` },
+              ...(quotes.length
+                ? [{ kind: 'RFQ_ANALYSIS' as const, label: 'RFQ Response Analysis', fileName: `RFQ-Response-Analysis-${rfqNo}.pdf` }]
+                : []),
+            ]}
+          />
           <EditableCardSection
             title={`Local RFQ ${rfqNo}`}
             fields={rfqFields}
@@ -857,195 +880,30 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       ) : null}
 
       {rfq ? (
-        <div className="space-y-2">
-          <p className="font-semibold text-[var(--portal-navy)]">
-            Vendor Quotes (Local RFQ)
-            <span className="ml-2 text-xs font-normal text-slate-600">
-              {quotes.length} received{minQuotes ? ` · minimum ${minQuotes}` : ''}
-            </span>
-          </p>
-          <div className="overflow-x-auto rounded-md border border-teal-100 bg-white/70">
-            <table className="min-w-full text-xs">
-              <thead className="bg-teal-50 text-left text-slate-600">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Vendor No.</th>
-                  <th className="px-3 py-2 font-medium">Vendor</th>
-                  <th className="px-3 py-2 text-right font-medium">Quoted Amount</th>
-                  <th className="px-3 py-2 text-right font-medium">Lead Time (Days)</th>
-                  <th className="px-3 py-2 font-medium">Quote Received Date</th>
-                  <th className="px-3 py-2 font-medium">Attachments</th>
-                  <th className="px-3 py-2 font-medium">Winner</th>
-                  {canEditQuotes ? <th className="px-3 py-2" aria-label="Quote actions" /> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {quotes.length === 0 ? (
-                  <tr>
-                    <td colSpan={canEditQuotes ? 8 : 7} className="px-3 py-3 text-slate-500">
-                      No vendor quotes yet.
-                    </td>
-                  </tr>
-                ) : null}
-                {quotes.map((quote) => (
-                  <tr key={quote.lineNo} className={`border-t border-teal-50 ${quote.selected ? 'bg-teal-50' : ''}`}>
-                    <td className="px-3 py-2">{quote.vendorNo}</td>
-                    <td className="px-3 py-2">
-                      {quote.vendorName}
-                      {quote.notes ? <span className="block text-slate-500">{quote.notes}</span> : null}
-                    </td>
-                    <td className="px-3 py-2 text-right">{formatCurrency(Number(quote.quotedAmount ?? 0))}</td>
-                    <td className="px-3 py-2 text-right">{quote.leadTimeDays}</td>
-                    <td className="px-3 py-2">{bcDate(quote.quoteDate)}</td>
-                    <td className="px-3 py-2">
-                      <span className={quote.attachments > 0 ? 'text-teal-800' : 'font-medium text-red-700'}>
-                        {quote.attachments > 0 ? `${quote.attachments} file(s)` : 'Missing'}
-                      </span>
-                      {canEditQuotes ? (
-                        <label className="ml-2 cursor-pointer text-[var(--portal-navy)] underline">
-                          Attach
-                          <input
-                            type="file"
-                            className="sr-only"
-                            accept=".pdf,.doc,.docx,.jpg,.png"
-                            disabled={busy}
-                            onChange={(event) => {
-                              void attach(quote, event.target.files?.[0])
-                              event.target.value = ''
-                            }}
-                          />
-                        </label>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2">
-                      {quote.selected ? <strong className="text-teal-800">Selected</strong> : null}
-                      {!quote.selected && fadSelectWinner ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => selectWinner(quote)}
-                        >
-                          Select as Winner (FAD)
-                        </Button>
-                      ) : null}
-                    </td>
-                    {canEditQuotes ? (
-                      <td className="whitespace-nowrap px-2 py-1 text-right">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => editQuote(quote)}
-                          aria-label={`Edit quote from ${quote.vendorName || quote.vendorNo}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-600 hover:bg-red-50"
-                          disabled={busy}
-                          onClick={() => void deleteQuote(quote)}
-                          aria-label={`Delete quote from ${quote.vendorName || quote.vendorNo}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {canEditQuotes ? (
-            <div
-              className={cn(
-                'grid grid-cols-1 gap-2 rounded-md border bg-white/70 p-3 sm:grid-cols-3 lg:grid-cols-6',
-                quoteForm.lineNo ? 'border-teal-300 bg-teal-50/50' : 'border-teal-100',
-              )}
-            >
-              {quoteForm.lineNo ? (
-                <p className="text-sm font-semibold text-slate-900 sm:col-span-3 lg:col-span-6">Edit the quote from {quoteForm.vendorNo}</p>
-              ) : null}
-              <div className="space-y-1 sm:col-span-3 lg:col-span-2">
-                <Label htmlFor={`lpr-quote-vendor-${request.id}`}>Vendor No.</Label>
-                <LookupCombobox
-                  id={`lpr-quote-vendor-${request.id}`}
-                  options={vendorOptions}
-                  loading={vendorQuery.isLoading}
-                  emptyText="Vendor list not available from Business Central. Type the exact Vendor No.; BC checks it on save."
-                  value={quoteForm.vendorNo}
-                  onChange={(vendorNo) => setQuoteForm((current) => ({ ...current, vendorNo }))}
-                  placeholder="Type vendor no. or name"
-                  disabled={busy || Boolean(quoteForm.lineNo)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`lpr-quote-amount-${request.id}`}>Quoted Amount</Label>
-                <Input
-                  id={`lpr-quote-amount-${request.id}`}
-                  inputMode="decimal"
-                  value={quoteForm.quotedAmount}
-                  onChange={(event) => setQuoteForm({ ...quoteForm, quotedAmount: event.target.value })}
-                  disabled={busy}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`lpr-quote-lead-${request.id}`}>Lead Time (Days)</Label>
-                <Input
-                  id={`lpr-quote-lead-${request.id}`}
-                  inputMode="numeric"
-                  value={quoteForm.leadTimeDays}
-                  onChange={(event) => setQuoteForm({ ...quoteForm, leadTimeDays: event.target.value })}
-                  disabled={busy}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`lpr-quote-date-${request.id}`}>Quote Received Date</Label>
-                <Input
-                  id={`lpr-quote-date-${request.id}`}
-                  type="date"
-                  value={quoteForm.quoteDate}
-                  onChange={(event) => setQuoteForm({ ...quoteForm, quoteDate: event.target.value })}
-                  disabled={busy}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`lpr-quote-notes-${request.id}`}>Notes</Label>
-                <Input
-                  id={`lpr-quote-notes-${request.id}`}
-                  value={quoteForm.notes}
-                  onChange={(event) => setQuoteForm({ ...quoteForm, notes: event.target.value })}
-                  disabled={busy}
-                />
-              </div>
-              <div className="flex gap-2 sm:col-span-3 lg:col-span-6">
-                {quoteForm.lineNo ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      setQuoteForm({ vendorNo: '', quotedAmount: '', leadTimeDays: '', quoteDate: todayIsoDate(), notes: '' })
-                    }
-                  >
-                    Cancel
-                  </Button>
-                ) : null}
-                <Button type="button" variant={quoteForm.lineNo ? 'gradient' : 'outline'} disabled={busy} onClick={() => void saveQuote()}>
-                  {quoteForm.lineNo ? 'Save changes' : 'Save vendor quote'}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <VendorQuotesSection
+          rfqNo={rfqNo}
+          quotes={quotes}
+          minQuotes={minQuotes}
+          rfqLines={rfqLines ?? []}
+          canEdit={canEditQuotes}
+          canSelectWinner={fadSelectWinner}
+          busy={busy}
+          vendorOptions={vendorOptions}
+          vendorsLoading={vendorQuery.isLoading}
+          formId={`lpr-quote-${request.id}`}
+          onSave={saveQuote}
+          onAttach={(quote, file) => void attach(quote, file)}
+          onDelete={deleteQuote}
+          onSelectWinner={selectWinner}
+        />
       ) : null}
 
       {po ? (
         <ChainDocBlock id="lpr-doc-po">
+          <LprPrintButtons
+            lprRequestId={request.id}
+            documents={[{ kind: 'PO', label: 'Print Purchase Order', fileName: `Purchase-Order-${poNo}.pdf` }]}
+          />
           <EditableCardSection
             title={`Purchase Order ${poNo}`}
             fields={poFields}

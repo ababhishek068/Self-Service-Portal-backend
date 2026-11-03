@@ -340,12 +340,31 @@ export interface LocalPurchaseNextAction {
   commentRequired?: boolean
 }
 
+/** A vendor's price for one RFQ line (BC 1.0.3.594 ABH Vendor Quote Line; 0 until entered). */
+export interface LocalPurchaseVendorQuoteLine {
+  rfqLineNo: number
+  description: string
+  specification: string
+  unitOfMeasure: string
+  quantity: number
+  unitPrice: number
+  lineAmount: number
+  remarks: string
+}
+
 export interface LocalPurchaseVendorQuote {
   rfqNo: string
   lineNo: number
   vendorNo: string
   vendorName: string
+  /** Excluding VAT; with item prices, their total. */
   quotedAmount: number
+  /** BC 1.0.3.594 (LPR-UAT-2 Test Issues-3): the vendor's quotation no., VAT and total incl. VAT. */
+  vendorQuoteNo?: string
+  vatPercent?: number
+  vatAmount?: number
+  totalAmount?: number
+  lines?: LocalPurchaseVendorQuoteLine[]
   leadTimeDays: number
   quoteDate: string
   rank: number
@@ -437,6 +456,10 @@ export async function upsertLocalPurchaseVendorQuote(
     quoteDate?: string
     notes?: string
     lineNo?: number
+    vendorQuoteNo?: string
+    vatPercent?: number
+    /** Item prices; BC then makes the quoted amount their total. */
+    lines?: Array<{ rfqLineNo: number; unitPrice: number }>
   },
 ) {
   requireAuthApiUrl()
@@ -457,6 +480,32 @@ export async function uploadLocalPurchaseQuoteAttachment(
     attachment,
     { timeout: 60000 } as Parameters<typeof authPost>[2],
   )
+}
+
+/** Documents Business Central prints for a Local Purchase (BC 1.0.3.594 / 595). */
+export type LocalPurchaseDocumentKind = 'VENDOR_RFQ' | 'RFQ_ANALYSIS' | 'PO'
+
+export async function fetchLocalPurchasePdf(id: string, kind: LocalPurchaseDocumentKind) {
+  requireAuthApiUrl()
+  const response = await authHttp.get<Blob>(
+    `/api/requests/${encodeURIComponent(id)}/local-purchase/pdf/${kind}`,
+    { responseType: 'blob', timeout: 90000 },
+  )
+  return response.data
+}
+
+export interface LprPaymentOptions {
+  /** False on Business Central before 1.0.3.595: the codes are typed. */
+  available: boolean
+  paymentTerms: Array<{ code: string; description: string }>
+  paymentMethods: Array<{ code: string; description: string }>
+  shipmentMethods: Array<{ code: string; description: string }>
+}
+
+/** Payment terms, payment methods and shipment methods for the Purchase Order card. */
+export async function getLprPaymentOptions() {
+  requireAuthApiUrl()
+  return authGet<LprPaymentOptions>('/api/local-purchase/payment-options')
 }
 
 export interface LocalPurchaseAccess {
