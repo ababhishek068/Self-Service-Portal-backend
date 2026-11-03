@@ -27,7 +27,7 @@ import { formatAmount } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
-import type { CardField } from '@/components/facility/BcCard'
+import { CardSection, type CardField } from '@/components/facility/BcCard'
 import { BcLinesTable } from '@/components/facility/BcLinesTable'
 import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
@@ -223,7 +223,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const [actionComment, setActionComment] = useState('')
   // The approve / send back / reject waiting for its comment (BC opens a comment dialog first).
   const [commentAction, setCommentAction] = useState<LocalPurchaseNextAction | null>(null)
+  // The vendor quote line a Change Winner (FAD) is for, kept while FAD writes the reason.
+  const [commentLinkedNo, setCommentLinkedNo] = useState('')
   const [storeCardOpen, setStoreCardOpen] = useState(false)
+  // Shipping and Payment on the Purchase Order starts closed, as in BC.
+  const [showPoShipping, setShowPoShipping] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
   const access = useLocalPurchaseAccess()
@@ -335,6 +339,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     // Approve, send back and reject open the comment box first; it is the confirmation too.
     if (asksComment(action) && !extra.commented) {
       setActionComment('')
+      setCommentLinkedNo(extra.linkedDocumentNo ?? '')
       setCommentAction(action)
       return
     }
@@ -399,6 +404,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           ? `RFQ ${resultNo || ''} created. Its next step is shown below (BC 1.0.3.588: prepare it, then Submit RFQ to Operations Manager).`
           : action.actionCode === 'SUBMIT_RFQ_OPS'
             ? `RFQ ${action.documentNo} submitted to the Operations Manager for approval. Vendor quotes start after the approval.`
+            : action.actionCode === 'SELECT_WINNER_FAD'
+              ? `Winner changed to ${resultNo || 'the selected vendor'}; your reason is the Vendor Selection Reason. Next: Approve Winner (FAD Final).`
             : action.actionCode === 'APPROVE_WINNER_FAD_FINAL'
               ? `Winner approved on ${action.documentNo}. Business Central created the Purchase Order: Procurement reviews it, then the Operations Manager approves it.`
             : resultNo && resultNo !== action.documentNo
@@ -459,6 +466,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     return saveDoc('DELETE_VENDOR_QUOTE', rfqNo, { lineNo: quote.lineNo }, `Quote from ${name} deleted.`)
   }
 
+  const changeWinnerQuote = quotes.find((quote) => String(quote.lineNo) === commentLinkedNo)
+  const changeWinnerTo = changeWinnerQuote ? changeWinnerQuote.vendorName || changeWinnerQuote.vendorNo : ''
   const selectWinner = (quote: LocalPurchaseVendorQuote) => {
     const action = nextActions.find((row) => row.actionCode === 'SELECT_WINNER_FAD')
     if (action) void run(action, { linkedDocumentNo: String(quote.lineNo) })
@@ -585,81 +594,155 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       }
     : {}
 
-  // Purchase Order totals as on the BC card: BC 1.0.3.595 sends the amount excl. VAT; before, the lines' total.
+  // Purchase Order card as in BC: General, Lines, totals, Invoice Details, Shipping and Payment. BC 1.0.3.596
+  // sends the card fields the chain had no key for by BC field name (cardFields); older BC leaves them blank.
   const paymentOptions = paymentQuery.data?.available ? paymentQuery.data : undefined
+  const poCard = (po?.cardFields ?? {}) as Record<string, unknown>
+  const card = (name: string) => text(poCard[name])
+  const yesNo = (value: unknown) => (value === true || String(value).toLowerCase() === 'true' ? 'Yes' : 'No')
   const poTotals = (() => {
+    const lines = poLines ?? []
+    const subtotal = lines.reduce((sum, line) => sum + Number(line.lineAmount ?? 0), 0)
+    const invDiscount = lines.reduce((sum, line) => sum + Number(line.invDiscountAmount ?? 0), 0)
     const inclVat = Number(po?.amountIncludingVat ?? 0)
-    const exclVat =
-      po?.amountExclVat !== undefined
-        ? Number(po.amountExclVat)
-        : (poLines ?? []).reduce((sum, line) => sum + Number(line.lineAmount ?? 0), 0)
-    return { exclVat, inclVat, vat: Math.max(0, inclVat - exclVat), hasAmounts: inclVat > 0 || exclVat > 0 }
+    // BC 1.0.3.595 sends the amount excl. VAT; before, the lines' total less the invoice discount.
+    const exclVat = po?.amountExclVat !== undefined ? Number(po.amountExclVat) : subtotal - invDiscount
+    return {
+      subtotal,
+      invDiscount,
+      discountPercent: subtotal > 0 ? (invDiscount / subtotal) * 100 : 0,
+      exclVat,
+      vat: Math.max(0, inclVat - exclVat),
+      inclVat,
+    }
   })()
 
-  // Purchase Order card: General, payment / delivery, totals, then the invoice / payment progress.
-  const poFields: CardField[] = po
+  const poGeneral: CardField[] = po
     ? [
         { label: 'No.', value: poNo, emphasis: 'strong' },
-        { label: 'Process Step', value: text(po.processStep), emphasis: 'strong' },
-        { label: 'Full Flow Stage', value: text(po.flowStage) },
         { label: 'Vendor No.', value: text(po.vendorNo) },
         { label: 'Vendor Name', value: text(po.vendorName), emphasis: 'user' },
-        { label: 'Request Description', value: text(po.requestSummary) },
+        { label: 'Contact', value: card('Buy-from Contact') },
         { label: 'Document Date', value: dateValue(bcDate(po.documentDate)) },
         { label: 'Order Date', value: dateValue(bcDate(po.orderDate)) },
-        { label: 'Requested Receipt Date', value: dateValue(bcDate(po.requiredByDate)) },
-        { label: 'Expected Receipt Date', value: dateValue(bcDate(po.expectedReceiptDate)) },
-        { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
-        { label: 'Vendor Shipment No.', value: text(po.vendorShipmentNo) },
-        { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
-        { label: 'Payment Terms', value: optionLabel(paymentOptions?.paymentTerms, po.paymentTermsCode) },
-        { label: 'Payment Method', value: optionLabel(paymentOptions?.paymentMethods, po.paymentMethodCode) },
-        { label: 'Shipment Method', value: optionLabel(paymentOptions?.shipmentMethods, po.shipmentMethodCode) },
+        { label: 'Vendor Invoice No.', value: card('Vendor Invoice No.') },
         { label: 'PO Remarks / Special Terms', value: text(po.poRemarks) },
-        { label: 'Subtotal Excl. VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.exclVat) : '' },
-        { label: 'Total VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.vat) : '' },
-        { label: 'Total Incl. VAT', value: poTotals.hasAmounts ? formatAmount(poTotals.inclVat) : '', emphasis: 'strong' },
-        { label: 'Currency Code', value: poCurrency || 'Blank (local ETB)' },
+        { label: 'Purchase Requisition No.', value: text(po.fromLprNo) },
+        { label: 'RFQ No.', value: card('RFQ No.') },
+        { label: 'Posting Description', value: text(po.requestSummary) },
+        { label: 'Vendor Delivery Note No.', value: text(po.vendorShipmentNo) },
+        { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
+        { label: 'Process Step', value: text(po.processStep), emphasis: 'strong' },
+        { label: 'Full Flow Stage', value: text(po.flowStage) },
+        { label: 'Procurement Source', value: text(po.procurementSource) },
+        { label: 'From RFQ No.', value: card('Request for Quote No.') || rfqNo },
         { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
-        { label: 'FAD Approved PO', value: po.fadPoApproved ? 'Yes' : 'No' },
+        { label: 'FAD Approved PO', value: yesNo(po.fadPoApproved) },
         { label: 'GRN', value: grnNos.join(', ') },
-        { label: 'Invoice', value: invoiceNo },
+        { label: 'Created Invoice No.', value: text(po.createdInvoiceNo) },
+        { label: 'Posted Invoice No.', value: text(po.postedInvoiceNo) },
         { label: 'Invoice Checked By (Operations Manager)', value: text(po.opsInvoiceCheckedBy), emphasis: 'user' },
-        { label: 'Invoice Verified (Finance)', value: po.invoiceVerified ? 'Yes' : 'No' },
-        { label: 'Payment Approved (F&A)', value: po.ceoPayApproved ? 'Yes' : 'No' },
+        { label: 'Invoice 3-Way Verified', value: yesNo(po.invoiceVerified) },
+        { label: 'Payment Approved (F&A)', value: yesNo(po.ceoPayApproved) },
         { label: 'Paid From Bank', value: text(po.paymentBankNo) },
         { label: 'Payment Voucher', value: text(po.paymentDocNo) },
-        { label: 'LPR Closed', value: po.lprClosed ? 'Yes' : 'No' },
+        { label: 'LPR Closed', value: yesNo(po.lprClosed) },
         { label: 'Send Back Comment', value: text(po.sendBackComment) },
+        { label: 'Rejection Reason', value: text(po.rejectionReason) },
+        { label: 'Sent Back By', value: card('ABH Sent Back By'), emphasis: 'user' },
+        { label: 'Sent Back Date', value: dateValue(bcDate(card('ABH Sent Back Date'))) },
+        { label: 'Status', value: text(po.status) },
       ]
     : []
-  const poSpecs: Record<string, EditSpec> = po
+  const poGeneralSpecs: Record<string, EditSpec> = po
     ? {
-        'Request Description': { key: 'requestSummary', kind: 'text', initial: text(po.requestSummary) },
         'Document Date': { key: 'documentDate', kind: 'date', initial: isoDate(po.documentDate) },
         'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
-        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
-        'Expected Receipt Date': { key: 'expectedReceiptDate', kind: 'date', initial: isoDate(po.expectedReceiptDate) },
-        'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
-        'Vendor Shipment No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
-        'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) },
-        // BC 1.0.3.594: payment / delivery details and remarks printed on the Purchase Order.
-        'Payment Terms': optionSpec('paymentTermsCode', paymentOptions?.paymentTerms, po.paymentTermsCode),
-        'Payment Method': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
-        'Shipment Method': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
         'PO Remarks / Special Terms': { key: 'poRemarks', kind: 'longtext', initial: text(po.poRemarks) },
+        'Posting Description': { key: 'requestSummary', kind: 'text', initial: text(po.requestSummary) },
+        'Vendor Delivery Note No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
+        'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
       }
     : {}
+  const poTotalFields: CardField[] = [
+    { label: 'Subtotal Excl. Tax', value: formatAmount(poTotals.subtotal) },
+    { label: 'Inv. Discount Amount', value: formatAmount(poTotals.invDiscount) },
+    { label: 'Invoice Discount %', value: `${poTotals.discountPercent.toFixed(2)}%` },
+    { label: 'Total Excl. Tax', value: formatAmount(poTotals.exclVat) },
+    { label: 'Total Tax', value: formatAmount(poTotals.vat) },
+    { label: 'Total Incl. Tax', value: formatAmount(poTotals.inclVat), emphasis: 'strong' },
+  ]
+  const poInvoiceDetails: CardField[] = po
+    ? [
+        { label: 'Currency Code', value: poCurrency || 'Blank (local ETB)' },
+        { label: 'Posting No. Series', value: card('Posting No. Series') },
+        { label: 'Receiving No. Series', value: card('Receiving No. Series') },
+        { label: 'Expected Receipt Date', value: dateValue(bcDate(po.expectedReceiptDate)) },
+        { label: 'Prices Including Tax', value: yesNo(po.pricesIncludingVat) },
+        { label: 'VAT Bus. Posting Group', value: card('VAT Bus. Posting Group') },
+        { label: 'Payment Terms Code', value: optionLabel(paymentOptions?.paymentTerms, po.paymentTermsCode) },
+        { label: 'Payment Method Code', value: optionLabel(paymentOptions?.paymentMethods, po.paymentMethodCode) },
+        { label: 'Division Code', value: text(po.divisionCode) },
+        { label: 'Department Code', value: text(po.departmentCode) },
+        { label: 'Payment Discount %', value: card('Payment Discount %') },
+        { label: 'Tax Exemption No.', value: card('Tax Exemption No.') },
+        { label: 'Provincial Tax Area Code', value: card('Provincial Tax Area Code') },
+        { label: 'Shipment Method Code', value: optionLabel(paymentOptions?.shipmentMethods, po.shipmentMethodCode) },
+        { label: 'Payment Reference', value: card('Payment Reference') },
+        { label: 'Creditor No.', value: card('Creditor No.') },
+        { label: 'On Hold', value: card('On Hold') },
+        { label: 'Requested Receipt Date', value: dateValue(bcDate(po.requiredByDate)) },
+        { label: 'Promised Receipt Date', value: dateValue(bcDate(card('Promised Receipt Date'))) },
+        { label: 'Due Date', value: dateValue(bcDate(card('Due Date'))) },
+      ]
+    : []
+  const poInvoiceSpecs: Record<string, EditSpec> = po
+    ? {
+        'Expected Receipt Date': { key: 'expectedReceiptDate', kind: 'date', initial: isoDate(po.expectedReceiptDate) },
+        // BC 1.0.3.594: payment / delivery details printed on the Purchase Order.
+        'Payment Terms Code': optionSpec('paymentTermsCode', paymentOptions?.paymentTerms, po.paymentTermsCode),
+        'Payment Method Code': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
+        'Shipment Method Code': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
+        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
+      }
+    : {}
+  const poShipping: CardField[] = po
+    ? [
+        { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
+        { label: 'Ship-to Code', value: card('Ship-to Code') },
+        { label: 'Ship-to Name', value: card('Ship-to Name') },
+        { label: 'Ship-to Address', value: [card('Ship-to Address'), card('Ship-to Address 2')].filter(Boolean).join(', ') },
+        { label: 'Ship-to City', value: card('Ship-to City') },
+        { label: 'Ship-to Post Code', value: card('Ship-to Post Code') },
+        { label: 'Ship-to Country/Region', value: card('Ship-to Country/Region Code') },
+        { label: 'Pay-to Vendor No.', value: card('Pay-to Vendor No.') },
+        { label: 'Pay-to Name', value: card('Pay-to Name') },
+        { label: 'Pay-to Address', value: card('Pay-to Address') },
+        { label: 'Pay-to City', value: card('Pay-to City') },
+        { label: 'Pay-to Contact', value: card('Pay-to Contact') },
+      ]
+    : []
+  const poShippingSpecs: Record<string, EditSpec> = po
+    ? { 'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) } }
+    : {}
+  const savePoHeader = (changed: Record<string, string>) =>
+    saveDoc('UPDATE_PO_HEADER', poNo, changed, `${poNo} saved in Business Central.`)
 
   return (
     <section className="space-y-4 text-sm text-slate-800">
       <LprCommentDialog
         open={commentAction !== null}
-        title={commentAction?.label ?? ''}
+        title={
+          commentAction?.actionCode === 'SELECT_WINNER_FAD' && changeWinnerTo
+            ? `Change Winner (FAD) to ${changeWinnerTo}`
+            : (commentAction?.label ?? '')
+        }
         documentNo={commentAction?.documentNo ?? ''}
         label={
           commentAction?.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
             ? 'Technical recommendation'
+            : commentAction?.actionCode === 'SELECT_WINNER_FAD'
+              ? 'Reason for changing the winner (your recommendation after the technical evaluation)'
             : commentAction && RETURN_ACTIONS.has(commentAction.actionCode)
               ? 'Reason (the Procurement Officer sees it)'
               : 'Comment'
@@ -670,7 +753,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         onChange={setActionComment}
         onCancel={() => setCommentAction(null)}
         onConfirm={() => {
-          if (commentAction) void run(commentAction, { commented: true })
+          if (commentAction) void run(commentAction, { commented: true, linkedDocumentNo: commentLinkedNo })
         }}
       />
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -905,12 +988,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             documents={[{ kind: 'PO', label: 'Print Purchase Order', fileName: `Purchase-Order-${poNo}.pdf` }]}
           />
           <EditableCardSection
-            title={`Purchase Order ${poNo}`}
-            fields={poFields}
-            specs={poSpecs}
+            title={`Purchase Order ${poNo} — General`}
+            fields={poGeneral}
+            specs={poGeneralSpecs}
             canEdit={editing.po}
             showAll
-            onSave={(changed) => saveDoc('UPDATE_PO_HEADER', poNo, changed, `${poNo} saved in Business Central.`)}
+            onSave={savePoHeader}
           />
           {poLines ? (
             <BcLinesTable
@@ -927,6 +1010,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
             />
           ) : null}
+          {poLines?.length ? <CardSection title="Totals" fields={poTotalFields} showAll /> : null}
           {allowed('SET_SERVICE_GL') && poLines ? (
             <PoServiceGlEditor
               poNo={poNo}
@@ -956,6 +1040,32 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               onSave={(payload) => saveDoc('UPDATE_PO_RECEIVE', poNo, payload, `Receive quantities saved on ${poNo}.`)}
             />
           ) : null}
+          <EditableCardSection
+            title="Invoice Details"
+            fields={poInvoiceDetails}
+            specs={poInvoiceSpecs}
+            canEdit={editing.po}
+            showAll
+            onSave={savePoHeader}
+          />
+          <details className="group" open={showPoShipping} onToggle={(event) => setShowPoShipping(event.currentTarget.open)}>
+            <summary className="flex cursor-pointer list-none items-center gap-1 border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">
+              Shipping and Payment
+              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+            </summary>
+            {showPoShipping ? (
+              <div className="pt-2">
+                <EditableCardSection
+                  title="Ship-to and Pay-to"
+                  fields={poShipping}
+                  specs={poShippingSpecs}
+                  canEdit={editing.po}
+                  showAll
+                  onSave={savePoHeader}
+                />
+              </div>
+            ) : null}
+          </details>
         </ChainDocBlock>
       ) : null}
 

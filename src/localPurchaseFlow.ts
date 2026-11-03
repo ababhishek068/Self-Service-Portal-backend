@@ -65,7 +65,8 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   SEND_TO_TECHNICAL: { roles: ['operationsManager'], commentRequired: true },
   SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'], commentRequired: true },
   SUBMIT_TECHNICAL_REVIEW: { roles: ['technical'], commentRequired: true },
-  SELECT_WINNER_FAD: { roles: ['fad'] },
+  /** UAT-2 (BC 1.0.3.596): changing the winner needs FAD's reason, recorded as the Vendor Selection Reason. */
+  SELECT_WINNER_FAD: { roles: ['fad'], commentRequired: true },
   APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentRequired: true },
   CREATE_PO: { roles: PROCUREMENT },
   APPROVE_PO_OPS: { roles: ['operationsManager'], commentRequired: true },
