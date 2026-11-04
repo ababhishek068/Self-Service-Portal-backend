@@ -23,7 +23,6 @@ import { LprApprovalHistory } from '@/components/facility/LprApprovalHistory'
 import { LprCommentDialog } from '@/components/facility/LprCommentDialog'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
-import { formatAmount } from '@/utils/formatters'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
@@ -38,7 +37,7 @@ import { LprPrintButtons } from '@/components/facility/LprPrintButtons'
 import { dateValue } from '@/components/facility/bcCardValues'
 import {
   ORDER_LINE_COLUMNS,
-  RECEIVE_LINE_COLUMNS,
+  PO_LINE_COLUMNS,
   lprLinesMissingFields,
   type PurchaseLine,
 } from '@/components/facility/bcPurchaseLines'
@@ -625,35 +624,26 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     }
   })()
 
+  // General as on the BC Purchase Order card, column by column (7 | 9 | 7).
   const poGeneral: CardField[] = po
     ? [
-        { label: 'No.', value: poNo, emphasis: 'strong' },
-        { label: 'Vendor No.', value: text(po.vendorNo) },
         { label: 'Vendor Name', value: text(po.vendorName), emphasis: 'user' },
         { label: 'Contact', value: card('Buy-from Contact') },
         { label: 'Document Date', value: dateValue(bcDate(po.documentDate)) },
-        { label: 'Order Date', value: dateValue(bcDate(po.orderDate)) },
         { label: 'Vendor Invoice No.', value: card('Vendor Invoice No.') },
         { label: 'PO Remarks / Special Terms', value: text(po.poRemarks) },
         { label: 'Purchase Requisition No.', value: text(po.fromLprNo) },
         { label: 'RFQ No.', value: card('RFQ No.') },
         { label: 'Posting Description', value: text(po.requestSummary) },
         { label: 'Vendor Delivery Note No.', value: text(po.vendorShipmentNo) },
-        { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
-        { label: 'Process Step', value: text(po.processStep), emphasis: 'strong' },
+        { label: 'Process Step (from template)', value: text(po.processStep), emphasis: 'strong' },
         { label: 'Full Flow Stage', value: text(po.flowStage) },
         { label: 'Procurement Source', value: text(po.procurementSource) },
         { label: 'From RFQ No.', value: card('Request for Quote No.') || rfqNo },
-        { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
         { label: 'FAD Approved PO', value: yesNo(po.fadPoApproved) },
-        { label: 'GRN', value: grnNos.join(', ') },
         { label: 'Created Invoice No.', value: text(po.createdInvoiceNo) },
-        { label: 'Posted Invoice No.', value: text(po.postedInvoiceNo) },
-        { label: 'Invoice Checked By (Operations Manager)', value: text(po.opsInvoiceCheckedBy), emphasis: 'user' },
         { label: 'Invoice 3-Way Verified', value: yesNo(po.invoiceVerified) },
-        { label: 'Payment Approved (F&A)', value: yesNo(po.ceoPayApproved) },
-        { label: 'Paid From Bank', value: text(po.paymentBankNo) },
-        { label: 'Payment Voucher', value: text(po.paymentDocNo) },
+        { label: 'CEO Payment Approved', value: yesNo(po.ceoPayApproved) },
         { label: 'LPR Closed', value: yesNo(po.lprClosed) },
         { label: 'Send Back Comment', value: text(po.sendBackComment) },
         { label: 'Rejection Reason', value: text(po.rejectionReason) },
@@ -665,39 +655,62 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const poGeneralSpecs: Record<string, EditSpec> = po
     ? {
         'Document Date': { key: 'documentDate', kind: 'date', initial: isoDate(po.documentDate) },
-        'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
         'PO Remarks / Special Terms': { key: 'poRemarks', kind: 'longtext', initial: text(po.poRemarks) },
         'Posting Description': { key: 'requestSummary', kind: 'text', initial: text(po.requestSummary) },
         'Vendor Delivery Note No.': { key: 'vendorShipmentNo', kind: 'text', initial: text(po.vendorShipmentNo) },
-        'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
         // BC 1.0.3.597: the other card fields are saved by their BC field name.
         Contact: cardSpec('Buy-from Contact', 'text'),
         'Vendor Invoice No.': cardSpec('Vendor Invoice No.', 'text'),
       }
     : {}
+  // The fields the portal shows besides the BC card: the order and who did each step of the local purchase.
+  const poProgress: CardField[] = po
+    ? [
+        { label: 'No.', value: poNo, emphasis: 'strong' },
+        { label: 'Vendor No.', value: text(po.vendorNo) },
+        { label: 'Order Date', value: dateValue(bcDate(po.orderDate)) },
+        { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
+        { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
+        { label: 'GRN', value: grnNos.join(', ') },
+        { label: 'Posted Invoice No.', value: text(po.postedInvoiceNo) },
+        { label: 'Invoice Checked By (Operations Manager)', value: text(po.opsInvoiceCheckedBy), emphasis: 'user' },
+        { label: 'Paid From Bank', value: text(po.paymentBankNo) },
+        { label: 'Payment Voucher', value: text(po.paymentDocNo) },
+      ]
+    : []
+  const poProgressSpecs: Record<string, EditSpec> = po
+    ? {
+        'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
+        'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
+      }
+    : {}
+  // Totals under the lines as on the BC subform (2 | 2 | 2), amounts in the local currency.
+  const amountText = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const totalsCurrency = poCurrency || 'ETB'
   const poTotalFields: CardField[] = [
-    { label: 'Subtotal Excl. Tax', value: formatAmount(poTotals.subtotal) },
-    { label: 'Inv. Discount Amount', value: formatAmount(poTotals.invDiscount) },
-    { label: 'Invoice Discount %', value: `${poTotals.discountPercent.toFixed(2)}%` },
-    { label: 'Total Excl. Tax', value: formatAmount(poTotals.exclVat) },
-    { label: 'Total Tax', value: formatAmount(poTotals.vat) },
-    { label: 'Total Incl. Tax', value: formatAmount(poTotals.inclVat), emphasis: 'strong' },
+    { label: `Subtotal Excl. Tax (${totalsCurrency})`, value: amountText(poTotals.subtotal) },
+    { label: `Inv. Discount Amount (${totalsCurrency})`, value: amountText(poTotals.invDiscount) },
+    { label: 'Invoice Discount %', value: String(Math.round(poTotals.discountPercent * 100) / 100) },
+    { label: `Total Excl. Tax (${totalsCurrency})`, value: amountText(poTotals.exclVat) },
+    { label: `Total Tax (${totalsCurrency})`, value: amountText(poTotals.vat) },
+    { label: `Total Incl. Tax (${totalsCurrency})`, value: amountText(poTotals.inclVat), emphasis: 'strong' },
   ]
+  // Invoice Details as on the BC card (6 | 7 | 7); Payment Method Code and Due Date close their columns.
   const poInvoiceDetails: CardField[] = po
     ? [
-        { label: 'Currency Code', value: poCurrency || 'Blank (local ETB)' },
+        { label: 'Currency Code', value: poCurrency },
         { label: 'Posting No. Series', value: card('Posting No. Series') },
         { label: 'Receiving No. Series', value: card('Receiving No. Series') },
         { label: 'Expected Receipt Date', value: dateValue(bcDate(po.expectedReceiptDate)) },
         { label: 'Prices Including Tax', value: yesNo(po.pricesIncludingVat) },
         { label: 'VAT Bus. Posting Group', value: card('VAT Bus. Posting Group') },
         { label: 'Payment Terms Code', value: optionLabel(paymentOptions?.paymentTerms, po.paymentTermsCode) },
-        { label: 'Payment Method Code', value: optionLabel(paymentOptions?.paymentMethods, po.paymentMethodCode) },
         { label: 'Division Code', value: text(po.divisionCode) },
         { label: 'Department Code', value: text(po.departmentCode) },
         { label: 'Payment Discount %', value: card('Payment Discount %') },
         { label: 'Tax Exemption No.', value: card('Tax Exemption No.') },
         { label: 'Provincial Tax Area Code', value: card('Provincial Tax Area Code') },
+        { label: 'Payment Method Code', value: optionLabel(paymentOptions?.paymentMethods, po.paymentMethodCode) },
         { label: 'Shipment Method Code', value: optionLabel(paymentOptions?.shipmentMethods, po.shipmentMethodCode) },
         { label: 'Payment Reference', value: card('Payment Reference') },
         { label: 'Creditor No.', value: card('Creditor No.') },
@@ -710,20 +723,20 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const poInvoiceSpecs: Record<string, EditSpec> = po
     ? {
         'Expected Receipt Date': { key: 'expectedReceiptDate', kind: 'date', initial: isoDate(po.expectedReceiptDate) },
+        'VAT Bus. Posting Group': cardSpec('VAT Bus. Posting Group', 'code'),
         // BC 1.0.3.594: payment / delivery details printed on the Purchase Order.
         'Payment Terms Code': optionSpec('paymentTermsCode', paymentOptions?.paymentTerms, po.paymentTermsCode),
-        'Payment Method Code': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
-        'Shipment Method Code': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
-        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
-        'VAT Bus. Posting Group': cardSpec('VAT Bus. Posting Group', 'code'),
         'Division Code': { key: 'divisionCode', kind: 'code', initial: text(po.divisionCode) },
         'Department Code': { key: 'departmentCode', kind: 'code', initial: text(po.departmentCode) },
         'Payment Discount %': cardSpec('Payment Discount %', 'number'),
         'Tax Exemption No.': cardSpec('Tax Exemption No.', 'text'),
         'Provincial Tax Area Code': cardSpec('Provincial Tax Area Code', 'code'),
+        'Payment Method Code': optionSpec('paymentMethodCode', paymentOptions?.paymentMethods, po.paymentMethodCode),
+        'Shipment Method Code': optionSpec('shipmentMethodCode', paymentOptions?.shipmentMethods, po.shipmentMethodCode),
         'Payment Reference': cardSpec('Payment Reference', 'text'),
         'Creditor No.': cardSpec('Creditor No.', 'text'),
         'On Hold': cardSpec('On Hold', 'code'),
+        'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
         'Promised Receipt Date': cardSpec('Promised Receipt Date', 'date'),
         'Due Date': cardSpec('Due Date', 'date'),
       }
@@ -1014,34 +1027,44 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
 
       {po ? (
         <ChainDocBlock id="lpr-doc-po">
-          <LprPrintButtons
-            lprRequestId={request.id}
-            documents={[{ kind: 'PO', label: 'Print Purchase Order', fileName: `Purchase-Order-${poNo}.pdf` }]}
-          />
+          {/* The BC Purchase Order card: title, General, Lines, totals, Invoice Details, Shipping and Payment. */}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs text-slate-500">Purchase Order</p>
+              <p className="text-xl font-semibold tracking-tight text-slate-900">
+                {[poNo, text(po.vendorName)].filter(Boolean).join(' · ')}
+              </p>
+            </div>
+            <LprPrintButtons
+              lprRequestId={request.id}
+              documents={[{ kind: 'PO', label: 'Print Purchase Order', fileName: `Purchase-Order-${poNo}.pdf` }]}
+            />
+          </div>
           <EditableCardSection
-            title={`Purchase Order ${poNo} — General`}
+            title="General"
             fields={poGeneral}
             specs={poGeneralSpecs}
             canEdit={editing.po}
             showAll
+            columns={[7, 9, 7]}
             onSave={savePoHeader}
           />
           {poLines ? (
             <BcLinesTable
               title="Lines"
               lines={poLines}
-              columns={[...ORDER_LINE_COLUMNS, ...RECEIVE_LINE_COLUMNS]}
+              columns={PO_LINE_COLUMNS}
               docNo={poNo}
               editable={editing.po}
               busy={busy}
-              totalHeader="Line Amount"
+              showTotal={false}
               onSave={(isNew, payload) =>
                 saveDoc(isNew ? 'ADD_PO_LINE' : 'UPDATE_PO_LINE', poNo, payload, isNew ? `Line added to ${poNo}.` : `Line saved on ${poNo}.`)
               }
               onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
             />
           ) : null}
-          {poLines?.length ? <CardSection title="Totals" fields={poTotalFields} showAll /> : null}
+          {poLines?.length ? <CardSection title="Totals" fields={poTotalFields} showAll columns={[2, 2, 2]} /> : null}
           {/* The Finance Checker may also correct the service G/L at the Finance review (BC 1.0.3.598). */}
           {(allowed('SET_SERVICE_GL') || (editing.po && isFinanceChecker)) && poLines ? (
             <PoServiceGlEditor
@@ -1078,12 +1101,16 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             specs={poInvoiceSpecs}
             canEdit={editing.po}
             showAll
+            columns={[6, 7, 7]}
             onSave={savePoHeader}
           />
           <details className="group" open={showPoShipping} onToggle={(event) => setShowPoShipping(event.currentTarget.open)}>
             <summary className="flex cursor-pointer list-none items-center gap-1 border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">
               Shipping and Payment
               <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+              {!showPoShipping && text(po.locationCode) ? (
+                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">{text(po.locationCode)}</span>
+              ) : null}
             </summary>
             {showPoShipping ? (
               <div className="pt-2">
@@ -1098,6 +1125,14 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               </div>
             ) : null}
           </details>
+          <EditableCardSection
+            title="Local Purchase progress"
+            fields={poProgress}
+            specs={poProgressSpecs}
+            canEdit={editing.po}
+            showAll
+            onSave={savePoHeader}
+          />
         </ChainDocBlock>
       ) : null}
 

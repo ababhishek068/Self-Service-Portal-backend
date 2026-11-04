@@ -55,6 +55,7 @@ export function CardSection({
   fields,
   showAll,
   action,
+  columns,
 }: {
   title: string
   intro?: string
@@ -62,8 +63,22 @@ export function CardSection({
   showAll: boolean
   /** Buttons at the right of the section title (e.g. Edit / Save). */
   action?: ReactNode
+  /**
+   * Fields per column, top to bottom, as the BC card lays them out (e.g. [7, 9, 7]); without it the
+   * fields fill the columns row by row.
+   */
+  columns?: number[]
 }) {
   const visible = showAll ? fields : fields.filter((field) => field.key)
+  const row = (field: CardField) => (
+    <CardRow key={field.label} label={field.label} value={field.value} emphasis={field.emphasis} editor={field.editor} />
+  )
+  const stacks = columns?.length
+    ? columns.map((size, index) => {
+        const start = columns.slice(0, index).reduce((sum, count) => sum + count, 0)
+        return visible.slice(start, index === columns.length - 1 ? undefined : start + size)
+      })
+    : null
   return (
     <section>
       <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-slate-700/80 pb-1.5">
@@ -73,15 +88,7 @@ export function CardSection({
       {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
       {/* Columns of at least 24rem, never more than 3: 1 on phones, 2 on laptops, 3 on wider screens. */}
       <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(24rem,calc((100%_-_6rem)/3))),1fr))] gap-x-12">
-        {visible.map((field) => (
-          <CardRow
-            key={field.label}
-            label={field.label}
-            value={field.value}
-            emphasis={field.emphasis}
-            editor={field.editor}
-          />
-        ))}
+        {stacks ? stacks.map((stack, index) => <div key={index}>{stack.map(row)}</div>) : visible.map(row)}
       </div>
     </section>
   )

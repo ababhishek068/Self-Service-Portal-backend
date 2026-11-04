@@ -189,3 +189,57 @@ export function lineValues(columns: LineColumn[], line: PurchaseLine | null) {
       .map((column) => [column.key, line ? column.value(line) : column.key === 'type' ? '0' : '']),
   )
 }
+
+/** A Purchase Order subform value BC 1.0.3.599 sends by its BC field name (cardFields of the line). */
+function lineCard(line: PurchaseLine, name: string) {
+  const fields = line.cardFields as Record<string, unknown> | undefined
+  return text(fields?.[name])
+}
+
+/** Amounts as on the BC subform (12,400.00). */
+function decimal(value: unknown) {
+  const number = Number(value ?? 0)
+  return number ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
+}
+
+const ORDER_COLUMN_BY_KEY = new Map(ORDER_LINE_COLUMNS.map((column) => [column.key, column]))
+function orderColumn(key: string, header?: string): LineColumn {
+  const column = ORDER_COLUMN_BY_KEY.get(key)!
+  return header ? { ...column, header } : column
+}
+function readOnlyColumn(header: string, key: string, value: (line: PurchaseLine) => string, numeric = false): LineColumn {
+  return { header, key, kind: numeric ? 'number' : 'text', numeric, readOnly: true, value }
+}
+
+/**
+ * Purchase Order lines in the BC subform's order and captions (LPR-UAT-2, 4 Nov: the PO as in BC), with the
+ * G/L account Finance reviews and the Required Date after them. Editing keys are those of ORDER_LINE_COLUMNS.
+ */
+export const PO_LINE_COLUMNS: LineColumn[] = [
+  orderColumn('type'),
+  orderColumn('no', 'No.'),
+  readOnlyColumn('GST/HST', 'gstHst', (line) => lineCard(line, 'GST/HST')),
+  orderColumn('description', 'Description'),
+  orderColumn('requestType'),
+  orderColumn('purpose'),
+  orderColumn('specification'),
+  orderColumn('brandModel', 'Brand / Model'),
+  orderColumn('remarks'),
+  orderColumn('locationCode'),
+  orderColumn('quantity'),
+  orderColumn('unitOfMeasureCode', 'Unit of Measure Code'),
+  {
+    ...orderColumn('directUnitCost', 'Direct Unit Cost Excl. Tax'),
+    display: (line) => decimal(line.directUnitCost ?? line.estimatedUnitPrice),
+  },
+  readOnlyColumn('Line Amount Excl. Tax', 'lineAmount', (line) => decimal(line.lineAmount), true),
+  readOnlyColumn('Item G/L Budget Account', 'itemGlBudgetAccount', (line) => lineCard(line, 'Item G/L Budget Account')),
+  orderColumn('glAccountNo'),
+  orderColumn('glAccountName'),
+  orderColumn('vatProdPostingGroup'),
+  ...RECEIVE_LINE_COLUMNS,
+  readOnlyColumn('Qty. to Invoice', 'qtyToInvoice', (line) => quantity(lineCard(line, 'Qty. to Invoice')), true),
+  readOnlyColumn('Quantity Invoiced', 'quantityInvoiced', (line) => quantity(lineCard(line, 'Quantity Invoiced')), true),
+  readOnlyColumn('Qty. to Assign', 'qtyToAssign', (line) => quantity(lineCard(line, 'Qty. to Assign')), true),
+  orderColumn('requiredDate'),
+]

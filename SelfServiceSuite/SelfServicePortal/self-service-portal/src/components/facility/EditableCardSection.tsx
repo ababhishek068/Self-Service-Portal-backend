@@ -18,6 +18,7 @@ export function EditableCardSection({
   specs,
   canEdit,
   showAll,
+  columns,
   onSave,
 }: {
   title: string
@@ -26,6 +27,8 @@ export function EditableCardSection({
   specs: Record<string, EditSpec>
   canEdit: boolean
   showAll: boolean
+  /** Fields per column, as the BC card lays them out (CardSection). */
+  columns?: number[]
   onSave: (changed: Record<string, string>) => Promise<boolean>
 }) {
   // Values being edited: payload key → value (null when not editing).
@@ -93,5 +96,5 @@ export function EditableCardSection({
     </Button>
   ) : null
 
-  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} />
+  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} columns={columns} />
 }
