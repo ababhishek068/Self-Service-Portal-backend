@@ -19,6 +19,9 @@ export function EditableCardSection({
   canEdit,
   showAll,
   columns,
+  collapsible,
+  defaultOpen,
+  summary,
   onSave,
 }: {
   title: string
@@ -29,6 +32,10 @@ export function EditableCardSection({
   showAll: boolean
   /** Fields per column, as the BC card lays them out (CardSection). */
   columns?: number[]
+  /** A BC FastTab that opens and closes, with `summary` on its bar while closed (CardSection). */
+  collapsible?: boolean
+  defaultOpen?: boolean
+  summary?: string[]
   onSave: (changed: Record<string, string>) => Promise<boolean>
 }) {
   // Values being edited: payload key → value (null when not editing).
@@ -96,5 +103,5 @@ export function EditableCardSection({
     </Button>
   ) : null
 
-  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} columns={columns} />
+  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} columns={columns} collapsible={collapsible} defaultOpen={defaultOpen} forceOpen={editing} summary={summary} />
 }

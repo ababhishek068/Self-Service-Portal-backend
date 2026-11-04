@@ -225,8 +225,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   // The vendor quote line a Change Winner (FAD) is for, kept while FAD writes the reason.
   const [commentLinkedNo, setCommentLinkedNo] = useState('')
   const [storeCardOpen, setStoreCardOpen] = useState(false)
-  // Shipping and Payment on the Purchase Order starts closed, as in BC.
-  const [showPoShipping, setShowPoShipping] = useState(false)
   const [vendorInvoiceNo, setVendorInvoiceNo] = useState('')
   const [bankAccountNo, setBankAccountNo] = useState('')
   const access = useLocalPurchaseAccess()
@@ -741,6 +739,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'Due Date': cardSpec('Due Date', 'date'),
       }
     : {}
+  // Shipping and Payment as on the BC card: ship-to (12) | pay-to (10).
   const poShipping: CardField[] = po
     ? [
         { label: 'Location Code', value: text(po.locationCode) || text(po.destinationStore) },
@@ -749,12 +748,21 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'Ship-to Address', value: card('Ship-to Address') },
         { label: 'Ship-to Address 2', value: card('Ship-to Address 2') },
         { label: 'Ship-to City', value: card('Ship-to City') },
+        { label: 'Ship-to County', value: card('Ship-to County') },
         { label: 'Ship-to Post Code', value: card('Ship-to Post Code') },
         { label: 'Ship-to Country/Region', value: card('Ship-to Country/Region Code') },
+        { label: 'Ship-to Phone No.', value: card('Ship-to Phone No.') },
+        { label: 'Inbound Whse. Handling Time', value: card('Inbound Whse. Handling Time') },
+        { label: 'Lead Time Calculation', value: card('Lead Time Calculation') },
         { label: 'Pay-to Vendor No.', value: card('Pay-to Vendor No.') },
         { label: 'Pay-to Name', value: card('Pay-to Name') },
         { label: 'Pay-to Address', value: card('Pay-to Address') },
+        { label: 'Pay-to Address 2', value: card('Pay-to Address 2') },
         { label: 'Pay-to City', value: card('Pay-to City') },
+        { label: 'Pay-to County', value: card('Pay-to County') },
+        { label: 'Pay-to Post Code', value: card('Pay-to Post Code') },
+        { label: 'Pay-to Country/Region', value: card('Pay-to Country/Region Code') },
+        { label: 'Pay-to Contact No.', value: card('Pay-to Contact No.') },
         { label: 'Pay-to Contact', value: card('Pay-to Contact') },
       ]
     : []
@@ -765,10 +773,47 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'Ship-to Address': cardSpec('Ship-to Address', 'text'),
         'Ship-to Address 2': cardSpec('Ship-to Address 2', 'text'),
         'Ship-to City': cardSpec('Ship-to City', 'text'),
+        'Ship-to County': cardSpec('Ship-to County', 'text'),
         'Ship-to Post Code': cardSpec('Ship-to Post Code', 'code'),
         'Ship-to Country/Region': cardSpec('Ship-to Country/Region Code', 'code'),
       }
     : {}
+  // Foreign Trade, Prepayment and Electronic Invoice FastTabs of the BC card (BC 1.0.3.600).
+  const poForeignTrade: CardField[] = [
+    { label: 'Transaction Specification', value: card('Transaction Specification') },
+    { label: 'Transaction Type', value: card('Transaction Type') },
+    { label: 'Transport Method', value: card('Transport Method') },
+    { label: 'Entry Point', value: card('Entry Point') },
+    { label: 'Area', value: card('Area') },
+  ]
+  const poForeignTradeSpecs: Record<string, EditSpec> = Object.fromEntries(
+    poForeignTrade.map((field) => [field.label, cardSpec(field.label, 'code')]),
+  )
+  const prepaymentPercent = card('Prepayment %') || '0'
+  const poPrepayment: CardField[] = [
+    { label: 'Prepayment %', value: prepaymentPercent },
+    { label: 'Compress Prepayment', value: yesNo(card('Compress Prepayment')) },
+    { label: 'Prepmt. Payment Terms Code', value: optionLabel(paymentOptions?.paymentTerms, card('Prepmt. Payment Terms Code')) },
+    { label: 'Prepayment Due Date', value: dateValue(bcDate(card('Prepayment Due Date'))) },
+    { label: 'Prepmt. Payment Discount %', value: card('Prepmt. Payment Discount %') },
+    { label: 'Prepmt. Pmt. Discount Date', value: dateValue(bcDate(card('Prepmt. Pmt. Discount Date'))) },
+    { label: 'Vendor Cr. Memo No.', value: card('Vendor Cr. Memo No.') },
+  ]
+  const poPrepaymentSpecs: Record<string, EditSpec> = {
+    'Prepayment %': cardSpec('Prepayment %', 'number'),
+    'Compress Prepayment': { key: 'Compress Prepayment', kind: 'boolean', initial: card('Compress Prepayment').toLowerCase() === 'true' ? 'true' : 'false' },
+    'Prepmt. Payment Terms Code': optionSpec('Prepmt. Payment Terms Code', paymentOptions?.paymentTerms, card('Prepmt. Payment Terms Code')),
+    'Prepayment Due Date': cardSpec('Prepayment Due Date', 'date'),
+    'Prepmt. Payment Discount %': cardSpec('Prepmt. Payment Discount %', 'number'),
+    'Prepmt. Pmt. Discount Date': cardSpec('Prepmt. Pmt. Discount Date', 'date'),
+    'Vendor Cr. Memo No.': cardSpec('Vendor Cr. Memo No.', 'text'),
+  }
+  const poElectronicInvoice: CardField[] = [
+    { label: 'Fiscal Invoice Number PAC', value: card('Fiscal Invoice Number PAC') },
+  ]
+  const poElectronicInvoiceSpecs: Record<string, EditSpec> = {
+    'Fiscal Invoice Number PAC': cardSpec('Fiscal Invoice Number PAC', 'text'),
+  }
   const savePoHeader = (changed: Record<string, string>) =>
     saveDoc('UPDATE_PO_HEADER', poNo, changed, `${poNo} saved in Business Central.`)
 
@@ -1047,6 +1092,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             canEdit={editing.po}
             showAll
             columns={[7, 9, 7]}
+            collapsible
+            summary={[text(po.vendorName), dateValue(bcDate(po.documentDate)), text(po.status)]}
             onSave={savePoHeader}
           />
           {poLines ? (
@@ -1102,35 +1149,61 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             canEdit={editing.po}
             showAll
             columns={[6, 7, 7]}
+            collapsible
             onSave={savePoHeader}
           />
-          <details className="group" open={showPoShipping} onToggle={(event) => setShowPoShipping(event.currentTarget.open)}>
-            <summary className="flex cursor-pointer list-none items-center gap-1 border-b-2 border-slate-700/80 pb-1.5 text-base font-semibold text-slate-900">
-              Shipping and Payment
-              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
-              {!showPoShipping && text(po.locationCode) ? (
-                <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600">{text(po.locationCode)}</span>
-              ) : null}
-            </summary>
-            {showPoShipping ? (
-              <div className="pt-2">
-                <EditableCardSection
-                  title="Ship-to and Pay-to"
-                  fields={poShipping}
-                  specs={poShippingSpecs}
-                  canEdit={editing.po}
-                  showAll
-                  onSave={savePoHeader}
-                />
-              </div>
-            ) : null}
-          </details>
+          <EditableCardSection
+            title="Shipping and Payment"
+            fields={poShipping}
+            specs={poShippingSpecs}
+            canEdit={editing.po}
+            showAll
+            columns={[12, 10]}
+            collapsible
+            defaultOpen={false}
+            summary={[text(po.locationCode)]}
+            onSave={savePoHeader}
+          />
+          <EditableCardSection
+            title="Foreign Trade"
+            fields={poForeignTrade}
+            specs={poForeignTradeSpecs}
+            canEdit={editing.po}
+            showAll
+            collapsible
+            defaultOpen={false}
+            onSave={savePoHeader}
+          />
+          <EditableCardSection
+            title="Prepayment"
+            fields={poPrepayment}
+            specs={poPrepaymentSpecs}
+            canEdit={editing.po}
+            showAll
+            collapsible
+            defaultOpen={false}
+            summary={[prepaymentPercent, dateValue(bcDate(card('Prepayment Due Date')))]}
+            onSave={savePoHeader}
+          />
+          <EditableCardSection
+            title="Electronic Invoice"
+            fields={poElectronicInvoice}
+            specs={poElectronicInvoiceSpecs}
+            canEdit={editing.po}
+            showAll
+            collapsible
+            defaultOpen={false}
+            onSave={savePoHeader}
+          />
           <EditableCardSection
             title="Local Purchase progress"
             fields={poProgress}
             specs={poProgressSpecs}
             canEdit={editing.po}
             showAll
+            collapsible
+            defaultOpen={false}
+            summary={[text(po.opsApprovedBy), grnNos.join(', '), text(po.postedInvoiceNo || po.createdInvoiceNo)]}
             onSave={savePoHeader}
           />
         </ChainDocBlock>

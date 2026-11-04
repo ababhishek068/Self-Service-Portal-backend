@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { ChevronRight } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 /** `key` fields show by default; the rest open with Show all details. `editor` replaces the value box while editing. */
 export type CardField = {
@@ -56,6 +58,10 @@ export function CardSection({
   showAll,
   action,
   columns,
+  collapsible,
+  defaultOpen = true,
+  forceOpen,
+  summary,
 }: {
   title: string
   intro?: string
@@ -63,12 +69,21 @@ export function CardSection({
   showAll: boolean
   /** Buttons at the right of the section title (e.g. Edit / Save). */
   action?: ReactNode
+  /** A BC FastTab: the title opens and closes it; `summary` values show on the bar while it is closed. */
+  collapsible?: boolean
+  defaultOpen?: boolean
+  /** Kept open (e.g. while it is being edited). */
+  forceOpen?: boolean
+  summary?: string[]
   /**
    * Fields per column, top to bottom, as the BC card lays them out (e.g. [7, 9, 7]); without it the
    * fields fill the columns row by row.
    */
   columns?: number[]
 }) {
+  const [opened, setOpened] = useState(defaultOpen)
+  const open = !collapsible || opened || Boolean(forceOpen)
+  const chips = (summary ?? []).map((value) => value.trim()).filter(Boolean)
   const visible = showAll ? fields : fields.filter((field) => field.key)
   const row = (field: CardField) => (
     <CardRow key={field.label} label={field.label} value={field.value} emphasis={field.emphasis} editor={field.editor} />
@@ -82,14 +97,41 @@ export function CardSection({
   return (
     <section>
       <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-slate-700/80 pb-1.5">
-        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-        {action}
+        {collapsible ? (
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left text-base font-semibold text-slate-900 hover:text-[var(--portal-navy)]"
+            aria-expanded={open}
+            onClick={() => setOpened((current) => !current)}
+          >
+            {title}
+            <ChevronRight className={cn('h-4 w-4 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          </button>
+        ) : (
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {!open && chips.length ? (
+            <span className="flex flex-wrap overflow-hidden rounded border border-slate-200 text-xs text-slate-700">
+              {chips.map((chip, index) => (
+                <span key={index} className={cn('bg-slate-100 px-2.5 py-1', index > 0 && 'border-l border-slate-200')}>
+                  {chip}
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {action}
+        </div>
       </div>
-      {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
-      {/* Columns of at least 24rem, never more than 3: 1 on phones, 2 on laptops, 3 on wider screens. */}
-      <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(24rem,calc((100%_-_6rem)/3))),1fr))] gap-x-12">
-        {stacks ? stacks.map((stack, index) => <div key={index}>{stack.map(row)}</div>) : visible.map(row)}
-      </div>
+      {open ? (
+        <>
+          {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
+          {/* Columns of at least 24rem, never more than 3: 1 on phones, 2 on laptops, 3 on wider screens. */}
+          <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(24rem,calc((100%_-_6rem)/3))),1fr))] gap-x-12">
+            {stacks ? stacks.map((stack, index) => <div key={index}>{stack.map(row)}</div>) : visible.map(row)}
+          </div>
+        </>
+      ) : null}
     </section>
   )
 }
