@@ -211,35 +211,69 @@ function readOnlyColumn(header: string, key: string, value: (line: PurchaseLine)
   return { header, key, kind: numeric ? 'number' : 'text', numeric, readOnly: true, value }
 }
 
+/** Edit a column the RFQ shows read-only (the request carried from the LPR): the PO line takes it (BC 1.0.3.602). */
+function editable(column: LineColumn): LineColumn {
+  return { ...column, readOnly: false, wrap: false }
+}
+
+/** The choices of a BC option field sent with the lines (cardFields "<name>|options", BC 1.0.3.602). */
+function lineOptions(lines: PurchaseLine[], name: string) {
+  const captions = lines.map((line) => lineCard(line, `${name}|options`)).find(Boolean)
+  return captions ? captions.split(',').map((caption) => ({ value: caption.trim(), label: caption.trim() || ' ' })) : undefined
+}
+
 /**
  * Purchase Order lines in the BC subform's order and captions (LPR-UAT-2, 4 Nov: the PO as in BC), with the
- * G/L account Finance reviews and the Required Date after them. Editing keys are those of ORDER_LINE_COLUMNS.
+ * G/L account Finance reviews and the Required Date after them. Every field BC lets you edit on the line is
+ * editable (BC 1.0.3.602); the received / invoiced quantities belong to the receive and invoice steps, and the
+ * service G/L account to its own editor. Rows stay one line high as in BC; hover shows the full text.
  */
-export const PO_LINE_COLUMNS: LineColumn[] = [
-  orderColumn('type'),
-  orderColumn('no', 'No.'),
-  readOnlyColumn('GST/HST', 'gstHst', (line) => lineCard(line, 'GST/HST')),
-  orderColumn('description', 'Description'),
-  orderColumn('requestType'),
-  orderColumn('purpose'),
-  orderColumn('specification'),
-  orderColumn('brandModel', 'Brand / Model'),
-  orderColumn('remarks'),
-  orderColumn('locationCode'),
-  orderColumn('quantity'),
-  orderColumn('unitOfMeasureCode', 'Unit of Measure Code'),
-  {
-    ...orderColumn('directUnitCost', 'Direct Unit Cost Excl. Tax'),
-    display: (line) => decimal(line.directUnitCost ?? line.estimatedUnitPrice),
-  },
-  readOnlyColumn('Line Amount Excl. Tax', 'lineAmount', (line) => decimal(line.lineAmount), true),
-  readOnlyColumn('Item G/L Budget Account', 'itemGlBudgetAccount', (line) => lineCard(line, 'Item G/L Budget Account')),
-  orderColumn('glAccountNo'),
-  orderColumn('glAccountName'),
-  orderColumn('vatProdPostingGroup'),
-  ...RECEIVE_LINE_COLUMNS,
-  readOnlyColumn('Qty. to Invoice', 'qtyToInvoice', (line) => quantity(lineCard(line, 'Qty. to Invoice')), true),
-  readOnlyColumn('Quantity Invoiced', 'quantityInvoiced', (line) => quantity(lineCard(line, 'Quantity Invoiced')), true),
-  readOnlyColumn('Qty. to Assign', 'qtyToAssign', (line) => quantity(lineCard(line, 'Qty. to Assign')), true),
-  orderColumn('requiredDate'),
-]
+export function poLineColumns(lines: PurchaseLine[]): LineColumn[] {
+  const gstOptions = lineOptions(lines, 'GST/HST')
+  return [
+    orderColumn('type'),
+    orderColumn('no', 'No.'),
+    {
+      header: 'GST/HST',
+      key: 'GST/HST',
+      kind: gstOptions ? 'select' : 'text',
+      options: gstOptions,
+      value: (line) => lineCard(line, 'GST/HST'),
+    },
+    orderColumn('description', 'Description'),
+    editable(orderColumn('requestType')),
+    editable(orderColumn('purpose')),
+    { ...orderColumn('specification'), wrap: false },
+    orderColumn('brandModel', 'Brand / Model'),
+    editable(orderColumn('remarks')),
+    orderColumn('locationCode'),
+    orderColumn('quantity'),
+    orderColumn('unitOfMeasureCode', 'Unit of Measure Code'),
+    {
+      ...orderColumn('directUnitCost', 'Direct Unit Cost Excl. Tax'),
+      display: (line) => decimal(line.directUnitCost ?? line.estimatedUnitPrice),
+    },
+    {
+      header: 'Line Amount Excl. Tax',
+      key: 'lineAmount',
+      kind: 'number',
+      numeric: true,
+      value: (line) => quantity(line.lineAmount),
+      display: (line) => decimal(line.lineAmount),
+    },
+    {
+      header: 'Item G/L Budget Account',
+      key: 'Item G/L Budget Account',
+      kind: 'code',
+      value: (line) => lineCard(line, 'Item G/L Budget Account'),
+    },
+    orderColumn('glAccountNo'),
+    orderColumn('glAccountName'),
+    orderColumn('vatProdPostingGroup'),
+    ...RECEIVE_LINE_COLUMNS,
+    readOnlyColumn('Qty. to Invoice', 'qtyToInvoice', (line) => quantity(lineCard(line, 'Qty. to Invoice')), true),
+    readOnlyColumn('Quantity Invoiced', 'quantityInvoiced', (line) => quantity(lineCard(line, 'Quantity Invoiced')), true),
+    readOnlyColumn('Qty. to Assign', 'qtyToAssign', (line) => quantity(lineCard(line, 'Qty. to Assign')), true),
+    orderColumn('requiredDate'),
+  ]
+}

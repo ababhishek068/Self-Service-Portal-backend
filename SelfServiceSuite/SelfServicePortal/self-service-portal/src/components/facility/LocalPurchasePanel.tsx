@@ -26,7 +26,7 @@ import type { PortalRequest } from '@/types/erp.types'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
 import { StatusNotice } from '@/components/feedback/StatusNotice'
 import { StoreRequisitionCardDialog } from '@/components/facility/StoreRequisitionCardDialog'
-import { CardSection, type CardField } from '@/components/facility/BcCard'
+import type { CardField } from '@/components/facility/BcCard'
 import { BcLinesTable } from '@/components/facility/BcLinesTable'
 import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
@@ -37,7 +37,7 @@ import { LprPrintButtons } from '@/components/facility/LprPrintButtons'
 import { dateValue } from '@/components/facility/bcCardValues'
 import {
   ORDER_LINE_COLUMNS,
-  PO_LINE_COLUMNS,
+  poLineColumns,
   lprLinesMissingFields,
   type PurchaseLine,
 } from '@/components/facility/bcPurchaseLines'
@@ -693,6 +693,19 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     { label: `Total Tax (${totalsCurrency})`, value: amountText(poTotals.vat) },
     { label: `Total Incl. Tax (${totalsCurrency})`, value: amountText(poTotals.inclVat), emphasis: 'strong' },
   ]
+  // BC 1.0.3.602: the invoice discount is entered here, as amount or %, and BC spreads it over the lines.
+  const poTotalSpecs: Record<string, EditSpec> = {
+    [`Inv. Discount Amount (${totalsCurrency})`]: {
+      key: 'invoiceDiscountAmount',
+      kind: 'number',
+      initial: String(Math.round(poTotals.invDiscount * 100) / 100),
+    },
+    'Invoice Discount %': {
+      key: 'invoiceDiscountPercent',
+      kind: 'number',
+      initial: String(Math.round(poTotals.discountPercent * 100) / 100),
+    },
+  }
   // Invoice Details as on the BC card (6 | 7 | 7); Payment Method Code and Due Date close their columns.
   const poInvoiceDetails: CardField[] = po
     ? [
@@ -1100,7 +1113,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             <BcLinesTable
               title="Lines"
               lines={poLines}
-              columns={PO_LINE_COLUMNS}
+              columns={poLineColumns(poLines)}
               docNo={poNo}
               editable={editing.po}
               busy={busy}
@@ -1111,7 +1124,17 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               onDelete={(line) => saveDoc('DELETE_PO_LINE', poNo, { lineNo: Number(line.lineNo) }, `Line deleted from ${poNo}.`)}
             />
           ) : null}
-          {poLines?.length ? <CardSection title="Totals" fields={poTotalFields} showAll columns={[2, 2, 2]} /> : null}
+          {poLines?.length ? (
+            <EditableCardSection
+              title="Totals"
+              fields={poTotalFields}
+              specs={poTotalSpecs}
+              canEdit={editing.po}
+              showAll
+              columns={[2, 2, 2]}
+              onSave={savePoHeader}
+            />
+          ) : null}
           {/* The Finance Checker may also correct the service G/L at the Finance review (BC 1.0.3.598). */}
           {(allowed('SET_SERVICE_GL') || (editing.po && isFinanceChecker)) && poLines ? (
             <PoServiceGlEditor
