@@ -515,7 +515,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v294 — 1.0.3.453 (LPR-UAT-2 Procurement Officer: the PO starts as a draft that Procurement completes and edits, then Submit PO to Operations Manager; the Purchase Order card fields of General, Invoice Details and Shipping and Payment are editable until then; with 1.0.3.452; for BC 1.0.3.597)'
+export const PORTAL_API_BUILD = 'v295 — 1.0.3.454 (LPR-UAT-2: the approver at each PO step - Operations Manager, Finance Checker at the Finance review, FAD - can edit the PO card and lines before final approval, each change logged in the Approval History; Procurement edits the draft; with 1.0.3.453; for BC 1.0.3.598)'
 
 interface LookupSpec {
   service: string

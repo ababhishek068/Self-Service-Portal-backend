@@ -409,7 +409,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             : action.actionCode === 'APPROVE_WINNER_FAD_FINAL'
               ? `Winner approved on ${action.documentNo}. Business Central created the Purchase Order as a draft: Procurement completes it, then submits it to the Operations Manager.`
             : action.actionCode === 'SUBMIT_PO_OPS'
-              ? `PO ${action.documentNo} submitted to the Operations Manager for approval. It can no longer be changed unless it is sent back.`
+              ? `PO ${action.documentNo} submitted to the Operations Manager for approval.`
             : resultNo && resultNo !== action.documentNo
             ? `${action.label} — ${resultNo}`
             : `${action.label} completed.`,
@@ -1042,7 +1042,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             />
           ) : null}
           {poLines?.length ? <CardSection title="Totals" fields={poTotalFields} showAll /> : null}
-          {allowed('SET_SERVICE_GL') && poLines ? (
+          {/* The Finance Checker may also correct the service G/L at the Finance review (BC 1.0.3.598). */}
+          {(allowed('SET_SERVICE_GL') || (editing.po && isFinanceChecker)) && poLines ? (
             <PoServiceGlEditor
               poNo={poNo}
               lines={poLines}

@@ -312,16 +312,19 @@ export function localPurchaseCardEditable(chain: LocalPurchaseChain) {
  * Which cards in the chain the signed-in user may edit now, by BC's rule for each card: the LPR
  * (localPurchaseCardEditable), the Local RFQ and the Local PO while BC reports their lines unlocked
  * (BC 1.0.3.569 sends linesLocked; older apps never unlock), and the receive quantities at PO Released.
- * Procurement edits the documents; the Store Keeper enters what is received. BC checks again on save.
+ * Procurement edits the documents; the Store Keeper enters what is received; the approver at the PO's
+ * step (BC poEditingRole) may correct the PO before FAD's final approval. BC checks again on save.
  */
 export function localPurchaseEditing(chain: LocalPurchaseChain, roles: LocalPurchaseRole[]) {
   const procurement = roles.some((role) => PROCUREMENT.includes(role))
   const unlocked = (doc: Record<string, unknown> | undefined) =>
     Boolean(doc) && String(doc?.linesLocked ?? '').toLowerCase() === 'false' && Array.isArray(doc?.lines)
+  // BC 1.0.3.598 (UAT-2): until FAD approves, the approver whose step the PO is at may complete / correct it.
+  const poApprover = chainText(chain.po?.poEditingRole) as LocalPurchaseRole
   return {
     lpr: procurement && localPurchaseCardEditable(chain),
     rfq: procurement && unlocked(chain.rfq) && !chainText(chain.rfq?.createdPoNo),
-    po: procurement && unlocked(chain.po),
+    po: (procurement && unlocked(chain.po)) || (Boolean(poApprover) && roles.includes(poApprover) && Array.isArray(chain.po?.lines)),
     receive: roles.includes('operations') && stageKey(chain.po?.flowStage) === 'PO RELEASED' && Array.isArray(chain.po?.lines),
   }
 }

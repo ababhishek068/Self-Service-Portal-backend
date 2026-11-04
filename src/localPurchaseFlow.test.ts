@@ -461,6 +461,25 @@ describe('localPurchaseNextActions — 26-step workflow (meeting 18 Oct)', () =>
   })
 })
 
+describe('localPurchaseEditing — the approver at the PO step (BC 1.0.3.598)', () => {
+  const chainAt = (poEditingRole: string): LocalPurchaseChain => ({
+    lpr: { no: 'ABH-PQ000125', lprStatus: 'Converted to RFQ' },
+    rfq: { no: 'ABH-PQ000126', flowStage: 'PO Created', createdPoNo: 'ABH-PO000011' },
+    po: { no: 'ABH-PO000011', flowStage: 'Pending Finance Review PO', linesLocked: 'true', poEditingRole, lines: [] },
+  })
+
+  it('lets the Finance Checker edit at the Finance review, not Procurement', () => {
+    assert.equal(localPurchaseEditing(chainAt('financeChecker'), ['financeChecker']).po, true)
+    assert.equal(localPurchaseEditing(chainAt('financeChecker'), ['procurement']).po, false)
+    assert.equal(localPurchaseEditing(chainAt('financeChecker'), ['fad']).po, false)
+  })
+
+  it('locks the PO for everyone once BC sends no editing role', () => {
+    assert.equal(localPurchaseEditing(chainAt(''), ['financeChecker']).po, false)
+    assert.equal(localPurchaseEditing(chainAt(''), ['fad']).po, false)
+  })
+})
+
 describe('Local Purchase access from Business Central', () => {
   beforeEach(() => clearLocalPurchaseAccessCache())
   const fadUser = { userID: 'ADMIN', jobTitle: 'Director' }
