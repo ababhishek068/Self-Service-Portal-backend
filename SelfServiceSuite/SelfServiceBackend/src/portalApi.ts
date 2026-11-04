@@ -515,7 +515,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v299 — 1.0.3.458 (LPR-UAT-2: Show more and Show less on the Purchase Order FastTabs as in BC - General with the buy-from address, posting, VAT reporting, due and order dates, quote no., responsibility center, user ID; Invoice Details with discount date and tax fields; Shipping and Payment with the pay-to address; with 1.0.3.457; for BC 1.0.3.603)'
+export const PORTAL_API_BUILD = 'v300 — 1.0.3.459 (LPR-UAT-2: on the Purchase Order line, Item G/L Budget Account is picked from the BC chart of accounts and Location Code from the BC locations, as the lookups on the BC lines; with 1.0.3.458; for BC 1.0.3.603)'
 
 interface LookupSpec {
   service: string
@@ -729,6 +729,13 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['No'],
     labelKeys: ['Name', 'No'],
     filter: 'DirectPosting eq true',
+  },
+  // Every G/L account, as the BC lookup on a Purchase Order line's Item G/L Budget Account (UAT-2, 4 Nov).
+  'chart-of-accounts': {
+    service: 'QyGlAccounts',
+    valueKeys: ['No'],
+    labelKeys: ['Name', 'No'],
+    nameFirst: true,
   },
   locations: {
     service: 'QyLocation',

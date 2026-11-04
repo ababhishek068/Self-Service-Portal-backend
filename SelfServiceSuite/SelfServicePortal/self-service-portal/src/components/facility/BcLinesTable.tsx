@@ -260,6 +260,14 @@ export function BcLinesTable({
                     disabled={busy}
                     onChange={(value) => setDraft((current) => ({ ...current, unitOfMeasureCode: value }))}
                   />
+                ) : column.lookup ? (
+                  <CatalogCodeField
+                    catalog={column.lookup}
+                    label={column.header}
+                    value={draft[column.key] ?? ''}
+                    disabled={busy}
+                    onChange={(value) => setDraft((current) => ({ ...current, [column.key]: value }))}
+                  />
                 ) : column.key === 'no' && CODE_CATALOGS[draft.type ?? ''] ? (
                   <CatalogCodeField
                     catalog={CODE_CATALOGS[draft.type ?? '']!}

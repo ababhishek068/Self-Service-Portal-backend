@@ -56,6 +56,8 @@ export type LineColumn = {
   wrap?: boolean
   /** Choices of a select column (Type uses TYPE_OPTIONS). */
   options?: Array<{ value: string; label: string }>
+  /** Picked from this BC list (portal lookup catalog) in the line editor, as the lookup on the BC subform. */
+  lookup?: string
   /**
    * Filled by the Procurement Officer after approval: hidden while BC says lineDetailsVisible =
    * false (LPR Draft, Pending Operations Manager, Pending FAD), when the lines carry the request only.
@@ -246,7 +248,7 @@ export function poLineColumns(lines: PurchaseLine[]): LineColumn[] {
     { ...orderColumn('specification'), wrap: false },
     orderColumn('brandModel', 'Brand / Model'),
     editable(orderColumn('remarks')),
-    orderColumn('locationCode'),
+    { ...orderColumn('locationCode'), lookup: 'locations' },
     orderColumn('quantity'),
     orderColumn('unitOfMeasureCode', 'Unit of Measure Code'),
     {
@@ -265,6 +267,7 @@ export function poLineColumns(lines: PurchaseLine[]): LineColumn[] {
       header: 'Item G/L Budget Account',
       key: 'Item G/L Budget Account',
       kind: 'code',
+      lookup: 'chart-of-accounts',
       value: (line) => lineCard(line, 'Item G/L Budget Account'),
     },
     orderColumn('glAccountNo'),
