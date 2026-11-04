@@ -659,14 +659,50 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         // BC 1.0.3.597: the other card fields are saved by their BC field name.
         Contact: cardSpec('Buy-from Contact', 'text'),
         'Vendor Invoice No.': cardSpec('Vendor Invoice No.', 'text'),
+        // Show more (BC 1.0.3.603).
+        'Buy-from Address': cardSpec('Buy-from Address', 'text'),
+        'Buy-from Address 2': cardSpec('Buy-from Address 2', 'text'),
+        'Buy-from City': cardSpec('Buy-from City', 'text'),
+        'Buy-from County': cardSpec('Buy-from County', 'text'),
+        'Buy-from Post Code': cardSpec('Buy-from Post Code', 'code'),
+        'Buy-from Country/Region': cardSpec('Buy-from Country/Region Code', 'code'),
+        'Buy-from Contact No.': cardSpec('Buy-from Contact No.', 'code'),
+        'Posting Date': cardSpec('Posting Date', 'date'),
+        'VAT Reporting Date': cardSpec('VAT Reporting Date', 'date'),
+        'Due Date': cardSpec('Due Date', 'date'),
+        'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
+        'Campaign No.': cardSpec('Campaign No.', 'code'),
+        'Responsibility Center': { key: 'Responsibility Center', kind: 'code', initial: text(po.responsibilityCenter) },
+        'User ID': cardSpec('Assigned User ID', 'code'),
       }
     : {}
-  // The fields the portal shows besides the BC card: the order and who did each step of the local purchase.
-  const poProgress: CardField[] = po
+  // General → Show more, as on the BC card.
+  const poGeneralMore: CardField[] = po
     ? [
         { label: 'No.', value: poNo, emphasis: 'strong' },
         { label: 'Vendor No.', value: text(po.vendorNo) },
+        { label: 'Buy-from Address', value: card('Buy-from Address') },
+        { label: 'Buy-from Address 2', value: card('Buy-from Address 2') },
+        { label: 'Buy-from City', value: card('Buy-from City') },
+        { label: 'Buy-from County', value: card('Buy-from County') },
+        { label: 'Buy-from Post Code', value: card('Buy-from Post Code') },
+        { label: 'Buy-from Country/Region', value: card('Buy-from Country/Region Code') },
+        { label: 'Buy-from Contact No.', value: card('Buy-from Contact No.') },
+        { label: 'No. of Archived Versions', value: card('No. of Archived Versions') },
+        { label: 'Posting Date', value: dateValue(bcDate(card('Posting Date'))) },
+        { label: 'VAT Reporting Date', value: dateValue(bcDate(card('VAT Reporting Date'))) },
+        { label: 'Due Date', value: dateValue(bcDate(card('Due Date'))) },
         { label: 'Order Date', value: dateValue(bcDate(po.orderDate)) },
+        { label: 'Quote No.', value: card('Quote No.') },
+        { label: 'Campaign No.', value: card('Campaign No.') },
+        { label: 'Responsibility Center', value: text(po.responsibilityCenter) },
+        { label: 'User ID', value: card('Assigned User ID') },
+        { label: 'Job Queue Status', value: card('Job Queue Status') },
+      ]
+    : []
+  // The fields the portal shows besides the BC card: who did each step of the local purchase.
+  const poProgress: CardField[] = po
+    ? [
         { label: 'Vendor Order No.', value: text(po.vendorOrderNo) },
         { label: 'Operations Manager Approved PO', value: text(po.opsApprovedBy), emphasis: 'user' },
         { label: 'GRN', value: grnNos.join(', ') },
@@ -678,7 +714,6 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
     : []
   const poProgressSpecs: Record<string, EditSpec> = po
     ? {
-        'Order Date': { key: 'orderDate', kind: 'date', initial: isoDate(po.orderDate) },
         'Vendor Order No.': { key: 'vendorOrderNo', kind: 'text', initial: text(po.vendorOrderNo) },
       }
     : {}
@@ -728,9 +763,17 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'On Hold', value: card('On Hold') },
         { label: 'Requested Receipt Date', value: dateValue(bcDate(po.requiredByDate)) },
         { label: 'Promised Receipt Date', value: dateValue(bcDate(card('Promised Receipt Date'))) },
-        { label: 'Due Date', value: dateValue(bcDate(card('Due Date'))) },
       ]
     : []
+  // Invoice Details → Show more, as on the BC card.
+  const poInvoiceMore: CardField[] = [
+    { label: 'Pmt. Discount Date', value: dateValue(bcDate(card('Pmt. Discount Date'))) },
+    { label: 'Tax Area Code', value: card('Tax Area Code') },
+    { label: 'Tax Liable', value: yesNo(card('Tax Liable')) },
+    { label: 'IRS 1099 Code', value: card('IRS 1099 Code') },
+    { label: 'Remit-to Code', value: card('Remit-to Code') },
+    { label: 'Journal Templ. Name', value: card('Journal Templ. Name') },
+  ]
   const poInvoiceSpecs: Record<string, EditSpec> = po
     ? {
         'Expected Receipt Date': { key: 'expectedReceiptDate', kind: 'date', initial: isoDate(po.expectedReceiptDate) },
@@ -749,7 +792,16 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         'On Hold': cardSpec('On Hold', 'code'),
         'Requested Receipt Date': { key: 'requiredByDate', kind: 'date', initial: isoDate(po.requiredByDate) },
         'Promised Receipt Date': cardSpec('Promised Receipt Date', 'date'),
-        'Due Date': cardSpec('Due Date', 'date'),
+        // Show more (BC 1.0.3.603).
+        'Pmt. Discount Date': cardSpec('Pmt. Discount Date', 'date'),
+        'Tax Area Code': cardSpec('Tax Area Code', 'code'),
+        'Tax Liable': {
+          key: 'Tax Liable',
+          kind: 'boolean',
+          initial: card('Tax Liable').toLowerCase() === 'true' ? 'true' : 'false',
+        },
+        'IRS 1099 Code': cardSpec('IRS 1099 Code', 'code'),
+        'Remit-to Code': cardSpec('Remit-to Code', 'code'),
       }
     : {}
   // Shipping and Payment as on the BC card: ship-to (12) | pay-to (10).
@@ -769,16 +821,19 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'Lead Time Calculation', value: card('Lead Time Calculation') },
         { label: 'Pay-to Vendor No.', value: card('Pay-to Vendor No.') },
         { label: 'Pay-to Name', value: card('Pay-to Name') },
-        { label: 'Pay-to Address', value: card('Pay-to Address') },
-        { label: 'Pay-to Address 2', value: card('Pay-to Address 2') },
-        { label: 'Pay-to City', value: card('Pay-to City') },
-        { label: 'Pay-to County', value: card('Pay-to County') },
-        { label: 'Pay-to Post Code', value: card('Pay-to Post Code') },
-        { label: 'Pay-to Country/Region', value: card('Pay-to Country/Region Code') },
-        { label: 'Pay-to Contact No.', value: card('Pay-to Contact No.') },
-        { label: 'Pay-to Contact', value: card('Pay-to Contact') },
       ]
     : []
+  // Shipping and Payment → Show more: the pay-to address.
+  const poShippingMore: CardField[] = [
+    { label: 'Pay-to Address', value: card('Pay-to Address') },
+    { label: 'Pay-to Address 2', value: card('Pay-to Address 2') },
+    { label: 'Pay-to City', value: card('Pay-to City') },
+    { label: 'Pay-to County', value: card('Pay-to County') },
+    { label: 'Pay-to Post Code', value: card('Pay-to Post Code') },
+    { label: 'Pay-to Country/Region', value: card('Pay-to Country/Region Code') },
+    { label: 'Pay-to Contact No.', value: card('Pay-to Contact No.') },
+    { label: 'Pay-to Contact', value: card('Pay-to Contact') },
+  ]
   const poShippingSpecs: Record<string, EditSpec> = po
     ? {
         'Location Code': { key: 'locationCode', kind: 'code', initial: text(po.locationCode) },
@@ -1105,6 +1160,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             canEdit={editing.po}
             showAll
             columns={[7, 9, 7]}
+            more={poGeneralMore}
             collapsible
             summary={[text(po.vendorName), dateValue(bcDate(po.documentDate)), text(po.status)]}
             onSave={savePoHeader}
@@ -1172,6 +1228,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             canEdit={editing.po}
             showAll
             columns={[6, 7, 7]}
+            more={poInvoiceMore}
             collapsible
             onSave={savePoHeader}
           />
@@ -1181,7 +1238,8 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             specs={poShippingSpecs}
             canEdit={editing.po}
             showAll
-            columns={[12, 10]}
+            columns={[12, 2]}
+            more={poShippingMore}
             collapsible
             defaultOpen={false}
             summary={[text(po.locationCode)]}

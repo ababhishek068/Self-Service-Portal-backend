@@ -515,7 +515,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v298 — 1.0.3.457 (LPR-UAT-2: every Purchase Order line field BC lets you edit is editable in the portal - GST/HST, description, request type, purpose, specification, brand, remarks, location, quantity, UOM, unit cost, line amount, Item G/L Budget Account, VAT group - rows one line high as in BC, and the invoice discount amount or % under the lines; with 1.0.3.456; for BC 1.0.3.602)'
+export const PORTAL_API_BUILD = 'v299 — 1.0.3.458 (LPR-UAT-2: Show more and Show less on the Purchase Order FastTabs as in BC - General with the buy-from address, posting, VAT reporting, due and order dates, quote no., responsibility center, user ID; Invoice Details with discount date and tax fields; Shipping and Payment with the pay-to address; with 1.0.3.457; for BC 1.0.3.603)'
 
 interface LookupSpec {
   service: string

@@ -22,6 +22,7 @@ export function EditableCardSection({
   collapsible,
   defaultOpen,
   summary,
+  more,
   onSave,
 }: {
   title: string
@@ -36,6 +37,8 @@ export function EditableCardSection({
   collapsible?: boolean
   defaultOpen?: boolean
   summary?: string[]
+  /** The fields BC shows under Show more; their editors open with Edit too. */
+  more?: CardField[]
   onSave: (changed: Record<string, string>) => Promise<boolean>
 }) {
   // Values being edited: payload key → value (null when not editing).
@@ -43,8 +46,8 @@ export function EditableCardSection({
   const [saving, setSaving] = useState(false)
   const editing = draft !== null && canEdit
   const base = typeof fields === 'function' ? fields(editing) : fields
-  const shown: CardField[] = editing
-    ? base.map((field) => {
+  const withEditor = (list: CardField[]) =>
+    list.map((field) => {
         const spec = specs[field.label]
         if (!spec) return field
         return {
@@ -54,14 +57,15 @@ export function EditableCardSection({
               kind={spec.kind}
               label={field.label}
               options={spec.options}
-              value={draft[spec.key] ?? ''}
+              value={draft?.[spec.key] ?? ''}
               disabled={saving}
               onChange={(value) => setDraft((current) => (current ? { ...current, [spec.key]: value } : current))}
             />
           ),
         }
       })
-    : base
+  const shown: CardField[] = editing ? withEditor(base) : base
+  const shownMore = more && editing ? withEditor(more) : more
 
   const save = async () => {
     if (!draft) return
@@ -103,5 +107,5 @@ export function EditableCardSection({
     </Button>
   ) : null
 
-  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} columns={columns} collapsible={collapsible} defaultOpen={defaultOpen} forceOpen={editing} summary={summary} />
+  return <CardSection title={title} intro={intro} fields={shown} showAll={showAll || editing} action={action} columns={columns} collapsible={collapsible} defaultOpen={defaultOpen} forceOpen={editing} summary={summary} more={shownMore} forceMore={editing} />
 }

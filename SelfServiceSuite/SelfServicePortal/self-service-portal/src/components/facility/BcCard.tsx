@@ -62,6 +62,8 @@ export function CardSection({
   defaultOpen = true,
   forceOpen,
   summary,
+  more,
+  forceMore,
 }: {
   title: string
   intro?: string
@@ -75,6 +77,10 @@ export function CardSection({
   /** Kept open (e.g. while it is being edited). */
   forceOpen?: boolean
   summary?: string[]
+  /** The fields BC shows under Show more on this FastTab. */
+  more?: CardField[]
+  /** Show more kept on (e.g. while editing). */
+  forceMore?: boolean
   /**
    * Fields per column, top to bottom, as the BC card lays them out (e.g. [7, 9, 7]); without it the
    * fields fill the columns row by row.
@@ -82,6 +88,8 @@ export function CardSection({
   columns?: number[]
 }) {
   const [opened, setOpened] = useState(defaultOpen)
+  const [moreShown, setMoreShown] = useState(false)
+  const showMore = moreShown || Boolean(forceMore)
   const open = !collapsible || opened || Boolean(forceOpen)
   const chips = (summary ?? []).map((value) => value.trim()).filter(Boolean)
   const visible = showAll ? fields : fields.filter((field) => field.key)
@@ -125,11 +133,28 @@ export function CardSection({
       </div>
       {open ? (
         <>
+          {more?.length ? (
+            <div className="mt-1 flex justify-end">
+              <button
+                type="button"
+                className="text-xs font-medium text-[var(--portal-navy)] hover:underline disabled:no-underline disabled:opacity-60"
+                disabled={Boolean(forceMore)}
+                onClick={() => setMoreShown((current) => !current)}
+              >
+                {showMore ? 'Show less' : 'Show more'}
+              </button>
+            </div>
+          ) : null}
           {intro && showAll ? <p className="mt-3 max-w-3xl text-sm text-slate-600">{intro}</p> : null}
           {/* Columns of at least 24rem, never more than 3: 1 on phones, 2 on laptops, 3 on wider screens. */}
           <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(24rem,calc((100%_-_6rem)/3))),1fr))] gap-x-12">
             {stacks ? stacks.map((stack, index) => <div key={index}>{stack.map(row)}</div>) : visible.map(row)}
           </div>
+          {showMore && more?.length ? (
+            <div className="mt-1 grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(24rem,calc((100%_-_6rem)/3))),1fr))] gap-x-12 border-t border-dashed border-slate-200 pt-1">
+              {more.map(row)}
+            </div>
+          ) : null}
         </>
       ) : null}
     </section>
