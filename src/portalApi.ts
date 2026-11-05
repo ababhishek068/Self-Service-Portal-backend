@@ -159,6 +159,22 @@ import {
   REQUESTABLE_HR_SERVICE_LETTER_TYPES,
   type RequestableHrServiceLetterType,
 } from './hrServiceLetters.js'
+import {
+  decideOvertimeApproval,
+  deleteOvertimeRequest,
+  getOvertimeContext,
+  getOvertimeRequestByNo,
+  listOvertimeApprovals,
+  listOvertimeRequests,
+  overtimeActingUserMayView,
+  overtimeApprovalQueueItem,
+  overtimeApproverOutcome,
+  overtimeToPortalRequest,
+  saveOvertimeRequest,
+  validateOvertimeDetails,
+  withdrawOvertimeRequest,
+  OVERTIME_MODULE,
+} from './overtimeRequests.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
   return async (
@@ -516,7 +532,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v301 — 1.0.3.460 (UAT: Staff Claim line without the G/L Account fields for the requester - set from the claim type, asked only when BC has none; non-government / no agreement hospitals refund 80%; with 1.0.3.459; for BC 1.0.3.605)'
+export const PORTAL_API_BUILD = 'v302 — 1.0.3.461 (UAT: staff Overtime Request as the manager template - employee and overtime details, request summary with hours and estimated amount, attendance check, Line Manager, HR, Director / COO and Finance approval, approved hours go to the Overtime Sheet for payroll; Overtime in Approvals; for BC 1.0.3.606)'
 
 interface LookupSpec {
   service: string
@@ -1892,13 +1908,23 @@ async function decidedApprovalQueues(authUser: AuthUser) {
   )
   const approverIds = new Set(ids.map((id) => id.trim().toUpperCase()).filter(Boolean))
   const isApprover = (id: string) => approverIds.has(id.trim().toUpperCase())
-  const approved: ReturnType<typeof approvalQueueItem>[] = []
-  const rejected: ReturnType<typeof approvalQueueItem>[] = []
+  // The OData queue items, and the Overtime Requests (BC 1.0.3.606) the approver decided.
+  type DecidedItem = Omit<ReturnType<typeof approvalQueueItem>, 'module'> & { module: string }
+  const approved: DecidedItem[] = []
+  const rejected: DecidedItem[] = []
   for (const [key, rows] of mine) {
     const outcome = approverDocumentOutcome(byDocument.get(key) ?? rows, isApprover)
     if (!outcome) continue
     const item = { ...approvalQueueItem(newestApprovalEntry(rows)!), status: outcome }
     if (!item.requestNo) continue
+    if (outcome === 'Approved') approved.push(item)
+    else rejected.push(item)
+  }
+  const overtimeDecided = await listOvertimeApprovals(ids.join('|'), 'decided').catch(() => [])
+  for (const request of overtimeDecided) {
+    const outcome = overtimeApproverOutcome(request, ids)
+    if (!outcome) continue
+    const item = { ...overtimeApprovalQueueItem(request), status: outcome }
     if (outcome === 'Approved') approved.push(item)
     else rejected.push(item)
   }
@@ -1958,7 +1984,7 @@ async function resolveApprovalReference(
 const approvalModule = approvalModuleFromEntry
 export { approvalModule }
 
-const SOAP_APPROVAL_MODULES = [EMPLOYEE_EXIT_MODULE, HR_SERVICE_LETTER_MODULE] as const
+const SOAP_APPROVAL_MODULES = [EMPLOYEE_EXIT_MODULE, HR_SERVICE_LETTER_MODULE, OVERTIME_MODULE] as const
 
 function parseSoapApprovalId(id: string) {
   const trimmed = id.trim()
@@ -1972,10 +1998,18 @@ function parseSoapApprovalId(id: string) {
   return { module, no }
 }
 
+/**
+ * Approval Entries of the workflows the portal lists through SOAP (Employee Exit; Overtime
+ * Request, BC 1.0.3.606): kept out of the OData queues so each appears once, with its own detail.
+ */
 function isEmployeeExitApprovalEntry(row: ODataRecord) {
   const tableId = Number(row.TableID ?? row.TableId ?? 0)
   const code = text(row, ['ApprovalCode', 'Approval_Code'])
-  return tableId === 52100 || /PORTAL-EMP-(TRANSFER|RESIGN|EXIT)/i.test(code)
+  return (
+    tableId === 52100 ||
+    tableId === 53643 ||
+    /PORTAL-EMP-(TRANSFER|RESIGN|EXIT)|PORTAL-OVERTIME/i.test(code)
+  )
 }
 
 async function soapApproverIds(authUser: AuthUser) {
@@ -1984,19 +2018,23 @@ async function soapApproverIds(authUser: AuthUser) {
 
 async function soapApprovalQueues(authUser: AuthUser) {
   const joined = await soapApproverIds(authUser)
-  const [exitResult, letterResult] = await Promise.allSettled([
+  const [exitResult, letterResult, overtimeResult] = await Promise.allSettled([
     listEmployeeExitApprovals(joined),
     listHrServiceLetterApprovals(joined),
+    listOvertimeApprovals(joined, 'pending'),
   ])
   const exitRows = exitResult.status === 'fulfilled' ? exitResult.value : []
   const letterRows = letterResult.status === 'fulfilled' ? letterResult.value : []
+  const overtimeRows = overtimeResult.status === 'fulfilled' ? overtimeResult.value : []
   return {
     joined,
     exitRows,
     letterRows,
+    overtimeRows,
     queueItems: [
       ...exitRows.map(employeeExitApprovalQueueItem),
       ...letterRows.map(hrLetterApprovalQueueItem),
+      ...overtimeRows.map(overtimeApprovalQueueItem),
     ],
   }
 }
@@ -6261,6 +6299,19 @@ export function buildPortalApiRouter() {
           res.json(employeeExitToPortalRequest(request))
           return
         }
+        if (soapRef.module === OVERTIME_MODULE) {
+          const actingIds = await approverIdCandidates(authUser)
+          const queued = (await listOvertimeApprovals(joined, 'pending')).find(
+            (row) => row.requestNo === soapRef.no,
+          )
+          const request = queued ?? (await getOvertimeRequestByNo(soapRef.no))
+          if (!request || (!queued && !overtimeActingUserMayView(request, actingIds))) {
+            throw portalError('Overtime approval was not found for this user', 404)
+          }
+          const detail = overtimeToPortalRequest(request, authUser.userID)
+          res.json({ ...detail, approvalComment: await approvalCommentLimits() })
+          return
+        }
         const letter = (await listHrServiceLetterApprovals(joined)).find(
           (row) => row.requestNo === soapRef.no,
         )
@@ -6378,6 +6429,14 @@ export function buildPortalApiRouter() {
             approve: decision === 'Approved',
             remarks: comment,
           })
+        } else if (soapRef.module === OVERTIME_MODULE) {
+          await decideOvertimeApproval({
+            approverUserIds: joined,
+            requestNo: soapRef.no,
+            approve: decision === 'Approved',
+            remarks: comment,
+          })
+          forgetNotifications(authUser)
         } else {
           await decideHrServiceLetterApproval({
             approverUserId: joined,
@@ -6769,6 +6828,59 @@ export function buildPortalApiRouter() {
           employeeNo: authUser.employeeNo,
         }),
       )
+    }),
+  )
+
+  // Staff Overtime Request (BC 1.0.3.606): Line Manager, HR, Director / COO, Finance, then payroll.
+  router.get(
+    '/hr/overtime/context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await getOvertimeContext(authUser.employeeNo, authUser.userID))
+    }),
+  )
+
+  router.get(
+    '/hr/overtime',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ rows: await listOvertimeRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.post(
+    '/hr/overtime',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
+      const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
+      res.json(
+        await saveOvertimeRequest({
+          employeeNo: authUser.employeeNo,
+          requesterUserId: authUser.userID,
+          requestNo,
+          details: validateOvertimeDetails(req.body?.details, submit),
+          submit,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/overtime/:no/withdraw',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await withdrawOvertimeRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
+    }),
+  )
+
+  router.delete(
+    '/hr/overtime/:no',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await deleteOvertimeRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
     }),
   )
 

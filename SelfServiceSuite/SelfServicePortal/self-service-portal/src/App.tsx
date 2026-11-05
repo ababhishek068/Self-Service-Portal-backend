@@ -47,6 +47,7 @@ import { ApiNetworkCheck } from '@/pages/dev/ApiNetworkCheck'
 import { GatePass } from '@/pages/facility/GatePass'
 import type { GatePassSource } from '@/api/endpoints/gatePass'
 import { ComingSoon } from '@/pages/shared/ComingSoon'
+import { OvertimeRequest } from '@/pages/hr/OvertimeRequest'
 import { IctHelpdesk } from '@/pages/ict/IctHelpdesk'
 
 const gatePassSources: GatePassSource[] = ['storeIssue', 'transferOrder', 'assetTransfer']
@@ -151,7 +152,7 @@ export default function App() {
         <Route path="hr/payslip" element={<Payslip />} />
         <Route path="hr/salary-advance" element={<ComingSoon title="Salary Advance" />} />
         <Route path="hr/document-requisition" element={<Navigate to="/hr/request-letters" replace />} />
-        <Route path="hr/overtime-request" element={<ComingSoon title="Overtime Request" />} />
+        <Route path="hr/overtime-request" element={<OvertimeRequest />} />
         <Route path="hr/travel-request" element={<ComingSoon title="Travel Request" />} />
         <Route path="hr/request-letters" element={<HrServiceRequestLetters />} />
         <Route path="hr/request-letters/:letterType" element={<HrServiceRequestLetters />} />

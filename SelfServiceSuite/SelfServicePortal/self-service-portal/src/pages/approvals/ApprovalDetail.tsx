@@ -150,7 +150,7 @@ function approvalHeaderFacts(
     push('Earned leave days', ['EarnedLeaveDays', 'Earned_Leave_Days'])
     return facts
   }
-  if (requestType === 'employeeExit' || requestType === 'hrServiceLetter') {
+  if (requestType === 'employeeExit' || requestType === 'hrServiceLetter' || requestType === 'overtime') {
     const facts = Array.isArray(payload.detailFacts)
       ? (payload.detailFacts as Array<{ label?: unknown; value?: unknown }>)
       : []
@@ -273,6 +273,10 @@ function approvalMetric(
   }
   if (requestType === 'employeeExit') {
     return { label: 'Stage', value: String(payload.pendingStageLabel || 'Approval') }
+  }
+  if (requestType === 'overtime') {
+    const hours = firstPayloadNumber(payload, ['totalHours'])
+    return { label: 'Overtime hours', value: `${Number(hours.toFixed(2))} hrs · est. ${formatCurrency(amount)}` }
   }
   if (requestType === 'hrServiceLetter') {
     const loan = firstPayloadNumber(payload, ['loanAmount'])
@@ -431,6 +435,16 @@ export function ApprovalDetail() {
                 </div>
               </div>
 
+              {request.requestType === 'overtime' ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+                  {`Overtime routing: Line Manager, HR, Director / COO, Finance, then payroll (the hours go to the overtime sheet).${
+                    payload.pendingStageLabel && request.status === 'Pending Approval'
+                      ? ` This request is waiting on ${String(payload.pendingStageLabel)}.`
+                      : ''
+                  }`}
+                </div>
+              ) : null}
+
               {request.requestType === 'employeeExit' || request.requestType === 'hrServiceLetter' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
                   {request.requestType === 'employeeExit'
@@ -568,7 +582,7 @@ export function ApprovalDetail() {
                       placeholder={
                         request.requestType === 'hrServiceLetter'
                           ? 'Enter HR remarks (shown to the employee)'
-                          : request.requestType === 'employeeExit'
+                          : request.requestType === 'employeeExit' || request.requestType === 'overtime'
                             ? 'Add a note. A reason is required to reject.'
                             : canSendBack
                               ? 'Add an approval note. A comment is required to send back or reject.'
@@ -586,6 +600,11 @@ export function ApprovalDetail() {
                       <p className="mt-2 text-xs text-slate-500">
                         Transfer and resignation go to the Immediate Supervisor first, then HR. Exit forms do not
                         appear here.
+                      </p>
+                    ) : request.requestType === 'overtime' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Approve sends the request to the next step; after Finance the hours go to the overtime sheet. A
+                        rejection reason is required and is shown to the employee.
                       </p>
                     ) : canSendBack ? (
                       <p className="mt-2 text-xs text-slate-500">

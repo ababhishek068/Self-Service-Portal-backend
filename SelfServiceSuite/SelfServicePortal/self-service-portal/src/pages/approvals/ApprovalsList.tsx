@@ -38,6 +38,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     { value: 'transferOrder', label: 'Order' },
     { value: 'employeeExit', label: 'Exit' },
     { value: 'hrServiceLetter', label: 'Letters' },
+    { value: 'overtime', label: 'Overtime' },
   ]
   const sourceRows = useMemo(() => approvals.data ?? [], [approvals.data])
   const rows = useMemo(() => {
