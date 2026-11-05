@@ -15,7 +15,7 @@ import { useLookupOptions } from '@/hooks/useLookupOptions'
 
 const module = { module: 'staffClaim', entity: 'selfServiceStaffClaims' } as const
 
-const HOSPITAL_REFUND_RATE: Record<string, number> = { '0': 1, '1': 0.6, '2': 0.9 }
+const HOSPITAL_REFUND_RATE: Record<string, number> = { '0': 1, '1': 0.8, '2': 0.9 }
 
 function claimTypeCode(value: unknown) {
   const raw = String(value ?? '').trim()
@@ -82,19 +82,20 @@ function claimTypeDisplay(value: unknown, claimTypes: LookupOption[]) {
   return match?.label || raw
 }
 
-function lineHasAccountName(line: Record<string, unknown>, glAccounts: LookupOption[]) {
-  return Boolean(
-    String(line.accountName ?? '').trim() ||
-      accountNameForNo(String(line.accountNo ?? ''), glAccounts),
-  )
-}
-
 function glAccountForClaimType(claimType: string, claimTypes: LookupOption[]) {
   const code = claimTypeCode(claimType)
   const selected =
     claimTypes.find((option) => option.value === claimType) ??
     claimTypes.find((option) => claimTypeCode(option.value) === code)
   return String(selected?.meta?.accountNo ?? '').trim()
+}
+
+/** True when the chosen claim type has no G/L account (BC claim type, or Medical Allowance for medical). */
+function claimTypeNeedsAccount(claimType: unknown, claimTypes: LookupOption[], glAccounts: LookupOption[]) {
+  const value = String(claimType ?? '').trim()
+  if (!value) return false
+  if (glAccountForClaimType(value, claimTypes)) return false
+  return !(isMedicalClaim(value) && findMedicalAllowanceAccount(glAccounts))
 }
 
 function findMedicalAllowanceAccount(glAccounts: LookupOption[]) {
@@ -413,6 +414,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             options: claimTypeChoices,
             placeholder: claimTypePlaceholder,
           },
+          // UAT (5 Nov): the G/L account means nothing to the requester; it comes from the claim type. The
+          // selector shows only when Business Central has no account for the chosen claim type.
           {
             name: 'accountNo',
             label: 'G/L Account',
@@ -420,14 +423,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             options: glAccounts.options,
             placeholder: glAccounts.isLoading
               ? 'Loading G/L accounts from Business Central…'
-              : 'Auto-selected from claim type — choose one if not mapped',
-          },
-          {
-            name: 'accountName',
-            label: 'Selected G/L Account',
-            type: 'text',
-            readOnly: true,
-            visibleWhen: (values) => Boolean(String(values.accountNo ?? '').trim()),
+              : 'This claim type has no G/L account in Business Central — choose one',
+            visibleWhen: (values) => claimTypeNeedsAccount(values.claimType, claimTypeChoices, glAccounts.options),
           },
           {
             name: 'hospitalCategory',
@@ -510,16 +507,6 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             key: 'claimType',
             header: 'Claim Type',
             format: (value) => claimTypeDisplay(value, claimTypeChoices),
-          },
-          { key: 'accountNo', header: 'Account No' },
-          {
-            key: 'accountName',
-            header: 'Account Name',
-            visibleWhen: (lines) =>
-              lines.some((line) => lineHasAccountName(line, glAccounts.options)),
-            format: (value, line) =>
-              String(value ?? '').trim() ||
-              accountNameForNo(String(line.accountNo ?? ''), glAccounts.options),
           },
           {
             key: 'hospitalCategory',

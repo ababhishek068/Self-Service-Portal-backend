@@ -14,7 +14,8 @@ export const claimTypeOptions = [
 /** BC hospital categories: 0 = Government, 1 = Private, 2 = Outline/Online. */
 export const hospitalCategoryOptions = [
   { label: 'Government hospital (100% refund)', value: '0' },
-  { label: 'Non-Government / no agreement (60% refund)', value: '1' },
+  // UAT (5 Nov 2026): non-government / no agreement refunds 80% (BC 1.0.3.605 Staff Medical Claims Refund).
+  { label: 'Non-Government / no agreement (80% refund)', value: '1' },
   { label: 'Online / outline branch (90% refund)', value: '2' },
 ]
 

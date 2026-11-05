@@ -470,7 +470,8 @@ function medicalClaimCoveragePercent(
 
 function localMedicalRefundAmounts(hospitalCategory: number, medicalAmount: number) {
   if (medicalAmount <= 0) return { amount: 0, amountToRefund: 0, coveragePercent: 0 }
-  const rates: Record<number, number> = { 0: 100, 1: 60, 2: 90 }
+  // UAT (5 Nov 2026): non-government / no agreement refunds 80% (BC 1.0.3.605).
+  const rates: Record<number, number> = { 0: 100, 1: 80, 2: 90 }
   const coveragePercent = rates[hospitalCategory] ?? rates[0]
   const amountToRefund = Math.round(medicalAmount * (coveragePercent / 100) * 100) / 100
   return { amount: amountToRefund, amountToRefund, coveragePercent }
@@ -515,7 +516,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v300 — 1.0.3.459 (LPR-UAT-2: on the Purchase Order line, Item G/L Budget Account is picked from the BC chart of accounts and Location Code from the BC locations, as the lookups on the BC lines; with 1.0.3.458; for BC 1.0.3.603)'
+export const PORTAL_API_BUILD = 'v301 — 1.0.3.460 (UAT: Staff Claim line without the G/L Account fields for the requester - set from the claim type, asked only when BC has none; non-government / no agreement hospitals refund 80%; with 1.0.3.459; for BC 1.0.3.605)'
 
 interface LookupSpec {
   service: string
