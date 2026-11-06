@@ -291,3 +291,4 @@ export type PortalModuleKey =
   | 'documentRequisition'
   | 'employeeExit'
   | 'hrServiceLetter'
+  | 'profileChange'

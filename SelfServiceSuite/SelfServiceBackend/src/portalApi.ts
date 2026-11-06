@@ -175,6 +175,24 @@ import {
   withdrawOvertimeRequest,
   OVERTIME_MODULE,
 } from './overtimeRequests.js'
+import {
+  decideProfileChange,
+  discardProfileDraft,
+  ensureProfileDraft,
+  getProfileChangeByNo,
+  getProfileEditContext,
+  listProfileChangeApprovals,
+  listProfileChanges,
+  profileChangeActingUserMayView,
+  profileChangeApprovalQueueItem,
+  profileChangeApproverOutcome,
+  profileChangeToPortalRequest,
+  saveProfileChanges,
+  validateProfileChanges,
+  withdrawProfileChange,
+  PROFILE_CHANGE_MODULE,
+  PROFILE_CHANGE_TABLE_ID,
+} from './profileChanges.js'
 
 function safe(handler: (req: Request, res: import('express').Response) => Promise<unknown>) {
   return async (
@@ -532,7 +550,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v302 — 1.0.3.461 (UAT: staff Overtime Request as the manager template - employee and overtime details, request summary with hours and estimated amount, attendance check, Line Manager, HR, Director / COO and Finance approval, approved hours go to the Overtime Sheet for payroll; Overtime in Approvals; for BC 1.0.3.606)'
+export const PORTAL_API_BUILD = 'v303 — 1.0.3.462 (UAT: employees edit their own profile as the manager sample - Bio Data personal and contact details, Next of Kin, Dependants, Qualifications, Employment History and supporting documents; Save as Draft, Submit to HR, Withdraw; HR verifies in Approvals or BC and the approved changes are written to the employee; for BC 1.0.3.609)'
 
 interface LookupSpec {
   service: string
@@ -1928,6 +1946,15 @@ async function decidedApprovalQueues(authUser: AuthUser) {
     if (outcome === 'Approved') approved.push(item)
     else rejected.push(item)
   }
+  // Profile changes HR verified (BC 1.0.3.609).
+  const profileDecided = await listProfileChangeApprovals(ids.join('|'), 'decided').catch(() => [])
+  for (const request of profileDecided) {
+    const outcome = profileChangeApproverOutcome(request, ids)
+    if (!outcome) continue
+    const item = { ...profileChangeApprovalQueueItem(request), status: outcome }
+    if (outcome === 'Approved') approved.push(item)
+    else rejected.push(item)
+  }
   return { approved, rejected }
 }
 
@@ -1984,7 +2011,12 @@ async function resolveApprovalReference(
 const approvalModule = approvalModuleFromEntry
 export { approvalModule }
 
-const SOAP_APPROVAL_MODULES = [EMPLOYEE_EXIT_MODULE, HR_SERVICE_LETTER_MODULE, OVERTIME_MODULE] as const
+const SOAP_APPROVAL_MODULES = [
+  EMPLOYEE_EXIT_MODULE,
+  HR_SERVICE_LETTER_MODULE,
+  OVERTIME_MODULE,
+  PROFILE_CHANGE_MODULE,
+] as const
 
 function parseSoapApprovalId(id: string) {
   const trimmed = id.trim()
@@ -2008,8 +2040,39 @@ function isEmployeeExitApprovalEntry(row: ODataRecord) {
   return (
     tableId === 52100 ||
     tableId === 53643 ||
-    /PORTAL-EMP-(TRANSFER|RESIGN|EXIT)|PORTAL-OVERTIME/i.test(code)
+    tableId === PROFILE_CHANGE_TABLE_ID ||
+    /PORTAL-EMP-(TRANSFER|RESIGN|EXIT)|PORTAL-OVERTIME|PORTAL-PROFILE/i.test(code)
   )
+}
+
+/** The employee who asked, or the HR approver, may read a profile change request and its documents. */
+async function profileChangeForUser(authUser: AuthUser, requestNo: string) {
+  const request = await getProfileChangeByNo(requestNo)
+  const actingIds = await approverIdCandidates(authUser)
+  if (!request || !profileChangeActingUserMayView(request, actingIds, authUser.employeeNo)) {
+    throw portalError('Profile change request was not found', 404)
+  }
+  return request
+}
+
+async function sendProfileChangeAttachment(
+  res: import('express').Response,
+  authUser: AuthUser,
+  requestNo: string,
+  attachmentId: string,
+) {
+  const request = await profileChangeForUser(authUser, requestNo)
+  const attachment = request.attachments.find((entry) => entry.id === attachmentId)
+  if (!attachment) throw portalError('Document was not found', 404)
+  const result = await callSoapMethod('GetDocumentAttachment', {
+    docNo: request.requestNo,
+    attachmentID: attachment.id,
+    tableID: PROFILE_CHANGE_TABLE_ID,
+  })
+  if (!result.returnValue) throw portalError('Document was not found', 404)
+  res.setHeader('Content-Type', attachment.fileType)
+  res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName.replace(/[^\x20-\x7E]|"/g, '_')}"`)
+  res.send(Buffer.from(result.returnValue, 'base64'))
 }
 
 async function soapApproverIds(authUser: AuthUser) {
@@ -2018,23 +2081,27 @@ async function soapApproverIds(authUser: AuthUser) {
 
 async function soapApprovalQueues(authUser: AuthUser) {
   const joined = await soapApproverIds(authUser)
-  const [exitResult, letterResult, overtimeResult] = await Promise.allSettled([
+  const [exitResult, letterResult, overtimeResult, profileResult] = await Promise.allSettled([
     listEmployeeExitApprovals(joined),
     listHrServiceLetterApprovals(joined),
     listOvertimeApprovals(joined, 'pending'),
+    listProfileChangeApprovals(joined, 'pending'),
   ])
   const exitRows = exitResult.status === 'fulfilled' ? exitResult.value : []
   const letterRows = letterResult.status === 'fulfilled' ? letterResult.value : []
   const overtimeRows = overtimeResult.status === 'fulfilled' ? overtimeResult.value : []
+  const profileRows = profileResult.status === 'fulfilled' ? profileResult.value : []
   return {
     joined,
     exitRows,
     letterRows,
     overtimeRows,
+    profileRows,
     queueItems: [
       ...exitRows.map(employeeExitApprovalQueueItem),
       ...letterRows.map(hrLetterApprovalQueueItem),
       ...overtimeRows.map(overtimeApprovalQueueItem),
+      ...profileRows.map(profileChangeApprovalQueueItem),
     ],
   }
 }
@@ -6199,6 +6266,11 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const requestId = String(req.params.id)
       const authUser = user(req)
+      const soapRef = parseSoapApprovalId(requestId)
+      if (soapRef?.module === PROFILE_CHANGE_MODULE) {
+        await sendProfileChangeAttachment(res, authUser, soapRef.no, String(req.params.attachmentId ?? ''))
+        return
+      }
       const { module, no } = parseRequestId(requestId)
       const spec = module === 'leave' ? undefined : findFrontendModuleSpec(module)
       const tableID = module === 'leave' ? 50532 : spec?.headerTableId
@@ -6309,6 +6381,18 @@ export function buildPortalApiRouter() {
             throw portalError('Overtime approval was not found for this user', 404)
           }
           const detail = overtimeToPortalRequest(request, authUser.userID)
+          res.json({ ...detail, approvalComment: await approvalCommentLimits() })
+          return
+        }
+        if (soapRef.module === PROFILE_CHANGE_MODULE) {
+          const queued = (await listProfileChangeApprovals(joined, 'pending')).find(
+            (row) => row.requestNo === soapRef.no,
+          )
+          const request = queued ?? (await getProfileChangeByNo(soapRef.no))
+          if (!request || (!queued && !profileChangeActingUserMayView(request, actingIds))) {
+            throw portalError('Profile change approval was not found for this user', 404)
+          }
+          const detail = profileChangeToPortalRequest(request, authUser.userID)
           res.json({ ...detail, approvalComment: await approvalCommentLimits() })
           return
         }
@@ -6431,6 +6515,14 @@ export function buildPortalApiRouter() {
           })
         } else if (soapRef.module === OVERTIME_MODULE) {
           await decideOvertimeApproval({
+            approverUserIds: joined,
+            requestNo: soapRef.no,
+            approve: decision === 'Approved',
+            remarks: comment,
+          })
+          forgetNotifications(authUser)
+        } else if (soapRef.module === PROFILE_CHANGE_MODULE) {
+          await decideProfileChange({
             approverUserIds: joined,
             requestNo: soapRef.no,
             approve: decision === 'Approved',
@@ -6828,6 +6920,110 @@ export function buildPortalApiRouter() {
           employeeNo: authUser.employeeNo,
         }),
       )
+    }),
+  )
+
+  // Employee profile changes (BC 1.0.3.609): the employee edits their profile, HR verifies it,
+  // and BC writes the approved changes to the employee card and its lists.
+  router.get(
+    '/profile/edit-context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await getProfileEditContext(authUser.employeeNo, authUser.userID))
+    }),
+  )
+
+  router.get(
+    '/profile/changes',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ rows: await listProfileChanges(authUser.employeeNo) })
+    }),
+  )
+
+  router.post(
+    '/profile/changes',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
+      res.json(
+        await saveProfileChanges({
+          employeeNo: authUser.employeeNo,
+          requesterUserId: authUser.userID,
+          changes: validateProfileChanges(req.body?.changes),
+          note: String(req.body?.note ?? ''),
+          submit,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/profile/changes/attachments',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      // Check the file first, so an invalid file never creates an empty draft.
+      validatePortalAttachment(req.body ?? {})
+      const draft = await ensureProfileDraft(authUser.employeeNo, authUser.userID)
+      await uploadPortalAttachment(PROFILE_CHANGE_TABLE_ID, draft.requestNo, req.body ?? {})
+      res.status(201).json((await getProfileChangeByNo(draft.requestNo)) ?? draft)
+    }),
+  )
+
+  router.delete(
+    '/profile/changes/:no/attachments/:attachmentId',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const no = String(req.params.no ?? '').trim()
+      const attachmentId = String(req.params.attachmentId ?? '').trim()
+      const request = await getProfileChangeByNo(no)
+      if (!request || request.employeeNo.toUpperCase() !== authUser.employeeNo.toUpperCase()) {
+        throw portalError('Profile change request was not found', 404)
+      }
+      if (request.status !== 'Draft') {
+        throw portalError('Documents can only be removed while your changes are a draft.', 422)
+      }
+      if (!request.attachments.some((attachment) => attachment.id === attachmentId)) {
+        throw portalError('Document was not found', 404)
+      }
+      const result = await callSoapMethod('DeleteDocumentAttachment', {
+        docNo: request.requestNo,
+        docID: attachmentId,
+      })
+      if (!result.returnValue || String(result.returnValue).toLowerCase() === 'false') {
+        throw portalError('Business Central did not delete the document', 502)
+      }
+      res.json((await getProfileChangeByNo(no)) ?? request)
+    }),
+  )
+
+  router.get(
+    '/profile/changes/:no/attachments/:attachmentId/download',
+    safe(async (req, res) => {
+      await sendProfileChangeAttachment(
+        res,
+        user(req),
+        String(req.params.no ?? '').trim(),
+        String(req.params.attachmentId ?? '').trim(),
+      )
+    }),
+  )
+
+  router.post(
+    '/profile/changes/:no/withdraw',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await withdrawProfileChange(authUser.employeeNo, String(req.params.no ?? '').trim()))
+    }),
+  )
+
+  router.delete(
+    '/profile/changes/:no',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await discardProfileDraft(authUser.employeeNo, String(req.params.no ?? '').trim()))
     }),
   )
 

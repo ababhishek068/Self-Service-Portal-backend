@@ -150,7 +150,12 @@ function approvalHeaderFacts(
     push('Earned leave days', ['EarnedLeaveDays', 'Earned_Leave_Days'])
     return facts
   }
-  if (requestType === 'employeeExit' || requestType === 'hrServiceLetter' || requestType === 'overtime') {
+  if (
+    requestType === 'employeeExit' ||
+    requestType === 'hrServiceLetter' ||
+    requestType === 'overtime' ||
+    requestType === 'profileChange'
+  ) {
     const facts = Array.isArray(payload.detailFacts)
       ? (payload.detailFacts as Array<{ label?: unknown; value?: unknown }>)
       : []
@@ -274,6 +279,10 @@ function approvalMetric(
   if (requestType === 'employeeExit') {
     return { label: 'Stage', value: String(payload.pendingStageLabel || 'Approval') }
   }
+  if (requestType === 'profileChange') {
+    const count = firstPayloadNumber(payload, ['changeCount'])
+    return { label: 'Changes', value: `${count} change${count === 1 ? '' : 's'} to verify` }
+  }
   if (requestType === 'overtime') {
     const hours = firstPayloadNumber(payload, ['totalHours'])
     return { label: 'Overtime hours', value: `${Number(hours.toFixed(2))} hrs · est. ${formatCurrency(amount)}` }
@@ -284,6 +293,77 @@ function approvalMetric(
     return { label: 'Letter', value: String(payload.letterTypeLabel || 'HR letter') }
   }
   return { label: 'Amount', value: formatCurrency(amount) }
+}
+
+interface ProfileChangeRow {
+  lineNo?: number
+  area?: string
+  areaName?: string
+  action?: string
+  rowRef?: string
+  rowLabel?: string
+  fieldCaption?: string
+  oldValue?: string
+  newValue?: string
+}
+
+const PROFILE_ACTION_STYLES: Record<string, string> = {
+  add: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  remove: 'bg-red-50 text-red-700 ring-red-200',
+  change: 'bg-amber-50 text-amber-800 ring-amber-200',
+}
+
+/** HR sees every profile change grouped by section: the current value and the new value. */
+function ProfileChangesTable({ changes }: { changes: ProfileChangeRow[] }) {
+  return (
+    <div className="border-t border-slate-200 pt-4">
+      <p className="mb-2 text-sm font-semibold text-slate-900">Profile changes</p>
+      <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+        <table className="min-w-full border-collapse text-left text-sm">
+          <thead className="border-b border-slate-200 bg-slate-50/90 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-3 py-2 font-semibold">Section</th>
+              <th className="whitespace-nowrap px-3 py-2 font-semibold">Field</th>
+              <th className="whitespace-nowrap px-3 py-2 font-semibold">Current value</th>
+              <th className="whitespace-nowrap px-3 py-2 font-semibold">New value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changes.map((change, index) => {
+              const action = String(change.action ?? 'change')
+              const verb = action === 'add' ? 'New' : action === 'remove' ? 'Remove' : 'Change'
+              return (
+                <tr key={String(change.lineNo ?? index)} className="border-b border-slate-100 align-top last:border-0">
+                  <td className="px-3 py-2">
+                    <p className="font-medium text-slate-900">{change.areaName || change.area}</p>
+                    {change.rowLabel ? <p className="text-xs text-slate-500">{change.rowLabel}</p> : null}
+                    {change.area !== 'identity' && change.area !== 'contact' ? (
+                      <span
+                        className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${
+                          PROFILE_ACTION_STYLES[action] ?? PROFILE_ACTION_STYLES.change
+                        }`}
+                      >
+                        {verb}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">{change.fieldCaption}</td>
+                  <td
+                    className={`min-w-[10rem] px-3 py-2 text-slate-500 ${
+                      change.oldValue && change.action !== 'remove' ? 'line-through decoration-slate-300' : ''
+                    }`}
+                  >
+                    {change.oldValue || '—'}
+                  </td>
+                  <td className="min-w-[10rem] px-3 py-2 font-semibold text-slate-900">{change.newValue || '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
 }
 
 /** Line fields that hold the requester's description / specification: wrapped, never cut off. */
@@ -348,6 +428,7 @@ export function ApprovalDetail() {
     : []
   const lineKeys = preferredLineKeys(request?.requestType, lines)
   const metric = request ? approvalMetric(request.requestType, request.amount, payload, lines) : null
+  const profileChanges = Array.isArray(payload.profileChanges) ? (payload.profileChanges as ProfileChangeRow[]) : []
   const headerFacts = request ? approvalHeaderFacts(request.requestType, payload) : []
 
   useEffect(() => {
@@ -445,6 +526,13 @@ export function ApprovalDetail() {
                 </div>
               ) : null}
 
+              {request.requestType === 'profileChange' ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+                  The employee changed their own profile. Check each change and the supporting documents. Approve
+                  writes all of them to the employee in Business Central; Reject needs a reason, which the employee sees.
+                </div>
+              ) : null}
+
               {request.requestType === 'employeeExit' || request.requestType === 'hrServiceLetter' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
                   {request.requestType === 'employeeExit'
@@ -477,6 +565,8 @@ export function ApprovalDetail() {
                   </dl>
                 </div>
               ) : null}
+
+              {profileChanges.length ? <ProfileChangesTable changes={profileChanges} /> : null}
 
               {displayStatus === 'Rejected' &&
               (request.approvalSteps ?? []).some((step) => step.status === 'Approved') ? (
@@ -582,7 +672,9 @@ export function ApprovalDetail() {
                       placeholder={
                         request.requestType === 'hrServiceLetter'
                           ? 'Enter HR remarks (shown to the employee)'
-                          : request.requestType === 'employeeExit' || request.requestType === 'overtime'
+                          : request.requestType === 'employeeExit' ||
+                              request.requestType === 'overtime' ||
+                              request.requestType === 'profileChange'
                             ? 'Add a note. A reason is required to reject.'
                             : canSendBack
                               ? 'Add an approval note. A comment is required to send back or reject.'
@@ -600,6 +692,12 @@ export function ApprovalDetail() {
                       <p className="mt-2 text-xs text-slate-500">
                         Transfer and resignation go to the Immediate Supervisor first, then HR. Exit forms do not
                         appear here.
+                      </p>
+                    ) : request.requestType === 'profileChange' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Approve writes every change above to the employee card, next of kin, dependants, qualifications and
+                        employment history, and copies the documents to the employee. A rejection reason is required and is
+                        shown to the employee.
                       </p>
                     ) : request.requestType === 'overtime' ? (
                       <p className="mt-2 text-xs text-slate-500">

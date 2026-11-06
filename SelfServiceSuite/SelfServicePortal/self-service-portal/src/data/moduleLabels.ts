@@ -23,6 +23,7 @@ export const moduleLabels: Record<PortalModuleKey, string> = {
   documentRequisition: 'Document Requisition',
   employeeExit: 'Employee Exit',
   hrServiceLetter: 'HR Service Letters',
+  profileChange: 'Profile Change',
 }
 
 /** Ordered list of statuses a request can transition through. */

@@ -4,6 +4,17 @@ import {
   BookOpen, Briefcase, Building2, CalendarDays, Download, FileText, GraduationCap, History, IdCard, RefreshCw, ShieldCheck, Users, Wallet,
 } from 'lucide-react'
 import { downloadEmployeeAttachment, getEmployeeProfileDetails, getPortalBuild, listEmployeeAttachments } from '@/api/endpoints/profile'
+import { fetchProfileEditContext } from '@/api/endpoints/profileChanges'
+import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import {
+  BioDataEditor,
+  ProfileActionBar,
+  ProfileDocuments,
+  ProfileStatusBanner,
+  RowAreaEditor,
+  SectionHeading,
+} from './ProfileEditor'
+import { useProfileEditor } from './useProfileEditor'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
 import { useAuth } from '@/hooks/useAuth'
@@ -108,6 +119,10 @@ function FieldGrid({fields}: {fields: {key: string; label: string; value: string
 function SubHeading({children}: {children: ReactNode}) {
   return <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{children}</h3>
 }
+/** Sections HR keeps (job, leave, pay…): shown, not editable from the portal. */
+function HrOnlyNote() {
+  return <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">This section is kept by HR. Contact HR if something here is wrong.</p>
+}
 function CardSections({sections}: {sections: ProfileSection[]}) {
   if (!sections.length) return null
   return <div className="space-y-6">{sections.map(section =>
@@ -116,6 +131,12 @@ function CardSections({sections}: {sections: ProfileSection[]}) {
       <FieldGrid fields={sectionFields(section)} />
     </div>)}
   </div>
+}
+/** Bio Data while editing: the rest of the BC card (read only, under the editable sections). */
+function otherDetails(profile: EmployeeProfileDetails) {
+  const sections = (profile.sections ?? []).filter(section => section.key === 'other' && sectionFields(section).length > 0)
+  if (!sections.length) return null
+  return <div className="space-y-3"><SectionHeading>Other Details</SectionHeading><HrOnlyNote/><FieldGrid fields={sections.flatMap(sectionFields)}/></div>
 }
 function ProfileFields({profile, fields}: {profile: EmployeeProfileDetails; fields: Field[]}) {
   const extras = (profile.extraFields ?? []).flatMap(field => {
@@ -159,15 +180,24 @@ export function Profile() {
   const {employee}=useAuth()
   const {roleLabels}=usePermissions()
   const toast=useToast()
+  const confirm=useConfirm()
   const [selected,setSelected]=useState<Tab>('bio')
   const [downloading,setDownloading]=useState<string|null>(null)
   const profileQuery=useQuery({queryKey:['profile','details',employee?.employeeNo],queryFn:getEmployeeProfileDetails,enabled:Boolean(employee?.employeeNo)})
   const attachmentsQuery=useQuery({queryKey:['profile','attachments',employee?.employeeNo],queryFn:listEmployeeAttachments,enabled:Boolean(employee?.employeeNo)})
   const buildQuery=useQuery({queryKey:['portal-build'],queryFn:getPortalBuild})
-  const refresh=()=>{void profileQuery.refetch();void attachmentsQuery.refetch()}
+  // Profile editing (BC 1.0.3.609). Only our own actions refetch it, so unsaved edits are kept.
+  const editQuery=useQuery({queryKey:['profile','edit-context',employee?.employeeNo],queryFn:fetchProfileEditContext,enabled:Boolean(employee?.employeeNo),staleTime:Infinity,refetchOnWindowFocus:false,retry:false})
+  const reloadAll=async()=>{await Promise.all([editQuery.refetch(),profileQuery.refetch(),attachmentsQuery.refetch()])}
+  const editor=useProfileEditor(editQuery.data,reloadAll)
+  const editing=Boolean(editQuery.data)
+  const refresh=async()=>{
+    if(editor.dirty && !(await confirm({title:'Refresh your profile?',message:'Your changes that are not saved yet will be lost.',confirmLabel:'Refresh',tone:'danger'})))return
+    void profileQuery.refetch();void attachmentsQuery.refetch();void editQuery.refetch()
+  }
   const profile=profileQuery.data
   if(profileQuery.isPending)return <PageWrapper title="Employee Profile"><p role="status" className="text-sm text-slate-600">Loading your profile…</p></PageWrapper>
-  if(!profile)return <PageWrapper title="Employee Profile"><div role="alert" className="space-y-3"><p>We couldn’t load your profile. Please try again.</p><Button onClick={refresh}>Try again</Button></div></PageWrapper>
+  if(!profile)return <PageWrapper title="Employee Profile"><div role="alert" className="space-y-3"><p>We couldn’t load your profile. Please try again.</p><Button onClick={()=>void refresh()}>Try again</Button></div></PageWrapper>
   const structured=(profile.sections?.length ?? 0)>0
   const unavailableKeys=new Set(profile.unavailableSections ?? [])
   const unavailable=new Set<Tab>([...unavailableKeys].flatMap(key=>UNAVAILABLE_TABS[key] ?? []))
@@ -178,7 +208,11 @@ export function Profile() {
   const memberships=profile.memberships ?? []
   const rewards=profile.rewards ?? []
   const salaryAllowances=profile.salaryAllowances ?? []
-  const hasContent: Record<Tab,boolean> = {
+  const hasContent: Record<Tab,boolean> = editing ? {
+    bio: true, contract: false, job: structured && sectionsForTab(profile,'job').length>0, leave: structured && sectionsForTab(profile,'leave').length>0,
+    pay: (structured && sectionsForTab(profile,'pay').length>0) || salaryAllowances.length>0, kin: true, dependants: true, qualifications: true,
+    history: true, training: trainingHistory.length>0 || memberships.length>0 || rewards.length>0, assets: profile.assignedAssets.length>0, attachments: true,
+  } : {
     bio: structured ? sectionsForTab(profile,'bio').length>0 : fieldsFor(profile,bioFields).length>0 || Boolean(profile.extraFields?.some(field=>display(field.value))),
     contract: !structured && fieldsFor(profile,contractFields).length>0,
     job: structured && sectionsForTab(profile,'job').length>0,
@@ -193,7 +227,7 @@ export function Profile() {
     attachments: attachmentsQuery.isPending || attachmentsQuery.isError || Boolean(attachmentsQuery.data?.length),
   }
   const visible: Tab[] = TAB_ORDER.filter(tab=>{
-    if(tab==='contract' && structured)return false
+    if(tab==='contract' && (structured || editing))return false
     if(tab==='job' && !structured)return false
     return hasContent[tab] || unavailable.has(tab)
   })
@@ -217,17 +251,21 @@ export function Profile() {
             {joined||service?<p className="mt-1 text-xs text-white/70">{[joined?`Joined ${formatDate(joined)}`:'',service?`${service} of service`:''].filter(Boolean).join(' · ')}</p>:null}
             <div className="mt-3 flex flex-wrap gap-2">{[profile.employeeNo,profile.department,profile.branch||profile.division,profile.status].filter(value=>display(value)).map((value,index)=><span key={index} className="rounded-full bg-white/15 px-3 py-1 text-xs">{value}</span>)}</div>
           </div>
-          <Button variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={refresh} disabled={profileQuery.isFetching || attachmentsQuery.isFetching}><RefreshCw className="h-4 w-4"/>Refresh</Button>
+          <Button variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={()=>void refresh()} disabled={profileQuery.isFetching || attachmentsQuery.isFetching || editQuery.isFetching || editor.busy!==null}><RefreshCw className="h-4 w-4"/>Refresh</Button>
         </div>
         {roleLabels.length?<div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/20 pt-4"><ShieldCheck className="h-4 w-4"/><span className="text-xs">Portal Access</span>{roleLabels.map(label=><span key={label} className="rounded-full bg-white/20 px-3 py-1 text-xs">{label}</span>)}</div>:null}
       </div>
+      {editing?<ProfileStatusBanner editor={editor}/>:null}
+      {editQuery.isError?<p role="status" className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">Editing your profile is not available right now: {editQuery.error instanceof Error?editQuery.error.message:'please try again later.'} Your profile is shown below.</p>:null}
       {unavailableKeys.has('details') || profileQuery.isError ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Some profile details could not be loaded. The information available is shown below. Please retry or contact HR if details are missing.</p>:null}
       {visible.length?<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div role="tablist" aria-label="Profile sections" className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-4">{visible.map(tab=><button key={tab} role="tab" id={`profile-tab-${tab}`} aria-selected={tab===active} aria-controls={`profile-panel-${tab}`} onClick={()=>setSelected(tab)} className={cn('rounded-full px-4 py-2 text-sm font-medium',tab===active?'bg-[var(--portal-navy)] text-white':'text-slate-600 hover:bg-slate-100')}>{labels[tab]}</button>)}</div>
+        <div role="tablist" aria-label="Profile sections" className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-4">{visible.map(tab=><button key={tab} role="tab" id={`profile-tab-${tab}`} aria-selected={tab===active} aria-controls={`profile-panel-${tab}`} onClick={()=>setSelected(tab)} className={cn('flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors',tab===active?'border-[var(--portal-navy)] bg-[var(--portal-navy)] text-white shadow-sm':'border-slate-200 bg-white text-slate-700 hover:bg-slate-50')}>{tabIcons[tab]}{labels[tab]}</button>)}</div>
+        {editing && !editor.locked && ['bio','kin','dependants','qualifications','history','attachments'].includes(active ?? '')?<p className="mb-4 rounded-lg border border-[var(--portal-navy)]/15 bg-[var(--portal-navy)]/[0.04] px-3 py-2 text-sm text-slate-700">You can correct and complete your details here. Your changes go to HR for verification before they are saved in your record.</p>:null}
         <section role="tabpanel" id={`profile-panel-${active}`} aria-labelledby={`profile-tab-${active}`}>
           <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--portal-navy)]">{active?tabIcons[active]:null}{active?labels[active]:''}</h2>
-          {active && unavailable.has(active)?<div role="status" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">This section could not be fully loaded. Please retry or contact HR.<Button variant="ghost" onClick={refresh}>Retry</Button></div>:null}
-          {active==='bio'?(structured?<CardSections sections={sectionsForTab(profile,'bio')}/>:<ProfileFields profile={profile} fields={bioFields}/>):null}
+          {active && unavailable.has(active)?<div role="status" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">This section could not be fully loaded. Please retry or contact HR.<Button variant="ghost" onClick={()=>void refresh()}>Retry</Button></div>:null}
+          {editing && ['job','leave','pay','training','assets'].includes(active ?? '')?<HrOnlyNote/>:null}
+          {active==='bio'?(editing?<BioDataEditor editor={editor} extra={otherDetails(profile)}/>:structured?<CardSections sections={sectionsForTab(profile,'bio')}/>:<ProfileFields profile={profile} fields={bioFields}/>):null}
           {active==='contract'?<ProfileFields profile={profile} fields={contractFields}/>:null}
           {active==='job'?<CardSections sections={sectionsForTab(profile,'job')}/>:null}
           {active==='leave'?<CardSections sections={sectionsForTab(profile,'leave')}/>:null}
@@ -235,14 +273,18 @@ export function Profile() {
             <CardSections sections={sectionsForTab(profile,'pay')}/>
             <ProfileTable rows={salaryAllowances} fields={ALLOWANCE_FIELDS} title={`Salary Allowances${display(profile.salaryAllowancePeriod)?` — ${profile.salaryAllowancePeriod}`:''}`}/>
           </div>:null}
-          {active==='kin'?<div className="space-y-6">
+          {active==='kin'?(editing?<div className="space-y-8">
+            <RowAreaEditor editor={editor} area="kin"/>
+            <RowAreaEditor editor={editor} area="beneficiary" title="Beneficiaries"/>
+          </div>:<div className="space-y-6">
             <ProfileTable rows={profile.nextOfKin} fields={KIN_FIELDS} title={beneficiaries.length?'Next of Kin':undefined}/>
             <ProfileTable rows={beneficiaries} fields={KIN_FIELDS} title="Beneficiaries"/>
-          </div>:null}
-          {active==='dependants'?<ProfileTable rows={dependants} fields={KIN_FIELDS}/>:null}
-          {active==='qualifications'?<ProfileTable rows={profile.qualifications} fields={QUALIFICATION_FIELDS}/>:null}
+          </div>):null}
+          {active==='dependants'?(editing?<RowAreaEditor editor={editor} area="dependant" title="Dependants"/>:<ProfileTable rows={dependants} fields={KIN_FIELDS}/>):null}
+          {active==='qualifications'?(editing?<RowAreaEditor editor={editor} area="qualification" title="Qualifications"/>:<ProfileTable rows={profile.qualifications} fields={QUALIFICATION_FIELDS}/>):null}
           {active==='history'?<div className="space-y-6">
-            <ProfileTable rows={profile.employmentHistory} fields={HISTORY_FIELDS} title={internalHistory.length?'Previous Employment':undefined}/>
+            {editing?<RowAreaEditor editor={editor} area="history" title="Previous Employment"/>:<ProfileTable rows={profile.employmentHistory} fields={HISTORY_FIELDS} title={internalHistory.length?'Previous Employment':undefined}/>}
+            {editing && internalHistory.length?<HrOnlyNote/>:null}
             <ProfileTable rows={internalHistory} fields={INTERNAL_HISTORY_FIELDS} title="Internal Employment History"/>
           </div>:null}
           {active==='training'?<div className="space-y-6">
@@ -252,11 +294,15 @@ export function Profile() {
           </div>:null}
           {active==='assets'?<ProfileTable rows={profile.assignedAssets} fields={ASSET_FIELDS}/>:null}
           {active==='attachments'?<div className="space-y-3">
+            {editing?<div className="mb-8"><ProfileDocuments editor={editor}/></div>:null}
+            {editing?<SectionHeading icon={<FileText/>}>Documents in your employee record</SectionHeading>:null}
+            {editing && !attachmentsQuery.isPending && !attachmentsQuery.isError && !attachmentsQuery.data?.length?<p className="text-sm text-slate-500">No documents in your record yet.</p>:null}
             {attachmentsQuery.isPending?<p role="status">Loading attachments…</p>:null}
             {attachmentsQuery.isError?<div role="alert"><p>Attachments could not be loaded.</p><Button variant="outline" onClick={()=>void attachmentsQuery.refetch()}>Retry</Button></div>:null}
             {attachmentsQuery.data?.map(attachment=><div key={attachment.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"><div className="min-w-0"><p className="break-words text-sm font-medium">{attachment.fileName}</p>{attachment.description?<p className="text-xs text-slate-500">{attachment.description}</p>:null}</div><Button variant="outline" disabled={Boolean(downloading)} onClick={()=>void download(attachment)}><Download className="h-4 w-4"/>{downloading===String(attachment.id)?'Downloading…':'Download'}</Button></div>)}
           </div>:null}
         </section>
+        {editing?<ProfileActionBar editor={editor} onShowDocuments={()=>setSelected('attachments')}/>:null}
       </div>:<p>No profile information is currently available.</p>}
       <p className="text-center text-xs text-slate-400">Portal build: {buildQuery.data?.portalApiBuild ?? 'Unavailable'}</p>
     </div>
