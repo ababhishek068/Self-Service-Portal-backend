@@ -550,7 +550,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v303 — 1.0.3.462 (UAT: employees edit their own profile as the manager sample - Bio Data personal and contact details, Next of Kin, Dependants, Qualifications, Employment History and supporting documents; Save as Draft, Submit to HR, Withdraw; HR verifies in Approvals or BC and the approved changes are written to the employee; for BC 1.0.3.609)'
+export const PORTAL_API_BUILD = 'v304 — 1.0.3.463 (UAT: Overtime Request with several dates as the manager form - enter a line then Add Line, lines table with edit and delete, totals and monthly check across the lines, approvers see every line; Employee Profile is read only until Edit Profile is clicked; for BC 1.0.3.612)'
 
 interface LookupSpec {
   service: string

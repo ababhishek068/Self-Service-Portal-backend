@@ -8,6 +8,7 @@ import { fetchProfileEditContext } from '@/api/endpoints/profileChanges'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import {
   BioDataEditor,
+  EditProfileButton,
   ProfileActionBar,
   ProfileDocuments,
   ProfileStatusBanner,
@@ -30,6 +31,8 @@ type Tab = 'bio' | 'contract' | 'job' | 'leave' | 'pay' | 'kin' | 'dependants' |
 type Field = [keyof EmployeeProfileDetails, string, 'date'?]
 type TableField = [string, string, ('date' | 'number')?]
 
+/** Tabs the employee can change (after clicking Edit Profile); the others are kept by HR. */
+const EDITABLE_TABS: Tab[] = ['bio', 'kin', 'dependants', 'qualifications', 'history', 'attachments']
 const TAB_ORDER: Tab[] = ['bio', 'contract', 'job', 'leave', 'pay', 'kin', 'dependants', 'qualifications', 'history', 'training', 'assets', 'attachments']
 const labels: Record<Tab, string> = {
   bio: 'Bio Data', contract: 'Contract', job: 'Job & Contract', leave: 'Leave & Benefits', pay: 'Pay & Bank', kin: 'Next of Kin',
@@ -260,9 +263,12 @@ export function Profile() {
       {unavailableKeys.has('details') || profileQuery.isError ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Some profile details could not be loaded. The information available is shown below. Please retry or contact HR if details are missing.</p>:null}
       {visible.length?<div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div role="tablist" aria-label="Profile sections" className="mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-4">{visible.map(tab=><button key={tab} role="tab" id={`profile-tab-${tab}`} aria-selected={tab===active} aria-controls={`profile-panel-${tab}`} onClick={()=>setSelected(tab)} className={cn('flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors',tab===active?'border-[var(--portal-navy)] bg-[var(--portal-navy)] text-white shadow-sm':'border-slate-200 bg-white text-slate-700 hover:bg-slate-50')}>{tabIcons[tab]}{labels[tab]}</button>)}</div>
-        {editing && !editor.locked && ['bio','kin','dependants','qualifications','history','attachments'].includes(active ?? '')?<p className="mb-4 rounded-lg border border-[var(--portal-navy)]/15 bg-[var(--portal-navy)]/[0.04] px-3 py-2 text-sm text-slate-700">You can correct and complete your details here. Your changes go to HR for verification before they are saved in your record.</p>:null}
+        {editing && !editor.locked && EDITABLE_TABS.includes(active ?? 'bio')?<p className={cn('mb-4 rounded-lg border px-3 py-2 text-sm',editor.editing?'border-amber-200 bg-amber-50 text-amber-900':'border-[var(--portal-navy)]/15 bg-[var(--portal-navy)]/[0.04] text-slate-700')}>{editor.editing?'You are editing your profile. Change what is wrong or missing on any tab, then Save as Draft or Submit to HR. Cancel leaves edit mode.':'Something wrong or missing? Click Edit Profile to correct it. Your changes go to HR for verification before they are saved in your record.'}</p>:null}
         <section role="tabpanel" id={`profile-panel-${active}`} aria-labelledby={`profile-tab-${active}`}>
-          <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--portal-navy)]">{active?tabIcons[active]:null}{active?labels[active]:''}</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--portal-navy)]">{active?tabIcons[active]:null}{active?labels[active]:''}</h2>
+            {editing && EDITABLE_TABS.includes(active ?? 'bio')?<EditProfileButton editor={editor}/>:null}
+          </div>
           {active && unavailable.has(active)?<div role="status" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">This section could not be fully loaded. Please retry or contact HR.<Button variant="ghost" onClick={()=>void refresh()}>Retry</Button></div>:null}
           {editing && ['job','leave','pay','training','assets'].includes(active ?? '')?<HrOnlyNote/>:null}
           {active==='bio'?(editing?<BioDataEditor editor={editor} extra={otherDetails(profile)}/>:structured?<CardSections sections={sectionsForTab(profile,'bio')}/>:<ProfileFields profile={profile} fields={bioFields}/>):null}

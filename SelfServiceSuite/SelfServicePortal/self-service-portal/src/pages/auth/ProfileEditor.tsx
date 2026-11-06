@@ -135,6 +135,17 @@ const FIELD_ICONS: Record<string, ReactNode> = {
   postalAddress: <MapPin />, city: <Building2 />, residentialAddress: <House />, residentialAddress2: <House />,
 }
 
+/** The pencil that switches the profile into edit mode (shown only while it is read only). */
+export function EditProfileButton({ editor }: { editor: ProfileEditor }) {
+  if (!editor.context || editor.locked || editor.editing) return null
+  return (
+    <Button type="button" variant="outline" size="sm" disabled={editor.busy !== null} onClick={editor.startEditing}>
+      <Pencil className="h-4 w-4" />
+      Edit Profile
+    </Button>
+  )
+}
+
 export function SectionHeading({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
     <div className="flex items-center gap-3">
@@ -155,7 +166,8 @@ function FieldCard({ def, editor }: { def: ProfileFieldDef; editor: ProfileEdito
   if (def.key === 'fullName' && ['firstName', 'middleName', 'lastName'].some((key) => key in editor.draft.fields)) {
     shown = ['firstName', 'middleName', 'lastName'].map((key) => editor.value(key).trim()).filter(Boolean).join(' ')
   }
-  const missing = def.required && !current.trim()
+  const missing = editor.editing && def.required && !current.trim()
+  if (changed && !editor.editing && !def.readOnly && def.type !== 'computed') shown = displayValue(def, current, lookups)
   return (
     <div
       className={cn(
@@ -170,9 +182,9 @@ function FieldCard({ def, editor }: { def: ProfileFieldDef; editor: ProfileEdito
       <div className="min-w-0 flex-1">
         <label htmlFor={id} className="flex items-center gap-1 text-xs font-medium text-slate-500">
           {def.label}
-          {def.required && !def.readOnly ? <span className="text-red-600">*</span> : null}
+          {def.required && !def.readOnly && editor.editing ? <span className="text-red-600">*</span> : null}
         </label>
-        {def.readOnly || def.type === 'computed' ? (
+        {def.readOnly || def.type === 'computed' || !editor.editing ? (
           <p className="mt-1 break-words text-sm font-semibold text-slate-900">{shown || '—'}</p>
         ) : (
           <div className="mt-1">
@@ -303,6 +315,7 @@ export function RowAreaEditor({ editor, area, title }: { editor: ProfileEditor; 
   const lookups = editor.context?.lookups ?? {}
   const rows = shownRows(area, data, editor.draft.rows)
   const disabled = editor.locked || editor.busy !== null
+  const editing = editor.editing
   const defs = Object.fromEntries(data.fields.map((field) => [field.key, field]))
   return (
     <div className="space-y-3">
@@ -310,14 +323,16 @@ export function RowAreaEditor({ editor, area, title }: { editor: ProfileEditor; 
         <div className="min-w-0 flex-1">
           <SectionHeading icon={AREA_ICONS[area]}>{title ?? data.label}</SectionHeading>
         </div>
-        <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setDialog({ ref: null, values: {} })}>
-          <Plus className="h-4 w-4" />
-          {ADD_LABELS[area]}
-        </Button>
+        {editing ? (
+          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setDialog({ ref: null, values: {} })}>
+            <Plus className="h-4 w-4" />
+            {ADD_LABELS[area]}
+          </Button>
+        ) : null}
       </div>
       {rows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-          Nothing recorded yet. Use {ADD_LABELS[area].toLowerCase()} to add one.
+          {editing ? `Nothing recorded yet. Use ${ADD_LABELS[area].toLowerCase()} to add one.` : 'Nothing recorded yet. Click Edit Profile to add one.'}
         </p>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -345,7 +360,7 @@ export function RowAreaEditor({ editor, area, title }: { editor: ProfileEditor; 
                       </span>
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className={cn('flex shrink-0 gap-1', editing ? '' : 'hidden')}>
                     {row.state === 'removed' || row.state === 'changed' ? (
                       <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => editor.undoRow(area, row.ref)}>
                         <Undo2 className="h-4 w-4" />
@@ -545,7 +560,7 @@ export function ProfileDocuments({ editor }: { editor: ProfileEditor }) {
   const [file, setFile] = useState<File | null>(null)
   const request = editor.request
   const documents = request && request.status !== 'Approved' && request.status !== 'Rejected' ? request.attachments : []
-  const canEdit = !editor.locked && editor.busy === null
+  const canEdit = editor.editing && editor.busy === null
   const attach = async () => {
     if (!file) return
     const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
@@ -786,8 +801,11 @@ export function ProfileActionBar({ editor, onShowDocuments }: { editor: ProfileE
     ? `${editor.changeCount} change${editor.changeCount === 1 ? '' : 's'} not saved yet`
     : editor.changeCount
       ? `Draft saved · ${editor.changeCount} change${editor.changeCount === 1 ? '' : 's'}`
-      : 'No changes yet. Edit your details, then submit them to HR.'
+      : editor.editing
+        ? 'Change your details, then Save as Draft or Submit them to HR.'
+        : 'Your profile is up to date. Click Edit Profile to correct or add details.'
 
+  /** Cancel leaves edit mode; unsaved changes go back to the last saved draft (or to HR's record). */
   const cancel = async () => {
     if (editor.dirty) {
       const ok = await confirm({
@@ -796,19 +814,33 @@ export function ProfileActionBar({ editor, onShowDocuments }: { editor: ProfileE
         confirmLabel: 'Undo changes',
         tone: 'danger',
       })
-      if (ok) editor.revert()
-      return
+      if (!ok) return
+      editor.revert()
     }
-    if (editor.hasDraft) {
-      const ok = await confirm({
-        title: 'Discard your draft?',
-        message: 'The saved changes and their documents are deleted. Your recorded profile does not change.',
-        confirmLabel: 'Discard draft',
-        tone: 'danger',
-      })
-      if (ok) await editor.discard()
-    }
+    editor.stopEditing()
   }
+
+  const discard = async () => {
+    const ok = await confirm({
+      title: 'Discard your draft?',
+      message: 'The saved changes and their documents are deleted. Your recorded profile does not change.',
+      confirmLabel: 'Discard draft',
+      tone: 'danger',
+    })
+    if (ok) await editor.discard()
+  }
+
+  const submitButton = (
+    <Button
+      type="button"
+      disabled={busy || editor.changeCount === 0 || Boolean(context.routingProblem)}
+      title={context.routingProblem || undefined}
+      onClick={() => setSubmitOpen(true)}
+    >
+      <Send className="h-4 w-4" />
+      Submit
+    </Button>
+  )
 
   return (
     <>
@@ -821,25 +853,33 @@ export function ProfileActionBar({ editor, onShowDocuments }: { editor: ProfileE
             </button>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={busy || !editor.dirty} onClick={() => void editor.saveDraft()}>
-            <Save className="h-4 w-4" />
-            {editor.busy === 'save' ? 'Saving…' : 'Save as Draft'}
-          </Button>
-          <Button
-            type="button"
-            disabled={busy || editor.changeCount === 0 || Boolean(context.routingProblem)}
-            title={context.routingProblem || undefined}
-            onClick={() => setSubmitOpen(true)}
-          >
-            <Send className="h-4 w-4" />
-            Submit
-          </Button>
-          <Button type="button" variant="outline" disabled={busy || (!editor.dirty && !editor.hasDraft)} onClick={() => void cancel()}>
-            <X className="h-4 w-4" />
-            Cancel
-          </Button>
-        </div>
+        {editor.editing ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" disabled={busy || !editor.dirty} onClick={() => void editor.saveDraft()}>
+              <Save className="h-4 w-4" />
+              {editor.busy === 'save' ? 'Saving…' : 'Save as Draft'}
+            </Button>
+            {submitButton}
+            <Button type="button" variant="outline" disabled={busy} onClick={() => void cancel()}>
+              <X className="h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {editor.hasDraft ? (
+              <Button type="button" variant="ghost" className="text-red-700" disabled={busy} onClick={() => void discard()}>
+                <Trash2 className="h-4 w-4" />
+                {editor.busy === 'discard' ? 'Discarding…' : 'Discard draft'}
+              </Button>
+            ) : null}
+            {editor.changeCount ? submitButton : null}
+            <Button type="button" variant={editor.changeCount ? 'outline' : 'default'} disabled={busy} onClick={editor.startEditing}>
+              <Pencil className="h-4 w-4" />
+              Edit Profile
+            </Button>
+          </div>
+        )}
       </div>
       {submitOpen ? (
         <SubmitDialog

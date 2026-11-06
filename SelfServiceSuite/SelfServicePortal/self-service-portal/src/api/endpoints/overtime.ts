@@ -37,6 +37,23 @@ export interface OvertimeLogEntry {
 
 export type OvertimeRequestStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected'
 
+/** One overtime date and time of a request (BC 1.0.3.612). */
+export interface OvertimeLine {
+  lineNo: number
+  overtimeDate: string
+  startTime: string
+  endTime: string
+  dayType: OvertimeDayType
+  dayTypeLabel: string
+  totalHours: number
+  normalHours: number
+  nightHours: number
+  restDayHours: number
+  holidayHours: number
+  estimatedAmount: number
+  reason: string
+}
+
 export interface OvertimeRequest {
   id: string
   requestNo: string
@@ -81,6 +98,8 @@ export interface OvertimeRequest {
   sentToPayrollAt: string
   steps: OvertimeStep[]
   log: OvertimeLogEntry[]
+  lines: OvertimeLine[]
+  linesFromBc: boolean
 }
 
 export interface OvertimeContext {
@@ -102,15 +121,22 @@ export interface OvertimeContext {
   hourlyRate: number
   approvers: OvertimeStep[]
   routingProblem: string
+  /** BC 1.0.3.612: several dates and times in one request. */
+  supportsLines: boolean
+  maxLines: number
 }
 
-export interface OvertimeDetails {
+export interface OvertimeLineInput {
   overtimeDate: string
   startTime: string
   endTime: string
   dayType: OvertimeDayType
   reason: string
+}
+
+export interface OvertimeDetails extends OvertimeLineInput {
   projectNo: string
+  lines: OvertimeLineInput[]
 }
 
 export async function fetchOvertimeContext() {

@@ -63,11 +63,14 @@ export function useProfileEditor(context: ProfileEditContext | undefined, reload
   const [saved, setSaved] = useState(snapshot(EMPTY_DRAFT))
   const [request, setRequest] = useState<ProfileChangeRequest | null>(null)
   const [busy, setBusy] = useState<'save' | 'submit' | 'withdraw' | 'discard' | 'upload' | null>(null)
+  // The profile is read only until the employee clicks Edit.
+  const [editing, setEditing] = useState(false)
 
   // Load BC's state when the edit context arrives (the query only refetches after our own actions).
   if (context && context !== loadedFrom) {
     const fromServer = draftFromRequest(context.request)
     setLoadedFrom(context)
+    setEditing(false)
     setDraft(fromServer)
     // A rejected request is not a draft: its changes show as not saved until the employee saves or submits.
     setSaved(snapshot(context.request?.status === 'Rejected' ? EMPTY_DRAFT : fromServer))
@@ -79,6 +82,10 @@ export function useProfileEditor(context: ProfileEditContext | undefined, reload
     [context],
   )
   const locked = request?.status === 'Waiting for HR'
+  const startEditing = () => {
+    if (!locked) setEditing(true)
+  }
+  const stopEditing = () => setEditing(false)
   const changeCount = Object.keys(draft.fields).length + draft.rows.length
   const dirty = !locked && snapshot(draft) !== saved
   const hasDraft = request?.status === 'Draft'
@@ -214,6 +221,9 @@ export function useProfileEditor(context: ProfileEditContext | undefined, reload
     request,
     busy,
     locked,
+    editing: editing && !locked,
+    startEditing,
+    stopEditing,
     dirty,
     hasDraft,
     changeCount,

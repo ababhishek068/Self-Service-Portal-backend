@@ -15,6 +15,7 @@ import {
   MinusCircle,
   Network,
   Pencil,
+  Plus,
   RefreshCw,
   Save,
   Send,
@@ -39,7 +40,7 @@ import {
   withdrawOvertimeRequest,
   type OvertimeContext,
   type OvertimeDayType,
-  type OvertimeDetails,
+  type OvertimeLineInput,
   type OvertimeRequest as OvertimeRequestRow,
   type OvertimeStep,
 } from '@/api/endpoints/overtime'
@@ -75,19 +76,66 @@ function localToday() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-function emptyDetails(): OvertimeDetails {
-  return { overtimeDate: localToday(), startTime: '17:00', endTime: '21:00', dayType: 'working', reason: '', projectNo: '' }
+/** A new request starts with today evening filled in; after Add Line the entry is cleared. */
+function firstEntry(): OvertimeLineInput {
+  return { overtimeDate: localToday(), startTime: '17:00', endTime: '21:00', dayType: 'working', reason: '' }
 }
 
-function detailsOf(request: OvertimeRequestRow): OvertimeDetails {
-  return {
-    overtimeDate: request.overtimeDate,
-    startTime: request.startTime,
-    endTime: request.endTime,
-    dayType: request.dayType,
-    reason: request.reason,
-    projectNo: request.projectNo,
-  }
+function clearedEntry(dayType: OvertimeDayType): OvertimeLineInput {
+  return { overtimeDate: '', startTime: '', endTime: '', dayType, reason: '' }
+}
+
+function linesOf(request: OvertimeRequestRow): OvertimeLineInput[] {
+  return request.lines.map((line) => ({
+    overtimeDate: line.overtimeDate,
+    startTime: line.startTime,
+    endTime: line.endTime,
+    dayType: line.dayType,
+    reason: line.reason,
+  }))
+}
+
+function sortLines(lines: OvertimeLineInput[]) {
+  return [...lines].sort((left, right) => (left.overtimeDate + left.startTime).localeCompare(right.overtimeDate + right.startTime))
+}
+
+/** Minutes a line covers from 1 January 1970 (an end before the start is the next morning). */
+function slotOf(line: OvertimeLineInput) {
+  const [startHour = 0, startMinute = 0] = line.startTime.split(':').map(Number)
+  const [endHour = 0, endMinute = 0] = line.endTime.split(':').map(Number)
+  const start = startHour * 60 + startMinute
+  let end = endHour * 60 + endMinute
+  if (end <= start) end += 1440
+  const base = (Date.parse(`${line.overtimeDate}T00:00:00Z`) / 60_000) || 0
+  return { start: base + start, end: base + end }
+}
+
+function overlaps(left: OvertimeLineInput, right: OvertimeLineInput) {
+  const a = slotOf(left)
+  const b = slotOf(right)
+  return Math.min(a.end, b.end) > Math.max(a.start, b.start)
+}
+
+/** "11/06/2026", as on the manager form. */
+function shortDate(value: string) {
+  const parsed = parseISO(value)
+  return value && isValid(parsed) ? format(parsed, 'dd/MM/yyyy') : value || '—'
+}
+
+/** "05:00 PM" */
+function clockText(value: string) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(value)
+  if (!match) return value || '—'
+  const hour = Number(match[1])
+  return `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]} ${hour < 12 ? 'AM' : 'PM'}`
+}
+
+function dateRange(lines: Array<{ overtimeDate: string }>, fallback: string) {
+  const dates = lines.map((line) => line.overtimeDate).filter(Boolean).sort()
+  if (!dates.length) return prettyDate(fallback)
+  const first = dates[0]!
+  const last = dates[dates.length - 1]!
+  return first === last ? prettyDate(first) : `${prettyDate(first)} – ${prettyDate(last)}`
 }
 
 function prettyDate(value: string) {
@@ -125,13 +173,32 @@ function bandsText(hours: ReturnType<typeof splitOvertimeHours>) {
     .join(' · ')
 }
 
-/** Pending and approved hours of the employee in the month of `date`, without `exceptNo`. */
-function monthHours(rows: OvertimeRequestRow[], date: string, exceptNo: string) {
-  const month = date.slice(0, 7)
-  return rows
-    .filter((row) => row.requestNo !== exceptNo && row.overtimeDate.slice(0, 7) === month)
-    .filter((row) => row.status === 'Pending Approval' || row.status === 'Approved')
-    .reduce((total, row) => total + row.totalHours, 0)
+/**
+ * The busiest month of this request: its hours plus the employee's other pending and approved
+ * overtime in that month (BC checks the same limit month by month).
+ */
+function busiestMonth(rows: OvertimeRequestRow[], lines: OvertimeLineInput[], exceptNo: string) {
+  const months = new Map<string, number>()
+  for (const line of lines) {
+    if (!line.overtimeDate) continue
+    const month = line.overtimeDate.slice(0, 7)
+    months.set(month, (months.get(month) ?? 0) + splitOvertimeHours(line.startTime, line.endTime, line.dayType).totalHours)
+  }
+  let worst = { month: '', hours: 0 }
+  for (const [month, own] of months) {
+    const others = rows
+      .filter((row) => row.requestNo !== exceptNo && (row.status === 'Pending Approval' || row.status === 'Approved'))
+      .flatMap((row) => row.lines)
+      .filter((line) => line.overtimeDate.slice(0, 7) === month)
+      .reduce((total, line) => total + line.totalHours, 0)
+    if (own + others > worst.hours) worst = { month, hours: own + others }
+  }
+  return worst
+}
+
+function monthLabel(month: string) {
+  const parsed = parseISO(`${month}-01`)
+  return isValid(parsed) ? format(parsed, 'MMMM yyyy') : 'this month'
 }
 
 function waitingFor(row: OvertimeRequestRow) {
@@ -300,6 +367,95 @@ function CheckRow({ ok, text, warn }: { ok: boolean; text: string; warn?: boolea
   )
 }
 
+type TableLine = OvertimeLineInput & { hours: ReturnType<typeof splitOvertimeHours> }
+
+/** The request's overtime lines, as on the manager form (with Edit / Delete while it is a draft). */
+function OvertimeLinesTable({
+  lines,
+  rates,
+  editingIndex,
+  onEdit,
+  onDelete,
+  className,
+}: {
+  lines: TableLine[]
+  rates: OvertimeContext['rates']
+  editingIndex: number | null
+  onEdit?: (index: number) => void
+  onDelete?: (index: number) => void
+  className?: string
+}) {
+  const editable = Boolean(onEdit || onDelete)
+  const total = lines.reduce((sum, line) => sum + line.hours.totalHours, 0)
+  return (
+    <div className={cn('overflow-x-auto rounded-lg border border-slate-200', className)}>
+      <table className="min-w-full border-collapse text-left text-sm">
+        <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+          <tr>
+            <th className="whitespace-nowrap px-3 py-2.5">Date</th>
+            <th className="whitespace-nowrap px-3 py-2.5">Start Time</th>
+            <th className="whitespace-nowrap px-3 py-2.5">End Time</th>
+            <th className="whitespace-nowrap px-3 py-2.5 text-right">Overtime Hours</th>
+            <th className="whitespace-nowrap px-3 py-2.5">Category</th>
+            <th className="whitespace-nowrap px-3 py-2.5">Rate Type</th>
+            <th className="min-w-[12rem] px-3 py-2.5">Reason / Justification</th>
+            {editable ? <th className="w-20 px-3 py-2.5"><span className="sr-only">Actions</span></th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.length === 0 ? (
+            <tr>
+              <td colSpan={editable ? 8 : 7} className="px-3 py-6 text-center text-sm text-slate-500">
+                No overtime lines yet. Fill in the details above and click Add Line.
+              </td>
+            </tr>
+          ) : (
+            lines.map((line, index) => (
+              <tr
+                key={`${line.overtimeDate}-${line.startTime}-${index}`}
+                className={cn('border-b border-slate-100 last:border-0', editingIndex === index ? 'bg-amber-50' : 'hover:bg-slate-50/60')}
+              >
+                <td className="whitespace-nowrap px-3 py-2.5">{shortDate(line.overtimeDate)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5">{clockText(line.startTime)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5">{clockText(line.endTime)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{line.hours.totalHours.toFixed(2)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5">{DAY_TYPES.find((type) => type.value === line.dayType)?.label ?? line.dayType}</td>
+                <td className="whitespace-nowrap px-3 py-2.5">{rateType(line.hours, line.dayType, rates)}</td>
+                <td className="px-3 py-2.5">{line.reason || '—'}</td>
+                {editable ? (
+                  <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                    {onEdit ? (
+                      <Button type="button" variant="ghost" size="sm" aria-label={`Edit the line of ${shortDate(line.overtimeDate)}`} onClick={() => onEdit(index)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                    {onDelete ? (
+                      <Button type="button" variant="ghost" size="sm" aria-label={`Delete the line of ${shortDate(line.overtimeDate)}`} onClick={() => onDelete(index)}>
+                        <Trash2 className="h-4 w-4 text-red-600" />
+                      </Button>
+                    ) : null}
+                  </td>
+                ) : null}
+              </tr>
+            ))
+          )}
+        </tbody>
+        {lines.length > 1 ? (
+          <tfoot className="border-t border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900">
+            <tr>
+              <td className="px-3 py-2.5" colSpan={3}>
+                Total ({lines.length} lines)
+              </td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{total.toFixed(2)}</td>
+              <td colSpan={editable ? 4 : 3} />
+            </tr>
+          </tfoot>
+        ) : null}
+      </table>
+    </div>
+  )
+}
+
 export function OvertimeRequest() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -308,7 +464,11 @@ export function OvertimeRequest() {
   const [mode, setMode] = useState<Mode>(searchParams.get('request') ? 'detail' : 'form')
   const [selectedNo, setSelectedNo] = useState<string | null>(searchParams.get('request'))
   const [editingNo, setEditingNo] = useState<string | null>(null)
-  const [details, setDetails] = useState<OvertimeDetails>(emptyDetails)
+  const [entry, setEntry] = useState<OvertimeLineInput>(firstEntry)
+  const [lines, setLines] = useState<OvertimeLineInput[]>([])
+  const [editingLine, setEditingLine] = useState<number | null>(null)
+  const [projectNo, setProjectNo] = useState('')
+  const [entryError, setEntryError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
 
   const contextQuery = useQuery({ queryKey: CONTEXT_KEY, queryFn: fetchOvertimeContext, staleTime: 60_000 })
@@ -341,17 +501,37 @@ export function OvertimeRequest() {
     }
   }
 
-  const hours = useMemo(
-    () => splitOvertimeHours(details.startTime, details.endTime, details.dayType),
-    [details.startTime, details.endTime, details.dayType],
-  )
   const rates = context?.rates ?? { normal: 1.5, night: 1.75, restDay: 2, holiday: 2.5 }
-  const estimate = context ? estimateOvertimeAmount(hours, context.hourlyRate, rates) : 0
-  const monthTotal = monthHours(rows, details.overtimeDate, editingNo ?? '') + hours.totalHours
+  const hourlyRate = context?.hourlyRate ?? 0
+  const maxLines = context?.maxLines ?? 1
+  const entryHours = useMemo(
+    () => splitOvertimeHours(entry.startTime, entry.endTime, entry.dayType),
+    [entry.startTime, entry.endTime, entry.dayType],
+  )
+  // The request's lines; a new request with no line yet counts the entry, so the summary is never empty.
+  const counted = lines.length || editingLine !== null ? lines : entryHours.totalHours ? [entry] : []
+  const formHours = counted.reduce(
+    (total, line) => {
+      const split = splitOvertimeHours(line.startTime, line.endTime, line.dayType)
+      return {
+        totalHours: total.totalHours + split.totalHours,
+        normalHours: total.normalHours + split.normalHours,
+        nightHours: total.nightHours + split.nightHours,
+        restDayHours: total.restDayHours + split.restDayHours,
+        holidayHours: total.holidayHours + split.holidayHours,
+      }
+    },
+    { totalHours: 0, normalHours: 0, nightHours: 0, restDayHours: 0, holidayHours: 0 },
+  )
+  const formAmount = counted.reduce(
+    (total, line) => total + estimateOvertimeAmount(splitOvertimeHours(line.startTime, line.endTime, line.dayType), hourlyRate, rates),
+    0,
+  )
+  const busiest = busiestMonth(rows, counted, editingNo ?? '')
   const limit = context?.maxHoursPerMonth ?? 0
-  const dateObject = parseISO(details.overtimeDate)
+  const dateObject = parseISO(entry.overtimeDate)
   const weekendHint =
-    details.dayType === 'working' && isValid(dateObject) && (dateObject.getDay() === 0 || dateObject.getDay() === 6)
+    entry.dayType === 'working' && isValid(dateObject) && (dateObject.getDay() === 0 || dateObject.getDay() === 6)
       ? `${format(dateObject, 'EEEE')}: if it is your weekly rest day, choose Weekly rest day.`
       : ''
 
@@ -376,14 +556,72 @@ export function OvertimeRequest() {
 
   const startNew = () => {
     setEditingNo(null)
-    setDetails(emptyDetails())
+    setLines([])
+    setEntry(firstEntry())
+    setEditingLine(null)
+    setEntryError(null)
+    setProjectNo('')
     goTo('form')
   }
 
   const startEdit = (request: OvertimeRequestRow) => {
+    const existing = sortLines(linesOf(request))
     setEditingNo(request.requestNo)
-    setDetails(detailsOf(request))
+    setLines(existing)
+    setEntry(clearedEntry(existing[0]?.dayType ?? 'working'))
+    setEditingLine(null)
+    setEntryError(null)
+    setProjectNo(request.projectNo)
     goTo('form')
+  }
+
+  /** What is wrong with a line before it goes into the table (null when it is fine). */
+  const lineProblem = (line: OvertimeLineInput, others: OvertimeLineInput[]) => {
+    if (!line.overtimeDate) return 'Enter the overtime date.'
+    if (!line.startTime || !line.endTime) return 'Enter the start and end time.'
+    if (splitOvertimeHours(line.startTime, line.endTime, line.dayType).totalHours <= 0) {
+      return 'The end time must be different from the start time.'
+    }
+    if (line.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
+    const clash = others.find((other) => overlaps(line, other))
+    if (clash) {
+      return `It overlaps the line of ${shortDate(clash.overtimeDate)} ${clockText(clash.startTime)} – ${clockText(clash.endTime)}.`
+    }
+    return null
+  }
+
+  const addLine = () => {
+    const others = lines.filter((_, index) => index !== editingLine)
+    const problem = lineProblem(entry, others)
+    if (problem) {
+      setEntryError(problem)
+      return
+    }
+    const line = { ...entry, reason: entry.reason.trim() }
+    setLines(sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item))))
+    setEntry(clearedEntry(entry.dayType))
+    setEditingLine(null)
+    setEntryError(null)
+    setFormError(null)
+  }
+
+  const editLine = (index: number) => {
+    const line = lines[index]
+    if (!line) return
+    setEntry(line)
+    setEditingLine(index)
+    setEntryError(null)
+  }
+
+  const cancelLineEdit = () => {
+    setEntry(clearedEntry(entry.dayType))
+    setEditingLine(null)
+    setEntryError(null)
+  }
+
+  const deleteLine = (index: number) => {
+    setLines(lines.filter((_, item) => item !== index))
+    if (editingLine !== null) cancelLineEdit()
   }
 
   const rememberRow = (request: OvertimeRequestRow) => {
@@ -443,22 +681,43 @@ export function OvertimeRequest() {
 
   const busy = saveMutation.isPending
 
-  const validate = (submit: boolean) => {
-    if (!details.overtimeDate) return 'Enter the overtime date.'
-    if (!details.startTime || !details.endTime) return 'Enter the start and end time.'
-    if (hours.totalHours <= 0) return 'The end time must be different from the start time.'
-    if (submit && details.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
-    return null
-  }
-
   const send = (submit: boolean) => {
-    const problem = validate(submit)
-    if (problem) {
-      setFormError(problem)
+    if (editingLine !== null) {
+      setFormError('Click Update Line to keep your change to the line, or Cancel to leave it as it was.')
+      return
+    }
+    let all = lines
+    // A line filled in but not added with Add Line yet is added for the employee.
+    if (entry.overtimeDate || entry.startTime || entry.endTime) {
+      const problem = lineProblem(entry, lines)
+      if (problem) {
+        setEntryError(problem)
+        setFormError(lines.length ? `Finish the line you are entering and click Add Line, or clear it. ${problem}` : problem)
+        return
+      }
+      if (lines.length >= maxLines) {
+        setFormError(`This request can hold ${maxLines} line${maxLines === 1 ? '' : 's'}. Clear the line you are entering, or make a second request.`)
+        return
+      }
+      all = sortLines([...lines, { ...entry, reason: entry.reason.trim() }])
+    }
+    if (!all.length) {
+      setFormError('Add at least one overtime line: the date, start and end time, category and reason, then Add Line.')
       return
     }
     setFormError(null)
-    saveMutation.mutate({ requestNo: editingNo ?? undefined, details, submit })
+    setEntryError(null)
+    const first = all[0]!
+    const reasons = [...new Set(all.map((line) => line.reason.trim()).filter(Boolean))]
+    if (all !== lines) {
+      setLines(all)
+      setEntry(clearedEntry(entry.dayType))
+    }
+    saveMutation.mutate({
+      requestNo: editingNo ?? undefined,
+      details: { ...first, reason: reasons.join('; ').slice(0, 500), projectNo, lines: all },
+      submit,
+    })
   }
 
   const askWithdraw = (request: OvertimeRequestRow) => {
@@ -487,9 +746,20 @@ export function OvertimeRequest() {
 
   const columns: DataTableColumn<OvertimeRequestRow>[] = [
     { id: 'no', header: 'Request No.', cell: (row) => row.requestNo },
-    { id: 'date', header: 'Overtime date', cell: (row) => prettyDate(row.overtimeDate) },
-    { id: 'time', header: 'Time', cell: (row) => `${row.startTime} – ${row.endTime}` },
-    { id: 'category', header: 'Category', cell: (row) => DAY_TYPES.find((type) => type.value === row.dayType)?.label.split(' (')[0] ?? row.dayTypeLabel },
+    { id: 'date', header: 'Overtime date', cell: (row) => dateRange(row.lines, row.overtimeDate) },
+    {
+      id: 'time',
+      header: 'Time',
+      cell: (row) => (row.lines.length > 1 ? `${row.lines.length} lines` : `${clockText(row.startTime)} – ${clockText(row.endTime)}`),
+    },
+    {
+      id: 'category',
+      header: 'Category',
+      cell: (row) =>
+        new Set(row.lines.map((line) => line.dayType)).size > 1
+          ? 'Mixed'
+          : (DAY_TYPES.find((type) => type.value === row.dayType)?.label.split(' (')[0] ?? row.dayTypeLabel),
+    },
     { id: 'hours', header: 'Hours', cell: (row) => hoursText(row.totalHours) },
     { id: 'amount', header: 'Estimated amount', cell: (row) => formatAmount(row.estimatedAmount) },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
@@ -500,9 +770,8 @@ export function OvertimeRequest() {
   const shown = mode === 'detail' ? selected : null
   const shownHours = shown
     ? { totalHours: shown.totalHours, normalHours: shown.normalHours, nightHours: shown.nightHours, restDayHours: shown.restDayHours, holidayHours: shown.holidayHours }
-    : hours
-  const shownDayType = shown?.dayType ?? details.dayType
-  const shownAmount = shown ? shown.estimatedAmount : estimate
+    : formHours
+  const shownAmount = shown ? shown.estimatedAmount : formAmount
   const steps = workflowSteps(mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null, context, employeeName)
   const routingProblem = context?.routingProblem ?? ''
 
@@ -669,10 +938,10 @@ export function OvertimeRequest() {
                     ) : (
                       <Select
                         id="overtime-project"
-                        value={details.projectNo}
+                        value={projectNo}
                         options={projectOptions}
                         placeholder={projectsQuery.isLoading ? 'Loading projects…' : 'No project'}
-                        onChange={(event) => setDetails((current) => ({ ...current, projectNo: event.target.value }))}
+                        onChange={(event) => setProjectNo(event.target.value)}
                       />
                     )}
                   </Field>
@@ -702,104 +971,139 @@ export function OvertimeRequest() {
             </Section>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details" className="lg:col-span-2">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-3">
-                  <Field label="Overtime Date" required htmlFor="overtime-date">
-                    {shown ? (
-                      <ReadValue value={prettyDate(shown.overtimeDate)} />
-                    ) : (
+          <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details">
+            {shown ? null : (
+              <div className={cn('rounded-lg', editingLine !== null ? 'bg-amber-50/60 p-3 ring-1 ring-amber-200' : '')}>
+                {editingLine !== null ? (
+                  <p className="mb-3 text-xs font-medium text-amber-900">Editing line {editingLine + 1}. Click Update Line to keep the change.</p>
+                ) : null}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <Field label="Overtime Date" required htmlFor="overtime-date">
                       <Input
                         id="overtime-date"
                         type="date"
-                        value={details.overtimeDate}
-                        onChange={(event) => setDetails((current) => ({ ...current, overtimeDate: event.target.value }))}
+                        value={entry.overtimeDate}
+                        onChange={(event) => setEntry((current) => ({ ...current, overtimeDate: event.target.value }))}
                       />
-                    )}
-                  </Field>
-                  <Field label="Start Time" required htmlFor="overtime-start">
-                    {shown ? (
-                      <ReadValue value={shown.startTime} />
-                    ) : (
+                    </Field>
+                    <Field label="Start Time" required htmlFor="overtime-start">
                       <Input
                         id="overtime-start"
                         type="time"
-                        value={details.startTime}
-                        onChange={(event) => setDetails((current) => ({ ...current, startTime: event.target.value }))}
+                        value={entry.startTime}
+                        onChange={(event) => setEntry((current) => ({ ...current, startTime: event.target.value }))}
                       />
-                    )}
-                  </Field>
-                  <Field label="End Time" required htmlFor="overtime-end">
-                    {shown ? (
-                      <ReadValue value={shown.endTime} />
-                    ) : (
+                    </Field>
+                    <Field label="End Time" required htmlFor="overtime-end">
                       <Input
                         id="overtime-end"
                         type="time"
-                        value={details.endTime}
-                        onChange={(event) => setDetails((current) => ({ ...current, endTime: event.target.value }))}
+                        value={entry.endTime}
+                        onChange={(event) => setEntry((current) => ({ ...current, endTime: event.target.value }))}
                       />
-                    )}
-                  </Field>
-                  <Field label="Overtime Hours" required>
-                    <div className="flex">
-                      <div className="min-h-10 flex-1 rounded-l-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm tabular-nums text-slate-900">
-                        {shownHours.totalHours.toFixed(2)}
+                    </Field>
+                    <Field label="Overtime Hours" required>
+                      <div className="flex">
+                        <div className="min-h-10 flex-1 rounded-l-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm tabular-nums text-slate-900">
+                          {entryHours.totalHours.toFixed(2)}
+                        </div>
+                        <span className="rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">hrs</span>
                       </div>
-                      <span className="rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">hrs</span>
-                    </div>
-                  </Field>
-                </div>
-                <div className="space-y-3">
-                  <Field label="Overtime Category" required htmlFor="overtime-category">
-                    {shown ? (
-                      <ReadValue value={DAY_TYPES.find((type) => type.value === shown.dayType)?.label ?? shown.dayTypeLabel} />
-                    ) : (
+                    </Field>
+                  </div>
+                  <div className="space-y-3">
+                    <Field label="Overtime Category" required htmlFor="overtime-category">
                       <Select
                         id="overtime-category"
-                        value={details.dayType}
+                        value={entry.dayType}
                         options={DAY_TYPES}
                         onChange={(event) =>
-                          setDetails((current) => ({ ...current, dayType: (event.target.value || 'working') as OvertimeDayType }))
+                          setEntry((current) => ({ ...current, dayType: (event.target.value || 'working') as OvertimeDayType }))
                         }
                       />
-                    )}
-                  </Field>
-                  <Field label="Rate Type">
-                    <ReadValue value={rateType(shownHours, shownDayType, rates)} />
-                  </Field>
-                  <Field label="Reason / Justification" required htmlFor="overtime-reason">
-                    {shown ? (
-                      <div className="min-h-20 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900">
-                        {shown.reason || '—'}
-                      </div>
-                    ) : (
+                    </Field>
+                    <Field label="Rate Type">
+                      <ReadValue value={entryHours.totalHours ? rateType(entryHours, entry.dayType, rates) : ''} />
+                    </Field>
+                    <Field label="Reason / Justification" required htmlFor="overtime-reason">
                       <Textarea
                         id="overtime-reason"
                         rows={3}
-                        maxLength={500}
-                        value={details.reason}
+                        maxLength={250}
+                        value={entry.reason}
                         placeholder="Why is the overtime needed?"
-                        onChange={(event) => setDetails((current) => ({ ...current, reason: event.target.value }))}
+                        onChange={(event) => setEntry((current) => ({ ...current, reason: event.target.value }))}
                       />
-                    )}
-                  </Field>
+                    </Field>
+                  </div>
                 </div>
+                {weekendHint ? (
+                  <p className="mt-3 flex items-center gap-2 text-xs text-amber-800">
+                    <Info className="h-3.5 w-3.5" />
+                    {weekendHint}
+                  </p>
+                ) : null}
+                {entryError ? (
+                  <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-red-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    {entryError}
+                  </p>
+                ) : null}
               </div>
-              {!shown && weekendHint ? (
-                <p className="mt-3 flex items-center gap-2 text-xs text-amber-800">
-                  <Info className="h-3.5 w-3.5" />
-                  {weekendHint}
-                </p>
-              ) : null}
-            </Section>
+            )}
 
+            <OvertimeLinesTable
+              className={shown ? '' : 'mt-4'}
+              lines={
+                shown
+                  ? shown.lines.map((line) => ({ ...line, hours: line }))
+                  : lines.map((line) => ({ ...line, hours: splitOvertimeHours(line.startTime, line.endTime, line.dayType) }))
+              }
+              rates={rates}
+              editingIndex={editingLine}
+              onEdit={shown ? undefined : editLine}
+              onDelete={shown ? undefined : deleteLine}
+            />
+
+            {shown ? null : (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-[var(--portal-navy)]/40 text-[var(--portal-navy)]"
+                  disabled={busy || (editingLine === null && lines.length >= maxLines)}
+                  onClick={addLine}
+                >
+                  {editingLine === null ? <Plus className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  {editingLine === null ? 'Add Line' : 'Update Line'}
+                </Button>
+                {editingLine !== null ? (
+                  <Button type="button" variant="ghost" onClick={cancelLineEdit}>
+                    Cancel
+                  </Button>
+                ) : null}
+                {editingLine === null && lines.length >= maxLines ? (
+                  <span className="text-xs text-slate-500">
+                    {maxLines === 1
+                      ? 'Several dates in one request need Business Central package 1.0.3.612. Make one request per date for now.'
+                      : `A request can hold ${maxLines} lines. Make a second request for the other days.`}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500">
+                    Fill in the date, times, category and reason, then Add Line. Add a line for each day you work overtime.
+                  </span>
+                )}
+              </div>
+            )}
+          </Section>
+
+          <div className="grid gap-4 lg:grid-cols-3">
             <Section icon={<CheckCircle2 className="h-4 w-4" />} title="Attendance Check">
               {(() => {
                 const active = context?.employee.active ?? true
                 const allowed = context?.employee.allowOvertime ?? true
-                const withinLimit = !limit || (shown ? !/limit/i.test(shown.warnings) : monthTotal <= limit)
+                const withinLimit = !limit || (shown ? !/limit/i.test(shown.warnings) : busiest.hours <= limit)
                 const passed = active && allowed && withinLimit
                 return (
                   <div className={cn('rounded-lg border p-3', passed ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70')}>
@@ -823,7 +1127,9 @@ export function OvertimeRequest() {
                               ? withinLimit
                                 ? `Within the monthly limit of ${limit} hours`
                                 : shown.warnings
-                              : `${Number(monthTotal.toFixed(2))} of ${limit} overtime hours this month${withinLimit ? '' : ' — above the limit'}`
+                              : busiest.month
+                                ? `${Number(busiest.hours.toFixed(2))} of ${limit} overtime hours in ${monthLabel(busiest.month)}${withinLimit ? '' : ' — above the limit'}`
+                                : `Monthly limit ${limit} hours`
                             : 'Compliant with policy'
                         }
                       />
@@ -835,17 +1141,17 @@ export function OvertimeRequest() {
                 )
               })()}
             </Section>
-          </div>
 
-          <Section icon={<Network className="h-4 w-4" />} title="Approval Workflow">
-            {routingProblem && (!shown || shown.status === 'Draft') ? (
-              <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{routingProblem}</span>
-              </div>
-            ) : null}
-            <WorkflowTracker steps={steps} />
-          </Section>
+            <Section icon={<Network className="h-4 w-4" />} title="Approval Workflow" className="lg:col-span-2">
+              {routingProblem && (!shown || shown.status === 'Draft') ? (
+                <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{routingProblem}</span>
+                </div>
+              ) : null}
+              <WorkflowTracker steps={steps} />
+            </Section>
+          </div>
 
           {shown?.log.length ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">

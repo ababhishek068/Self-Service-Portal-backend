@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   overtimeActingUserMayView,
+  overtimeDocumentLines,
   overtimeApprovalQueueItem,
   overtimeApproverOutcome,
   overtimeServiceMissing,
@@ -123,5 +124,72 @@ describe('overtime approvals in the portal', () => {
     assert.deepEqual(context.rates, { normal: 1.5, night: 1.75, restDay: 2, holiday: 2.5 })
     assert.equal(context.monthlyHours, 208)
     assert.equal(context.employee.allowOvertime, true)
+  })
+})
+
+describe('overtime requests with several lines (BC 1.0.3.612)', () => {
+  it('sorts the lines by date and sends the first as the request date', () => {
+    const details = validateOvertimeDetails(
+      {
+        lines: [
+          { overtimeDate: '2026-06-12', startTime: '19:00', endTime: '22:00', dayType: 'working', reason: 'Client meeting' },
+          { overtimeDate: '2026-06-11', startTime: '06:00', endTime: '09:00', dayType: 'working', reason: 'Project deadline' },
+        ],
+      },
+      true,
+    )
+    assert.equal(details.lines.length, 2)
+    assert.equal(details.overtimeDate, '2026-06-11')
+    assert.equal(details.startTime, '06:00')
+    assert.equal(details.reason, 'Project deadline; Client meeting')
+  })
+
+  it('refuses overlapping lines, also past midnight, and names the line with a problem', () => {
+    assert.throws(
+      () =>
+        validateOvertimeDetails(
+          {
+            lines: [
+              { overtimeDate: '2026-06-11', startTime: '22:00', endTime: '02:00', reason: 'Night release' },
+              { overtimeDate: '2026-06-12', startTime: '01:00', endTime: '03:00', reason: 'Night release' },
+            ],
+          },
+          true,
+        ),
+      /overlap/,
+    )
+    assert.throws(
+      () =>
+        validateOvertimeDetails(
+          { lines: [{ overtimeDate: '2026-06-11', startTime: '17:00', endTime: '20:00', reason: 'ok ok' }, { overtimeDate: '2026-06-12', startTime: '17:00', endTime: '20:00' }] },
+          true,
+        ),
+      /Line 2: Enter the reason/,
+    )
+    assert.throws(() => validateOvertimeDetails({ lines: Array.from({ length: 32 }, () => ({})) }, false), /at most 31/)
+  })
+
+  it('reads BC lines, or the one date of an older request, and lists them for approvers', () => {
+    const several = parseOvertimeRequests(
+      JSON.stringify([
+        {
+          requestNo: 'OTR-00002',
+          overtimeDate: '2026-06-11',
+          totalHours: 6,
+          lines: [
+            { lineNo: 10000, overtimeDate: '2026-06-11', startTime: '06:00', endTime: '09:00', dayTypeLabel: 'Working Day', totalHours: 3, normalHours: 3, reason: 'Project deadline' },
+            { lineNo: 20000, overtimeDate: '2026-06-13', startTime: '20:00', endTime: '23:00', dayTypeLabel: 'Working Day', totalHours: 3, normalHours: 2, nightHours: 1, reason: 'System update' },
+          ],
+        },
+      ]),
+    )[0]!
+    assert.equal(several.linesFromBc, true)
+    const lines = overtimeDocumentLines(several)
+    assert.equal(lines[1]!.hoursByRate, '2 normal day · 1 night')
+    assert.equal(overtimeApprovalQueueItem(several).title, 'Overtime 2026-06-11 – 2026-06-13 (6 hrs, 2 lines)')
+    assert.equal(overtimeToPortalRequest(several).payload.lines.length, 2)
+    assert.equal(request.linesFromBc, false)
+    assert.equal(request.lines.length, 1)
+    assert.equal(request.lines[0]!.startTime, '17:00')
   })
 })

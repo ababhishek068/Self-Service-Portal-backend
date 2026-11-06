@@ -44,6 +44,23 @@ export type OvertimeLogEntry = {
 
 export type OvertimeRequestStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected'
 
+/** One overtime date and time of a request (BC 1.0.3.612; older requests have one). */
+export type OvertimeLine = {
+  lineNo: number
+  overtimeDate: string
+  startTime: string
+  endTime: string
+  dayType: OvertimeDayType
+  dayTypeLabel: string
+  totalHours: number
+  normalHours: number
+  nightHours: number
+  restDayHours: number
+  holidayHours: number
+  estimatedAmount: number
+  reason: string
+}
+
 export type OvertimeRequest = {
   id: string
   requestNo: string
@@ -88,6 +105,9 @@ export type OvertimeRequest = {
   sentToPayrollAt: string
   steps: OvertimeStep[]
   log: OvertimeLogEntry[]
+  lines: OvertimeLine[]
+  /** False when BC (before 1.0.3.612) returned no lines: the one line comes from the request. */
+  linesFromBc: boolean
 }
 
 export type OvertimeContext = {
@@ -109,15 +129,23 @@ export type OvertimeContext = {
   hourlyRate: number
   approvers: OvertimeStep[]
   routingProblem: string
+  /** BC 1.0.3.612: one request can hold several dates and times. */
+  supportsLines: boolean
+  maxLines: number
 }
 
-export type OvertimeDetails = {
+export type OvertimeLineInput = {
   overtimeDate: string
   startTime: string
   endTime: string
   dayType: OvertimeDayType
   reason: string
+}
+
+/** The first line is also sent as the request's own date and time (BC before 1.0.3.612 reads only those). */
+export type OvertimeDetails = OvertimeLineInput & {
   projectNo: string
+  lines: OvertimeLineInput[]
 }
 
 const STEP_STATUSES: OvertimeStepStatus[] = [
@@ -182,9 +210,34 @@ export function parseOvertimeStep(value: unknown): OvertimeStep {
   }
 }
 
+function parseOvertimeLine(value: unknown, index: number): OvertimeLine {
+  const row = record(value)
+  return {
+    lineNo: num(row.lineNo) || (index + 1) * 10000,
+    overtimeDate: str(row.overtimeDate),
+    startTime: str(row.startTime),
+    endTime: str(row.endTime),
+    dayType: dayTypeOf(row.dayType),
+    dayTypeLabel: str(row.dayTypeLabel),
+    totalHours: num(row.totalHours),
+    normalHours: num(row.normalHours),
+    nightHours: num(row.nightHours),
+    restDayHours: num(row.restDayHours),
+    holidayHours: num(row.holidayHours),
+    estimatedAmount: num(row.estimatedAmount),
+    reason: str(row.reason),
+  }
+}
+
 export function parseOvertimeRequest(value: unknown): OvertimeRequest {
   const row = record(value)
   const status = str(row.status) as OvertimeRequestStatus
+  const linesFromBc = Array.isArray(row.lines) && row.lines.length > 0
+  const lines = linesFromBc
+    ? (row.lines as unknown[]).map(parseOvertimeLine)
+    : str(row.overtimeDate)
+      ? [parseOvertimeLine(row, 0)]
+      : []
   return {
     id: str(row.id) || str(row.requestNo),
     requestNo: str(row.requestNo) || str(row.id),
@@ -240,6 +293,8 @@ export function parseOvertimeRequest(value: unknown): OvertimeRequest {
         comment: str(item.comment),
       }
     }),
+    lines,
+    linesFromBc,
   }
 }
 
@@ -276,6 +331,8 @@ export function parseOvertimeContext(value: unknown): OvertimeContext {
     hourlyRate: num(root.hourlyRate),
     approvers: (Array.isArray(root.approvers) ? root.approvers : []).map(parseOvertimeStep),
     routingProblem: str(root.routingProblem),
+    supportsLines: bool(root.supportsLines),
+    maxLines: num(root.maxLines) || (bool(root.supportsLines) ? OVERTIME_MAX_LINES : 1),
   }
 }
 
@@ -320,23 +377,69 @@ function invalid(message: string) {
   return Object.assign(new Error(message), { status: 422, code: 'OVERTIME_INVALID' })
 }
 
-/** What the portal sends to BC; BC checks it again (overlaps, routing, the reason on submit). */
-export function validateOvertimeDetails(input: unknown, submit: boolean): OvertimeDetails {
+export const OVERTIME_MAX_LINES = 31
+
+function dayNumber(date: string) {
+  return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / 86_400_000
+}
+
+/** The minutes a line covers, counted from 1 January 1970 (an end before the start is the next morning). */
+export function overtimeSlot(line: Pick<OvertimeLineInput, 'overtimeDate' | 'startTime' | 'endTime'>) {
+  const start = minutesOf(line.startTime) ?? 0
+  let end = minutesOf(line.endTime) ?? 0
+  if (end <= start) end += 1440
+  const base = dayNumber(line.overtimeDate) * 1440
+  return { start: base + start, end: base + end }
+}
+
+function validateLine(input: unknown, submit: boolean, prefix: string): OvertimeLineInput {
   const body = record(input)
-  const details: OvertimeDetails = {
+  const line: OvertimeLineInput = {
     overtimeDate: str(body.overtimeDate),
     startTime: str(body.startTime).slice(0, 5),
     endTime: str(body.endTime).slice(0, 5),
     dayType: dayTypeOf(body.dayType),
-    reason: str(body.reason).slice(0, 500),
-    projectNo: str(body.projectNo).toUpperCase().slice(0, 20),
+    reason: str(body.reason).slice(0, 250),
   }
-  if (!isIsoDate(details.overtimeDate)) throw invalid('Enter the overtime date.')
-  if (minutesOf(details.startTime) === null) throw invalid('Enter the start time, for example 17:00.')
-  if (minutesOf(details.endTime) === null) throw invalid('Enter the end time, for example 21:00.')
-  if (details.startTime === details.endTime) throw invalid('The end time must be different from the start time.')
-  if (submit && details.reason.length < 3) throw invalid('Enter the reason / justification for the overtime.')
-  return details
+  if (!isIsoDate(line.overtimeDate)) throw invalid(`${prefix}Enter the overtime date.`)
+  if (minutesOf(line.startTime) === null) throw invalid(`${prefix}Enter the start time, for example 17:00.`)
+  if (minutesOf(line.endTime) === null) throw invalid(`${prefix}Enter the end time, for example 21:00.`)
+  if (line.startTime === line.endTime) throw invalid(`${prefix}The end time must be different from the start time.`)
+  if (submit && line.reason.length < 3) throw invalid(`${prefix}Enter the reason / justification for the overtime.`)
+  return line
+}
+
+/**
+ * What the portal sends to BC: one or more lines (date, times, category, reason), sorted by date,
+ * none overlapping another. BC checks them again (other requests, routing, the monthly limit).
+ */
+export function validateOvertimeDetails(input: unknown, submit: boolean): OvertimeDetails {
+  const body = record(input)
+  const rawLines = Array.isArray(body.lines) && body.lines.length ? body.lines : [body]
+  if (rawLines.length > OVERTIME_MAX_LINES) {
+    throw invalid(`One overtime request can have at most ${OVERTIME_MAX_LINES} lines. Make a second request for the other days.`)
+  }
+  const lines = rawLines
+    .map((line, index) => validateLine(line, submit, rawLines.length > 1 ? `Line ${index + 1}: ` : ''))
+    .sort((left, right) => (left.overtimeDate + left.startTime).localeCompare(right.overtimeDate + right.startTime))
+  for (let index = 0; index < lines.length; index += 1) {
+    for (let other = index + 1; other < lines.length; other += 1) {
+      const a = overtimeSlot(lines[index]!)
+      const b = overtimeSlot(lines[other]!)
+      if (overlap(a.start, a.end, b.start, b.end) > 0) {
+        const describe = (line: OvertimeLineInput) => `${line.overtimeDate} ${line.startTime}–${line.endTime}`
+        throw invalid(`Two overtime lines overlap: ${describe(lines[index]!)} and ${describe(lines[other]!)}.`)
+      }
+    }
+  }
+  const reasons = [...new Set(lines.map((line) => line.reason).filter(Boolean))]
+  const first = lines[0]!
+  return {
+    ...first,
+    reason: (str(body.reason) || reasons.join('; ')).slice(0, 500),
+    projectNo: str(body.projectNo).toUpperCase().slice(0, 20),
+    lines,
+  }
 }
 
 /** BC without package 1.0.3.606 does not know the overtime methods. */
@@ -404,7 +507,16 @@ export async function saveOvertimeRequest(input: {
     detailsJson: JSON.stringify(input.details),
     submitRequest: input.submit,
   })
-  return parseOvertimeRequest(parseJson(result.returnValue))
+  const saved = parseOvertimeRequest(parseJson(result.returnValue))
+  if (input.details.lines.length > 1 && !saved.linesFromBc) {
+    throw Object.assign(
+      new Error(
+        `Business Central kept only the first line of ${saved.requestNo}: several dates in one request need BC package 1.0.3.612. Ask the BC administrator to publish it, then edit the draft.`,
+      ),
+      { status: 503, code: 'OVERTIME_LINES_MISSING' },
+    )
+  }
+  return saved
 }
 
 export async function withdrawOvertimeRequest(employeeNo: string, requestNo: string) {
@@ -486,10 +598,17 @@ export function overtimeDetailFacts(request: OvertimeRequest) {
     request.restDayHours ? `Rest day ${formatHours(request.restDayHours)}` : '',
     request.holidayHours ? `Public holiday ${formatHours(request.holidayHours)}` : '',
   ].filter(Boolean)
+  const several = request.lines.length > 1
+  const categories = [...new Set(request.lines.map((line) => line.dayTypeLabel).filter(Boolean))]
   const facts: Array<{ label: string; value: string }> = [
-    { label: 'Overtime date', value: request.overtimeDate },
-    { label: 'Time', value: request.startTime && request.endTime ? `${request.startTime} – ${request.endTime}` : '' },
-    { label: 'Overtime category', value: request.dayTypeLabel },
+    several
+      ? { label: 'Overtime dates', value: `${overtimeDateRange(request)} (${request.lines.length} lines, below)` }
+      : { label: 'Overtime date', value: request.overtimeDate },
+    {
+      label: 'Time',
+      value: !several && request.startTime && request.endTime ? `${request.startTime} – ${request.endTime}` : '',
+    },
+    { label: 'Overtime category', value: several ? categories.join(' · ') : request.dayTypeLabel },
     { label: 'Overtime hours', value: formatHours(request.totalHours) },
     { label: 'Hours by rate', value: bands.join(' · ') },
     { label: 'Estimated amount', value: request.estimatedAmount ? formatEtb(request.estimatedAmount) : '' },
@@ -505,6 +624,41 @@ export function overtimeDetailFacts(request: OvertimeRequest) {
   return facts.filter((fact) => fact.value)
 }
 
+/** "2026-06-11" or "2026-06-11 – 2026-06-13". */
+export function overtimeDateRange(request: OvertimeRequest) {
+  const dates = request.lines.map((line) => line.overtimeDate).filter(Boolean).sort()
+  if (!dates.length) return request.overtimeDate
+  const first = dates[0]!
+  const last = dates[dates.length - 1]!
+  return first === last ? first : `${first} – ${last}`
+}
+
+function bandText(line: OvertimeLine) {
+  return [
+    line.normalHours ? `${Number(line.normalHours.toFixed(2))} normal day` : '',
+    line.nightHours ? `${Number(line.nightHours.toFixed(2))} night` : '',
+    line.restDayHours ? `${Number(line.restDayHours.toFixed(2))} rest day` : '',
+    line.holidayHours ? `${Number(line.holidayHours.toFixed(2))} public holiday` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The Approvals document lines: one per overtime date and time. */
+export function overtimeDocumentLines(request: OvertimeRequest) {
+  return request.lines.map((line) => ({
+    lineNo: line.lineNo,
+    date: line.overtimeDate,
+    startTime: line.startTime,
+    endTime: line.endTime,
+    overtimeHours: Number(line.totalHours.toFixed(2)),
+    category: line.dayTypeLabel,
+    hoursByRate: bandText(line),
+    estimatedAmount: line.estimatedAmount ? formatEtb(line.estimatedAmount) : '',
+    reason: line.reason,
+  }))
+}
+
 function queueStatus(status: OvertimeRequestStatus) {
   if (status === 'Approved') return 'Approved'
   if (status === 'Rejected') return 'Rejected'
@@ -517,7 +671,10 @@ export function overtimeApprovalQueueItem(request: OvertimeRequest) {
     id: `${OVERTIME_MODULE}-${request.requestNo}`,
     requestNo: request.requestNo,
     module: OVERTIME_MODULE,
-    title: `Overtime ${request.overtimeDate} (${formatHours(request.totalHours)})`,
+    title:
+      request.lines.length > 1
+        ? `Overtime ${overtimeDateRange(request)} (${formatHours(request.totalHours)}, ${request.lines.length} lines)`
+        : `Overtime ${request.overtimeDate} (${formatHours(request.totalHours)})`,
     makerEmployeeNo: request.employeeNo,
     makerName: request.employeeName,
     amount: request.estimatedAmount,
@@ -588,7 +745,8 @@ export function overtimeToPortalRequest(request: OvertimeRequest, actingUserId =
     attachments: [],
     payload: {
       sourceDocumentAvailable: true,
-      hideDocumentLines: true,
+      // One date shows in the facts; several show as the document lines.
+      hideDocumentLines: request.lines.length <= 1,
       commentRequiredOnReject: true,
       pendingStage: pendingStep?.stage ?? request.stage,
       pendingStageLabel: pendingStep?.label ?? request.stageLabel,
@@ -597,7 +755,7 @@ export function overtimeToPortalRequest(request: OvertimeRequest, actingUserId =
       totalHours: request.totalHours,
       detailFacts: overtimeDetailFacts(request),
       overtime: request,
-      lines: [],
+      lines: request.lines.length > 1 ? overtimeDocumentLines(request) : [],
     },
   }
 }
