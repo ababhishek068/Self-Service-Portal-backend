@@ -72,18 +72,91 @@ const DAY_TYPES: Array<{ value: OvertimeDayType; label: string }> = [
 
 type Mode = 'form' | 'list' | 'detail'
 
-function localToday() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+/** The line being entered: everything blank until the employee fills it in (category too). */
+type EntryDraft = Omit<OvertimeLineInput, 'dayType'> & { dayType: OvertimeDayType | '' }
+
+function emptyEntry(): EntryDraft {
+  return { overtimeDate: '', startTime: '', endTime: '', dayType: '', reason: '' }
 }
 
-/** A new request starts with today evening filled in; after Add Line the entry is cleared. */
-function firstEntry(): OvertimeLineInput {
-  return { overtimeDate: localToday(), startTime: '17:00', endTime: '21:00', dayType: 'working', reason: '' }
+/** "17:05" -> 05:05 PM; blank when the value is not a time. */
+function to12(value: string): { text: string; meridiem: 'AM' | 'PM' | null } {
+  const match = /^(\d{1,2}):(\d{2})/.exec(value)
+  if (!match) return { text: '', meridiem: null }
+  const hour = Number(match[1])
+  return { text: `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]}`, meridiem: hour < 12 ? 'AM' : 'PM' }
 }
 
-function clearedEntry(dayType: OvertimeDayType): OvertimeLineInput {
-  return { overtimeDate: '', startTime: '', endTime: '', dayType, reason: '' }
+/** "5", "5:30", "0530" or "530" with AM / PM -> "17:30"; blank when it is not a valid 12-hour time. */
+function to24(text: string, meridiem: 'AM' | 'PM') {
+  const match = /^(\d{1,2})(?::?(\d{2}))?$/.exec(text.trim())
+  if (!match) return ''
+  const hour = Number(match[1])
+  const minute = Number(match[2] ?? '0')
+  if (hour < 1 || hour > 12 || minute > 59) return ''
+  return `${String((hour % 12) + (meridiem === 'PM' ? 12 : 0)).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+/** HH:MM typed in 12-hour time, with AM / PM chosen next to it (the form keeps 24-hour time). */
+function TimeField({
+  id,
+  label,
+  value,
+  defaultMeridiem,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  defaultMeridiem: 'AM' | 'PM'
+  onChange: (value: string) => void
+}) {
+  const initial = to12(value)
+  const [text, setText] = useState(initial.text)
+  const [meridiem, setMeridiem] = useState<'AM' | 'PM'>(initial.meridiem ?? defaultMeridiem)
+  const invalid = text.trim() !== '' && !to24(text, meridiem)
+  const update = (nextText: string, nextMeridiem: 'AM' | 'PM') => {
+    setText(nextText)
+    setMeridiem(nextMeridiem)
+    onChange(to24(nextText, nextMeridiem))
+  }
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-sm text-slate-700">
+        {label}
+        <span className="text-red-500"> *</span>
+      </Label>
+      <Input
+        id={id}
+        inputMode="numeric"
+        placeholder="HH:MM"
+        maxLength={5}
+        value={text}
+        aria-invalid={invalid}
+        className={invalid ? 'border-red-400' : undefined}
+        onChange={(event) => update(event.target.value.replace(/[^\d:]/g, ''), meridiem)}
+        onBlur={() => {
+          const value24 = to24(text, meridiem)
+          if (value24) setText(to12(value24).text)
+        }}
+      />
+      <div role="radiogroup" aria-label={`${label}: AM or PM`} className="flex gap-6 pt-0.5 text-sm text-slate-700">
+        {(['AM', 'PM'] as const).map((option) => (
+          <label key={option} className="flex cursor-pointer items-center gap-1.5">
+            <input
+              type="radio"
+              name={`${id}-meridiem`}
+              className="h-4 w-4 accent-[var(--portal-navy)]"
+              checked={meridiem === option}
+              onChange={() => update(text, option)}
+            />
+            {option}
+          </label>
+        ))}
+      </div>
+      {invalid ? <p className="text-xs text-red-600">Type the time as HH:MM, from 01:00 to 12:59 (for example 05:30).</p> : null}
+    </div>
+  )
 }
 
 function linesOf(request: OvertimeRequestRow): OvertimeLineInput[] {
@@ -420,9 +493,9 @@ function CheckRow({ ok, text, warn }: { ok: boolean; text: string; warn?: boolea
   )
 }
 
-type TableLine = OvertimeLineInput & { hours: ReturnType<typeof splitOvertimeHours> }
+type TableLine = OvertimeLineInput & { hours: ReturnType<typeof splitOvertimeHours>; amount: number }
 
-/** The request's overtime lines, as on the manager form (with Edit / Delete while it is a draft). */
+/** The saved overtime lines: date, category, hours, rate and amount (Edit / Delete while it is a draft). */
 function OvertimeLinesTable({
   lines,
   rates,
@@ -439,68 +512,67 @@ function OvertimeLinesTable({
   className?: string
 }) {
   const editable = Boolean(onEdit || onDelete)
-  const total = lines.reduce((sum, line) => sum + line.hours.totalHours, 0)
+  const totalHours = lines.reduce((sum, line) => sum + line.hours.totalHours, 0)
+  const totalAmount = lines.reduce((sum, line) => sum + line.amount, 0)
   return (
     <div className={cn('overflow-x-auto rounded-lg border border-slate-200', className)}>
       <table className="min-w-full border-collapse text-left text-sm">
         <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
           <tr>
             <th className="whitespace-nowrap px-3 py-2.5">Date</th>
-            <th className="whitespace-nowrap px-3 py-2.5">Start Time</th>
-            <th className="whitespace-nowrap px-3 py-2.5">End Time</th>
-            <th className="whitespace-nowrap px-3 py-2.5 text-right">Overtime Hours</th>
-            <th className="whitespace-nowrap px-3 py-2.5">Category</th>
-            <th className="whitespace-nowrap px-3 py-2.5">Rate Type</th>
-            <th className="min-w-[12rem] px-3 py-2.5">Reason / Justification</th>
+            <th className="px-3 py-2.5">Category</th>
+            <th className="whitespace-nowrap px-3 py-2.5 text-right">Hours</th>
+            <th className="whitespace-nowrap px-3 py-2.5">Rate</th>
+            <th className="whitespace-nowrap px-3 py-2.5 text-right">Amount</th>
             {editable ? <th className="w-20 px-3 py-2.5"><span className="sr-only">Actions</span></th> : null}
           </tr>
         </thead>
         <tbody>
-          {lines.length === 0 ? (
-            <tr>
-              <td colSpan={editable ? 8 : 7} className="px-3 py-6 text-center text-sm text-slate-500">
-                No overtime lines yet. Fill in the details above and click Add Line.
+          {lines.map((line, index) => (
+            <tr
+              key={`${line.overtimeDate}-${line.startTime}-${index}`}
+              className={cn('border-b border-slate-100 align-top last:border-0', editingIndex === index ? 'bg-amber-50' : 'hover:bg-slate-50/60')}
+            >
+              <td className="whitespace-nowrap px-3 py-2.5">
+                <p className="font-medium text-slate-900">{shortDate(line.overtimeDate)}</p>
+                <p className="text-xs text-slate-500">
+                  {clockText(line.startTime)} – {clockText(line.endTime)}
+                </p>
               </td>
+              <td className="min-w-[12rem] px-3 py-2.5">
+                <p className="text-slate-900">{DAY_TYPES.find((type) => type.value === line.dayType)?.label ?? line.dayType}</p>
+                {line.reason ? <p className="text-xs text-slate-500">{line.reason}</p> : null}
+              </td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{line.hours.totalHours.toFixed(2)}</td>
+              <td className="whitespace-nowrap px-3 py-2.5">{rateType(line.hours, line.dayType, rates)}</td>
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{formatAmount(line.amount)}</td>
+              {editable ? (
+                <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                  {onEdit ? (
+                    <Button type="button" variant="ghost" size="sm" aria-label={`Edit the line of ${shortDate(line.overtimeDate)}`} onClick={() => onEdit(index)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                  {onDelete ? (
+                    <Button type="button" variant="ghost" size="sm" aria-label={`Delete the line of ${shortDate(line.overtimeDate)}`} onClick={() => onDelete(index)}>
+                      <Trash2 className="h-4 w-4 text-red-600" />
+                    </Button>
+                  ) : null}
+                </td>
+              ) : null}
             </tr>
-          ) : (
-            lines.map((line, index) => (
-              <tr
-                key={`${line.overtimeDate}-${line.startTime}-${index}`}
-                className={cn('border-b border-slate-100 last:border-0', editingIndex === index ? 'bg-amber-50' : 'hover:bg-slate-50/60')}
-              >
-                <td className="whitespace-nowrap px-3 py-2.5">{shortDate(line.overtimeDate)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{clockText(line.startTime)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{clockText(line.endTime)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{line.hours.totalHours.toFixed(2)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{DAY_TYPES.find((type) => type.value === line.dayType)?.label ?? line.dayType}</td>
-                <td className="whitespace-nowrap px-3 py-2.5">{rateType(line.hours, line.dayType, rates)}</td>
-                <td className="px-3 py-2.5">{line.reason || '—'}</td>
-                {editable ? (
-                  <td className="whitespace-nowrap px-2 py-1.5 text-right">
-                    {onEdit ? (
-                      <Button type="button" variant="ghost" size="sm" aria-label={`Edit the line of ${shortDate(line.overtimeDate)}`} onClick={() => onEdit(index)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    ) : null}
-                    {onDelete ? (
-                      <Button type="button" variant="ghost" size="sm" aria-label={`Delete the line of ${shortDate(line.overtimeDate)}`} onClick={() => onDelete(index)}>
-                        <Trash2 className="h-4 w-4 text-red-600" />
-                      </Button>
-                    ) : null}
-                  </td>
-                ) : null}
-              </tr>
-            ))
-          )}
+          ))}
         </tbody>
         {lines.length > 1 ? (
           <tfoot className="border-t border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900">
             <tr>
-              <td className="px-3 py-2.5" colSpan={3}>
+              <td className="px-3 py-2.5" colSpan={2}>
                 Total ({lines.length} lines)
               </td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{total.toFixed(2)}</td>
-              <td colSpan={editable ? 4 : 3} />
+              <td className="px-3 py-2.5 text-right tabular-nums">{totalHours.toFixed(2)}</td>
+              <td />
+              <td className="px-3 py-2.5 text-right tabular-nums">{formatAmount(totalAmount)}</td>
+              {editable ? <td /> : null}
             </tr>
           </tfoot>
         ) : null}
@@ -517,9 +589,12 @@ export function OvertimeRequest() {
   const [mode, setMode] = useState<Mode>(searchParams.get('request') ? 'detail' : 'form')
   const [selectedNo, setSelectedNo] = useState<string | null>(searchParams.get('request'))
   const [editingNo, setEditingNo] = useState<string | null>(null)
-  const [entry, setEntry] = useState<OvertimeLineInput>(firstEntry)
+  const [entry, setEntry] = useState<EntryDraft>(emptyEntry)
   const [lines, setLines] = useState<OvertimeLineInput[]>([])
   const [editingLine, setEditingLine] = useState<number | null>(null)
+  // The New Line card opens with Add Line (or the pencil of a line) and closes with Save / Cancel.
+  const [entryOpen, setEntryOpen] = useState(false)
+  const [entryKey, setEntryKey] = useState(0)
   const [projectNo, setProjectNo] = useState('')
   const [entryError, setEntryError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -558,11 +633,11 @@ export function OvertimeRequest() {
   const hourlyRate = context?.hourlyRate ?? 0
   const maxLines = context?.maxLines ?? 1
   const entryHours = useMemo(
-    () => splitOvertimeHours(entry.startTime, entry.endTime, entry.dayType),
+    () => splitOvertimeHours(entry.startTime, entry.endTime, entry.dayType || 'working'),
     [entry.startTime, entry.endTime, entry.dayType],
   )
-  // The request's lines; a new request with no line yet counts the entry, so the summary is never empty.
-  const counted = lines.length || editingLine !== null ? lines : entryHours.totalHours ? [entry] : []
+  // The summary counts the saved lines only: 0.00 hours until the first line is saved.
+  const counted = lines
   const formHours = counted.reduce(
     (total, line) => {
       const split = splitOvertimeHours(line.startTime, line.endTime, line.dayType)
@@ -610,7 +685,8 @@ export function OvertimeRequest() {
   const startNew = () => {
     setEditingNo(null)
     setLines([])
-    setEntry(firstEntry())
+    setEntry(emptyEntry())
+    setEntryOpen(false)
     setEditingLine(null)
     setEntryError(null)
     setProjectNo('')
@@ -618,24 +694,27 @@ export function OvertimeRequest() {
   }
 
   const startEdit = (request: OvertimeRequestRow) => {
-    const existing = sortLines(linesOf(request))
     setEditingNo(request.requestNo)
-    setLines(existing)
-    setEntry(clearedEntry(existing[0]?.dayType ?? 'working'))
+    setLines(sortLines(linesOf(request)))
+    setEntry(emptyEntry())
+    setEntryOpen(false)
     setEditingLine(null)
     setEntryError(null)
     setProjectNo(request.projectNo)
     goTo('form')
   }
 
-  /** What is wrong with a line before it goes into the table (null when it is fine). */
-  const lineProblem = (line: OvertimeLineInput, others: OvertimeLineInput[]) => {
-    if (!line.overtimeDate) return 'Enter the overtime date.'
-    if (!line.startTime || !line.endTime) return 'Enter the start and end time.'
-    if (splitOvertimeHours(line.startTime, line.endTime, line.dayType).totalHours <= 0) {
+  /** What is wrong with the line being entered (null when it can be saved). */
+  const lineProblem = (draft: EntryDraft, others: OvertimeLineInput[]) => {
+    if (!draft.overtimeDate) return 'Choose the overtime date.'
+    if (!draft.startTime) return 'Enter the start time as HH:MM and choose AM or PM.'
+    if (!draft.endTime) return 'Enter the end time as HH:MM and choose AM or PM.'
+    if (splitOvertimeHours(draft.startTime, draft.endTime, 'working').totalHours <= 0) {
       return 'The end time must be different from the start time.'
     }
-    if (line.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
+    if (!draft.dayType) return 'Choose the overtime category.'
+    if (draft.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
+    const line: OvertimeLineInput = { ...draft, dayType: draft.dayType }
     const category = categoryProblem(line)
     if (category) return category
     const clash = others.find((other) => overlaps(line, other))
@@ -645,38 +724,46 @@ export function OvertimeRequest() {
     return null
   }
 
-  const addLine = () => {
-    const others = lines.filter((_, index) => index !== editingLine)
-    const problem = lineProblem(entry, others)
-    if (problem) {
-      setEntryError(problem)
-      return
-    }
-    const line = { ...entry, reason: entry.reason.trim() }
-    setLines(sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item))))
-    setEntry(clearedEntry(entry.dayType))
-    setEditingLine(null)
+  const openEntry = (draft: EntryDraft, index: number | null) => {
+    setEntry(draft)
+    setEditingLine(index)
     setEntryError(null)
-    setFormError(null)
+    setEntryKey((key) => key + 1)
+    setEntryOpen(true)
   }
+
+  const openNewLine = () => openEntry(emptyEntry(), null)
 
   const editLine = (index: number) => {
     const line = lines[index]
-    if (!line) return
-    setEntry(line)
-    setEditingLine(index)
-    setEntryError(null)
+    if (line) openEntry(line, index)
   }
 
-  const cancelLineEdit = () => {
-    setEntry(clearedEntry(entry.dayType))
+  const cancelEntry = () => {
+    setEntry(emptyEntry())
     setEditingLine(null)
     setEntryError(null)
+    setEntryOpen(false)
+  }
+
+  /** Save: the line goes into the table and the card closes (Add Line opens it again). */
+  const saveLine = () => {
+    const others = lines.filter((_, index) => index !== editingLine)
+    const problem = lineProblem(entry, others)
+    if (problem || !entry.dayType) {
+      setEntryError(problem ?? 'Choose the overtime category.')
+      return
+    }
+    const line: OvertimeLineInput = { ...entry, dayType: entry.dayType, reason: entry.reason.trim() }
+    setLines(sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item))))
+    cancelEntry()
+    setFormError(null)
   }
 
   /** One click: the entered line becomes a normal day line and a night line (or more), each checked. */
   const splitEntry = () => {
-    const parts = splitAtBands(entry)
+    if (!entry.dayType) return
+    const parts = splitAtBands({ ...entry, dayType: entry.dayType })
     const others = lines.filter((_, index) => index !== editingLine)
     const added: OvertimeLineInput[] = []
     for (const part of parts) {
@@ -692,15 +779,13 @@ export function OvertimeRequest() {
       return
     }
     setLines(sortLines([...others, ...added]))
-    setEntry(clearedEntry('working'))
-    setEditingLine(null)
-    setEntryError(null)
+    cancelEntry()
     setFormError(null)
   }
 
   const deleteLine = (index: number) => {
     setLines(lines.filter((_, item) => item !== index))
-    if (editingLine !== null) cancelLineEdit()
+    if (editingLine !== null) cancelEntry()
   }
 
   const rememberRow = (request: OvertimeRequestRow) => {
@@ -761,27 +846,26 @@ export function OvertimeRequest() {
   const busy = saveMutation.isPending
 
   const send = (submit: boolean) => {
-    if (editingLine !== null) {
-      setFormError('Click Update Line to keep your change to the line, or Cancel to leave it as it was.')
-      return
-    }
     let all = lines
-    // A line filled in but not added with Add Line yet is added for the employee.
-    if (entry.overtimeDate || entry.startTime || entry.endTime) {
-      const problem = lineProblem(entry, lines)
-      if (problem) {
-        setEntryError(problem)
-        setFormError(lines.length ? `Finish the line you are entering and click Add Line, or clear it. ${problem}` : problem)
+    // A line filled in on the open card but not saved yet is saved for the employee.
+    const entryStarted = entryOpen && Boolean(entry.overtimeDate || entry.startTime || entry.endTime || entry.dayType || entry.reason.trim())
+    if (entryStarted) {
+      const others = lines.filter((_, index) => index !== editingLine)
+      const problem = lineProblem(entry, others)
+      if (problem || !entry.dayType) {
+        setEntryError(problem ?? 'Choose the overtime category.')
+        setFormError(`Save or cancel the overtime line you are entering first. ${problem ?? ''}`.trim())
         return
       }
-      if (lines.length >= maxLines) {
-        setFormError(`This request can hold ${maxLines} line${maxLines === 1 ? '' : 's'}. Clear the line you are entering, or make a second request.`)
+      if (editingLine === null && lines.length >= maxLines) {
+        setFormError(`This request can hold ${maxLines} line${maxLines === 1 ? '' : 's'}. Cancel the line you are entering, or make a second request.`)
         return
       }
-      all = sortLines([...lines, { ...entry, reason: entry.reason.trim() }])
+      const line: OvertimeLineInput = { ...entry, dayType: entry.dayType, reason: entry.reason.trim() }
+      all = sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item)))
     }
     if (!all.length) {
-      setFormError('Add at least one overtime line: the date, start and end time, category and reason, then Add Line.')
+      setFormError('Click Add Line to enter your overtime: the date, start and end time, category and reason, then Save.')
       return
     }
     setFormError(null)
@@ -790,7 +874,7 @@ export function OvertimeRequest() {
     const reasons = [...new Set(all.map((line) => line.reason.trim()).filter(Boolean))]
     if (all !== lines) {
       setLines(all)
-      setEntry(clearedEntry(entry.dayType))
+      cancelEntry()
     }
     saveMutation.mutate({
       requestNo: editingNo ?? undefined,
@@ -1051,70 +1135,103 @@ export function OvertimeRequest() {
           </div>
 
           <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details">
-            {shown ? null : (
-              <div className={cn('rounded-lg', editingLine !== null ? 'bg-amber-50/60 p-3 ring-1 ring-amber-200' : '')}>
-                {editingLine !== null ? (
-                  <p className="mb-3 text-xs font-medium text-amber-900">Editing line {editingLine + 1}. Click Update Line to keep the change.</p>
-                ) : null}
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-3">
-                    <Field label="Overtime Date" required htmlFor="overtime-date">
+            {shown || lines.length ? (
+              <OvertimeLinesTable
+                lines={
+                  shown
+                    ? shown.lines.map((line) => ({ ...line, hours: line, amount: line.estimatedAmount }))
+                    : lines.map((line) => {
+                        const hours = splitOvertimeHours(line.startTime, line.endTime, line.dayType)
+                        return { ...line, hours, amount: estimateOvertimeAmount(hours, hourlyRate, rates) }
+                      })
+                }
+                rates={rates}
+                editingIndex={editingLine}
+                onEdit={shown ? undefined : editLine}
+                onDelete={shown ? undefined : deleteLine}
+              />
+            ) : null}
+
+            {shown ? null : entryOpen ? (
+              <div key={entryKey} className={cn('rounded-xl border border-slate-200 bg-white p-4 shadow-sm', lines.length ? 'mt-4' : '')}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Overtime Details – {editingLine === null ? 'New Line' : `Edit Line ${editingLine + 1}`}
+                  </p>
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                    {editingLine === null ? 'New Entry' : 'Editing'}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-6 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <p className="text-sm font-semibold text-slate-800">Date &amp; Time</p>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="overtime-date" className="text-sm text-slate-700">
+                        Overtime Date<span className="text-red-500"> *</span>
+                      </Label>
                       <Input
                         id="overtime-date"
                         type="date"
                         value={entry.overtimeDate}
                         onChange={(event) => setEntry((current) => ({ ...current, overtimeDate: event.target.value }))}
                       />
-                    </Field>
-                    <Field label="Start Time" required htmlFor="overtime-start">
-                      <Input
-                        id="overtime-start"
-                        type="time"
-                        value={entry.startTime}
-                        onChange={(event) => setEntry((current) => ({ ...current, startTime: event.target.value }))}
-                      />
-                    </Field>
-                    <Field label="End Time" required htmlFor="overtime-end">
-                      <Input
-                        id="overtime-end"
-                        type="time"
-                        value={entry.endTime}
-                        onChange={(event) => setEntry((current) => ({ ...current, endTime: event.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Overtime Hours" required>
-                      <div className="flex">
-                        <div className="min-h-10 flex-1 rounded-l-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm tabular-nums text-slate-900">
-                          {entryHours.totalHours.toFixed(2)}
-                        </div>
-                        <span className="rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">hrs</span>
-                      </div>
-                    </Field>
+                    </div>
+                    <TimeField
+                      id="overtime-start"
+                      label="Start Time"
+                      value={entry.startTime}
+                      defaultMeridiem="AM"
+                      onChange={(value) => setEntry((current) => ({ ...current, startTime: value }))}
+                    />
+                    <TimeField
+                      id="overtime-end"
+                      label="End Time"
+                      value={entry.endTime}
+                      defaultMeridiem="PM"
+                      onChange={(value) => setEntry((current) => ({ ...current, endTime: value }))}
+                    />
+                    <div>
+                      <p className="text-xs font-medium text-slate-600">Calculated Hours</p>
+                      <p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{entryHours.totalHours.toFixed(2)} Hours</p>
+                      <p className="text-xs text-slate-500">Automatic calculation</p>
+                    </div>
                   </div>
-                  <div className="space-y-3">
-                    <Field label="Overtime Category" required htmlFor="overtime-category">
+                  <div className="space-y-4">
+                    <p className="text-sm font-semibold text-slate-800">Payment Details</p>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="overtime-category" className="text-sm text-slate-700">
+                        Overtime Category<span className="text-red-500"> *</span>
+                      </Label>
                       <Select
                         id="overtime-category"
                         value={entry.dayType}
                         options={DAY_TYPES}
+                        placeholder="Select category"
                         onChange={(event) =>
-                          setEntry((current) => ({ ...current, dayType: (event.target.value || 'working') as OvertimeDayType }))
+                          setEntry((current) => ({ ...current, dayType: event.target.value as OvertimeDayType | '' }))
                         }
                       />
-                    </Field>
-                    <Field label="Rate Type">
-                      <ReadValue value={entryHours.totalHours ? rateType(entryHours, entry.dayType, rates) : ''} />
-                    </Field>
-                    <Field label="Reason / Justification" required htmlFor="overtime-reason">
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-600">Rate</p>
+                      <p className="mt-1 text-base font-semibold text-slate-900">
+                        {entry.dayType ? rateType(entryHours, entry.dayType, rates) : 'Auto-filled'}
+                      </p>
+                      <p className="text-xs text-slate-500">Based on category</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="overtime-reason" className="text-sm text-slate-700">
+                        Reason / Justification<span className="text-red-500"> *</span>
+                      </Label>
                       <Textarea
                         id="overtime-reason"
-                        rows={3}
+                        rows={4}
                         maxLength={250}
                         value={entry.reason}
-                        placeholder="Why is the overtime needed?"
+                        placeholder="Enter reason or justification…"
                         onChange={(event) => setEntry((current) => ({ ...current, reason: event.target.value }))}
                       />
-                    </Field>
+                    </div>
                   </div>
                 </div>
                 {weekendHint ? (
@@ -1124,17 +1241,18 @@ export function OvertimeRequest() {
                   </p>
                 ) : null}
                 {(() => {
-                  if (!entry.startTime || !entry.endTime || !entryHours.totalHours) return null
-                  const parts = splitAtBands(entry)
-                  const allNight = entry.dayType === 'working' && !parts.length && Boolean(categoryProblem(entry))
-                  const allDay = entry.dayType === 'night' && !parts.length && Boolean(categoryProblem(entry))
+                  if (!entry.dayType || !entry.startTime || !entry.endTime || !entryHours.totalHours) return null
+                  const line: OvertimeLineInput = { ...entry, dayType: entry.dayType }
+                  const parts = splitAtBands(line)
+                  const allNight = line.dayType === 'working' && !parts.length && Boolean(categoryProblem(line))
+                  const allDay = line.dayType === 'night' && !parts.length && Boolean(categoryProblem(line))
                   if (!parts.length && !allNight && !allDay) return null
                   return (
                     <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                       <Info className="h-4 w-4 shrink-0" />
                       <span className="min-w-0 flex-1">
                         {parts.length
-                          ? `${clockText(entry.startTime)} – ${clockText(entry.endTime)} has normal day and night hours, which are paid at different rates: they go on separate lines (${parts
+                          ? `${clockText(line.startTime)} – ${clockText(line.endTime)} has normal day and night hours, which are paid at different rates: they go on separate lines (${parts
                               .map((part) => `${clockText(part.startTime)} – ${clockText(part.endTime)} ${part.dayType === 'night' ? 'night' : 'normal day'}`)
                               .join(', ')}).`
                           : allNight
@@ -1163,50 +1281,41 @@ export function OvertimeRequest() {
                     {entryError}
                   </p>
                 ) : null}
-              </div>
-            )}
-
-            <OvertimeLinesTable
-              className={shown ? '' : 'mt-4'}
-              lines={
-                shown
-                  ? shown.lines.map((line) => ({ ...line, hours: line }))
-                  : lines.map((line) => ({ ...line, hours: splitOvertimeHours(line.startTime, line.endTime, line.dayType) }))
-              }
-              rates={rates}
-              editingIndex={editingLine}
-              onEdit={shown ? undefined : editLine}
-              onDelete={shown ? undefined : deleteLine}
-            />
-
-            {shown ? null : (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-[var(--portal-navy)]/40 text-[var(--portal-navy)]"
-                  disabled={busy || (editingLine === null && lines.length >= maxLines)}
-                  onClick={addLine}
-                >
-                  {editingLine === null ? <Plus className="mr-2 h-4 w-4" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                  {editingLine === null ? 'Add Line' : 'Update Line'}
-                </Button>
-                {editingLine !== null ? (
-                  <Button type="button" variant="ghost" onClick={cancelLineEdit}>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button type="button" variant="outline" className="rounded-full" disabled={busy} onClick={cancelEntry}>
                     Cancel
                   </Button>
-                ) : null}
-                {editingLine === null && lines.length >= maxLines ? (
-                  <span className="text-xs text-slate-500">
-                    {maxLines === 1
+                  <Button
+                    type="button"
+                    className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                    disabled={busy}
+                    onClick={saveLine}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className={lines.length ? 'mt-4' : ''}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white py-2.5 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={busy || lines.length >= maxLines}
+                  onClick={openNewLine}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Line
+                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  {lines.length >= maxLines
+                    ? maxLines === 1
                       ? 'Several dates in one request need Business Central package 1.0.3.612. Make one request per date for now.'
-                      : `A request can hold ${maxLines} lines. Make a second request for the other days.`}
-                  </span>
-                ) : (
-                  <span className="text-xs text-slate-500">
-                    Fill in the date, times, category and reason, then Add Line. Add a line for each day you work overtime.
-                  </span>
-                )}
+                      : `A request can hold ${maxLines} lines. Make a second request for the other days.`
+                    : lines.length
+                      ? 'Click Add Line to enter another overtime record.'
+                      : 'Click Add Line to open the overtime entry form.'}
+                </p>
               </div>
             )}
           </Section>
