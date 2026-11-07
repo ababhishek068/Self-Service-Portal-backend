@@ -68,7 +68,7 @@ export const navigationMenu: NavItem[] = [
       { label: 'Payslip', path: '/hr/payslip', icon: Wallet },
       { label: 'Performance', path: '/hr/performance', icon: BarChart3 },
       { label: 'Training Request', path: '/hr/training-request', icon: FileText },
-      { label: 'Salary Advance', path: '/hr/salary-advance', icon: Banknote },
+      { label: 'Advance Request', path: '/hr/salary-advance', icon: Banknote },
       { label: 'Overtime Request', path: '/hr/overtime-request', icon: ClipboardList },
       { label: 'Travel Request', path: '/hr/travel-request', icon: Plane },
     ],

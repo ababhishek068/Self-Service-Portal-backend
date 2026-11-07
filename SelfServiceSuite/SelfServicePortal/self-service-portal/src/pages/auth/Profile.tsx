@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   BookOpen, Briefcase, Building2, CalendarDays, Download, FileText, GraduationCap, History, IdCard, RefreshCw, ShieldCheck, Users, Wallet,
 } from 'lucide-react'
+import { computeProfileCompleteness } from '@/utils/profileCompleteness'
 import { downloadEmployeeAttachment, getEmployeeProfileDetails, getPortalBuild, listEmployeeAttachments } from '@/api/endpoints/profile'
 import { fetchProfileEditContext } from '@/api/endpoints/profileChanges'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
@@ -211,22 +212,26 @@ export function Profile() {
   const memberships=profile.memberships ?? []
   const rewards=profile.rewards ?? []
   const salaryAllowances=profile.salaryAllowances ?? []
+  const assignedAssets=profile.assignedAssets ?? []
+  const nextOfKin=profile.nextOfKin ?? []
+  const qualifications=profile.qualifications ?? []
+  const employmentHistory=profile.employmentHistory ?? []
   const hasContent: Record<Tab,boolean> = editing ? {
     bio: true, contract: false, job: structured && sectionsForTab(profile,'job').length>0, leave: structured && sectionsForTab(profile,'leave').length>0,
     pay: (structured && sectionsForTab(profile,'pay').length>0) || salaryAllowances.length>0, kin: true, dependants: true, qualifications: true,
-    history: true, training: trainingHistory.length>0 || memberships.length>0 || rewards.length>0, assets: profile.assignedAssets.length>0, attachments: true,
+    history: true, training: trainingHistory.length>0 || memberships.length>0 || rewards.length>0, assets: assignedAssets.length>0, attachments: true,
   } : {
     bio: structured ? sectionsForTab(profile,'bio').length>0 : fieldsFor(profile,bioFields).length>0 || Boolean(profile.extraFields?.some(field=>display(field.value))),
     contract: !structured && fieldsFor(profile,contractFields).length>0,
     job: structured && sectionsForTab(profile,'job').length>0,
     leave: structured && sectionsForTab(profile,'leave').length>0,
     pay: (structured && sectionsForTab(profile,'pay').length>0) || salaryAllowances.length>0,
-    kin: profile.nextOfKin.length>0 || beneficiaries.length>0,
+    kin: nextOfKin.length>0 || beneficiaries.length>0,
     dependants: dependants.length>0,
-    qualifications: profile.qualifications.length>0,
-    history: profile.employmentHistory.length>0 || internalHistory.length>0,
+    qualifications: qualifications.length>0,
+    history: employmentHistory.length>0 || internalHistory.length>0,
     training: trainingHistory.length>0 || memberships.length>0 || rewards.length>0,
-    assets: profile.assignedAssets.length>0,
+    assets: assignedAssets.length>0,
     attachments: attachmentsQuery.isPending || attachmentsQuery.isError || Boolean(attachmentsQuery.data?.length),
   }
   const visible: Tab[] = TAB_ORDER.filter(tab=>{
@@ -239,6 +244,13 @@ export function Profile() {
   const initials=fullName.split(/\s+/).slice(0,2).map(part=>part[0]??'').join('')
   const joined=display(profile.dateOfJoin)
   const service=display(profile.lengthOfService)
+  // Plain call (not useMemo) — must stay below early returns; hooks cannot be conditional.
+  const completeness=computeProfileCompleteness(
+    profile as unknown as Record<string, unknown>,
+    editQuery.data,
+    editor.draft.fields,
+  )
+  const completenessRing=`conic-gradient(#b1c836 ${completeness.percent}%, rgba(255,255,255,0.22) 0)`
   const download=async(attachment:Attachment)=>{
     if(downloading)return
     setDownloading(String(attachment.id))
@@ -254,7 +266,22 @@ export function Profile() {
             {joined||service?<p className="mt-1 text-xs text-white/70">{[joined?`Joined ${formatDate(joined)}`:'',service?`${service} of service`:''].filter(Boolean).join(' · ')}</p>:null}
             <div className="mt-3 flex flex-wrap gap-2">{[profile.employeeNo,profile.department,profile.branch||profile.division,profile.status].filter(value=>display(value)).map((value,index)=><span key={index} className="rounded-full bg-white/15 px-3 py-1 text-xs">{value}</span>)}</div>
           </div>
-          <Button variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={()=>void refresh()} disabled={profileQuery.isFetching || attachmentsQuery.isFetching || editQuery.isFetching || editor.busy!==null}><RefreshCw className="h-4 w-4"/>Refresh</Button>
+          <div className="flex flex-wrap items-center gap-4">
+            <div
+              className="flex items-center gap-3 rounded-2xl bg-white/10 px-3 py-2 ring-1 ring-white/20"
+              title={completeness.missing.length?`Missing: ${completeness.missing.map(item=>item.label).join(', ')}`:'All key profile fields are filled'}
+            >
+              <div className="relative h-14 w-14 shrink-0 rounded-full p-[3px]" style={{background:completenessRing}} aria-hidden>
+                <div className="flex h-full w-full items-center justify-center rounded-full bg-[var(--portal-navy)] text-sm font-bold">{completeness.percent}%</div>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-tight">Profile Completeness</p>
+                <p className="text-xs text-white/75">{completeness.message}</p>
+                {completeness.missing.length?<p className="mt-1 text-[11px] text-amber-100">Add: {completeness.missing.map(item=>item.label).join(' · ')}</p>:null}
+              </div>
+            </div>
+            <Button variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={()=>void refresh()} disabled={profileQuery.isFetching || attachmentsQuery.isFetching || editQuery.isFetching || editor.busy!==null}><RefreshCw className="h-4 w-4"/>Refresh</Button>
+          </div>
         </div>
         {roleLabels.length?<div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/20 pt-4"><ShieldCheck className="h-4 w-4"/><span className="text-xs">Portal Access</span>{roleLabels.map(label=><span key={label} className="rounded-full bg-white/20 px-3 py-1 text-xs">{label}</span>)}</div>:null}
       </div>
@@ -283,13 +310,13 @@ export function Profile() {
             <RowAreaEditor editor={editor} area="kin"/>
             <RowAreaEditor editor={editor} area="beneficiary" title="Beneficiaries"/>
           </div>:<div className="space-y-6">
-            <ProfileTable rows={profile.nextOfKin} fields={KIN_FIELDS} title={beneficiaries.length?'Next of Kin':undefined}/>
+            <ProfileTable rows={nextOfKin} fields={KIN_FIELDS} title={beneficiaries.length?'Next of Kin':undefined}/>
             <ProfileTable rows={beneficiaries} fields={KIN_FIELDS} title="Beneficiaries"/>
           </div>):null}
           {active==='dependants'?(editing?<RowAreaEditor editor={editor} area="dependant" title="Dependants"/>:<ProfileTable rows={dependants} fields={KIN_FIELDS}/>):null}
-          {active==='qualifications'?(editing?<RowAreaEditor editor={editor} area="qualification" title="Qualifications"/>:<ProfileTable rows={profile.qualifications} fields={QUALIFICATION_FIELDS}/>):null}
+          {active==='qualifications'?(editing?<RowAreaEditor editor={editor} area="qualification" title="Qualifications"/>:<ProfileTable rows={qualifications} fields={QUALIFICATION_FIELDS}/>):null}
           {active==='history'?<div className="space-y-6">
-            {editing?<RowAreaEditor editor={editor} area="history" title="Previous Employment"/>:<ProfileTable rows={profile.employmentHistory} fields={HISTORY_FIELDS} title={internalHistory.length?'Previous Employment':undefined}/>}
+            {editing?<RowAreaEditor editor={editor} area="history" title="Previous Employment"/>:<ProfileTable rows={employmentHistory} fields={HISTORY_FIELDS} title={internalHistory.length?'Previous Employment':undefined}/>}
             {editing && internalHistory.length?<HrOnlyNote/>:null}
             <ProfileTable rows={internalHistory} fields={INTERNAL_HISTORY_FIELDS} title="Internal Employment History"/>
           </div>:null}
@@ -298,7 +325,7 @@ export function Profile() {
             <ProfileTable rows={memberships} fields={MEMBERSHIP_FIELDS} title="Professional Memberships"/>
             <ProfileTable rows={rewards} fields={REWARD_FIELDS} title="Rewards"/>
           </div>:null}
-          {active==='assets'?<ProfileTable rows={profile.assignedAssets} fields={ASSET_FIELDS}/>:null}
+          {active==='assets'?<ProfileTable rows={assignedAssets} fields={ASSET_FIELDS}/>:null}
           {active==='attachments'?<div className="space-y-3">
             {editing?<div className="mb-8"><ProfileDocuments editor={editor}/></div>:null}
             {editing?<SectionHeading icon={<FileText/>}>Documents in your employee record</SectionHeading>:null}

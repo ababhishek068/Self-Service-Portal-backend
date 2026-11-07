@@ -1876,10 +1876,41 @@ const salaryAdvance: ModuleSpec = {
           )
         }
       }
-      const purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
       const percentageSalary = Number(req.body?.percentageSalary ?? 0)
+      const requestPurpose = String(req.body?.requestPurpose ?? '').trim()
+      const otherPurposeDetails = String(req.body?.otherPurposeDetails ?? '').trim()
+      const justification = String(req.body?.justification ?? '').trim()
+      const requiredAdvanceDate = String(req.body?.requiredAdvanceDate ?? '').trim()
+      const activityStartDate = String(req.body?.activityStartDate ?? '').trim()
+      const activityEndDate = String(req.body?.activityEndDate ?? '').trim()
+      const activityLocation = String(req.body?.activityLocation ?? '').trim()
+      const projectAssignment = String(req.body?.projectAssignment ?? '').trim()
+      let purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
       if (!purpose) {
-        throw Object.assign(new Error('Enter the salary advance purpose before saving.'), {
+        const purposeLabel =
+          requestPurpose === 'Other' && otherPurposeDetails
+            ? `Other: ${otherPurposeDetails}`
+            : requestPurpose
+        purpose = [
+          purposeLabel,
+          justification ? `Justification: ${justification}` : '',
+          requiredAdvanceDate ? `Required advance date: ${requiredAdvanceDate}` : '',
+          activityStartDate ? `Activity start: ${activityStartDate}` : '',
+          activityEndDate ? `Activity end: ${activityEndDate}` : '',
+          activityLocation ? `Location: ${activityLocation}` : '',
+          projectAssignment ? `Project: ${projectAssignment}` : '',
+        ]
+          .filter(Boolean)
+          .join(' | ')
+          .slice(0, 250)
+      }
+      if (!purpose) {
+        throw Object.assign(new Error('Enter the advance request purpose before saving.'), {
+          status: 422,
+        })
+      }
+      if (requestPurpose === 'Other' && !otherPurposeDetails && !String(req.body?.purpose ?? '').trim()) {
+        throw Object.assign(new Error('Enter details when Other (Specify) is selected.'), {
           status: 422,
         })
       }
