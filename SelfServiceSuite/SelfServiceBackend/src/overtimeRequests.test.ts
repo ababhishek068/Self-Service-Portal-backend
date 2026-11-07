@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  overtimeCategoryProblem,
   overtimeActingUserMayView,
   overtimeDocumentLines,
   overtimeApprovalQueueItem,
@@ -26,6 +27,7 @@ describe('overtime hours by legal band (as BC 1.0.3.606)', () => {
     assert.equal(late.totalHours, 3.5)
     assert.equal(late.normalHours, 2)
     assert.equal(late.nightHours, 1.5)
+    assert.equal(splitOvertimeHours('22:00', '02:00', 'night').nightHours, 4)
   })
 
   it('treats an end before the start as the next morning', () => {
@@ -133,12 +135,13 @@ describe('overtime requests with several lines (BC 1.0.3.612)', () => {
       {
         lines: [
           { overtimeDate: '2026-06-12', startTime: '19:00', endTime: '22:00', dayType: 'working', reason: 'Client meeting' },
+          { overtimeDate: '2026-06-12', startTime: '22:00', endTime: '23:00', dayType: 'night', reason: 'Client meeting' },
           { overtimeDate: '2026-06-11', startTime: '06:00', endTime: '09:00', dayType: 'working', reason: 'Project deadline' },
         ],
       },
       true,
     )
-    assert.equal(details.lines.length, 2)
+    assert.equal(details.lines.length, 3)
     assert.equal(details.overtimeDate, '2026-06-11')
     assert.equal(details.startTime, '06:00')
     assert.equal(details.reason, 'Project deadline; Client meeting')
@@ -150,8 +153,8 @@ describe('overtime requests with several lines (BC 1.0.3.612)', () => {
         validateOvertimeDetails(
           {
             lines: [
-              { overtimeDate: '2026-06-11', startTime: '22:00', endTime: '02:00', reason: 'Night release' },
-              { overtimeDate: '2026-06-12', startTime: '01:00', endTime: '03:00', reason: 'Night release' },
+              { overtimeDate: '2026-06-11', startTime: '22:00', endTime: '02:00', dayType: 'night', reason: 'Night release' },
+              { overtimeDate: '2026-06-12', startTime: '01:00', endTime: '03:00', dayType: 'night', reason: 'Night release' },
             ],
           },
           true,
@@ -191,5 +194,20 @@ describe('overtime requests with several lines (BC 1.0.3.612)', () => {
     assert.equal(request.linesFromBc, false)
     assert.equal(request.lines.length, 1)
     assert.equal(request.lines[0]!.startTime, '17:00')
+  })
+})
+
+describe('the four overtime categories (BC 1.0.3.615)', () => {
+  it('keeps normal day hours within 6 AM - 10 PM and night hours within 10 PM - 6 AM', () => {
+    assert.equal(overtimeCategoryProblem({ startTime: '17:00', endTime: '21:00', dayType: 'working' }), '')
+    assert.match(overtimeCategoryProblem({ startTime: '20:00', endTime: '23:00', dayType: 'working' }), /second line with Night/)
+    assert.equal(overtimeCategoryProblem({ startTime: '22:00', endTime: '05:00', dayType: 'night' }), '')
+    assert.match(overtimeCategoryProblem({ startTime: '21:00', endTime: '23:00', dayType: 'night' }), /Normal day hours/)
+    assert.equal(overtimeCategoryProblem({ startTime: '20:00', endTime: '23:00', dayType: 'restDay' }), '')
+    assert.throws(
+      () => validateOvertimeDetails({ overtimeDate: '2026-06-11', startTime: '20:00', endTime: '23:00', dayType: 'working', reason: 'Release' }, true),
+      /Night hours/,
+    )
+    assert.equal(validateOvertimeDetails({ overtimeDate: '2026-06-11', startTime: '22:00', endTime: '01:00', dayType: 'night' }, false).dayType, 'night')
   })
 })

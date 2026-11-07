@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { format, isValid, parseISO } from 'date-fns'
+import { addDays, format, isValid, parseISO } from 'date-fns'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -64,9 +64,10 @@ const LIST_KEY = ['hr', 'overtime-requests'] as const
 const CONTEXT_KEY = ['hr', 'overtime-context'] as const
 
 const DAY_TYPES: Array<{ value: OvertimeDayType; label: string }> = [
-  { value: 'working', label: 'Working day (normal day 6 AM–10 PM / night)' },
-  { value: 'restDay', label: 'Weekly rest day' },
-  { value: 'holiday', label: 'Public holiday' },
+  { value: 'working', label: 'Normal day hours (6 AM – 10 PM)' },
+  { value: 'night', label: 'Night hours (10 PM – 6 AM)' },
+  { value: 'restDay', label: 'Rest day hours' },
+  { value: 'holiday', label: 'Public holiday hours' },
 ]
 
 type Mode = 'form' | 'list' | 'detail'
@@ -130,6 +131,57 @@ function clockText(value: string) {
   return `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
+function minutesOfClock(value: string) {
+  const [hour = 0, minute = 0] = value.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+function clockOf(minutes: number) {
+  const value = ((minutes % 1440) + 1440) % 1440
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+}
+
+function shiftDate(date: string, days: number) {
+  const parsed = parseISO(date)
+  return days && isValid(parsed) ? format(addDays(parsed, days), 'yyyy-MM-dd') : date
+}
+
+/** Normal day hours lie within 6 AM - 10 PM and night hours within 10 PM - 6 AM (BC checks the same). */
+function categoryProblem(line: OvertimeLineInput) {
+  if (line.dayType !== 'working' && line.dayType !== 'night') return ''
+  const split = splitOvertimeHours(line.startTime, line.endTime, 'working')
+  if (!split.totalHours) return ''
+  if (line.dayType === 'working' && split.nightHours > 0) {
+    return 'Normal day hours are between 6 AM and 10 PM. Put the hours after 10 PM (or before 6 AM) in a second line with Night hours.'
+  }
+  if (line.dayType === 'night' && split.normalHours > 0) {
+    return 'Night hours are between 10 PM and 6 AM. Put the hours from 6 AM to 10 PM in a second line with Normal day hours.'
+  }
+  return ''
+}
+
+/** A line that crosses 6 AM or 10 PM, cut into normal day and night lines (the date moves on after midnight). */
+function splitAtBands(line: OvertimeLineInput): OvertimeLineInput[] {
+  if (line.dayType !== 'working' && line.dayType !== 'night') return []
+  const split = splitOvertimeHours(line.startTime, line.endTime, 'working')
+  if (!split.normalHours || !split.nightHours) return []
+  const start = minutesOfClock(line.startTime)
+  let end = minutesOfClock(line.endTime)
+  if (end <= start) end += 1440
+  const cuts = [start, ...[360, 1320, 1800, 2760].filter((point) => point > start && point < end), end]
+  return cuts.slice(0, -1).map((from, index) => {
+    const to = cuts[index + 1]!
+    const normal = (from >= 360 && to <= 1320) || (from >= 1800 && to <= 2760)
+    return {
+      ...line,
+      overtimeDate: shiftDate(line.overtimeDate, Math.floor(from / 1440)),
+      startTime: clockOf(from),
+      endTime: clockOf(to),
+      dayType: normal ? ('working' as const) : ('night' as const),
+    }
+  })
+}
+
 function dateRange(lines: Array<{ overtimeDate: string }>, fallback: string) {
   const dates = lines.map((line) => line.overtimeDate).filter(Boolean).sort()
   if (!dates.length) return prettyDate(fallback)
@@ -153,6 +205,7 @@ function rateText(value: number) {
 
 /** The rate(s) that apply, as the template's Rate Type. */
 function rateType(hours: ReturnType<typeof splitOvertimeHours>, dayType: OvertimeDayType, rates: OvertimeContext['rates']) {
+  if (dayType === 'night') return `${rateText(rates.night)} (night)`
   if (dayType === 'restDay') return `${rateText(rates.restDay)} (weekly rest day)`
   if (dayType === 'holiday') return `${rateText(rates.holiday)} (public holiday)`
   if (hours.normalHours && hours.nightHours) {
@@ -532,7 +585,7 @@ export function OvertimeRequest() {
   const dateObject = parseISO(entry.overtimeDate)
   const weekendHint =
     entry.dayType === 'working' && isValid(dateObject) && (dateObject.getDay() === 0 || dateObject.getDay() === 6)
-      ? `${format(dateObject, 'EEEE')}: if it is your weekly rest day, choose Weekly rest day.`
+      ? `${format(dateObject, 'EEEE')}: if it is your weekly rest day, choose Rest day hours.`
       : ''
 
   const projectOptions = useMemo(
@@ -583,6 +636,8 @@ export function OvertimeRequest() {
       return 'The end time must be different from the start time.'
     }
     if (line.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
+    const category = categoryProblem(line)
+    if (category) return category
     const clash = others.find((other) => overlaps(line, other))
     if (clash) {
       return `It overlaps the line of ${shortDate(clash.overtimeDate)} ${clockText(clash.startTime)} – ${clockText(clash.endTime)}.`
@@ -617,6 +672,30 @@ export function OvertimeRequest() {
     setEntry(clearedEntry(entry.dayType))
     setEditingLine(null)
     setEntryError(null)
+  }
+
+  /** One click: the entered line becomes a normal day line and a night line (or more), each checked. */
+  const splitEntry = () => {
+    const parts = splitAtBands(entry)
+    const others = lines.filter((_, index) => index !== editingLine)
+    const added: OvertimeLineInput[] = []
+    for (const part of parts) {
+      const problem = lineProblem(part, [...others, ...added])
+      if (problem) {
+        setEntryError(problem)
+        return
+      }
+      added.push({ ...part, reason: part.reason.trim() })
+    }
+    if (others.length + added.length > maxLines) {
+      setEntryError(`A request can hold ${maxLines} lines. Make a second request for the other days.`)
+      return
+    }
+    setLines(sortLines([...others, ...added]))
+    setEntry(clearedEntry('working'))
+    setEditingLine(null)
+    setEntryError(null)
+    setFormError(null)
   }
 
   const deleteLine = (index: number) => {
@@ -1044,6 +1123,40 @@ export function OvertimeRequest() {
                     {weekendHint}
                   </p>
                 ) : null}
+                {(() => {
+                  if (!entry.startTime || !entry.endTime || !entryHours.totalHours) return null
+                  const parts = splitAtBands(entry)
+                  const allNight = entry.dayType === 'working' && !parts.length && Boolean(categoryProblem(entry))
+                  const allDay = entry.dayType === 'night' && !parts.length && Boolean(categoryProblem(entry))
+                  if (!parts.length && !allNight && !allDay) return null
+                  return (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      <Info className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        {parts.length
+                          ? `${clockText(entry.startTime)} – ${clockText(entry.endTime)} has normal day and night hours, which are paid at different rates: they go on separate lines (${parts
+                              .map((part) => `${clockText(part.startTime)} – ${clockText(part.endTime)} ${part.dayType === 'night' ? 'night' : 'normal day'}`)
+                              .join(', ')}).`
+                          : allNight
+                            ? 'These hours are at night (10 PM – 6 AM): choose Night hours.'
+                            : 'These hours are in the day (6 AM – 10 PM): choose Normal day hours.'}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-300 bg-white"
+                        onClick={() =>
+                          parts.length
+                            ? splitEntry()
+                            : setEntry((current) => ({ ...current, dayType: allNight ? 'night' : 'working' }))
+                        }
+                      >
+                        {parts.length ? `Split into ${parts.length} lines` : allNight ? 'Use Night hours' : 'Use Normal day hours'}
+                      </Button>
+                    </div>
+                  )
+                })()}
                 {entryError ? (
                   <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-red-700">
                     <AlertTriangle className="h-4 w-4 shrink-0" />

@@ -2,7 +2,8 @@ import { authDelete, authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
 
 /** Staff Overtime Request (BC 1.0.3.606): Line Manager, HR, Director / COO, Finance, then payroll. */
-export type OvertimeDayType = 'working' | 'restDay' | 'holiday'
+/** Normal day (6 AM - 10 PM), night (10 PM - 6 AM), rest day, public holiday: the four overtime sheet bands. */
+export type OvertimeDayType = 'working' | 'night' | 'restDay' | 'holiday'
 
 export type OvertimeStepStatus =
   | 'Not started'
@@ -187,6 +188,7 @@ export function splitOvertimeHours(startTime: string, endTime: string, dayType: 
   if (end < start) end += 1440
   const round = (minutes: number) => Math.round((minutes / 60) * 100) / 100
   const totalHours = round(end - start)
+  if (dayType === 'night') return { ...empty, totalHours, nightHours: totalHours }
   if (dayType === 'restDay') return { ...empty, totalHours, restDayHours: totalHours }
   if (dayType === 'holiday') return { ...empty, totalHours, holidayHours: totalHours }
   const normalHours = round(overlap(start, end, 360, 1320) + overlap(start, end, 1800, 2760))

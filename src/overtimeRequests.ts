@@ -8,7 +8,8 @@ import { callSoapMethod } from './bcClient.js'
  */
 export const OVERTIME_MODULE = 'overtime' as const
 
-export const OVERTIME_DAY_TYPES = ['working', 'restDay', 'holiday'] as const
+/** The four overtime sheet bands: normal day (6 AM - 10 PM), night (10 PM - 6 AM), rest day, public holiday. */
+export const OVERTIME_DAY_TYPES = ['working', 'night', 'restDay', 'holiday'] as const
 export type OvertimeDayType = (typeof OVERTIME_DAY_TYPES)[number]
 
 export type OvertimeStepStatus =
@@ -361,6 +362,7 @@ export function splitOvertimeHours(startTime: string, endTime: string, dayType: 
   if (end < start) end += 1440
   const round = (minutes: number) => Math.round((minutes / 60) * 100) / 100
   const totalHours = round(end - start)
+  if (dayType === 'night') return { ...empty, totalHours, nightHours: totalHours }
   if (dayType === 'restDay') return { ...empty, totalHours, restDayHours: totalHours }
   if (dayType === 'holiday') return { ...empty, totalHours, holidayHours: totalHours }
   const normalHours = round(overlap(start, end, 360, 1320) + overlap(start, end, 1800, 2760))
@@ -406,7 +408,23 @@ function validateLine(input: unknown, submit: boolean, prefix: string): Overtime
   if (minutesOf(line.endTime) === null) throw invalid(`${prefix}Enter the end time, for example 21:00.`)
   if (line.startTime === line.endTime) throw invalid(`${prefix}The end time must be different from the start time.`)
   if (submit && line.reason.length < 3) throw invalid(`${prefix}Enter the reason / justification for the overtime.`)
+  const categoryProblem = overtimeCategoryProblem(line)
+  if (categoryProblem) throw invalid(`${prefix}${categoryProblem}`)
   return line
+}
+
+/** Normal day hours lie within 6 AM - 10 PM and night hours within 10 PM - 6 AM (as BC 1.0.3.615 checks). */
+export function overtimeCategoryProblem(line: Pick<OvertimeLineInput, 'startTime' | 'endTime' | 'dayType'>) {
+  if (line.dayType !== 'working' && line.dayType !== 'night') return ''
+  const split = splitOvertimeHours(line.startTime, line.endTime, 'working')
+  if (!split.totalHours) return ''
+  if (line.dayType === 'working' && split.nightHours > 0) {
+    return 'Normal day hours are between 6 AM and 10 PM. Put the hours after 10 PM (or before 6 AM) in a second line with Night hours.'
+  }
+  if (line.dayType === 'night' && split.normalHours > 0) {
+    return 'Night hours are between 10 PM and 6 AM. Put the hours from 6 AM to 10 PM in a second line with Normal day hours.'
+  }
+  return ''
 }
 
 /**

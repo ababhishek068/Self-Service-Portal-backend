@@ -550,7 +550,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v304 — 1.0.3.463 (UAT: Overtime Request with several dates as the manager form - enter a line then Add Line, lines table with edit and delete, totals and monthly check across the lines, approvers see every line; Employee Profile is read only until Edit Profile is clicked; for BC 1.0.3.612)'
+export const PORTAL_API_BUILD = 'v305 — 1.0.3.464 (UAT: four overtime categories as the overtime sheet - Normal day hours 6 AM to 10 PM, Night hours 10 PM to 6 AM, Rest day hours, Public holiday hours; times that do not fit the category are refused, with Split into lines; several dates per request; Employee Profile read only until Edit Profile; for BC 1.0.3.615)'
 
 interface LookupSpec {
   service: string
