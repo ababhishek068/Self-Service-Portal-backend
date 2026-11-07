@@ -47,7 +47,9 @@ const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export function LeavePlanner() {
   const navigate = useNavigate()
-  const { isHOD } = usePermissions()
+  const { isHOD, isHR, isCEO } = usePermissions()
+  // The API shows the department schedule to the HOD, HR and the CEO (1.0.3.466); others see their own leave.
+  const canViewDepartment = isHOD || isHR || isCEO
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [scope, setScope] = useState<'department' | 'self'>('self')
   const query = useQuery({
@@ -142,7 +144,7 @@ export function LeavePlanner() {
             onChange={(event) => setScope(event.target.value as 'department' | 'self')}
             options={[
               { value: 'self', label: 'My leave only' },
-              ...(isHOD
+              ...(canViewDepartment
                 ? [{ value: 'department' as const, label: 'Department schedule' }]
                 : []),
             ]}
