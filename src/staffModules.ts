@@ -1876,13 +1876,30 @@ const salaryAdvance: ModuleSpec = {
           )
         }
       }
+      const purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
+      const percentageSalary = Number(req.body?.percentageSalary ?? 0)
+      if (!purpose) {
+        throw Object.assign(new Error('Enter the salary advance purpose before saving.'), {
+          status: 422,
+        })
+      }
+      if (!(percentageSalary > 0) || percentageSalary > 100) {
+        throw Object.assign(
+          new Error(
+            percentageSalary > 100
+              ? 'Salary advance cannot exceed 100% of salary.'
+              : 'Enter a salary advance percentage greater than 0.',
+          ),
+          { status: 422 },
+        )
+      }
       // Match ESS SOAP payload — BC derives customer/account from staffNo.
       return {
         myAction: no ? 'edit' : 'create',
         recId: no ? String(req.body?.recId ?? '') : '',
         staffNo: user.employeeNo,
-        purpose: req.body?.purpose ?? req.body?.reason ?? '',
-        percentageSalary: Number(req.body?.percentageSalary ?? 0),
+        purpose,
+        percentageSalary,
       }
     },
     submit: ({ no }) => ({ docNo: no, action: 'request' }),
@@ -3290,9 +3307,13 @@ async function submitPortalModuleRequestOnce(spec: ModuleSpec, user: AuthUser, n
         status: 422,
       })
     }
-    if (percentage <= 0) {
+    if (percentage <= 0 || percentage > 100) {
       throw Object.assign(
-        new Error('Save the salary advance with a valid percentage before requesting approval.'),
+        new Error(
+          percentage > 100
+            ? 'Salary advance cannot exceed 100% of salary.'
+            : 'Save the salary advance with a valid percentage before requesting approval.',
+        ),
         { status: 422 },
       )
     }

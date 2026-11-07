@@ -142,7 +142,9 @@ export function LeavePlanner() {
             onChange={(event) => setScope(event.target.value as 'department' | 'self')}
             options={[
               { value: 'self', label: 'My leave only' },
-              { value: 'department', label: isHOD ? 'Department schedule' : 'Team schedule' },
+              ...(isHOD
+                ? [{ value: 'department' as const, label: 'Department schedule' }]
+                : []),
             ]}
           />
         </div>

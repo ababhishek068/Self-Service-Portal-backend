@@ -551,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v306 — 1.0.3.465 (LPR: Store Manager assigns the receiving store after FAD approves the PO - store list, new item setup with FA and 15% VAT defaults, Confirm Store, Store Manager queue and bell; store keeper receives only after the store is assigned; overtime four categories, several dates, profile Edit; for BC 1.0.3.615)'
+export const PORTAL_API_BUILD = 'v307 — 1.0.3.466 (Go-live: leave ownership IDOR closed, leave schedule fail-closed for non-HOD, gender leave types fail-closed, Salary Advance route live with % cap; for BC 1.0.3.616)'
 
 interface LookupSpec {
   service: string

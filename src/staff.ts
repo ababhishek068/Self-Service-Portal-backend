@@ -102,7 +102,9 @@ function leaveTypeGenderRestriction(row: ODataRecord): 'Male' | 'Female' | '' {
 
 function leaveTypeMatchesGender(row: ODataRecord, userGender: 'Male' | 'Female' | '') {
   const restriction = leaveTypeGenderRestriction(row)
-  if (!restriction || !userGender) return true
+  if (!restriction) return true
+  // Fail closed: gendered leave types stay hidden until HR fills Gender on the Employee Card.
+  if (!userGender) return false
   return restriction === userGender
 }
 
@@ -627,7 +629,8 @@ function mapLeaveRowsToSchedule(
   return leaveRows
     .map((row) => {
       const employeeNo = leaveScheduleEmployeeNo(row) || userEmployeeNo
-      if (scope !== 'self' && allowedEmployees.size > 0 && !allowedEmployees.has(employeeNo)) return null
+      // Fail closed: department/team schedule must never show leave outside the directory.
+      if (scope !== 'self' && !allowedEmployees.has(employeeNo)) return null
 
       const person =
         directory.get(employeeNo) ??
@@ -684,11 +687,11 @@ async function fetchScheduleEmployeeDirectory(user: ReturnType<typeof authUser>,
   }
 
   const department = odataString(user.department)
+  // Never fall back to company-wide Active employees — that leaked every leave into Team schedule.
   const filters = [
     department ? `GlobalDimension2Code eq '${department}' and Status eq 'Active'` : '',
     department ? `DepartmentCode eq '${department}' and Status eq 'Active'` : '',
     department ? `GlobalDimension2Code eq '${department}'` : '',
-    `Status eq 'Active'`,
   ].filter(Boolean)
 
   for (const filter of filters) {
@@ -1333,17 +1336,21 @@ async function postApprovedLeaveForRequester(user: ReturnType<typeof authUser>, 
 }
 
 async function fetchOwnedLeaveRow(user: ReturnType<typeof authUser>, no: string) {
+  // Never fall back to an ApplicationCode-only filter — sequential leave numbers
+  // would otherwise let any authenticated employee read or attach to another draft.
   const filters = [
     `ApplicationCode eq '${odataString(no)}' and EmployeeNo eq '${odataString(user.employeeNo)}'`,
     `ApplicationCode eq '${odataString(no)}' and UserID eq '${odataString(user.userID)}'`,
-    `ApplicationCode eq '${odataString(no)}'`,
   ]
   for (const filter of filters) {
     const rows = (await fetchOData('QyHRLeaveApplications', {
       $filter: filter,
       $top: 1,
     }).catch(() => [])) as ODataRecord[] | null
-    if (Array.isArray(rows) && rows.length > 0) return rows[0]!
+    if (Array.isArray(rows) && rows.length > 0) {
+      const row = rows[0]!
+      if (leaveRowBelongsToUser(row, user)) return row
+    }
   }
   return null
 }
@@ -2467,8 +2474,12 @@ export function buildStaffRouter() {
     '/leave/schedule',
     safe(async (req, res) => {
       const user = authUser(req)
-      const scope = typeof req.query.scope === 'string' ? req.query.scope : 'self'
-      const rows = await fetchLeaveScheduleRows(user, scope === 'self' ? 'self' : 'department')
+      const requestedScope = typeof req.query.scope === 'string' ? req.query.scope : 'self'
+      const canViewDepartment =
+        user.roles?.some((role) => ['hod', 'hr', 'ceo'].includes(String(role).toLowerCase())) === true
+      const scope =
+        requestedScope === 'self' || !canViewDepartment ? 'self' : 'department'
+      const rows = await fetchLeaveScheduleRows(user, scope)
       res.json({ rows })
     }),
   )
