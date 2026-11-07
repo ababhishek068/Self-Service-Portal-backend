@@ -11,6 +11,7 @@ import {
   localPurchaseNextActions,
   localPurchaseProgress,
   localPurchaseStepWaiting,
+  localPurchaseStoreStep,
   normalizeLprVendors,
   parseBcLocalPurchaseRoles,
   resolveLocalPurchaseAccess,
@@ -83,6 +84,36 @@ describe('assertLocalPurchaseActionAllowed', () => {
       localPurchaseNextActions(chain, ['operations']).filter((action) => action.allowed).map((action) => action.actionCode),
       ['SET_RECEIVE_ITEM', 'PREPARE_LOCAL_RECEIVE'],
     )
+  })
+
+  it('BC 1.0.3.613: the Store Manager assigns the store before the store keeper receives', () => {
+    const released = (storeAssigned: boolean, needsItemSetup = false): LocalPurchaseChain => ({
+      lpr: { no: 'ABH-PQ000092', lprStatus: 'Converted to RFQ', createdRfqNo: 'ABH-PQ000093' },
+      rfq: { no: 'ABH-PQ000093', flowStage: 'PO Created', createdPoNo: 'ABH-PO000008' },
+      po: { no: 'ABH-PO000008', flowStage: 'PO Released', storeAssigned, lines: [{ lineNo: 10000, needsItemSetup }] },
+    })
+    const allowedFor = (chain: LocalPurchaseChain, roles: LocalPurchaseRole[]) =>
+      localPurchaseNextActions(chain, roles).filter((action) => action.allowed).map((action) => action.actionCode)
+
+    // Not assigned: only the Store Manager has a step; the store keeper waits.
+    assert.deepEqual(allowedFor(released(false, true), ['storeManager']), ['ASSIGN_STORE', 'SET_RECEIVE_ITEM', 'CONFIRM_STORE'])
+    assert.deepEqual(allowedFor(released(false), ['operations']), [])
+    assert.equal(localPurchaseStoreStep(released(false)).waitingForStoreManager, true)
+    assert.equal(localPurchaseEditing(released(false), ['operations']).receive, false)
+    assert.deepEqual(
+      localPurchaseNextActions(released(false), ['operations']).find((action) => action.actionCode === 'ASSIGN_STORE')?.ownerRoles,
+      ['storeManager'],
+    )
+
+    // Assigned: the store keeper receives; the Store Manager has nothing more to do.
+    assert.deepEqual(allowedFor(released(true), ['operations']), ['PREPARE_LOCAL_RECEIVE', 'POST_LOCAL_RECEIVE'])
+    assert.deepEqual(allowedFor(released(true), ['storeManager']), [])
+    assert.equal(localPurchaseEditing(released(true), ['operations']).receive, true)
+
+    // Only the Store Manager may assign; ASSIGN_STORE needs the store.
+    assert.throws(() => assertLocalPurchaseActionAllowed(['operations'], 'ASSIGN_STORE', '', true), /not authorized/)
+    assert.throws(() => assertLocalPurchaseActionAllowed(['storeManager'], 'ASSIGN_STORE'), /payload is required/)
+    assert.equal(assertLocalPurchaseActionAllowed(['storeManager'], 'confirm_store'), 'CONFIRM_STORE')
   })
 
   it('takes a comment of up to 250 characters (BC actionComment is Text[250])', () => {

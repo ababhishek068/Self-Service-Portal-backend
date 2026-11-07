@@ -55,6 +55,7 @@ import {
   localPurchaseEditing,
   localPurchaseNextActions,
   localPurchaseStepWaiting,
+  localPurchaseStoreStep,
   localPurchaseProgress,
   normalizeLprVendors,
   parseSoapJson,
@@ -550,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v305 — 1.0.3.464 (UAT: four overtime categories as the overtime sheet - Normal day hours 6 AM to 10 PM, Night hours 10 PM to 6 AM, Rest day hours, Public holiday hours; times that do not fit the category are refused, with Split into lines; several dates per request; Employee Profile read only until Edit Profile; for BC 1.0.3.615)'
+export const PORTAL_API_BUILD = 'v306 — 1.0.3.465 (LPR: Store Manager assigns the receiving store after FAD approves the PO - store list, new item setup with FA and 15% VAT defaults, Confirm Store, Store Manager queue and bell; store keeper receives only after the store is assigned; overtime four categories, several dates, profile Edit; for BC 1.0.3.615)'
 
 interface LookupSpec {
   service: string
@@ -2761,8 +2762,20 @@ const LPR_WAITING_CACHE_MS = 45_000
  * reach Requests to Approve. A Procurement Officer's step is theirs only when BC assigned the LPR
  * to them (or to nobody yet), as BC checks. Kept 45 seconds; the user's own action clears it.
  */
-async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurchaseWaitingItem[]> {
+/**
+ * LPR access with the Store Manager (portal job title or BC store assignment, as for Start LPR):
+ * BC 1.0.3.613 lets only the Store Manager assign the receiving store and set up new items, and
+ * BC checks it on the session user, so the portal must decide who that is.
+ */
+async function localPurchaseAccessFor(authUser: AuthUser) {
   const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+  if (!access.enabled || access.roles.includes('storeManager')) return access
+  const store = await storeUserRoles(authUser).catch(() => null)
+  return store?.manager ? { ...access, roles: [...access.roles, 'storeManager' as LocalPurchaseRole] } : access
+}
+
+async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurchaseWaitingItem[]> {
+  const access = await localPurchaseAccessFor(authUser)
   if (!access.enabled || access.roles.length === 0) return []
   const key = notificationUserKey(authUser)
   const cached = lprWaitingCache.get(key)
@@ -2770,7 +2783,8 @@ async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurch
   const spec = findFrontendModuleSpec('purchaseRequisition')
   if (!spec) return []
   const rows = (await listPortalModuleRows(spec, authUser, {
-    includeAll: canViewPurchaseProcess(authUser),
+    // The Store Manager's queue (POs to assign a store) covers every store LPR.
+    includeAll: canViewPurchaseProcess(authUser) || access.roles.includes('storeManager'),
   })) as ODataRecord[]
   const myIds = new Set((await approverIdCandidates(authUser)).map((id) => id.trim().toUpperCase()))
   const candidates = rows
@@ -5678,7 +5692,7 @@ export function buildPortalApiRouter() {
    */
   /** Local Purchase must be live in BC (PortalLocalPurchase* methods); otherwise 382 behaviour applies. */
   async function requireLocalPurchaseAccess(authUser: AuthUser) {
-    const access = await resolveLocalPurchaseAccess(authUser, callSoapMethod)
+    const access = await localPurchaseAccessFor(authUser)
     if (!access.enabled) {
       throw portalError(
         'Local Purchase is not enabled in Business Central yet. Publish the BC app with the Local Purchase portal methods first.',
@@ -5706,7 +5720,7 @@ export function buildPortalApiRouter() {
   router.get(
     '/local-purchase/access',
     safe(async (req, res) => {
-      const access = await resolveLocalPurchaseAccess(user(req), callSoapMethod)
+      const access = await localPurchaseAccessFor(user(req))
       res.setHeader('Cache-Control', 'private, no-store')
       res.json({ enabled: access.enabled, roles: access.roles })
     }),
@@ -5777,8 +5791,8 @@ export function buildPortalApiRouter() {
     '/local-purchase/receive-item-options',
     safe(async (req, res) => {
       const { roles } = await requireLocalPurchaseAccess(user(req))
-      if (!roles.includes('operations')) {
-        throw portalError('Only the store keeper sets the item before receiving.', 403, 'LPR_ACTION_FORBIDDEN')
+      if (!roles.includes('storeManager') && !roles.includes('operations')) {
+        throw portalError('Only the Store Manager sets up the items before receiving.', 403, 'LPR_ACTION_FORBIDDEN')
       }
       res.setHeader('Cache-Control', 'private, no-store')
       try {
@@ -5786,6 +5800,41 @@ export function buildPortalApiRouter() {
         res.json({ available: true, ...options })
       } catch {
         res.json({ available: false, itemCategories: [], itemSubCategories: [], vatProdPostingGroups: [], faPostingGroups: [] })
+      }
+    }),
+  )
+
+  /**
+   * The stores the Store Manager can receive a Local PO into (BC 1.0.3.613 PortalLprReceivingStores):
+   * the name to show and the locationCode for ASSIGN_STORE. `available` is false on older BC.
+   */
+  router.get(
+    '/local-purchase/receiving-stores',
+    safe(async (req, res) => {
+      const { roles } = await requireLocalPurchaseAccess(user(req))
+      if (!roles.includes('storeManager')) {
+        throw portalError('Only the Store Manager assigns the receiving store.', 403, 'LPR_ACTION_FORBIDDEN')
+      }
+      res.setHeader('Cache-Control', 'private, no-store')
+      try {
+        const parsed = parseSoapJson((await callSoapMethod('PortalLprReceivingStores', {})).returnValue)
+        const stores = (Array.isArray(parsed.stores) ? (parsed.stores as Array<Record<string, unknown>>) : [])
+          .map((row) => ({
+            storeCode: String(row.storeCode ?? '').trim(),
+            name: String(row.name ?? '').trim(),
+            locationCode: String(row.locationCode ?? '').trim(),
+            centralStore: row.centralStore === true || String(row.centralStore).toLowerCase() === 'true',
+            allowReceive: row.allowReceive !== false && String(row.allowReceive).toLowerCase() !== 'false',
+            mainStore: String(row.mainStore ?? '').trim(),
+          }))
+          .filter((row) => row.locationCode)
+        res.json({ available: true, stores })
+      } catch (error) {
+        res.json({
+          available: false,
+          stores: [],
+          message: error instanceof Error ? error.message : 'Business Central did not return the stores.',
+        })
       }
     }),
   )
@@ -6094,6 +6143,19 @@ export function buildPortalApiRouter() {
         actionComment,
         Boolean(payloadJson),
       )
+      if (actionCode === 'ASSIGN_STORE') {
+        const locationCode = String((payload as Record<string, unknown> | undefined)?.locationCode ?? '').trim()
+        if (!locationCode || locationCode.length > 20) {
+          throw portalError('Choose the store the goods are received into.', 422, 'LPR_STORE_REQUIRED')
+        }
+      }
+      // BC 1.0.3.613: item setup before receiving is the Store Manager's step (BC checks the
+      // session user, which is the portal's service user, so the portal checks it).
+      if (actionCode === 'SET_RECEIVE_ITEM' && !roles.includes('storeManager') && module === 'purchaseRequisition') {
+        if (localPurchaseStoreStep(await loadLocalPurchaseChain(no)).managed) {
+          throw portalError('Only the Store Manager sets up the items before receiving.', 403, 'LPR_ACTION_FORBIDDEN')
+        }
+      }
       const result = await callSoapMethod('PortalLocalPurchaseAction', {
         documentNo,
         actionCode,

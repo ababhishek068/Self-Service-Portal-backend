@@ -31,6 +31,7 @@ import { BcLinesTable } from '@/components/facility/BcLinesTable'
 import { EditableCardSection, type EditSpec } from '@/components/facility/EditableCardSection'
 import { PoReceiveEditor } from '@/components/facility/PoReceiveEditor'
 import { PoReceiveItemSetup } from '@/components/facility/PoReceiveItemSetup'
+import { PoAssignStore } from '@/components/facility/PoAssignStore'
 import { PoServiceGlEditor } from '@/components/facility/PoServiceGlEditor'
 import { VendorQuotesSection, type VendorQuoteSave } from '@/components/facility/VendorQuotesSection'
 import { LprPrintButtons } from '@/components/facility/LprPrintButtons'
@@ -52,7 +53,12 @@ const INLINE_ACTIONS = new Set([
   // Per PO line: the service G/L account and the store keeper's item setup (forms under the PO lines).
   'SET_SERVICE_GL',
   'SET_RECEIVE_ITEM',
+  // BC 1.0.3.613: the Store Manager's Assign Store panel under the PO lines.
+  'ASSIGN_STORE',
+  'CONFIRM_STORE',
 ])
+/** The Store Manager's steps on a released PO, done in the Assign Store panel. */
+const STORE_MANAGER_ACTIONS = new Set(['ASSIGN_STORE', 'SET_RECEIVE_ITEM', 'CONFIRM_STORE'])
 const RETURN_ACTIONS = new Set([
   'REJECT_LPR',
   'SEND_BACK_LPR',
@@ -65,6 +71,7 @@ const RETURN_ACTIONS = new Set([
 
 const ROLE_LABELS: Record<string, string> = {
   operations: 'Store Keeper',
+  storeManager: 'Store Manager',
   operationsManager: 'Operations Manager',
   procurement: 'Procurement',
   projectProcurement: 'Project Procurement',
@@ -305,10 +312,13 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   const nextActions = state.nextActions
   const allowed = (code: string) => nextActions.some((action) => action.actionCode === code && action.allowed)
   const ribbon = nextActions.filter((action) => action.allowed && !INLINE_ACTIONS.has(action.actionCode))
+  const storeManagerSteps = nextActions.filter((action) => action.allowed && STORE_MANAGER_ACTIONS.has(action.actionCode) && action.actionCode !== 'SET_RECEIVE_ITEM')
   // Only Send back / Reject (e.g. FAD at Ready for PO): the document waits for someone else's step.
-  const ownStep = ribbon.some((action) => !RETURN_ACTIONS.has(action.actionCode))
+  const ownStep = ribbon.some((action) => !RETURN_ACTIONS.has(action.actionCode)) || storeManagerSteps.length > 0
   const waiting = nextActions.filter(
-    (action) => !action.allowed && !['UPSERT_VENDOR_QUOTE', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE'].includes(action.actionCode),
+    (action) =>
+      !action.allowed &&
+      !['UPSERT_VENDOR_QUOTE', 'ISSUE_AFTER_LPR', 'UPDATE_LPR_LINE', 'FIX_LOCAL_CURRENCY'].includes(action.actionCode),
   )
   const issueAfterLpr = nextActions.find((action) => action.actionCode === 'ISSUE_AFTER_LPR')
   const updateLprLine = nextActions.find((action) => action.actionCode === 'UPDATE_LPR_LINE' && action.allowed)
@@ -639,6 +649,15 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
         { label: 'Procurement Source', value: text(po.procurementSource) },
         { label: 'From RFQ No.', value: card('Request for Quote No.') || rfqNo },
         { label: 'FAD Approved PO', value: yesNo(po.fadPoApproved) },
+        // BC 1.0.3.613: the Store Manager assigns the receiving store before the store keeper receives.
+        ...(po.storeAssigned !== undefined
+          ? [
+              { label: 'Store Assigned', value: yesNo(po.storeAssigned) },
+              { label: 'Store Assigned By', value: text(po.storeAssignedBy), emphasis: 'user' as const },
+              { label: 'Store Assigned Date', value: dateValue(bcDate(po.storeAssignedDate)) },
+              { label: 'Destination Store', value: text(po.destinationStore) },
+            ]
+          : []),
         { label: 'Created Invoice No.', value: text(po.createdInvoiceNo) },
         { label: 'Invoice 3-Way Verified', value: yesNo(po.invoiceVerified) },
         { label: 'CEO Payment Approved', value: yesNo(po.ceoPayApproved) },
@@ -990,7 +1009,12 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
             <StatusNotice tone="success" className="">Paid and LPR closed.</StatusNotice>
           ) : ownStep ? (
             <StatusNotice tone="attention" className="">
-              <p>Your step: {ribbon.map((action) => action.label).join(' · ')}</p>
+              <p>Your step: {[...storeManagerSteps, ...ribbon].map((action) => action.label).join(' · ')}</p>
+              {storeManagerSteps.length ? (
+                <p className="mt-1 text-xs font-normal">
+                  Purchase Order {poNo}: choose the receiving store, set up any new items, then Confirm Store (below the PO lines).
+                </p>
+              ) : null}
               {editHint}
               {processStep ? <p className="mt-1 text-xs font-normal">Process Step (BC): {processStep}</p> : null}
             </StatusNotice>
@@ -1202,7 +1226,19 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               }
             />
           ) : null}
-          {allowed('SET_RECEIVE_ITEM') && poLines ? (
+          {(allowed('ASSIGN_STORE') || allowed('CONFIRM_STORE')) && poLines ? (
+            <PoAssignStore
+              poNo={poNo}
+              po={po}
+              lines={poLines}
+              busy={busy}
+              onAction={(actionCode, payload, success) => saveDoc(actionCode, poNo, payload, success)}
+              onSaveItem={(payload) =>
+                saveDoc('SET_RECEIVE_ITEM', poNo, payload, `Item set on line ${String(payload.lineNo)} of ${poNo}.`)
+              }
+            />
+          ) : null}
+          {allowed('SET_RECEIVE_ITEM') && !allowed('ASSIGN_STORE') && poLines ? (
             <PoReceiveItemSetup
               poNo={poNo}
               lines={poLines}

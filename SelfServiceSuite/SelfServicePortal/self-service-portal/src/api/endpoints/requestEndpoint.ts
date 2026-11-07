@@ -330,6 +330,22 @@ export async function getReceiveItemOptions() {
   return authGet<ReceiveItemOptions>('/api/local-purchase/receive-item-options')
 }
 
+/** A store the Store Manager can receive a Local PO into (BC 1.0.3.613 PortalLprReceivingStores). */
+export interface LprReceivingStore {
+  storeCode: string
+  name: string
+  locationCode: string
+  centralStore: boolean
+  allowReceive: boolean
+  mainStore: string
+}
+
+/** Store Manager: the stores for Assign Store. `available` is false on BC before 1.0.3.613. */
+export async function getLprReceivingStores() {
+  requireAuthApiUrl()
+  return authGet<{ available: boolean; stores: LprReceivingStore[]; message?: string }>('/api/local-purchase/receiving-stores')
+}
+
 export interface LocalPurchaseNextAction {
   actionCode: string
   label: string

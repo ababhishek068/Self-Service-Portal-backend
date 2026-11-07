@@ -6,6 +6,8 @@
 
 export type LocalPurchaseRole =
   | 'operations'
+  /** BC 1.0.3.610 / 613: the Store Manager assigns the receiving store and sets up new items. */
+  | 'storeManager'
   | 'operationsManager'
   | 'procurement'
   | 'projectProcurement'
@@ -77,10 +79,19 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   APPROVE_PO_FAD: { roles: ['fad'], commentRequired: true },
   /** BC 1.0.3.590: G/L account of a Service line, before the Operations Manager approves the PO. */
   SET_SERVICE_GL: { roles: [...PROCUREMENT, 'financeChecker'], needsPayload: true },
+  /**
+   * BC 1.0.3.613: after FAD approves the PO, the Store Manager assigns the receiving store, sets up
+   * the new items (category / VAT, fixed assets) and confirms; only then the store keeper receives.
+   */
+  ASSIGN_STORE: { roles: ['storeManager'], needsPayload: true },
+  CONFIRM_STORE: { roles: ['storeManager'] },
   // Steps 20–21: the Store Keeper receives the goods and records the GRN.
   PREPARE_LOCAL_RECEIVE: { roles: ['operations'] },
-  /** BC 1.0.3.580/590: the store keeper picks the store item, or sets category / VAT (FA: FA cards), per line. */
-  SET_RECEIVE_ITEM: { roles: ['operations'], needsPayload: true },
+  /**
+   * Picks the store item, or sets category / VAT (FA: FA cards), per line. The Store Manager's step
+   * since BC 1.0.3.613 (the route checks it); on older BC it was the store keeper's.
+   */
+  SET_RECEIVE_ITEM: { roles: ['storeManager', 'operations'], needsPayload: true },
   POST_LOCAL_RECEIVE: { roles: ['operations'] },
   CREATE_LOCAL_INVOICE: { roles: PROCUREMENT },
   APPROVE_INVOICE_OPS: { roles: ['operationsManager'], commentRequired: true },
@@ -148,7 +159,9 @@ export const LOCAL_PURCHASE_ACTION_LABELS: Record<string, string> = {
   RESUBMIT_INVOICE: 'Resubmit invoice to Operations Manager',
   PREPARE_LOCAL_RECEIVE: 'Prepare Local Receive',
   POST_LOCAL_RECEIVE: 'Post Receive (GRN)',
-  SET_RECEIVE_ITEM: 'Set the item before receiving',
+  ASSIGN_STORE: 'Assign Store',
+  CONFIRM_STORE: 'Confirm Store',
+  SET_RECEIVE_ITEM: 'Set up the new items',
   FIX_LOCAL_CURRENCY: 'Fix Local Currency',
   CREATE_LOCAL_INVOICE: 'Create Local Invoice',
   APPROVE_INVOICE_OPS: 'Approve Invoice (Operations Manager)',
@@ -325,8 +338,23 @@ export function localPurchaseEditing(chain: LocalPurchaseChain, roles: LocalPurc
     lpr: procurement && localPurchaseCardEditable(chain),
     rfq: procurement && unlocked(chain.rfq) && !chainText(chain.rfq?.createdPoNo),
     po: (procurement && unlocked(chain.po)) || (Boolean(poApprover) && roles.includes(poApprover) && Array.isArray(chain.po?.lines)),
-    receive: roles.includes('operations') && stageKey(chain.po?.flowStage) === 'PO RELEASED' && Array.isArray(chain.po?.lines),
+    receive:
+      roles.includes('operations') &&
+      stageKey(chain.po?.flowStage) === 'PO RELEASED' &&
+      Array.isArray(chain.po?.lines) &&
+      localPurchaseStoreStep(chain).assigned,
   }
+}
+
+/**
+ * BC 1.0.3.613 sends storeAssigned on the PO: until the Store Manager confirms the store, the store
+ * keeper cannot receive. Older BC has no such step (the PO counts as assigned).
+ */
+export function localPurchaseStoreStep(chain: LocalPurchaseChain) {
+  const po = chain.po as Record<string, unknown> | undefined
+  const managed = Boolean(po && 'storeAssigned' in po)
+  const assigned = !managed || String(po?.storeAssigned).toLowerCase() === 'true'
+  return { managed, assigned, waitingForStoreManager: managed && !assigned && stageKey(po?.flowStage) === 'PO RELEASED' }
 }
 
 /** True once the Local PO's goods are received (GRN posted), so the store can issue them. */
@@ -387,12 +415,22 @@ export function localPurchaseNextActions(
       (Array.isArray(chain.po.lines) ? (chain.po.lines as Array<Record<string, unknown>>) : []).some(
         (line) => String(line.needsItemSetup).toLowerCase() === 'true',
       )
-    if (needsItemSetup) push('SET_RECEIVE_ITEM', 'po', poNo)
-    for (const action of PO_STAGE_ACTIONS[poStage] ?? []) {
-      const code = typeof action === 'string' ? action : action.code
-      if (needsGl && code === 'APPROVE_PO_OPS') continue
-      if (needsItemSetup && code === 'POST_LOCAL_RECEIVE') continue
-      push(action, 'po', poNo)
+    const storeStep = localPurchaseStoreStep(chain)
+    if (storeStep.waitingForStoreManager) {
+      // BC 1.0.3.613: the Store Manager assigns the store, sets up new items and confirms; the
+      // store keeper's Prepare / Post Receive wait until then (BC refuses them as well).
+      push({ code: 'ASSIGN_STORE', roles: ['storeManager'] }, 'po', poNo)
+      if (needsItemSetup) push({ code: 'SET_RECEIVE_ITEM', roles: ['storeManager'] }, 'po', poNo)
+      push({ code: 'CONFIRM_STORE', roles: ['storeManager'] }, 'po', poNo)
+      push('FIX_LOCAL_CURRENCY', 'po', poNo)
+    } else {
+      if (needsItemSetup) push({ code: 'SET_RECEIVE_ITEM', roles: storeStep.managed ? ['storeManager'] : ['operations'] }, 'po', poNo)
+      for (const action of PO_STAGE_ACTIONS[poStage] ?? []) {
+        const code = typeof action === 'string' ? action : action.code
+        if (needsGl && code === 'APPROVE_PO_OPS') continue
+        if (needsItemSetup && code === 'POST_LOCAL_RECEIVE') continue
+        push(action, 'po', poNo)
+      }
     }
   } else if (rfqNo && chain.rfq) {
     for (const action of RFQ_STAGE_ACTIONS[stageKey(chain.rfq.flowStage)] ?? []) push(action, 'rfq', rfqNo)

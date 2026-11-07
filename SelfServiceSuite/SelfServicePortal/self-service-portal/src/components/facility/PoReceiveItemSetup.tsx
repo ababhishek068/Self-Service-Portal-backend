@@ -33,21 +33,35 @@ function isTrue(value: unknown) {
   return String(value).toLowerCase() === 'true'
 }
 
+/** The 15% VAT group, so a wrong default (e.g. DIVIDENDTAX) never stays on screen. */
+function standardVat(groups: Array<{ code: string; description: string }>) {
+  return (
+    groups.find((group) => /(^|[^0-9])15([^0-9]|$)/.test(`${group.code} ${group.description}`) && /vat/i.test(`${group.code} ${group.description}`))
+      ?.code ??
+    groups.find((group) => /(^|[^0-9])15([^0-9]|$)/.test(`${group.code} ${group.description}`))?.code ??
+    ''
+  )
+}
+
 /**
- * Store keeper, before Post Receive (BC SET_RECEIVE_ITEM): an LPR line bought by name becomes an
- * existing store item, or a new item with its category, sub-category and VAT; a fixed asset line
- * becomes one FA card per unit (category with Finance Class Fixed Asset, FA posting group).
+ * Before receiving (BC SET_RECEIVE_ITEM; the Store Manager's step since BC 1.0.3.613): an LPR line
+ * bought by name becomes an existing store item, or a new item with its category, sub-category and
+ * VAT; a fixed asset line becomes one FA card per unit (category with Finance Class Fixed Asset,
+ * sub-category, FA posting group and VAT all required).
  */
 export function PoReceiveItemSetup({
   poNo,
   lines,
   busy,
   onSave,
+  embedded = false,
 }: {
   poNo: string
   lines: PurchaseLine[]
   busy: boolean
   onSave: (payload: Record<string, unknown>) => Promise<boolean>
+  /** Inside the Store Manager's Assign Store panel: no heading of its own. */
+  embedded?: boolean
 }) {
   const optionsQuery = useQuery({
     queryKey: ['local-purchase', 'receive-item-options'],
@@ -94,25 +108,41 @@ export function PoReceiveItemSetup({
     })),
   ]
   const faOptions = [
-    { value: '', label: 'From the item category' },
+    { value: '', label: 'Choose the FA posting group' },
     ...(options?.faPostingGroups ?? []).map((group) => ({ value: group.code, label: group.code })),
   ]
+  const defaultVat = standardVat(options?.vatProdPostingGroups ?? [])
 
   return (
-    <section className="mt-4 rounded-lg border border-amber-200 bg-amber-50/60 p-4">
-      <p className="text-sm font-semibold text-amber-900">Set the item before receiving ({poNo})</p>
-      <p className="mt-0.5 text-xs text-amber-900/80">
-        Pick an existing store item, or give the new item its category, sub-category and VAT. A fixed asset becomes
-        one asset card per unit. Post Receive is possible once every line is set.
-      </p>
+    <section className={embedded ? 'mt-2' : 'mt-4 rounded-lg border border-amber-200 bg-amber-50/60 p-4'}>
+      {embedded ? (
+        <p className="text-xs text-slate-600">
+          Pick an existing store item, or give the new item its category, sub-category and VAT. A fixed asset becomes one asset
+          card per unit, so its quantity must be whole.
+        </p>
+      ) : (
+        <>
+          <p className="text-sm font-semibold text-amber-900">Set up the new items before receiving ({poNo})</p>
+          <p className="mt-0.5 text-xs text-amber-900/80">
+            Pick an existing store item, or give the new item its category, sub-category and VAT. A fixed asset becomes
+            one asset card per unit. Post Receive is possible once every line is set.
+          </p>
+        </>
+      )}
       <ul className="mt-3 space-y-4">
         {pending.map((line) => {
           const lineNo = text(line.lineNo)
-          const draft = drafts[lineNo] ?? BLANK
+          const stored = drafts[lineNo] ?? BLANK
+          const category = options?.itemCategories.find((entry) => entry.code === stored.itemCategoryCode)
+          const fixedAsset = isTrue(line.isFixedAsset) || /fixed asset/i.test(category?.financeClass ?? '')
+          // VAT defaults to the 15% group; a fixed asset's FA posting group to its category's.
+          const draft: LineDraft = {
+            ...stored,
+            vatProdPostingGroup: stored.vatProdPostingGroup || defaultVat,
+            faPostingGroup: stored.faPostingGroup || (fixedAsset ? category?.faPostingGroup ?? '' : ''),
+          }
           const setDraft = (change: Partial<LineDraft>) =>
             setDrafts((all) => ({ ...all, [lineNo]: { ...(all[lineNo] ?? BLANK), ...change } }))
-          const category = options?.itemCategories.find((entry) => entry.code === draft.itemCategoryCode)
-          const fixedAsset = isTrue(line.isFixedAsset) || /fixed asset/i.test(category?.financeClass ?? '')
           const subCategoryOptions = [
             { value: '', label: fixedAsset ? 'Choose the sub-category' : 'No sub-category' },
             ...(options?.itemSubCategories ?? [])
@@ -122,7 +152,9 @@ export function PoReceiveItemSetup({
           const missing =
             draft.mode === 'existing'
               ? !draft.existingItemNo.trim()
-              : !draft.itemCategoryCode || !draft.vatProdPostingGroup || (fixedAsset && !draft.itemSubCategory)
+              : !draft.itemCategoryCode ||
+                !draft.vatProdPostingGroup ||
+                (fixedAsset && (!draft.itemSubCategory || !draft.faPostingGroup))
           const save = () => {
             const payload =
               draft.mode === 'existing'
@@ -190,7 +222,7 @@ export function PoReceiveItemSetup({
                       options={categoryOptions}
                       value={draft.itemCategoryCode}
                       disabled={busy}
-                      onChange={(value) => setDraft({ itemCategoryCode: value, itemSubCategory: '' })}
+                      onChange={(value) => setDraft({ itemCategoryCode: value, itemSubCategory: '', faPostingGroup: '' })}
                     />
                   </label>
                   <label className="block space-y-1">
