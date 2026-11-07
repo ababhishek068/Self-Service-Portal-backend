@@ -96,10 +96,41 @@ export type ProfileChangeRequest = {
   changesApplied: boolean
   /** BC 1.0.3.620: HR approved, but the changes could not be written to the employee yet (why). */
   applyProblem: string
+  /** BC 1.0.3.622: the Approval Entries of the BC workflow (like Leave); empty before. */
+  steps: ProfileApprovalStep[]
+  usesWorkflow: boolean
   lines: ProfileChangeLine[]
   attachments: ProfileChangeAttachment[]
   /** The draft as the edit form needs it back (rebuilt from the lines). */
   changes: ProfileChanges
+}
+
+export type ProfileApprovalStepStatus = 'Waiting' | 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
+
+export type ProfileApprovalStep = {
+  stage: number
+  label: string
+  approverUserId: string
+  approverName: string
+  status: ProfileApprovalStepStatus
+  decidedAt: string
+  comment: string
+}
+
+const STEP_STATUSES: ProfileApprovalStepStatus[] = ['Waiting', 'Pending', 'Approved', 'Rejected', 'Cancelled']
+
+function parseProfileApprovalStep(value: unknown): ProfileApprovalStep {
+  const row = record(value)
+  const status = str(row.status) as ProfileApprovalStepStatus
+  return {
+    stage: num(row.stage),
+    label: str(row.label) || 'Approver',
+    approverUserId: str(row.approverUserId),
+    approverName: str(row.approverName) || str(row.approverUserId),
+    status: STEP_STATUSES.includes(status) ? status : 'Waiting',
+    decidedAt: str(row.decidedAt),
+    comment: str(row.comment),
+  }
 }
 
 export type ProfileEditContext = {
@@ -111,6 +142,9 @@ export type ProfileEditContext = {
   hrApproverUserId: string
   hrApproverName: string
   routingProblem: string
+  /** BC 1.0.3.622: approvals follow the Business Central workflow; its name ('' when none is enabled). */
+  usesWorkflow: boolean
+  approvalWorkflow: string
   request: ProfileChangeRequest | null
 }
 
@@ -275,6 +309,8 @@ export function parseProfileChangeRequest(value: unknown): ProfileChangeRequest 
     decisionRemarks: str(row.decisionRemarks),
     changesApplied: bool(row.changesApplied),
     applyProblem: str(row.applyProblem),
+    steps: list(row.steps).map(parseProfileApprovalStep),
+    usesWorkflow: bool(row.usesWorkflow),
     lines,
     attachments,
     changes: changesFromLines(lines),
@@ -315,6 +351,8 @@ export function parseProfileEditContext(value: unknown): ProfileEditContext {
     hrApproverUserId: str(row.hrApproverUserId),
     hrApproverName: str(row.hrApproverName),
     routingProblem: str(row.routingProblem),
+    usesWorkflow: bool(row.usesWorkflow),
+    approvalWorkflow: str(row.approvalWorkflow),
     request: row.request ? parseProfileChangeRequest(row.request) : null,
   }
 }
@@ -476,17 +514,32 @@ function sameId(left: string, right: string) {
   return Boolean(left) && left.trim().toUpperCase() === right.trim().toUpperCase()
 }
 
-/** The employee who asked, or the HR approver. */
+/** The employee who asked, or one of the request's approvers (BC workflow steps, or the HR approver). */
 export function profileChangeActingUserMayView(request: ProfileChangeRequest, actingIds: string[], employeeNo = '') {
   if (employeeNo && sameId(request.employeeNo, employeeNo)) return true
+  if (request.steps.some((step) => actingIds.some((id) => sameId(step.approverUserId, id)))) return true
   return actingIds.some((id) => sameId(request.hrApproverUserId, id))
 }
 
-/** HR's decision on the request, for Approved / Rejected Documents. */
+/** This approver's decision on the request, for Approved / Rejected Documents. */
 export function profileChangeApproverOutcome(request: ProfileChangeRequest, actingIds: string[]) {
+  if (request.steps.length) {
+    const mine = request.steps
+      .filter((step) => actingIds.some((id) => sameId(step.approverUserId, id)))
+      .filter((step) => step.status === 'Approved' || step.status === 'Rejected')
+    if (!mine.length) return null
+    return mine.some((step) => step.status === 'Rejected') ? 'Rejected' : 'Approved'
+  }
   if (!actingIds.some((id) => sameId(request.hrApproverUserId, id))) return null
   if (request.status === 'Approved' || request.status === 'Rejected') return request.status
   return null
+}
+
+type PortalStepStatus = 'Waiting' | 'Pending Approval' | 'Approved' | 'Rejected' | 'Cancelled'
+
+function portalStepStatus(status: ProfileApprovalStepStatus): PortalStepStatus {
+  if (status === 'Pending') return 'Pending Approval'
+  return status
 }
 
 /** "3 Bio Data changes · Dependant added · Qualification removed" */
@@ -534,6 +587,17 @@ export function profileChangeApprovalQueueItem(request: ProfileChangeRequest) {
 /** Approvals detail: the request, the HR step and every change (current and new value). */
 export function profileChangeToPortalRequest(request: ProfileChangeRequest, actingUserId = '') {
   const queue = profileChangeApprovalQueueItem(request)
+  const pendingStep = request.steps.find((step) => step.status === 'Pending')
+  const workflowSteps = request.steps.map((step) => ({
+    id: `stage-${step.stage}`,
+    actorEmployeeNo: step.approverUserId,
+    actorName: `${step.label}: ${step.approverName || step.approverUserId || 'not set'}`,
+    role: 'HR' as const,
+    status: portalStepStatus(step.status),
+    timestamp: step.decidedAt,
+    note: step.comment,
+    sequenceNo: step.stage,
+  }))
   const hrStatus =
     request.status === 'Approved' || request.status === 'Rejected'
       ? request.status
@@ -569,24 +633,28 @@ export function profileChangeToPortalRequest(request: ProfileChangeRequest, acti
         note: 'Profile changes submitted from the self-service portal',
         sequenceNo: 0,
       },
-      {
-        id: 'hr',
-        actorEmployeeNo: request.hrApproverUserId,
-        actorName: `HR: ${request.hrApproverName || request.hrApproverUserId || 'not set'}`,
-        role: 'HR' as const,
-        status: hrStatus,
-        timestamp: request.decidedAt,
-        note: request.decisionRemarks,
-        sequenceNo: 1,
-      },
+      ...(workflowSteps.length
+        ? workflowSteps
+        : [
+            {
+              id: 'hr',
+              actorEmployeeNo: request.hrApproverUserId,
+              actorName: `HR: ${request.hrApproverName || request.hrApproverUserId || 'not set'}`,
+              role: 'HR' as const,
+              status: hrStatus,
+              timestamp: request.decidedAt,
+              note: request.decisionRemarks,
+              sequenceNo: 1,
+            },
+          ]),
     ],
     attachments: request.attachments,
     payload: {
       sourceDocumentAvailable: true,
       hideDocumentLines: true,
       commentRequiredOnReject: true,
-      pendingStage: 1,
-      pendingStageLabel: 'HR',
+      pendingStage: pendingStep?.stage ?? 1,
+      pendingStageLabel: pendingStep?.label ?? 'HR',
       bcStatus: request.status,
       reason: request.note,
       detailFacts: [

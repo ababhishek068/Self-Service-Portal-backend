@@ -130,6 +130,10 @@ export type OvertimeContext = {
   hourlyRate: number
   approvers: OvertimeStep[]
   routingProblem: string
+  /** BC 1.0.3.622: the approvers come from the Business Central workflow (like Leave) when it is sent. */
+  usesWorkflow: boolean
+  /** The enabled BC approval workflow (its description), '' when none is enabled. */
+  approvalWorkflow: string
   /** BC 1.0.3.612: one request can hold several dates and times. */
   supportsLines: boolean
   maxLines: number
@@ -332,6 +336,8 @@ export function parseOvertimeContext(value: unknown): OvertimeContext {
     hourlyRate: num(root.hourlyRate),
     approvers: (Array.isArray(root.approvers) ? root.approvers : []).map(parseOvertimeStep),
     routingProblem: str(root.routingProblem),
+    usesWorkflow: bool(root.usesWorkflow),
+    approvalWorkflow: str(root.approvalWorkflow),
     supportsLines: bool(root.supportsLines),
     maxLines: num(root.maxLines) || (bool(root.supportsLines) ? OVERTIME_MAX_LINES : 1),
   }
@@ -711,8 +717,9 @@ function portalStepStatus(status: OvertimeStepStatus): PortalStepStatus {
   return 'Waiting'
 }
 
-function stepRole(stage: number) {
-  return stage === 2 ? ('HR' as const) : stage === 4 ? ('Finance' as const) : ('Checker' as const)
+/** BC 1.0.3.622 steps are "Approver 1, 2, ..." from the workflow; older ones kept their step names. */
+function stepRole(label: string) {
+  return label === 'HR' ? ('HR' as const) : label === 'Finance' ? ('Finance' as const) : ('Checker' as const)
 }
 
 /** Approvals detail: the request, its five steps and the payroll step, as a PortalRequest. */
@@ -734,7 +741,7 @@ export function overtimeToPortalRequest(request: OvertimeRequest, actingUserId =
       id: `stage-${step.stage}`,
       actorEmployeeNo: step.approverUserId,
       actorName: `${step.label}: ${step.approverName || step.approverUserId || 'not set'}`,
-      role: stepRole(step.stage),
+      role: stepRole(step.label),
       status: portalStepStatus(step.status),
       timestamp: step.decidedAt || '',
       note: step.status === 'Skipped' ? step.skipReason : step.comment,

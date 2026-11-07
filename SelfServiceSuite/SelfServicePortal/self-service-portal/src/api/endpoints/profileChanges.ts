@@ -89,9 +89,22 @@ export interface ProfileChangeRequest {
   changesApplied: boolean
   /** BC 1.0.3.620: HR approved, but the changes could not be written yet (why). */
   applyProblem?: string
+  /** BC 1.0.3.622: the Approval Entries of the Business Central workflow (like Leave). */
+  steps?: ProfileApprovalStep[]
+  usesWorkflow?: boolean
   lines: ProfileChangeLine[]
   attachments: ProfileChangeAttachment[]
   changes: ProfileChanges
+}
+
+export interface ProfileApprovalStep {
+  stage: number
+  label: string
+  approverUserId: string
+  approverName: string
+  status: 'Waiting' | 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
+  decidedAt: string
+  comment: string
 }
 
 export interface ProfileEditContext {
@@ -103,6 +116,9 @@ export interface ProfileEditContext {
   hrApproverUserId: string
   hrApproverName: string
   routingProblem: string
+  /** BC 1.0.3.622: approvals follow the Business Central workflow; its name ('' when none is enabled). */
+  usesWorkflow?: boolean
+  approvalWorkflow?: string
   request: ProfileChangeRequest | null
 }
 

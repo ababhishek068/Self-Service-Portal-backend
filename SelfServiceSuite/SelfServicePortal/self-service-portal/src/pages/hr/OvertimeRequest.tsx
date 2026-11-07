@@ -56,6 +56,7 @@ import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { ClockTimePicker } from '@/components/shared/ClockTimePicker'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
 
 const LIST_KEY = ['hr', 'overtime-requests'] as const
@@ -77,25 +78,7 @@ function emptyEntry(): EntryDraft {
   return { overtimeDate: '', startTime: '', endTime: '', dayType: '', reason: '' }
 }
 
-/** "17:05" -> 05:05 PM; blank when the value is not a time. */
-function to12(value: string): { text: string; meridiem: 'AM' | 'PM' | null } {
-  const match = /^(\d{1,2}):(\d{2})/.exec(value)
-  if (!match) return { text: '', meridiem: null }
-  const hour = Number(match[1])
-  return { text: `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]}`, meridiem: hour < 12 ? 'AM' : 'PM' }
-}
-
-/** "5", "5:30", "0530" or "530" with AM / PM -> "17:30"; blank when it is not a valid 12-hour time. */
-function to24(text: string, meridiem: 'AM' | 'PM') {
-  const match = /^(\d{1,2})(?::?(\d{2}))?$/.exec(text.trim())
-  if (!match) return ''
-  const hour = Number(match[1])
-  const minute = Number(match[2] ?? '0')
-  if (hour < 1 || hour > 12 || minute > 59) return ''
-  return `${String((hour % 12) + (meridiem === 'PM' ? 12 : 0)).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-}
-
-/** HH:MM typed in 12-hour time, with AM / PM chosen next to it (the form keeps 24-hour time). */
+/** Start / End Time: chosen on a clock face (hour, minutes, AM / PM); the form keeps 24-hour time. */
 function TimeField({
   id,
   label,
@@ -109,50 +92,19 @@ function TimeField({
   defaultMeridiem: 'AM' | 'PM'
   onChange: (value: string) => void
 }) {
-  const initial = to12(value)
-  const [text, setText] = useState(initial.text)
-  const [meridiem, setMeridiem] = useState<'AM' | 'PM'>(initial.meridiem ?? defaultMeridiem)
-  const invalid = text.trim() !== '' && !to24(text, meridiem)
-  const update = (nextText: string, nextMeridiem: 'AM' | 'PM') => {
-    setText(nextText)
-    setMeridiem(nextMeridiem)
-    onChange(to24(nextText, nextMeridiem))
-  }
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-sm text-slate-700">
         {label}
         <span className="text-red-500"> *</span>
       </Label>
-      <Input
+      <ClockTimePicker
         id={id}
-        inputMode="numeric"
-        placeholder="HH:MM"
-        maxLength={5}
-        value={text}
-        aria-invalid={invalid}
-        className={invalid ? 'border-red-400' : undefined}
-        onChange={(event) => update(event.target.value.replace(/[^\d:]/g, ''), meridiem)}
-        onBlur={() => {
-          const value24 = to24(text, meridiem)
-          if (value24) setText(to12(value24).text)
-        }}
+        value={value}
+        title={`Select ${label.toLowerCase()}`}
+        defaultMeridiem={defaultMeridiem}
+        onChange={onChange}
       />
-      <div role="radiogroup" aria-label={`${label}: AM or PM`} className="flex gap-6 pt-0.5 text-sm text-slate-700">
-        {(['AM', 'PM'] as const).map((option) => (
-          <label key={option} className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="radio"
-              name={`${id}-meridiem`}
-              className="h-4 w-4 accent-[var(--portal-navy)]"
-              checked={meridiem === option}
-              onChange={() => update(text, option)}
-            />
-            {option}
-          </label>
-        ))}
-      </div>
-      {invalid ? <p className="text-xs text-red-600">Type the time as HH:MM, from 01:00 to 12:59 (for example 05:30).</p> : null}
     </div>
   )
 }
@@ -393,7 +345,7 @@ function approverStep(step: OvertimeStep): StepView {
 }
 
 function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeContext | undefined, employeeName: string): StepView[] {
-  // A draft has no approvers yet: show who it would go to now (BC resolves them again on submit).
+  // Before BC 1.0.3.622 a draft showed who it would go to; since then the BC workflow sets them on submit.
   const steps =
     request && request.status !== 'Draft' && request.steps.length ? request.steps : (context?.approvers ?? [])
   const submitted = request && request.status !== 'Draft'
@@ -409,6 +361,17 @@ function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeCont
     }
     return { key: 'payroll', label: 'Payroll', icon: <Flag className="h-5 w-5" />, person: 'Overtime sheet', status: 'Not started', tone: 'idle', at: '', note: '' }
   })()
+  // BC 1.0.3.622: the approvers come from the Business Central workflow (like Leave) when it is sent.
+  const workflowPending: StepView = {
+    key: 'approvers',
+    label: 'Approvers',
+    icon: <Users className="h-5 w-5" />,
+    person: context?.approvalWorkflow || 'Business Central workflow',
+    status: 'Set by HR in BC',
+    tone: 'idle',
+    at: '',
+    note: submitted ? '' : 'Shown here once you submit',
+  }
   return [
     {
       key: 'employee',
@@ -420,7 +383,7 @@ function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeCont
       at: submitted ? request.submittedAt : '',
       note: '',
     },
-    ...steps.map(approverStep),
+    ...(steps.length ? steps.map(approverStep) : [workflowPending]),
     payroll,
   ]
 }

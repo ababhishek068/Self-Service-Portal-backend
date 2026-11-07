@@ -122,6 +122,10 @@ export interface OvertimeContext {
   hourlyRate: number
   approvers: OvertimeStep[]
   routingProblem: string
+  /** BC 1.0.3.622: the approvers come from the Business Central workflow (like Leave) when it is sent. */
+  usesWorkflow?: boolean
+  /** The enabled BC approval workflow ('' when none is enabled). */
+  approvalWorkflow?: string
   /** BC 1.0.3.612: several dates and times in one request. */
   supportsLines: boolean
   maxLines: number

@@ -211,3 +211,46 @@ describe('the four overtime categories (BC 1.0.3.615)', () => {
     assert.equal(validateOvertimeDetails({ overtimeDate: '2026-06-11', startTime: '22:00', endTime: '01:00', dayType: 'night' }, false).dayType, 'night')
   })
 })
+
+describe('overtime with the Business Central workflow (BC 1.0.3.622)', () => {
+  const [workflow] = parseOvertimeRequests(
+    JSON.stringify([
+      {
+        requestNo: 'OTR-00009',
+        status: 'Pending Approval',
+        stage: 2,
+        stageLabel: 'Approver 2',
+        employeeNo: 'ABH-010',
+        overtimeDate: '2026-11-03',
+        startTime: '17:00',
+        endTime: '20:00',
+        totalHours: 3,
+        usesWorkflow: true,
+        steps: [
+          { stage: 1, label: 'Approver 1', approverUserId: 'ABH\\MANAGER', approverName: 'Manager', status: 'Approved' },
+          { stage: 2, label: 'Approver 2', approverUserId: 'ABH\\HR', approverName: 'HR Officer', status: 'Pending' },
+          { stage: 3, label: 'Approver 3', approverUserId: 'ABH\\FIN', approverName: 'Finance Officer', status: 'Waiting' },
+        ],
+      },
+    ]),
+  )
+
+  it('shows one step per approval entry, waiting for the open one', () => {
+    const detail = overtimeToPortalRequest(workflow!, 'ABH\\HR')
+    assert.deepEqual(
+      detail.approvalSteps.map((step) => step.status),
+      ['Submitted', 'Approved', 'Pending Approval', 'Waiting'],
+    )
+    assert.equal(detail.payload.pendingStageLabel, 'Approver 2')
+    assert.equal(detail.approvalSteps[3]!.role, 'Checker')
+  })
+
+  it('reads the workflow from the form context', () => {
+    const context = parseOvertimeContext(
+      '{"employee":{"employeeNo":"ABH-010"},"rates":{},"approvers":[],"usesWorkflow":true,"approvalWorkflow":"Overtime Request approval"}',
+    )
+    assert.equal(context.usesWorkflow, true)
+    assert.equal(context.approvalWorkflow, 'Overtime Request approval')
+    assert.equal(context.approvers.length, 0)
+  })
+})

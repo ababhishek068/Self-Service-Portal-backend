@@ -551,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v312 — 1.0.3.471 (Overtime page without the Request Summary card - the lines table shows hours and amounts; approvals reach the request with BC 1.0.3.620, stuck ones finish on the next read; for BC 1.0.3.620)'
+export const PORTAL_API_BUILD = 'v312 — 1.0.3.472 (Overtime and Profile Change approvals follow the Business Central workflow like Leave - the steps are the BC approval entries; clock time picker for overtime start and end time; for BC 1.0.3.622)'
 
 interface LookupSpec {
   service: string

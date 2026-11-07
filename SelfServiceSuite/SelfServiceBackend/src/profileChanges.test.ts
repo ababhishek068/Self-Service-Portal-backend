@@ -109,3 +109,50 @@ describe('profile changes in Approvals', () => {
     assert.equal(context.request, null)
   })
 })
+
+describe('profile changes with the Business Central workflow (BC 1.0.3.622)', () => {
+  const workflow = parseProfileChangeRequest({
+    requestNo: 'PCR-00007',
+    status: 'Waiting for HR',
+    employeeNo: 'ABH-010',
+    employeeName: 'Zerihun Sisay Reta',
+    hrApproverUserId: 'ABH\\HR2',
+    hrApproverName: 'Second HR',
+    usesWorkflow: true,
+    steps: [
+      { stage: 1, label: 'Approver 1', approverUserId: 'ABH\\HR', approverName: 'HR Officer', status: 'Approved', decidedAt: '2026-11-07T10:00:00Z', comment: 'ok' },
+      { stage: 2, label: 'Approver 2', approverUserId: 'ABH\\HR2', approverName: 'Second HR', status: 'Pending' },
+    ],
+    lines: [],
+  })
+
+  it('reads the workflow steps', () => {
+    assert.equal(workflow.usesWorkflow, true)
+    assert.equal(workflow.steps.length, 2)
+    assert.equal(workflow.steps[1].status, 'Pending')
+  })
+
+  it('shows the workflow steps in Approvals, with the waiting one as the pending stage', () => {
+    const detail = profileChangeToPortalRequest(workflow, 'ABH\\HR2')
+    assert.deepEqual(
+      detail.approvalSteps.map((step) => step.status),
+      ['Submitted', 'Approved', 'Pending Approval'],
+    )
+    assert.equal(detail.payload.pendingStage, 2)
+    assert.equal(detail.payload.pendingStageLabel, 'Approver 2')
+  })
+
+  it('lets an earlier approver read it and keeps their own decision', () => {
+    assert.equal(profileChangeActingUserMayView(workflow, ['ABH\\HR']), true)
+    assert.equal(profileChangeApproverOutcome(workflow, ['abh\\hr']), 'Approved')
+    assert.equal(profileChangeApproverOutcome(workflow, ['ABH\\HR2']), null)
+  })
+
+  it('reads the workflow from the edit context', () => {
+    const context = parseProfileEditContext(
+      JSON.stringify({ employeeNo: 'ABH-010', usesWorkflow: true, approvalWorkflow: 'Profile Change approval', routingProblem: '' }),
+    )
+    assert.equal(context.usesWorkflow, true)
+    assert.equal(context.approvalWorkflow, 'Profile Change approval')
+  })
+})
