@@ -261,8 +261,9 @@ export function Dashboard() {
                 <p className="mt-1 text-xs text-white/70 sm:text-sm">
                   Welcome to the {brand.product} — {new Date().getFullYear()} Summary
                 </p>
+                {/* Phones: the menu lists the same pages, so the long summary is left out. */}
                 {capabilitySummary ? (
-                  <p className="mt-2 max-w-2xl text-xs text-white/80 sm:text-sm">{capabilitySummary}</p>
+                  <p className="mt-2 hidden max-w-2xl text-xs text-white/80 sm:block sm:text-sm">{capabilitySummary}</p>
                 ) : null}
               </div>
               <div className="hidden h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-3xl font-bold text-white ring-4 ring-white/20 backdrop-blur sm:flex">
@@ -271,8 +272,9 @@ export function Dashboard() {
             </div>
           </div>
 
+          {/* Quick actions only on tablet / desktop: on a phone the list filled the screen (UAT); the menu has them. */}
           {quickLinks.length > 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:block">
               <h2 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Quick actions for your role</h2>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {quickLinks.map((link) => (
