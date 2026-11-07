@@ -681,7 +681,18 @@ export function ProfileStatusBanner({ editor }: { editor: ProfileEditor }) {
   // Counted as in the action bar: one per field, one per added / changed / removed record.
   const count = request ? request.changes.fields.length + request.changes.rows.length : 0
   const changesText = `${count} change${count === 1 ? '' : 's'}`
-  if (request?.status === 'Waiting for HR') {
+  if (request?.status === 'Waiting for HR' && request.applyProblem) {
+    notices.push(
+      <div key="apply" role="alert" className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">HR approved your changes, but they could not be saved in your record yet</p>
+          <p className="mt-1">Reason from Business Central: {request.applyProblem}</p>
+          <p className="mt-1">HR has been told on the request in Business Central. You do not need to do anything.</p>
+        </div>
+      </div>,
+    )
+  } else if (request?.status === 'Waiting for HR') {
     notices.push(
       <div key="pending" role="status" className="flex flex-wrap items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
         <Clock className="mt-0.5 h-5 w-5 shrink-0" />

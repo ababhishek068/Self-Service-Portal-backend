@@ -87,6 +87,8 @@ export interface ProfileChangeRequest {
   decidedByName: string
   decisionRemarks: string
   changesApplied: boolean
+  /** BC 1.0.3.620: HR approved, but the changes could not be written yet (why). */
+  applyProblem?: string
   lines: ProfileChangeLine[]
   attachments: ProfileChangeAttachment[]
   changes: ProfileChanges

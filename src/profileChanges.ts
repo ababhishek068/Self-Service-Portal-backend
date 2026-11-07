@@ -94,6 +94,8 @@ export type ProfileChangeRequest = {
   decidedByName: string
   decisionRemarks: string
   changesApplied: boolean
+  /** BC 1.0.3.620: HR approved, but the changes could not be written to the employee yet (why). */
+  applyProblem: string
   lines: ProfileChangeLine[]
   attachments: ProfileChangeAttachment[]
   /** The draft as the edit form needs it back (rebuilt from the lines). */
@@ -272,6 +274,7 @@ export function parseProfileChangeRequest(value: unknown): ProfileChangeRequest 
     decidedByName: str(row.decidedByName),
     decisionRemarks: str(row.decisionRemarks),
     changesApplied: bool(row.changesApplied),
+    applyProblem: str(row.applyProblem),
     lines,
     attachments,
     changes: changesFromLines(lines),

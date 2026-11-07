@@ -551,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v310 — 1.0.3.469 (Phones: the Dashboard no longer shows the Quick actions list or the long summary, the menu has them; overtime entry with Add Line, HH:MM and AM / PM; go-live build for BC 1.0.3.616)'
+export const PORTAL_API_BUILD = 'v311 — 1.0.3.470 (Approvals reach the request: profile change and overtime decisions finish in BC 1.0.3.620, stuck ones finish on the next read; an approved profile change that BC could not save shows the reason; mobile dashboard and overtime entry as 469; for BC 1.0.3.620)'
 
 interface LookupSpec {
   service: string
