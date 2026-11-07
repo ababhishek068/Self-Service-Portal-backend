@@ -245,11 +245,15 @@ export function Profile() {
   const joined=display(profile.dateOfJoin)
   const service=display(profile.lengthOfService)
   // Plain call (not useMemo) — must stay below early returns; hooks cannot be conditional.
-  const completeness=computeProfileCompleteness(
-    profile as unknown as Record<string, unknown>,
-    editQuery.data,
-    editor.draft.fields,
-  )
+  // Never let completeness math take down the whole Profile page.
+  let completeness={percent:0,filled:0,total:1,missing:[] as {key:string;label:string;filled:boolean}[],message:'Profile details loading…'}
+  try{
+    completeness=computeProfileCompleteness(
+      profile as unknown as Record<string, unknown>,
+      editQuery.data,
+      editor.draft?.fields,
+    )
+  }catch{/* keep defaults */}
   const completenessRing=`conic-gradient(#b1c836 ${completeness.percent}%, rgba(255,255,255,0.22) 0)`
   const download=async(attachment:Attachment)=>{
     if(downloading)return

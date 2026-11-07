@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   deleteProfileDocument,
   discardProfileDraft,
@@ -67,7 +67,9 @@ export function useProfileEditor(context: ProfileEditContext | undefined, reload
   const [editing, setEditing] = useState(false)
 
   // Load BC's state when the edit context arrives (the query only refetches after our own actions).
-  if (context && context !== loadedFrom) {
+  // Must be useEffect — setState during render can hang/white-screen the Profile page.
+  useEffect(() => {
+    if (!context || context === loadedFrom) return
     const fromServer = draftFromRequest(context.request)
     setLoadedFrom(context)
     setEditing(false)
@@ -75,7 +77,7 @@ export function useProfileEditor(context: ProfileEditContext | undefined, reload
     // A rejected request is not a draft: its changes show as not saved until the employee saves or submits.
     setSaved(snapshot(context.request?.status === 'Rejected' ? EMPTY_DRAFT : fromServer))
     setRequest(context.request)
-  }
+  }, [context, loadedFrom])
 
   const baseline = useMemo(
     () => Object.fromEntries((context?.fields ?? []).map((field) => [field.key, field.value])),
