@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  BarChart3,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -25,7 +24,6 @@ import {
   User,
   UserCog,
   Users,
-  Wallet,
   XCircle,
 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
@@ -286,17 +284,6 @@ function rateType(hours: ReturnType<typeof splitOvertimeHours>, dayType: Overtim
   }
   if (hours.nightHours) return `${rateText(rates.night)} (night, 10 PM–6 AM)`
   return `${rateText(rates.normal)} (normal day)`
-}
-
-function bandsText(hours: ReturnType<typeof splitOvertimeHours>) {
-  return [
-    hours.normalHours ? `${hoursText(hours.normalHours)} normal day` : '',
-    hours.nightHours ? `${hoursText(hours.nightHours)} night` : '',
-    hours.restDayHours ? `${hoursText(hours.restDayHours)} rest day` : '',
-    hours.holidayHours ? `${hoursText(hours.holidayHours)} public holiday` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
 }
 
 /**
@@ -638,23 +625,6 @@ export function OvertimeRequest() {
   )
   // The summary counts the saved lines only: 0.00 hours until the first line is saved.
   const counted = lines
-  const formHours = counted.reduce(
-    (total, line) => {
-      const split = splitOvertimeHours(line.startTime, line.endTime, line.dayType)
-      return {
-        totalHours: total.totalHours + split.totalHours,
-        normalHours: total.normalHours + split.normalHours,
-        nightHours: total.nightHours + split.nightHours,
-        restDayHours: total.restDayHours + split.restDayHours,
-        holidayHours: total.holidayHours + split.holidayHours,
-      }
-    },
-    { totalHours: 0, normalHours: 0, nightHours: 0, restDayHours: 0, holidayHours: 0 },
-  )
-  const formAmount = counted.reduce(
-    (total, line) => total + estimateOvertimeAmount(splitOvertimeHours(line.startTime, line.endTime, line.dayType), hourlyRate, rates),
-    0,
-  )
   const busiest = busiestMonth(rows, counted, editingNo ?? '')
   const limit = context?.maxHoursPerMonth ?? 0
   const dateObject = parseISO(entry.overtimeDate)
@@ -931,10 +901,6 @@ export function OvertimeRequest() {
 
   const employeeName = context?.employee.employeeName ?? ''
   const shown = mode === 'detail' ? selected : null
-  const shownHours = shown
-    ? { totalHours: shown.totalHours, normalHours: shown.normalHours, nightHours: shown.nightHours, restDayHours: shown.restDayHours, holidayHours: shown.holidayHours }
-    : formHours
-  const shownAmount = shown ? shown.estimatedAmount : formAmount
   const steps = workflowSteps(mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null, context, employeeName)
   const routingProblem = context?.routingProblem ?? ''
 
@@ -1070,8 +1036,8 @@ export function OvertimeRequest() {
             </div>
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Section icon={<User className="h-4 w-4" />} title="Employee Information" className="lg:col-span-2">
+          <div>
+            <Section icon={<User className="h-4 w-4" />} title="Employee Information">
               {contextQuery.isLoading && !shown ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   {Array.from({ length: 6 }, (_, index) => (
@@ -1110,27 +1076,6 @@ export function OvertimeRequest() {
                   </Field>
                 </div>
               )}
-            </Section>
-
-            <Section icon={<BarChart3 className="h-4 w-4" />} title="Request Summary">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <Clock className="h-8 w-8 shrink-0 text-[var(--portal-navy)]" />
-                  <div>
-                    <p className="text-xs font-medium text-slate-600">Total Overtime Hours</p>
-                    <p className="text-2xl font-bold tabular-nums text-[var(--portal-navy)]">{hoursText(shownHours.totalHours)}</p>
-                    {bandsText(shownHours) ? <p className="text-[11px] text-slate-500">{bandsText(shownHours)}</p> : null}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <Wallet className="h-8 w-8 shrink-0 text-emerald-600" />
-                  <div>
-                    <p className="text-xs font-medium text-slate-600">Estimated Amount</p>
-                    <p className="text-2xl font-bold tabular-nums text-emerald-600">{formatAmount(shownAmount)}</p>
-                    <p className="text-[11px] text-slate-500">Final amount is worked out on the overtime sheet in payroll.</p>
-                  </div>
-                </div>
-              </div>
             </Section>
           </div>
 
