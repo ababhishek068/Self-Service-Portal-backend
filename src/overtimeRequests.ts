@@ -2,8 +2,9 @@ import { callSoapMethod } from './bcClient.js'
 
 /**
  * Staff Overtime Request (BC 1.0.3.606, codeunit "ABH Overtime Request Mgt" through the Staff
- * Portal Codeunit): the employee asks, then the Line Manager, HR, the Director / COO and Finance
- * approve one after the other; the approved hours go to the Overtime Sheet of the open payroll
+ * Portal Codeunit): the employee asks, then the Line Manager, FD, HR (prepares the overtime
+ * payment) and Finance (pays) approve one after the other, through the Business Central approval
+ * workflow since BC 1.0.3.622/623; the approved hours go to the Overtime Sheet of the open payroll
  * period, which HR sends to payroll.
  */
 export const OVERTIME_MODULE = 'overtime' as const

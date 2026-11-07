@@ -551,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v312 — 1.0.3.472 (Overtime and Profile Change approvals follow the Business Central workflow like Leave - the steps are the BC approval entries; clock time picker for overtime start and end time; for BC 1.0.3.622)'
+export const PORTAL_API_BUILD = 'v312 — 1.0.3.473 (Overtime approval order Line Manager, FD, HR, Finance with the Business Central workflow - the form shows the whole chain before sending; clock time picker; for BC 1.0.3.623)'
 
 interface LookupSpec {
   service: string
@@ -7089,7 +7089,7 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  // Staff Overtime Request (BC 1.0.3.606): Line Manager, HR, Director / COO, Finance, then payroll.
+  // Staff Overtime Request (BC 1.0.3.606; BC workflow 1.0.3.623): Line Manager, FD, HR, Finance, then payroll.
   router.get(
     '/hr/overtime/context',
     safe(async (req, res) => {

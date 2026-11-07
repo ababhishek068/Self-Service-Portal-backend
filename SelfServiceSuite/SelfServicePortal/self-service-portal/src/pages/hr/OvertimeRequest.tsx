@@ -314,11 +314,13 @@ function ReadValue({ value, placeholder = '—' }: { value?: string; placeholder
 
 type StepView = { key: string; label: string; icon: ReactNode; person: string; status: string; tone: 'done' | 'pending' | 'rejected' | 'idle' | 'skipped' | 'info'; at: string; note: string }
 
-const STEP_ICONS: Record<number, ReactNode> = {
-  1: <Users className="h-5 w-5" />,
-  2: <ShieldCheck className="h-5 w-5" />,
-  3: <UserCog className="h-5 w-5" />,
-  4: <Landmark className="h-5 w-5" />,
+/** The icon of a step by its role (BC 1.0.3.623: Line Manager, then FD, HR, Finance from the BC workflow). */
+function stepIcon(label: string): ReactNode {
+  const role = label.trim().toLowerCase()
+  if (role === 'line manager') return <Users className="h-5 w-5" />
+  if (role === 'hr') return <ShieldCheck className="h-5 w-5" />
+  if (role === 'finance') return <Landmark className="h-5 w-5" />
+  return <UserCog className="h-5 w-5" />
 }
 
 function approverStep(step: OvertimeStep): StepView {
@@ -335,7 +337,7 @@ function approverStep(step: OvertimeStep): StepView {
   return {
     key: `stage-${step.stage}`,
     label: step.label,
-    icon: STEP_ICONS[step.stage] ?? <Users className="h-5 w-5" />,
+    icon: stepIcon(step.label),
     person: step.approverName || step.approverUserId || 'Not set in BC',
     status: step.status === 'Not started' ? 'Not started' : step.status,
     tone,
@@ -383,7 +385,9 @@ function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeCont
       at: submitted ? request.submittedAt : '',
       note: '',
     },
-    ...(steps.length ? steps.map(approverStep) : [workflowPending]),
+    ...steps.map(approverStep),
+    // Only the line manager is known before sending when the BC workflow does not use a Workflow User Group.
+    ...(steps.some((step) => step.label !== 'Line Manager') ? [] : [workflowPending]),
     payroll,
   ]
 }
@@ -933,7 +937,7 @@ export function OvertimeRequest() {
   return (
     <PageWrapper
       title="Overtime Request"
-      description="Overtime Entry — employee request form. Approved by the Line Manager, HR, the Director / COO and Finance, then paid through payroll."
+      description="Overtime Entry — employee request form. Approved by the Line Manager, FD, HR (prepares the overtime payment) and Finance (pays), then paid through payroll."
       actions={headerActions}
     >
       {contextError ? (

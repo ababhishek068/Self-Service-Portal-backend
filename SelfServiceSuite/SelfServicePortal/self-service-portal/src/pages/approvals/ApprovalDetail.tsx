@@ -518,7 +518,7 @@ export function ApprovalDetail() {
 
               {request.requestType === 'overtime' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
-                  {`Overtime routing: Line Manager, HR, Director / COO, Finance, then payroll (the hours go to the overtime sheet).${
+                  {`Overtime routing: Line Manager, FD, HR (prepares the overtime payment), Finance (pays), then payroll (the hours go to the overtime sheet).${
                     payload.pendingStageLabel && request.status === 'Pending Approval'
                       ? ` This request is waiting on ${String(payload.pendingStageLabel)}.`
                       : ''
