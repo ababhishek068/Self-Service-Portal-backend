@@ -314,16 +314,26 @@ function ReadValue({ value, placeholder = '—' }: { value?: string; placeholder
 
 type StepView = { key: string; label: string; icon: ReactNode; person: string; status: string; tone: 'done' | 'pending' | 'rejected' | 'idle' | 'skipped' | 'info'; at: string; note: string }
 
+/** Intended chain (1.0.3.623+): Line Manager → FD → HR (OT payment) → Finance (pays). */
+function displayOtStepLabel(label: string): string {
+  const role = label.trim().toLowerCase()
+  // Old BC (pre-622) still returns "Director / COO" for the FD step.
+  if (role === 'director / coo' || role === 'director' || role === 'coo') return 'FD'
+  return label.trim() || label
+}
+
 /** The icon of a step by its role (BC 1.0.3.623: Line Manager, then FD, HR, Finance from the BC workflow). */
 function stepIcon(label: string): ReactNode {
-  const role = label.trim().toLowerCase()
+  const role = displayOtStepLabel(label).toLowerCase()
   if (role === 'line manager') return <Users className="h-5 w-5" />
+  if (role === 'fd') return <UserCog className="h-5 w-5" />
   if (role === 'hr') return <ShieldCheck className="h-5 w-5" />
   if (role === 'finance') return <Landmark className="h-5 w-5" />
   return <UserCog className="h-5 w-5" />
 }
 
 function approverStep(step: OvertimeStep): StepView {
+  const label = displayOtStepLabel(step.label)
   const tone: StepView['tone'] =
     step.status === 'Approved'
       ? 'done'
@@ -336,8 +346,8 @@ function approverStep(step: OvertimeStep): StepView {
             : 'idle'
   return {
     key: `stage-${step.stage}`,
-    label: step.label,
-    icon: stepIcon(step.label),
+    label,
+    icon: stepIcon(label),
     person: step.approverName || step.approverUserId || 'Not set in BC',
     status: step.status === 'Not started' ? 'Not started' : step.status,
     tone,
@@ -346,10 +356,45 @@ function approverStep(step: OvertimeStep): StepView {
   }
 }
 
+/** Old Overtime Setup warning → the chain the business asked for. */
+function overtimeRoutingMessage(raw: string): string {
+  const text = raw.trim()
+  if (!text) return ''
+  if (/director\s*\/\s*coo|hr approver|overtime setup/i.test(text)) {
+    return (
+      'Overtime must go: Employee → Line Manager → FD (final approval) → HR (prepare OT payment) → Finance (pays). ' +
+      'Business Central is still on the old Overtime Setup approvers (HR / Director·COO / Finance). ' +
+      'HR must publish BC 1.0.3.623+ and enable an Overtime workflow whose Workflow User Group is ordered FD, then HR, then Finance.'
+    )
+  }
+  return text
+}
+
+/** Old BC returned LM → HR → Director/COO → Finance. Show LM → FD → HR → Finance. */
+function orderedOtApprovers(steps: OvertimeStep[]): OvertimeStep[] {
+  const lm = steps.find((step) => displayOtStepLabel(step.label).toLowerCase() === 'line manager')
+  const hr = steps.find((step) => displayOtStepLabel(step.label).toLowerCase() === 'hr')
+  const fd = steps.find((step) => {
+    const label = displayOtStepLabel(step.label).toLowerCase()
+    return label === 'fd' || /director|coo/i.test(step.label)
+  })
+  const finance = steps.find((step) => displayOtStepLabel(step.label).toLowerCase() === 'finance')
+  const usedOldDirectorOrder = Boolean(fd && hr && finance && /director|coo/i.test(fd.label))
+  if (!usedOldDirectorOrder) return steps
+  const picked = new Set([lm, fd, hr, finance].filter(Boolean))
+  const rest = steps.filter((step) => !picked.has(step))
+  return [...(lm ? [lm] : []), fd!, hr!, finance!, ...rest].map((step, index) => ({
+    ...step,
+    stage: index + 1,
+    label: displayOtStepLabel(step.label),
+  }))
+}
+
 function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeContext | undefined, employeeName: string): StepView[] {
   // Before BC 1.0.3.622 a draft showed who it would go to; since then the BC workflow sets them on submit.
-  const steps =
+  const rawSteps =
     request && request.status !== 'Draft' && request.steps.length ? request.steps : (context?.approvers ?? [])
+  const steps = orderedOtApprovers(rawSteps)
   const submitted = request && request.status !== 'Draft'
   const payroll: StepView = (() => {
     if (request?.sentToPayroll) {
@@ -869,7 +914,7 @@ export function OvertimeRequest() {
   const employeeName = context?.employee.employeeName ?? ''
   const shown = mode === 'detail' ? selected : null
   const steps = workflowSteps(mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null, context, employeeName)
-  const routingProblem = context?.routingProblem ?? ''
+  const routingProblem = overtimeRoutingMessage(context?.routingProblem ?? '')
 
   const headerActions =
     mode === 'list' ? (

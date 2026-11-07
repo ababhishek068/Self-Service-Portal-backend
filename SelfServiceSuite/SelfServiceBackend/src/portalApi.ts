@@ -551,7 +551,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v315 — 1.0.3.476 (Profile white-screen hardened: no setState-in-render, safe completeness; Advance Request + Profile Completeness)'
+export const PORTAL_API_BUILD = 'v316 — 1.0.3.477 (Imprest vs Advance Request labels; OT chain shown as LM→FD→HR→Finance; Profile white-screen fix)'
 
 interface LookupSpec {
   service: string

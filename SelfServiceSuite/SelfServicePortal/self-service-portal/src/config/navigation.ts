@@ -87,7 +87,7 @@ export const navigationMenu: NavItem[] = [
     label: 'My Requests - Finance',
     icon: Landmark,
     children: [
-      { label: 'Advance Request', path: '/finance/imprest', icon: Banknote },
+      { label: 'Imprest', path: '/finance/imprest', icon: Banknote },
       { label: 'Imprest Surrender', path: '/finance/imprest-surrender', icon: ReceiptText },
       { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Medical Claim', path: '/finance/medical-claim', icon: BadgeCheck },
