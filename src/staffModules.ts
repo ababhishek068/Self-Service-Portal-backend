@@ -556,6 +556,30 @@ const imprest: ModuleSpec = {
         next.setDate(next.getDate() + 1)
         returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
       }
+      const requestPurpose = String(req.body?.requestPurpose ?? '').trim()
+      const otherPurposeDetails = String(req.body?.otherPurposeDetails ?? '').trim()
+      const justification = String(req.body?.justification ?? '').trim()
+      let purpose = String(req.body?.purpose ?? '').trim()
+      if (!purpose) {
+        const purposeLabel =
+          requestPurpose === 'Other' && otherPurposeDetails
+            ? `Other: ${otherPurposeDetails}`
+            : requestPurpose
+        purpose = [purposeLabel, justification ? `Justification: ${justification}` : '']
+          .filter(Boolean)
+          .join(' | ')
+          .slice(0, 250)
+      }
+      if (!purpose) {
+        throw Object.assign(new Error('Enter the advance request purpose before saving.'), {
+          status: 422,
+        })
+      }
+      if (requestPurpose === 'Other' && !otherPurposeDetails && !String(req.body?.purpose ?? '').trim()) {
+        throw Object.assign(new Error('Enter details when Other (Specify) is selected.'), {
+          status: 422,
+        })
+      }
       return {
         action: no ? 'edit' : 'create',
         docNo: no,
@@ -563,7 +587,7 @@ const imprest: ModuleSpec = {
         dateRequired: formatBcSoapDate(
           String(req.body?.dateRequired ?? req.body?.startDate ?? ''),
         ),
-        purpose: req.body?.purpose ?? '',
+        purpose,
         myUserId: user.userID,
         travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
         travelDate,
@@ -1860,40 +1884,9 @@ const salaryAdvance: ModuleSpec = {
         )
       }
       const percentageSalary = Number(req.body?.percentageSalary ?? 0)
-      const requestPurpose = String(req.body?.requestPurpose ?? '').trim()
-      const otherPurposeDetails = String(req.body?.otherPurposeDetails ?? '').trim()
-      const justification = String(req.body?.justification ?? '').trim()
-      const requiredAdvanceDate = String(req.body?.requiredAdvanceDate ?? '').trim()
-      const activityStartDate = String(req.body?.activityStartDate ?? '').trim()
-      const activityEndDate = String(req.body?.activityEndDate ?? '').trim()
-      const activityLocation = String(req.body?.activityLocation ?? '').trim()
-      const projectAssignment = String(req.body?.projectAssignment ?? '').trim()
-      let purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
+      const purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
       if (!purpose) {
-        const purposeLabel =
-          requestPurpose === 'Other' && otherPurposeDetails
-            ? `Other: ${otherPurposeDetails}`
-            : requestPurpose
-        purpose = [
-          purposeLabel,
-          justification ? `Justification: ${justification}` : '',
-          requiredAdvanceDate ? `Required advance date: ${requiredAdvanceDate}` : '',
-          activityStartDate ? `Activity start: ${activityStartDate}` : '',
-          activityEndDate ? `Activity end: ${activityEndDate}` : '',
-          activityLocation ? `Location: ${activityLocation}` : '',
-          projectAssignment ? `Project: ${projectAssignment}` : '',
-        ]
-          .filter(Boolean)
-          .join(' | ')
-          .slice(0, 250)
-      }
-      if (!purpose) {
-        throw Object.assign(new Error('Enter the advance request purpose before saving.'), {
-          status: 422,
-        })
-      }
-      if (requestPurpose === 'Other' && !otherPurposeDetails && !String(req.body?.purpose ?? '').trim()) {
-        throw Object.assign(new Error('Enter details when Other (Specify) is selected.'), {
+        throw Object.assign(new Error('Enter the salary advance purpose before saving.'), {
           status: 422,
         })
       }

@@ -179,12 +179,23 @@ export const staffClaimLineSchema = z
 export const imprestHeaderSchema = z
   .object({
     dateRequired: workingDateField,
-    purpose: z.string().min(3, 'Advance purpose is required'),
+    requestPurpose: z.string().min(1, 'Request purpose is required'),
+    otherPurposeDetails: z.string().optional().default(''),
+    justification: z.string().min(10, 'Request justification is required'),
+    /** Built for Business Central SOAP — filled before create/edit. */
+    purpose: z.string().optional().default(''),
     travelDestination: optionalText,
     travelDate: dateField,
     returnDate: dateField,
   })
   .superRefine((data, ctx) => {
+    if (data.requestPurpose === 'Other' && !String(data.otherPurposeDetails ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['otherPurposeDetails'],
+        message: 'Enter details when Other (Specify) is selected',
+      })
+    }
     if (isBefore(parseISO(data.returnDate), parseISO(data.travelDate))) {
       ctx.addIssue({ code: 'custom', path: ['returnDate'], message: 'Return date must be on or after the start date' })
     }
@@ -514,36 +525,10 @@ export const transportRequestSchema = z
     message: 'Trip date cannot be backdated',
   })
 
-export const salaryAdvanceSchema = z
-  .object({
-    requestPurpose: z.string().min(1, 'Request purpose is required'),
-    otherPurposeDetails: z.string().optional().default(''),
-    justification: z.string().min(10, 'Request justification is required'),
-    requiredAdvanceDate: z.string().min(1, 'Required advance date is required'),
-    activityStartDate: z.string().optional().default(''),
-    activityEndDate: z.string().optional().default(''),
-    activityLocation: z.string().optional().default(''),
-    projectAssignment: z.string().optional().default(''),
-    percentageSalary: z.coerce.number().positive('Percentage is required').max(100, 'Maximum is 100%'),
-    /** Built for Business Central SOAP — filled by the page before create. */
-    purpose: z.string().optional().default(''),
-  })
-  .superRefine((data, ctx) => {
-    if (data.requestPurpose === 'Other' && !String(data.otherPurposeDetails ?? '').trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['otherPurposeDetails'],
-        message: 'Enter details when Other (Specify) is selected',
-      })
-    }
-    if (data.activityStartDate && data.activityEndDate && data.activityEndDate < data.activityStartDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['activityEndDate'],
-        message: 'Activity end date cannot be earlier than the start date',
-      })
-    }
-  })
+export const salaryAdvanceSchema = z.object({
+  purpose: z.string().min(1, 'Purpose is required'),
+  percentageSalary: z.coerce.number().positive('Percentage is required').max(100, 'Maximum is 100%'),
+})
 
 export const trainingNeedsSchema = z.object({
   trainingTitle: z.string().min(3, 'Training title is required'),

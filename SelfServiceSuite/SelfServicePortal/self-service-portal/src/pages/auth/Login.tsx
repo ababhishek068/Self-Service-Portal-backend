@@ -235,7 +235,7 @@ export function Login() {
         </p>
 
         <div className="relative z-10 flex h-full min-h-0 flex-col">
-          <div className="portal-auth-rise shrink-0">
+          <div className="portal-auth-rise flex shrink-0 flex-col items-center text-center">
             <BrandLogo variant="login" className="!w-[12rem] bg-transparent p-0 shadow-none" />
             <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/65">
               {brand.company}

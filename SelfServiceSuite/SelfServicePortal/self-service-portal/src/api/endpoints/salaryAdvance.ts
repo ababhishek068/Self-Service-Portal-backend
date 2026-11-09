@@ -9,11 +9,11 @@ export const createSalaryAdvanceRequest = (
   payload: SalaryAdvanceForm,
   employeeAccountNumber = '',
 ) => {
-  const purpose = String(payload.purpose || payload.justification || payload.requestPurpose || '').trim()
+  const purpose = String(payload.purpose ?? '').trim()
   return createModuleRequest(config, {
     ...payload,
     purpose,
-    title: `Advance request - ${purpose.slice(0, 40)}`,
+    title: `Salary advance - ${purpose.slice(0, 40)}`,
     amount: 0,
     ...(employeeAccountNumber
       ? { customerNo: employeeAccountNumber, accountNo: employeeAccountNumber }

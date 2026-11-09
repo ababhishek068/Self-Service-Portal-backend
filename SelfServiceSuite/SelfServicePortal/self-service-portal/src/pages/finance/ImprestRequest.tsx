@@ -1,14 +1,20 @@
 import { addDays, differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
+import { useMemo } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
+import {
+  buildAdvancePurposePayload,
+  purposeOptionsForDivision,
+} from '@/data/advanceRequestPurpose'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
 import { imprestTypeOptions } from '@/data/essOptions'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
 import { imprestHeaderSchema, imprestLineHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency } from '@/utils/formatters'
+import { useAuth } from '@/hooks/useAuth'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
 import type { LookupOption } from '@/api/endpoints/lookups'
@@ -219,8 +225,16 @@ function imprestListSearchExtra(row: PortalRequest): Array<string | number | und
 }
 
 export function ImprestRequest() {
+  const { employee } = useAuth()
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
   const destinations = useLookupOptions('travel-destinations')
+  const purposeOptions = useMemo(
+    () =>
+      purposeOptionsForDivision(
+        `${employee?.departmentCode ?? ''} ${employee?.placeOfDuty ?? ''} ${employee?.jobGrade ?? ''}`,
+      ),
+    [employee?.departmentCode, employee?.placeOfDuty, employee?.jobGrade],
+  )
 
   return (
     <MultiStepRequestPage
@@ -235,7 +249,16 @@ export function ImprestRequest() {
       listSearchExtra={imprestListSearchExtra}
       newButtonLabel="New Advance Payment"
       headerSchema={imprestHeaderSchema}
-      headerDefaults={{ dateRequired: today, purpose: '', travelDestination: '', travelDate: today, returnDate: tomorrow }}
+      headerDefaults={{
+        dateRequired: today,
+        requestPurpose: purposeOptions[0]?.value ?? 'Other',
+        otherPurposeDetails: '',
+        justification: '',
+        purpose: '',
+        travelDestination: '',
+        travelDate: today,
+        returnDate: tomorrow,
+      }}
       headerSupplement={() => (
         <div className="space-y-3">
           <FinanceEmployeeOrgBanner />
@@ -257,12 +280,19 @@ export function ImprestRequest() {
           next.setDate(next.getDate() + 1)
           returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
         }
+        const purpose = buildAdvancePurposePayload({
+          requestPurpose: String(values.requestPurpose ?? ''),
+          otherPurposeDetails: String(values.otherPurposeDetails ?? ''),
+          justification: String(values.justification ?? ''),
+          purpose: String(values.purpose ?? ''),
+        })
         return {
           ...values,
           travelDate,
           returnDate,
           startDate: travelDate,
-          title: String(values.purpose || 'Advance Payment'),
+          purpose,
+          title: purpose || 'Advance Payment',
         }
       }}
       headerOnValuesChange={(values, form) => {
@@ -290,7 +320,31 @@ export function ImprestRequest() {
             'Date',
           ],
         },
-        { name: 'purpose', label: 'Advance Purpose', type: 'textarea', valuePaths: ['Purpose'] },
+        {
+          name: 'requestPurpose',
+          label: 'Request Purpose',
+          type: 'select',
+          options: purposeOptions,
+          hint: 'Purpose list is filtered for your division. Choose Other (Specify) to add details.',
+        },
+        {
+          name: 'otherPurposeDetails',
+          label: 'Other Purpose Details',
+          type: 'textarea',
+          fullWidth: true,
+          maxLength: 200,
+          visibleWhen: (values) => String(values.requestPurpose ?? '') === 'Other',
+          placeholder: 'Describe the purpose when Other is selected',
+        },
+        {
+          name: 'justification',
+          label: 'Request Justification',
+          type: 'textarea',
+          fullWidth: true,
+          maxLength: 500,
+          placeholder: 'Explain why the advance is needed',
+          valuePaths: ['Purpose'],
+        },
         {
           name: 'travelDestination',
           label: 'Travel Destination (free text)',
