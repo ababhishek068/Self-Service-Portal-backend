@@ -596,7 +596,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v353 — 1.0.3.514 (Petty Cash ESSP expense categories 1–15)'
+export const PORTAL_API_BUILD = 'v354 — 1.0.3.515 (BC 1.0.3.633 Advance/Medical/Petty Cash SOAP)'
 
 interface LookupSpec {
   service: string
@@ -785,19 +785,24 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     },
   },
   'petty-cash-types': {
-    service: 'QyReceiptsPayments',
+    // BC 1.0.3.632+ — Petty Cash Request expense categories only (not supplier/vendor types).
+    service: 'QyPettyCashExpenseTypes',
     valueKeys: ['Code'],
     labelKeys: ['Description', 'Code'],
-    filter: `Type eq 'Payment' and Blocked eq false`,
-    meta: RECEIPTS_PAYMENTS_GL_META,
+    meta: {
+      accountNo: ['GLAccount', 'G_L_Account', 'GL_Account'],
+      accountName: ['Description'],
+    },
     fallback: {
-      service: 'QyReceipt_Payment_Types',
+      service: 'PettyCashExpenseTypes',
       valueKeys: ['Code'],
       labelKeys: ['Description', 'Code'],
-      filter: `Type eq 'Payment' and Blocked eq false`,
-      meta: RECEIPTS_PAYMENTS_GL_META,
+      meta: {
+        accountNo: ['GLAccount', 'G_L_Account', 'GL_Account'],
+        accountName: ['Description'],
+      },
       fallback: {
-        service: 'Receipt_Payment_Types',
+        service: 'QyReceiptsPayments',
         valueKeys: ['Code'],
         labelKeys: ['Description', 'Code'],
         filter: `Type eq 'Payment' and Blocked eq false`,
@@ -5014,11 +5019,69 @@ export function buildPortalApiRouter() {
         )
       }
 
-      if (catalog === 'petty-cash-types' && mapped.length === 0) {
-        const paymentRows = await filterPettyCashTypesByUsableGl(
-          await fetchReceiptPaymentPettyCashTypeRows(),
-        )
-        mapped = mapLookupRows(rootSpec, paymentRows)
+      if (catalog === 'petty-cash-types') {
+        // Prefer SOAP Expense Category list (BC 1.0.3.632+) — never show supplier/WHT payment codes.
+        try {
+          const soap = await callSoapMethod('PortalPettyCashExpenseCategories', {})
+          const parsed = parseSoapJson(soap.returnValue)
+          const categories = Array.isArray(parsed.categories) ? parsed.categories : []
+          const soapMapped = categories
+            .map((row) => {
+              if (!row || typeof row !== 'object') return null
+              const record = row as Record<string, unknown>
+              const value = String(record.code ?? record.Code ?? '').trim()
+              if (!value) return null
+              const label = String(record.description ?? record.Description ?? value).trim() || value
+              const hay = `${value} ${label}`.toUpperCase()
+              if (
+                hay.includes('SUPPLIER') ||
+                hay.includes('VEND') ||
+                hay.includes('WHT') ||
+                hay.includes('WITHHOLD')
+              ) {
+                return null
+              }
+              return {
+                value,
+                label,
+                meta: {
+                  accountNo: String(record.glAccount ?? record.GLAccount ?? '').trim(),
+                  accountName: label,
+                },
+              }
+            })
+            .filter(Boolean) as Array<{ value: string; label: string; meta?: Record<string, string> }>
+          if (soapMapped.length > 0) {
+            mapped = soapMapped
+          }
+        } catch {
+          // Fall through to OData / Receipts & Payment Types.
+        }
+        mapped = mapped.filter((row) => {
+          if (!row) return false
+          const hay = `${row.value} ${row.label}`.toUpperCase()
+          return !(
+            hay.includes('SUPPLIER') ||
+            hay.includes('VEND') ||
+            hay.includes('WHT') ||
+            hay.includes('WITHHOLD')
+          )
+        })
+        if (mapped.length === 0) {
+          const paymentRows = await filterPettyCashTypesByUsableGl(
+            await fetchReceiptPaymentPettyCashTypeRows(),
+          )
+          mapped = mapLookupRows(rootSpec, paymentRows).filter((row) => {
+            if (!row) return false
+            const hay = `${row.value} ${row.label}`.toUpperCase()
+            return !(
+              hay.includes('SUPPLIER') ||
+              hay.includes('VEND') ||
+              hay.includes('WHT') ||
+              hay.includes('WITHHOLD')
+            )
+          })
+        }
       }
 
       if (catalog === 'imprest-types' && mapped.length === 0) {
@@ -7018,44 +7081,86 @@ export function buildPortalApiRouter() {
       const medicalAmount = Number(req.body?.medicalAmount ?? 0)
       const hospitalCategory = hospitalCategoryCode(req.body?.hospitalCategory)
       const patient = req.body?.patient
-      // Policy: always 80% of accepted receipt (hospital category is classification only).
+      const dependant = String(req.body?.dependant ?? '').trim()
+      const patientCode = isDependantMedicalPatient(patient) ? 2 : 1
+      // Local fallback: 80% of receipt (hospital category is classification only).
       const policy = localMedicalRefundAmounts(hospitalCategory, medicalAmount)
       let amountToRefund = policy.amountToRefund
       let coveragePercent = policy.coveragePercent
-      // Prefer BC when it returns a value, but never exceed the policy 80% rate.
+      let availableBalance: number | null = null
+      let remainingBalance: number | null = null
+      let employeeContribution: number | null = null
+      let budgetCapped = false
+      let usedBcPolicy = false
+
+      // BC 1.0.3.631+: min(80% of receipt, remaining Self/Dependant budget).
       try {
-        const result = await callSoapMethod('FetchMedicalClaimAmount', {
+        const result = await callSoapMethod('FetchMedicalClaimAmountPolicy', {
+          employeeNo: authUser.employeeNo,
           medicalAmount,
           hospitalCategory,
+          patient: patientCode,
+          dependant: patientCode === 2 ? dependant : '',
         })
-        const raw = String(result.returnValue ?? '{}').trim()
-        let parsed: Record<string, unknown> = {}
-        try {
-          parsed = JSON.parse(raw) as Record<string, unknown>
-        } catch {
-          parsed = { Amount: Number(raw) || 0, AmountToRefund: 0 }
-        }
+        const parsed = parseSoapJson(result.returnValue)
         const soapRefund = Number(
           parsed.AmountToRefund ?? parsed.amountToRefund ?? parsed.Amount ?? parsed.amount ?? 0,
         )
-        if (soapRefund > 0) {
-          amountToRefund = Math.min(soapRefund, policy.amountToRefund)
-          coveragePercent = medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
+        if (Number.isFinite(soapRefund) && soapRefund >= 0 && medicalAmount > 0) {
+          amountToRefund = Math.round(soapRefund * 100) / 100
+          usedBcPolicy = true
+          availableBalance = Number(parsed.AvailableBalance ?? parsed.availableBalance)
+          if (!Number.isFinite(availableBalance as number)) availableBalance = null
+          remainingBalance = Number(parsed.RemainingBalance ?? parsed.remainingBalance)
+          if (!Number.isFinite(remainingBalance as number)) remainingBalance = null
+          employeeContribution = Number(parsed.EmployeeContribution ?? parsed.employeeContribution)
+          if (!Number.isFinite(employeeContribution as number)) {
+            employeeContribution = Math.round((medicalAmount - amountToRefund) * 100) / 100
+          }
+          if (availableBalance != null && availableBalance >= 0) {
+            budgetCapped = amountToRefund < policy.amountToRefund - 0.0001
+          }
+          coveragePercent =
+            medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
         }
       } catch {
-        // Local policy rates already applied above.
+        usedBcPolicy = false
       }
-      let balances: EmployeeMedicalBalances | null = null
-      try {
-        const soapResult = await callSoapMethod('FnGetEmployeeMedicalBalances', {
-          employeeNo: authUser.employeeNo,
-        })
-        balances = parseEmployeeMedicalBalancesReturn(soapResult.returnValue)
-      } catch {
-        balances = null
+
+      if (!usedBcPolicy) {
+        try {
+          const result = await callSoapMethod('FetchMedicalClaimAmount', {
+            medicalAmount,
+            hospitalCategory,
+          })
+          const parsed = parseSoapJson(result.returnValue)
+          const soapRefund = Number(
+            parsed.AmountToRefund ?? parsed.amountToRefund ?? parsed.Amount ?? parsed.amount ?? 0,
+          )
+          if (soapRefund > 0) {
+            amountToRefund = Math.min(soapRefund, policy.amountToRefund)
+            coveragePercent =
+              medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
+          }
+        } catch {
+          // Local 80% already applied.
+        }
+        let balances: EmployeeMedicalBalances | null = null
+        try {
+          const soapResult = await callSoapMethod('FnGetEmployeeMedicalBalances', {
+            employeeNo: authUser.employeeNo,
+          })
+          balances = parseEmployeeMedicalBalancesReturn(soapResult.returnValue)
+        } catch {
+          balances = null
+        }
+        const capped = applyMedicalBudgetCap(amountToRefund, patient, balances)
+        amountToRefund = capped.amountToRefund
+        availableBalance = capped.availableBalance
+        budgetCapped = capped.capped
+        employeeContribution = Math.round((medicalAmount - amountToRefund) * 100) / 100
       }
-      const capped = applyMedicalBudgetCap(amountToRefund, patient, balances)
-      amountToRefund = capped.amountToRefund
+
       if (medicalAmount > 0 && amountToRefund > 0) {
         coveragePercent = medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
       }
@@ -7066,9 +7171,14 @@ export function buildPortalApiRouter() {
         amountToRefund,
         coveragePercent,
         CoveragePercent: coveragePercent,
-        availableBalance: capped.availableBalance,
-        budgetCapped: capped.capped,
+        availableBalance,
+        RemainingBalance: remainingBalance,
+        remainingBalance,
+        EmployeeContribution: employeeContribution,
+        employeeContribution,
+        budgetCapped,
         policyCoveragePercent: MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT,
+        usedBcPolicy,
       })
     }),
   )
@@ -7116,6 +7226,48 @@ export function buildPortalApiRouter() {
       }
       const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
       res.json(parseSoapJson(result.returnValue))
+    }),
+  )
+
+  /** BC 1.0.3.632+ — Petty Cash Request expense categories (not supplier/vendor payment types). */
+  router.get(
+    '/petty-cash/expense-categories',
+    safe(async (_req, res) => {
+      const result = await callSoapMethod('PortalPettyCashExpenseCategories', {})
+      const parsed = parseSoapJson(result.returnValue)
+      const categories = Array.isArray(parsed.categories) ? parsed.categories : []
+      const rows = categories
+        .map((row) => {
+          if (!row || typeof row !== 'object') return null
+          const record = row as Record<string, unknown>
+          const code = String(record.code ?? record.Code ?? '').trim()
+          if (!code) return null
+          const hay = `${code} ${record.description ?? record.Description ?? ''}`.toUpperCase()
+          if (
+            hay.includes('SUPPLIER') ||
+            hay.includes('VEND') ||
+            hay.includes('WHT') ||
+            hay.includes('WITHHOLD')
+          ) {
+            return null
+          }
+          return {
+            value: code,
+            label: String(record.description ?? record.Description ?? code).trim() || code,
+            meta: {
+              accountNo: String(record.glAccount ?? record.GLAccount ?? '').trim(),
+              accountType: String(record.accountType ?? record.AccountType ?? '').trim(),
+              directExpense: Boolean(record.directExpense ?? record.DirectExpense),
+            },
+          }
+        })
+        .filter(Boolean)
+      res.json({
+        label: String(parsed.label ?? 'Expense Category'),
+        currencyDefault: String(parsed.currencyDefault ?? 'ETB'),
+        usingMarkedTypes: Boolean(parsed.usingMarkedTypes),
+        rows,
+      })
     }),
   )
 

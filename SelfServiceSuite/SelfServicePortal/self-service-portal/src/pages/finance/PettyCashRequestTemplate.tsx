@@ -1,20 +1,17 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { formatISO } from 'date-fns'
 import { ArrowLeft, CalendarDays, Check, CloudUpload, Loader2 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   addRequestLine,
   createModuleRequest,
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
-import { useLookupOptions } from '@/hooks/useLookupOptions'
+import { fetchPettyCashExpenseCategories } from '@/api/endpoints/pettyCashCategories'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { brand } from '@/config/brand'
-import {
-  pettyCashExpenseCategories,
-  pettyCashTypeOptions,
-} from '@/data/essOptions'
+import { pettyCashTypeOptions } from '@/data/essOptions'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { cn } from '@/lib/utils'
 import { readFileAsBase64 } from '@/utils/readFileAsBase64'
@@ -28,48 +25,13 @@ const fieldClass =
   'w-full rounded-xl border border-transparent bg-slate-100 px-3.5 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100 disabled:cursor-not-allowed disabled:opacity-70'
 const labelClass = 'mb-1.5 block text-sm font-medium text-slate-700'
 
-const CATEGORY_BC_KEYWORDS: Record<string, string[]> = {
-  OFFICE_SUPPLIES: ['stationer', 'supply', 'office'],
-  OFFICE_MAINTENANCE: ['maintenance', 'repair'],
-  CLEANING_SANITATION: ['clean', 'sanit'],
-  TRANSPORTATION: ['transport', 'taxi', 'travel'],
-  FUEL_LUBRICANTS: ['fuel', 'lubric'],
-  COMMUNICATION: ['mobile', 'postage', 'airtime', 'courier', 'communic'],
-  MEALS_REFRESHMENTS: ['refresh', 'meal', 'tea', 'coffee'],
-  MEETING_EXPENSES: ['meeting'],
-  MEDICAL_FIRST_AID: ['medical', 'first'],
-  PRINTING_PHOTOCOPYING: ['print', 'photocop', 'copy'],
-  BANK_CHARGES: ['bank'],
-  STAFF_WELFARE: ['welfare'],
-  GUEST_HOSPITALITY: ['guest', 'hospital'],
-  IT_COMPUTER_ACCESSORIES: ['it', 'computer', 'cable', 'mouse'],
-  MISCELLANEOUS: ['other', 'misc'],
-}
-
-function resolveBcPaymentType(esspCode: string, bcOptions: LookupOption[]) {
-  if (!bcOptions.length) return esspCode
-  const essp = pettyCashExpenseCategories.find((row) => row.value === esspCode)
-  const label = (essp?.label ?? esspCode).toLowerCase()
-  const byLabel = bcOptions.find((option) => {
-    const optionLabel = option.label.toLowerCase()
-    const optionValue = option.value.toLowerCase()
-    return optionLabel === label || optionValue === esspCode.toLowerCase() || optionLabel.includes(label)
-  })
-  if (byLabel) return byLabel.value
-
-  const keywords = CATEGORY_BC_KEYWORDS[esspCode] ?? []
-  for (const keyword of keywords) {
-    const match = bcOptions.find((option) => {
-      const hay = `${option.value} ${option.label}`.toLowerCase()
-      return hay.includes(keyword)
-    })
-    if (match) return match.value
-  }
-
+function isBlockedPaymentCode(option: LookupOption) {
+  const hay = `${option.value} ${option.label}`.toUpperCase()
   return (
-    bcOptions.find((option) => /other|misc/i.test(`${option.value} ${option.label}`))?.value ??
-    bcOptions[0]?.value ??
-    esspCode
+    hay.includes('SUPPLIER') ||
+    hay.includes('VEND') ||
+    hay.includes('WHT') ||
+    hay.includes('WITHHOLD')
   )
 }
 
@@ -82,7 +44,11 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
   const { employee } = useAuth()
   const toast = useToast()
   const queryClient = useQueryClient()
-  const bcPaymentTypes = useLookupOptions('petty-cash-types', pettyCashTypeOptions)
+  const categoriesQuery = useQuery({
+    queryKey: ['petty-cash-expense-categories'],
+    queryFn: fetchPettyCashExpenseCategories,
+    staleTime: 5 * 60 * 1000,
+  })
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [requestDate, setRequestDate] = useState(today)
@@ -99,10 +65,19 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
   const employeeName = employee?.displayName ?? ''
   const staffNo = employee?.employeeNo ?? ''
   const department = employee?.departmentName || employee?.departmentCode || ''
-  const selectedCategory = pettyCashExpenseCategories.find((row) => row.value === expenseCategory)
+
+  const categoryOptions = useMemo(() => {
+    const fromBc = (categoriesQuery.data?.rows ?? []).filter((row) => !isBlockedPaymentCode(row))
+    if (fromBc.length > 0) return fromBc
+    return pettyCashTypeOptions.filter((row) => !isBlockedPaymentCode(row))
+  }, [categoriesQuery.data?.rows])
+
+  const selectedCategory = categoryOptions.find((row) => row.value === expenseCategory)
   const requiresSpecify = Boolean(
-    selectedCategory && 'requiresSpecify' in selectedCategory && selectedCategory.requiresSpecify,
+    selectedCategory?.meta?.requiresSpecify ||
+      /misc|other/i.test(`${selectedCategory?.value ?? ''} ${selectedCategory?.label ?? ''}`),
   )
+  const currencyDefault = categoriesQuery.data?.currencyDefault || 'ETB'
 
   const canSubmit = useMemo(() => {
     return (
@@ -174,30 +149,29 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
 
     const categoryLabel = selectedCategory?.label ?? expenseCategory
     const narration = [
-      categoryLabel,
-      requiresSpecify && miscSpecify.trim() ? `Specify: ${miscSpecify.trim()}` : '',
       purpose.trim(),
+      requiresSpecify && miscSpecify.trim() ? `Specify: ${miscSpecify.trim()}` : '',
     ]
       .filter(Boolean)
       .join(' — ')
       .slice(0, 250)
-    const bcType = resolveBcPaymentType(expenseCategory, bcPaymentTypes.options)
 
     setSubmitting(true)
     try {
+      // Purpose → FnPettyCashHeader Payment Narration; Required Date → dateNeeded.
       let request = await createModuleRequest(module, {
         dateNeeded: requiredDate,
         requestDate,
         description: narration,
         purpose: narration,
         narration,
-        expenseCategory,
         title: `${categoryLabel} — ${purpose.trim()}`.slice(0, 80) || 'Petty Cash Request',
         amount: requestedAmount,
       })
 
+      // Expense Category + Amount → FnPettyCashLine (BC rejects supplier/vendor codes).
       request = await addRequestLine(request.id, {
-        type: bcType,
+        type: expenseCategory.trim(),
         name: categoryLabel,
         amount: requestedAmount,
         action: 'create',
@@ -331,26 +305,23 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
                   value={expenseCategory}
                   onChange={(event) => {
                     setExpenseCategory(event.target.value)
-                    if (event.target.value !== 'MISCELLANEOUS') setMiscSpecify('')
+                    if (!/misc|other/i.test(event.target.value)) setMiscSpecify('')
                   }}
                   required
                 >
-                  <option value="">Select category</option>
-                  {pettyCashExpenseCategories.map((option) => (
+                  <option value="">
+                    {categoriesQuery.isLoading ? 'Loading expense categories…' : 'Select category'}
+                  </option>
+                  {categoryOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
                 </select>
-                {selectedCategory ? (
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    Examples: {selectedCategory.examples}
-                  </p>
-                ) : (
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    Choose the category that best matches this petty cash spend.
-                  </p>
-                )}
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Categories come from Business Central Petty Cash expense types (not supplier/vendor
+                  payment codes).
+                </p>
               </div>
 
               {requiresSpecify ? (
@@ -406,7 +377,7 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
                   <label className={labelClass} htmlFor="pc-currency">
                     Currency
                   </label>
-                  <input id="pc-currency" className={fieldClass} value="ETB" readOnly disabled />
+                  <input id="pc-currency" className={fieldClass} value={currencyDefault} readOnly disabled />
                 </div>
               </div>
 
@@ -421,7 +392,6 @@ export function PettyCashRequestTemplate({ onCreated, onCancel }: Props) {
                     className={cn(fieldClass, 'pr-10')}
                     value={requiredDate}
                     onChange={(event) => setRequiredDate(event.target.value)}
-                    placeholder="Select required date"
                     required
                   />
                   <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

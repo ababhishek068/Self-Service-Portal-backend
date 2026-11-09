@@ -7,7 +7,7 @@ import { PettyCashRequestTemplate } from '@/pages/finance/PettyCashRequestTempla
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
-import { pettyCashExpenseCategories, pettyCashTypeOptions } from '@/data/essOptions'
+import { pettyCashTypeOptions } from '@/data/essOptions'
 import { pettyCashHeaderSchema, pettyCashLineSchema } from '@/schemas/requestSchemas'
 import { formatCurrency } from '@/utils/formatters'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
@@ -26,19 +26,21 @@ function accountDisplay(option: LookupOption | undefined) {
   return ''
 }
 
+function isBlockedPaymentCode(option: LookupOption) {
+  const hay = `${option.value} ${option.label}`.toUpperCase()
+  return (
+    hay.includes('SUPPLIER') ||
+    hay.includes('VEND') ||
+    hay.includes('WHT') ||
+    hay.includes('WITHHOLD')
+  )
+}
+
 export function PettyCash() {
   const paymentTypes = useLookupOptions('petty-cash-types', pettyCashTypeOptions)
   const expenseCategoryOptions = useMemo(
-    () =>
-      pettyCashExpenseCategories.map((row) => ({
-        value: row.value,
-        label: row.label,
-        meta: {
-          examples: row.examples,
-          requiresSpecify: 'requiresSpecify' in row && row.requiresSpecify === true,
-        },
-      })),
-    [],
+    () => paymentTypes.options.filter((option) => !isBlockedPaymentCode(option)),
+    [paymentTypes.options],
   )
 
   const onLineValuesChange = useCallback(
@@ -50,9 +52,8 @@ export function PettyCash() {
         form.setValue('accountName', '', { shouldValidate: false })
         return
       }
-      const essp = expenseCategoryOptions.find((option) => String(option.value).trim() === type)
-      const match = paymentTypes.options.find((option) => String(option.value).trim() === type)
-      const label = String(essp?.label ?? match?.label ?? '').trim()
+      const match = expenseCategoryOptions.find((option) => String(option.value).trim() === type)
+      const label = String(match?.label ?? '').trim()
       const accountNo = String(match?.meta?.accountNo ?? '').trim()
       const accountName = String(match?.meta?.accountName ?? '').trim()
       const display = accountDisplay(match)
@@ -66,7 +67,7 @@ export function PettyCash() {
         form.setValue('accountName', display || accountName, { shouldValidate: false })
       }
     },
-    [expenseCategoryOptions, paymentTypes.options],
+    [expenseCategoryOptions],
   )
 
   return (
@@ -191,8 +192,10 @@ export function PettyCash() {
             label: 'Expense Category',
             type: 'select',
             options: expenseCategoryOptions,
-            placeholder: 'Select category',
-            hint: 'ESSP petty cash categories (Office Supplies → Miscellaneous).',
+            placeholder: paymentTypes.isLoading
+              ? 'Loading expense categories…'
+              : 'Select expense category',
+            hint: 'Expense Category from Business Central (not Payment Type / supplier codes).',
           },
           {
             name: 'name',

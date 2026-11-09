@@ -123,29 +123,46 @@ async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn
   const hospitalCategory = String(values.hospitalCategory ?? '').trim()
   const medicalAmount = Number(values.medicalAmount ?? 0)
   const patient = String(values.patient ?? 'self').trim()
+  const dependant = String(values.dependant ?? '').trim()
   if (!hospitalCategory || !medicalAmount) return
+  if (isDependantPatient(patient) && !dependant) return
 
   const requestKey = ++medicalAmountRequest
   try {
-    const data = await validateHospitalCategory({ hospitalCategory, medicalAmount, patient })
+    const data = await validateHospitalCategory({
+      hospitalCategory,
+      medicalAmount,
+      patient,
+      dependant: isDependantPatient(patient) ? dependant : '',
+    })
     if (requestKey !== medicalAmountRequest) return
     let amount = Number(data.Amount ?? data.amount ?? 0)
     let amountToRefund = Number(data.AmountToRefund ?? data.amountToRefund ?? 0)
     let coveragePercent = Number(data.coveragePercent ?? data.CoveragePercent ?? 0)
-    if (amountToRefund <= 0) {
+    if (amountToRefund <= 0 && amount <= 0) {
       const fallback = localMedicalRefund(medicalAmount)
       amount = fallback.amount
       amountToRefund = fallback.amountToRefund
       coveragePercent = fallback.coveragePercent
     }
+    // BC sets claim line Amount from Amount to refund — never send uncapped receipt amount.
     const netAmount = amountToRefund > 0 ? amountToRefund : amount
-    if (netAmount > 0) form.setValue('amount', netAmount, { shouldValidate: true })
+    if (netAmount >= 0) form.setValue('amount', netAmount, { shouldValidate: true })
     if (amountToRefund >= 0) form.setValue('amountToRefund', amountToRefund, { shouldValidate: true })
     if (coveragePercent > 0) form.setValue('coveragePercent', coveragePercent, { shouldValidate: false })
+    const available = Number(data.availableBalance)
+    if (Number.isFinite(available) && available >= 0) {
+      form.setValue('availableBalance', available, { shouldValidate: false })
+    }
     if (data.budgetCapped) {
-      form.setValue('budgetNote', 'Refund capped at remaining Self/Dependant medical claim balance.', {
-        shouldValidate: false,
-      })
+      const balanceLabel = Number.isFinite(available)
+        ? ` Remaining budget: ${formatCurrency(available)}.`
+        : ''
+      form.setValue(
+        'budgetNote',
+        `Refund capped at remaining Self/Dependant medical claim balance.${balanceLabel}`,
+        { shouldValidate: false },
+      )
     } else {
       form.setValue('budgetNote', '', { shouldValidate: false })
     }
