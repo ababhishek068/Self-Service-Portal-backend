@@ -76,7 +76,7 @@ export const roleQuickLinks: RoleQuickLink[] = [
   {
     label: 'Petty Cash',
     href: '/finance/petty-cash',
-    description: 'Raise a petty cash request.',
+    description: 'Raise a Petty Cash Request for official business expenses.',
     roles: ['staff'],
   },
   {

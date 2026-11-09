@@ -136,6 +136,12 @@ export interface MultiStepRequestConfig {
   newButtonLabel?: string
   headerLabel?: string
   initialMode?: 'list' | 'create'
+  /** Replace the default header create form (e.g. Petty Cash Request template). */
+  customCreate?: (ctx: {
+    onCreated: (request: PortalRequest) => void
+    onCancel: () => void
+  }) => ReactNode
+
   /** Curated fields shown on the detail screen. Undefined values are hidden. */
   detailFields?: MultiStepDetailFieldConfig[]
   /** Custom line section on the detail screen (overrides default line table). */
@@ -1522,6 +1528,16 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   if (mode === 'create') {
+    if (config.customCreate) {
+      return (
+        <PageWrapper title={config.title}>
+          {config.customCreate({
+            onCreated: headerCreated,
+            onCancel: () => setMode('list'),
+          })}
+        </PageWrapper>
+      )
+    }
     return <HeaderForm config={config} onCreated={headerCreated} onCancel={() => setMode('list')} />
   }
 

@@ -92,7 +92,7 @@ export const navigationMenu: NavItem[] = [
       { label: 'Advance Surrender', path: '/finance/advance-surrender', icon: ReceiptText },
       { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Medical Claim', path: '/finance/medical-claim', icon: BadgeCheck },
-      { label: 'Petty Cash', path: '/finance/petty-cash', icon: Banknote },
+      { label: 'Petty Cash Request', path: '/finance/petty-cash', icon: Banknote },
       { label: 'Petty Cash Replenishment', path: '/finance/petty-cash-replenishment', icon: ReceiptText },
     ],
   },

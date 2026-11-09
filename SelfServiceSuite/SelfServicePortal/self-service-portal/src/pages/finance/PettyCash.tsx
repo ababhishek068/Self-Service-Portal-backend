@@ -1,12 +1,13 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { formatISO } from 'date-fns'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
+import { PettyCashRequestTemplate } from '@/pages/finance/PettyCashRequestTemplate'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
-import { pettyCashTypeOptions } from '@/data/essOptions'
+import { pettyCashExpenseCategories, pettyCashTypeOptions } from '@/data/essOptions'
 import { pettyCashHeaderSchema, pettyCashLineSchema } from '@/schemas/requestSchemas'
 import { formatCurrency } from '@/utils/formatters'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
@@ -27,6 +28,18 @@ function accountDisplay(option: LookupOption | undefined) {
 
 export function PettyCash() {
   const paymentTypes = useLookupOptions('petty-cash-types', pettyCashTypeOptions)
+  const expenseCategoryOptions = useMemo(
+    () =>
+      pettyCashExpenseCategories.map((row) => ({
+        value: row.value,
+        label: row.label,
+        meta: {
+          examples: row.examples,
+          requiresSpecify: 'requiresSpecify' in row && row.requiresSpecify === true,
+        },
+      })),
+    [],
+  )
 
   const onLineValuesChange = useCallback(
     (values: FieldValues, form: UseFormReturn<FieldValues>) => {
@@ -37,8 +50,9 @@ export function PettyCash() {
         form.setValue('accountName', '', { shouldValidate: false })
         return
       }
+      const essp = expenseCategoryOptions.find((option) => String(option.value).trim() === type)
       const match = paymentTypes.options.find((option) => String(option.value).trim() === type)
-      const label = String(match?.label ?? '').trim()
+      const label = String(essp?.label ?? match?.label ?? '').trim()
       const accountNo = String(match?.meta?.accountNo ?? '').trim()
       const accountName = String(match?.meta?.accountName ?? '').trim()
       const display = accountDisplay(match)
@@ -52,26 +66,48 @@ export function PettyCash() {
         form.setValue('accountName', display || accountName, { shouldValidate: false })
       }
     },
-    [paymentTypes.options],
+    [expenseCategoryOptions, paymentTypes.options],
   )
 
   return (
     <MultiStepRequestPage
-      title="Petty Cash Settlement"
-      headerLabel="New Petty Cash Settlement"
-      description="Create a petty cash settlement header, then add settlement lines (payment type, G/L account from Business Central, and amount) before requesting approval. Department float limits apply on Petty Cash Request (replenishment), not on settlement."
+      title="Petty Cash Request"
+      headerLabel="New Petty Cash Request"
+      description="Submit a request for petty cash to cover official business expenses. Create the request, add lines if needed, attach supporting documents, then request approval. Settlement of the cash remains a separate Finance step."
       module={module}
       queryKey={['finance', 'petty-cash']}
       listRequests={() => listModuleRequests(module)}
       listStatusFilter
       cancelStatuses={FINANCE_CANCEL_STATUSES}
-      newButtonLabel="New Petty Cash Settlement"
+      newButtonLabel="New Petty Cash Request"
       headerSchema={pettyCashHeaderSchema}
       headerDefaults={{ dateNeeded: today, description: '' }}
-      buildHeaderPayload={(values) => ({ ...values, title: String(values.description || 'Petty Cash Settlement') })}
+      buildHeaderPayload={(values) => ({
+        ...values,
+        title: String(values.description || 'Petty Cash Request'),
+      })}
+      customCreate={({ onCreated, onCancel }) => (
+        <PettyCashRequestTemplate onCreated={onCreated} onCancel={onCancel} />
+      )}
       headerFields={[
-        { name: 'dateNeeded', label: 'Needed By Date', type: 'date', valuePaths: ['Needed_By_Date', 'RequiredDate', 'Required_Date', 'Date'] },
-        { name: 'description', label: 'Petty Cash Description & Reason', type: 'textarea', valuePaths: ['PaymentNarration', 'Payment_Narration', 'Posting_Description', 'PostingDescription', 'Narration'] },
+        {
+          name: 'dateNeeded',
+          label: 'Required Date',
+          type: 'date',
+          valuePaths: ['Needed_By_Date', 'RequiredDate', 'Required_Date', 'Date'],
+        },
+        {
+          name: 'description',
+          label: 'Purpose of Request',
+          type: 'textarea',
+          valuePaths: [
+            'PaymentNarration',
+            'Payment_Narration',
+            'Posting_Description',
+            'PostingDescription',
+            'Narration',
+          ],
+        },
       ]}
       headerSupplement={() => <FinanceEmployeeOrgBanner />}
       requiresAttachmentBeforeSubmit
@@ -79,12 +115,18 @@ export function PettyCash() {
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
         {
-          label: 'Needed By Date',
-          paths: ['payload.Needed_By_Date', 'payload.RequiredDate', 'payload.Required_Date', 'payload.Date', 'request.createdAt'],
+          label: 'Required Date',
+          paths: [
+            'payload.Needed_By_Date',
+            'payload.RequiredDate',
+            'payload.Required_Date',
+            'payload.Date',
+            'request.createdAt',
+          ],
           format: 'date',
         },
         {
-          label: 'Description',
+          label: 'Purpose of Request',
           paths: [
             'payload.PaymentNarration',
             'payload.Payment_Narration',
@@ -146,31 +188,30 @@ export function PettyCash() {
         fields: [
           {
             name: 'type',
-            label: 'Payment Type',
+            label: 'Expense Category',
             type: 'select',
-            options: paymentTypes.options,
-            placeholder: paymentTypes.isLoading
-              ? 'Loading payment types from Business Central…'
-              : 'Select payment type',
+            options: expenseCategoryOptions,
+            placeholder: 'Select category',
+            hint: 'ESSP petty cash categories (Office Supplies → Miscellaneous).',
           },
           {
             name: 'name',
-            label: 'Type Name',
+            label: 'Category Name',
             type: 'text',
             readOnly: true,
-            placeholder: 'Filled from the payment type',
+            placeholder: 'Filled from the expense category',
           },
           {
             name: 'accountName',
             label: 'G/L Account',
             type: 'text',
             readOnly: true,
-            placeholder: 'Filled from Business Central for the payment type',
+            placeholder: 'Filled from Business Central for the category',
           },
-          { name: 'amount', label: 'Amount', type: 'number' },
+          { name: 'amount', label: 'Amount (ETB)', type: 'number' },
         ],
         columns: [
-          { key: 'type', header: 'Type' },
+          { key: 'type', header: 'Category' },
           { key: 'name', header: 'Name' },
           {
             key: 'accountName',

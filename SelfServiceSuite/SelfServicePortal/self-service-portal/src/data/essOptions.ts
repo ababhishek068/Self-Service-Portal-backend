@@ -26,15 +26,94 @@ export const hospitalCategoryOptions = [
 export const MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT = 80
 
 /** Petty cash line types (ReceiptPaymentTypes G/L Account, Payment). */
-export const pettyCashTypeOptions = [
-  'TRANSPORT',
-  'MOBILE',
-  'STATIONERY',
-  'REFRESHMENT',
-  'POSTAGE',
-  'FUEL',
-  'OTHER',
-].map((value) => ({ label: value, value }))
+/** ESSP Petty Cash Request expense categories (template). */
+export const pettyCashExpenseCategories = [
+  {
+    value: 'OFFICE_SUPPLIES',
+    label: 'Office Supplies',
+    examples: 'Pens, paper, files, stationery',
+  },
+  {
+    value: 'OFFICE_MAINTENANCE',
+    label: 'Office Maintenance',
+    examples: 'Minor repairs, plumbing, electrical works',
+  },
+  {
+    value: 'CLEANING_SANITATION',
+    label: 'Cleaning & Sanitation',
+    examples: 'Cleaning materials, detergents, toiletries',
+  },
+  {
+    value: 'TRANSPORTATION',
+    label: 'Transportation',
+    examples: 'Taxi fares, local transport, parking fees',
+  },
+  {
+    value: 'FUEL_LUBRICANTS',
+    label: 'Fuel & Lubricants',
+    examples: 'Small vehicle fuel expenses',
+  },
+  {
+    value: 'COMMUNICATION',
+    label: 'Communication',
+    examples: 'Postage, courier, mobile airtime',
+  },
+  {
+    value: 'MEALS_REFRESHMENTS',
+    label: 'Meals & Refreshments',
+    examples: 'Tea, coffee, water, snacks',
+  },
+  {
+    value: 'MEETING_EXPENSES',
+    label: 'Meeting Expenses',
+    examples: 'Meeting refreshments and minor meeting costs',
+  },
+  {
+    value: 'MEDICAL_FIRST_AID',
+    label: 'Medical & First Aid',
+    examples: 'First-aid supplies and minor medical items',
+  },
+  {
+    value: 'PRINTING_PHOTOCOPYING',
+    label: 'Printing & Photocopying',
+    examples: 'Photocopying, printing, binding',
+  },
+  {
+    value: 'BANK_CHARGES',
+    label: 'Bank Charges',
+    examples: 'Minor bank transaction charges',
+  },
+  {
+    value: 'STAFF_WELFARE',
+    label: 'Staff Welfare',
+    examples: 'Small staff welfare expenses',
+  },
+  {
+    value: 'GUEST_HOSPITALITY',
+    label: 'Guest Hospitality',
+    examples: 'Refreshments for visitors and guests',
+  },
+  {
+    value: 'IT_COMPUTER_ACCESSORIES',
+    label: 'IT & Computer Accessories',
+    examples: 'Mouse, keyboard, cables, adapters',
+  },
+  {
+    value: 'MISCELLANEOUS',
+    label: 'Miscellaneous Expenses',
+    examples: 'Other approved minor expenses (Specify)',
+    requiresSpecify: true,
+  },
+] as const
+
+export const pettyCashTypeOptions = pettyCashExpenseCategories.map((row) => ({
+  value: row.value,
+  label: row.label,
+  meta: {
+    examples: row.examples,
+    requiresSpecify: 'requiresSpecify' in row && row.requiresSpecify === true,
+  },
+}))
 
 /** Advance Payment line types (BC ImprestType OData, Type = 'Imprest'). */
 export const imprestTypeOptions = [
