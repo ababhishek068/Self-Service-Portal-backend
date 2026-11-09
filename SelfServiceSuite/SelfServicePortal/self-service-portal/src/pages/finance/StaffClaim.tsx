@@ -5,7 +5,11 @@ import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOr
 import { validateHospitalCategory } from '@/api/endpoints/claimCalc'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
-import { claimTypeOptions, hospitalCategoryOptions } from '@/data/essOptions'
+import {
+  claimTypeOptions,
+  hospitalCategoryOptions,
+  MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT,
+} from '@/data/essOptions'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
 import { staffClaimHeaderSchema, staffClaimLineSchema } from '@/schemas/requestSchemas'
@@ -14,8 +18,6 @@ import { todayIsoDate } from '@/utils/validators'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 
 const module = { module: 'staffClaim', entity: 'selfServiceStaffClaims' } as const
-
-const HOSPITAL_REFUND_RATE: Record<string, number> = { '0': 1, '1': 0.8, '2': 0.9 }
 
 function claimTypeCode(value: unknown) {
   const raw = String(value ?? '').trim()
@@ -109,27 +111,29 @@ function accountDisplay(accountNo: string, accountName: string) {
 
 let medicalAmountRequest = 0
 
-function localMedicalRefund(hospitalCategory: string, medicalAmount: number) {
-  const rate = HOSPITAL_REFUND_RATE[hospitalCategory] ?? HOSPITAL_REFUND_RATE['0']
+/** Policy: company covers 80% of the accepted receipt (before Self/Dependant budget cap). */
+function localMedicalRefund(medicalAmount: number) {
+  const rate = MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT / 100
   const amountToRefund = Math.round(medicalAmount * rate * 100) / 100
-  return { amount: amountToRefund, amountToRefund, coveragePercent: rate * 100 }
+  return { amount: amountToRefund, amountToRefund, coveragePercent: MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT }
 }
 
 async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn<FieldValues>) {
   if (!isMedicalClaim(values.claimType)) return
   const hospitalCategory = String(values.hospitalCategory ?? '').trim()
   const medicalAmount = Number(values.medicalAmount ?? 0)
+  const patient = String(values.patient ?? 'self').trim()
   if (!hospitalCategory || !medicalAmount) return
 
   const requestKey = ++medicalAmountRequest
   try {
-    const data = await validateHospitalCategory({ hospitalCategory, medicalAmount })
+    const data = await validateHospitalCategory({ hospitalCategory, medicalAmount, patient })
     if (requestKey !== medicalAmountRequest) return
     let amount = Number(data.Amount ?? data.amount ?? 0)
     let amountToRefund = Number(data.AmountToRefund ?? data.amountToRefund ?? 0)
     let coveragePercent = Number(data.coveragePercent ?? data.CoveragePercent ?? 0)
     if (amountToRefund <= 0) {
-      const fallback = localMedicalRefund(hospitalCategory, medicalAmount)
+      const fallback = localMedicalRefund(medicalAmount)
       amount = fallback.amount
       amountToRefund = fallback.amountToRefund
       coveragePercent = fallback.coveragePercent
@@ -138,9 +142,16 @@ async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn
     if (netAmount > 0) form.setValue('amount', netAmount, { shouldValidate: true })
     if (amountToRefund >= 0) form.setValue('amountToRefund', amountToRefund, { shouldValidate: true })
     if (coveragePercent > 0) form.setValue('coveragePercent', coveragePercent, { shouldValidate: false })
+    if (data.budgetCapped) {
+      form.setValue('budgetNote', 'Refund capped at remaining Self/Dependant medical claim balance.', {
+        shouldValidate: false,
+      })
+    } else {
+      form.setValue('budgetNote', '', { shouldValidate: false })
+    }
   } catch {
-    // ABH can still use its configured reimbursement rates while SOAP is down.
-    const fallback = localMedicalRefund(hospitalCategory, medicalAmount)
+    // Policy rates still apply when SOAP is down.
+    const fallback = localMedicalRefund(medicalAmount)
     form.setValue('amount', fallback.amount, { shouldValidate: true })
     form.setValue('amountToRefund', fallback.amountToRefund, { shouldValidate: true })
     form.setValue('coveragePercent', fallback.coveragePercent, { shouldValidate: false })
@@ -292,8 +303,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       headerLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       description={
         medicalOnly
-          ? 'Add claim lines with hospital category and medical amount — Business Central calculates the refund amount and G/L account.'
-          : 'Add claim lines by type. Business Central sets the G/L account from the claim type; you enter amount and expenditure details.'
+          ? `Medical Claim & Reimbursement Policy: company covers ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by your remaining Self or Dependant medical claim balance (annual entitlement = Basic × 12 × 20%, split 50/50). Attach valid medical receipts.`
+          : 'Add claim lines by type. Business Central sets the G/L account from the claim type; you enter amount and expenditure details. Medical lines use the 80% company coverage policy, capped by Self/Dependant balance.'
       }
       module={module}
       queryKey={medicalOnly ? ['hr', 'staff-medical-claim'] : ['finance', 'staff-claim']}
@@ -428,9 +439,10 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           },
           {
             name: 'hospitalCategory',
-            label: 'Hospital Category',
+            label: 'Hospital Category (classification)',
             type: 'select',
             options: hospitalCategoryOptions,
+            placeholder: `Refund is always ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the bill, capped by balance`,
             visibleWhen: (values) => isMedicalClaim(values.claimType),
           },
           {
@@ -492,7 +504,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           },
           {
             name: 'coveragePercent',
-            label: 'Coverage %',
+            label: 'Company coverage % (policy)',
             type: 'number',
             readOnly: true,
             visibleWhen: (values) =>

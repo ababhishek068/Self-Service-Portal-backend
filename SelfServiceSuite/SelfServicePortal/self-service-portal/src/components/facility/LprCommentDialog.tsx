@@ -46,7 +46,7 @@ export function LprCommentDialog({
   // On the page body, so it is centred on the screen whatever section opens it.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#050610]/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="lpr-comment-title"

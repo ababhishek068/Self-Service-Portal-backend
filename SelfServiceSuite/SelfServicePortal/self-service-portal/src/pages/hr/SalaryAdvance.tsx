@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { createSalaryAdvanceRequest, listSalaryAdvanceRequests } from '@/api/endpoints/salaryAdvance'
+import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { RequestFormPage } from '@/components/shared/RequestFormPage'
 import { useAuth } from '@/hooks/useAuth'
 import { useEmployeeDefaults } from '@/hooks/useEmployeeDefaults'
@@ -84,8 +85,8 @@ export function SalaryAdvance() {
 
   return (
     <RequestFormPage
-      title="Advance Request"
-      description="Request an advance before an approved business activity. Business Central owns approval; this form captures your request and shows status."
+      title="Salary Advance Request"
+      description="Request a salary advance before an approved business activity. Business Central owns approval (line manager first, then FAD / COO / CEO by amount). Settlement is a separate Finance flow and is not part of this form."
       schema={salaryAdvanceSchema}
       queryKey={['hr', 'salary-advance']}
       listRequests={listSalaryAdvanceRequests}
@@ -100,6 +101,8 @@ export function SalaryAdvance() {
         )
       }}
       moduleConfig={{ module: 'salaryAdvance', entity: 'selfServiceSalaryAdvanceRequests' }}
+      listContent={<FinanceEmployeeOrgBanner showJobGradeAndDistrict />}
+      formHeader={<FinanceEmployeeOrgBanner showJobGradeAndDistrict />}
       defaultValues={{
         requestPurpose: purposeOptions[0]?.value ?? 'Other',
         otherPurposeDetails: '',
@@ -119,13 +122,7 @@ export function SalaryAdvance() {
           type: 'select',
           options: purposeOptions,
           valuePaths: ['payload.Purpose', 'payload.purpose', 'lines.0.Purpose'],
-          hint: [
-            employee?.displayName ? `Employee: ${employee.displayName}` : null,
-            employee?.employeeNo ? `Staff No. ${employee.employeeNo}` : null,
-            'Purpose list is filtered for your division. Choose Other to add details.',
-          ]
-            .filter(Boolean)
-            .join(' · '),
+          hint: 'Purpose list is filtered for your division. Choose Other (Specify) to add details.',
         },
         {
           name: 'otherPurposeDetails',
@@ -150,7 +147,7 @@ export function SalaryAdvance() {
           label: 'Required Advance Date',
           type: 'date',
           valuePaths: ['payload.PaymentReleaseDate', 'payload.Date', 'lines.0.DueDate'],
-          hint: 'Date you need the funds',
+          hint: 'Date you need the funds (ETB)',
         },
         {
           name: 'activityStartDate',
@@ -180,10 +177,10 @@ export function SalaryAdvance() {
         },
         {
           name: 'percentageSalary',
-          label: 'Percentage of salary (ETB)',
+          label: 'Requested Amount (% of basic salary)',
           type: 'number',
           valuePaths: ['PercentageofSalary', 'lines.0.PercentageofSalary', 'lines.0.PercentageOfSalary'],
-          hint: 'Currency is ETB. Business Central calculates the amount as this % of your basic salary.',
+          hint: 'Currency is ETB. Business Central calculates the advance amount as this percentage of your basic salary (required, greater than 0).',
         },
       ]}
       detailFields={[
@@ -191,7 +188,7 @@ export function SalaryAdvance() {
         { label: 'Requested Date', paths: ['payload.Date', 'payload.RequestedDate', 'request.createdAt'], format: 'date' },
         { label: 'Purpose', paths: ['payload.Purpose', 'payload.purpose'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
-        { label: 'Amount', paths: ['request.amount', 'payload.TotalNetAmount', 'lines.0.Amount'], format: 'currency' },
+        { label: 'Amount (ETB)', paths: ['request.amount', 'payload.TotalNetAmount', 'lines.0.Amount'], format: 'currency' },
       ]}
       detailLineLabel="Advance Line"
       detailLineColumns={[
@@ -199,7 +196,7 @@ export function SalaryAdvance() {
         { label: 'Type', paths: ['AdvanceType', 'Advance_Type'] },
         { label: 'Purpose', paths: ['Purpose', 'purpose'] },
         { label: 'Percentage of Salary', paths: ['PercentageofSalary', 'PercentageOfSalary', 'Percentage_of_Salary'], format: 'percentage' },
-        { label: 'Amount', paths: ['Amount', 'resolvedAmount', 'amount'], format: 'currency' },
+        { label: 'Amount (ETB)', paths: ['Amount', 'resolvedAmount', 'amount'], format: 'currency' },
       ]}
     />
   )

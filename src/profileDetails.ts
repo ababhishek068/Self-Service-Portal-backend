@@ -261,7 +261,14 @@ export function parseProfileSections(raw: unknown): ProfileSection[] {
     for (const item of entry.fields.slice(0, MAX_SECTION_FIELDS)) {
       if (!isPlainObject(item)) continue
       const key = String(item.key ?? '').replace(/[^a-z0-9]/gi, '').slice(0, 80)
-      const label = profileText(item.label).slice(0, 120)
+      // Pay & Bank: BC still sends "Customer Account No." / "Customer No" for the staff id — show Staff Number.
+      const rawLabel = profileText(item.label)
+      const label = (
+        /^(customer account no\.?|customer no\.?)$/i.test(rawLabel) ||
+        /^(customerno|customeraccountno|employeeaccountno)$/i.test(key)
+          ? 'Staff Number'
+          : rawLabel
+      ).slice(0, 120)
       const value = profileText(item.value).slice(0, 2000)
       if (!key || !label || !value || usedFieldKeys.has(key) || isSecretProfileKey(key) || isSecretProfileLabel(label)) continue
       const typeText = String(item.type ?? 'text').toLowerCase()

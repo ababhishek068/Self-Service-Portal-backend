@@ -76,7 +76,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 type="button"
                 aria-label="Dismiss dialog"
                 onClick={() => close(false)}
-                className={`absolute inset-0 bg-slate-900/45 backdrop-blur-sm ${leaving ? 'animate-overlay-out' : 'animate-overlay-in'}`}
+                className={`absolute inset-0 bg-[#151722]/45 backdrop-blur-sm ${leaving ? 'animate-overlay-out' : 'animate-overlay-in'}`}
               />
               <div
                 role="alertdialog"

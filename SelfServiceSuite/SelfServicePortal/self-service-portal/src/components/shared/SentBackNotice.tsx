@@ -35,8 +35,8 @@ export function SentBackNotice({
           </p>
           <p className="mt-2 text-xs text-orange-900">
             {sentBack.reopenRequired
-              ? 'Press Reopen to Correct, make the changes, then press Request Approval.'
-              : 'Make the changes, then press Request Approval.'}{' '}
+              ? 'Press Reopen to Correct, update the purpose / justification (and any other fields the comment asks for), then press Request Approval.'
+              : 'Update the purpose / justification (and any other fields the comment asks for), then press Request Approval.'}{' '}
             The approvals already given are kept and the request goes back to {approver}.
           </p>
         </div>

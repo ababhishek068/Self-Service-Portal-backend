@@ -24,7 +24,7 @@ export function ConfirmDialog({
   // On the page body: a dialog inside an animated (transformed) section would centre on that
   // section instead of the screen (UAT-2: the Approve confirmation showed at the top).
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#050610]/40 p-4">
       <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
         <div className="flex gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-50">

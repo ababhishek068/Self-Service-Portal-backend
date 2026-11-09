@@ -32,9 +32,9 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: ['staff'],
   },
   {
-    label: 'New imprest request',
-    href: '/finance/imprest',
-    description: 'Raise a staff imprest advance requisition.',
+    label: 'New advance payment',
+    href: '/finance/advance-payment',
+    description: 'Raise a field activity advance payment request.',
     roles: ['staff'],
   },
   {
@@ -80,9 +80,9 @@ export const roleQuickLinks: RoleQuickLink[] = [
     roles: ['staff'],
   },
   {
-    label: 'Imprest Surrender',
-    href: '/finance/imprest-surrender',
-    description: 'Surrender a posted or approved imprest.',
+    label: 'Advance Surrender',
+    href: '/finance/advance-surrender',
+    description: 'Settle a posted or approved advance payment.',
     roles: ['staff'],
   },
   {
@@ -113,7 +113,7 @@ export const roleQuickLinks: RoleQuickLink[] = [
 
 /** One-line summary of what each primary role can do in the portal. */
 export const roleCapabilitySummary: Partial<Record<PortalRole, string>> = {
-  staff: 'Attendance, leave, payslip, claims, imprest, surrender, petty cash, requisitions, request letters, and employee exit.',
+  staff: 'Attendance, leave, payslip, claims, advance payment, advance surrender, petty cash, requisitions, request letters, and employee exit.',
   lineManager: 'Everything staff can do, plus approve or reject team requests.',
   hod: 'Manager access plus department team views, attendance, and HR reports.',
   finance: 'Staff self-service plus finance approval authority on pending documents.',

@@ -26,8 +26,8 @@ Write-Host "`n=== PORTAL API ===" -ForegroundColor Cyan
 try {
     $build = Invoke-RestMethod -Uri "$PortalUrl/api/portal-build" -TimeoutSec 10
     Write-Host "portalApiBuild: $($build.portalApiBuild)" -ForegroundColor Green
-    if ($build.portalApiBuild -notlike '*v316*1.0.3.477*') {
-        Write-Host "WARNING: Expected v316 / 1.0.3.477. Deploy ABH-Portal-COMPLETE-1.0.3.477.zip" -ForegroundColor Yellow
+    if ($build.portalApiBuild -notlike '*v348*1.0.3.509*') {
+        Write-Host "WARNING: Expected v348 / 1.0.3.509. Deploy ABH-Portal-COMPLETE-1.0.3.509.zip" -ForegroundColor Yellow
     }
 } catch {
     Write-Host "Portal not reachable at $PortalUrl — is node running?" -ForegroundColor Red

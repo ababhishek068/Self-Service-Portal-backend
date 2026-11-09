@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { brand, brandCopyright } from '@/config/brand'
 import { BrandLogo } from '@/components/brand/BrandLogo'
+import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { cn } from '@/lib/utils'
 
 interface AuthShellProps {
@@ -14,7 +15,8 @@ interface AuthShellProps {
 
 export function AuthShell({ title, subtitle, children, footer, size = 'md' }: AuthShellProps) {
   return (
-    <main className="portal-login-bg portal-safe-pt portal-safe-pb flex min-h-screen items-center justify-center px-4 py-8">
+    <main className="portal-login-bg portal-safe-pt portal-safe-pb relative flex min-h-screen items-center justify-center px-4 py-8">
+      <ThemeToggle className="absolute right-3 top-3 z-20 bg-white/70 shadow-sm ring-1 ring-slate-200 backdrop-blur sm:right-5 sm:top-5" />
       <div className={cn('w-full', size === 'lg' ? 'max-w-2xl' : 'max-w-md')}>
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex justify-center">

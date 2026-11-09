@@ -29,8 +29,8 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
   const filters = [
     { value: 'all', label: 'All' },
     { value: 'leave', label: 'Leave' },
-    { value: 'imprest', label: 'Imprest' },
-    { value: 'imprestSurrender', label: 'Surrender' },
+    { value: 'imprest', label: 'Advance Payment' },
+    { value: 'imprestSurrender', label: 'Advance Surrender' },
     { value: 'purchaseRequisition', label: 'Purchase' },
     { value: 'storeRequisition', label: 'Store' },
     { value: 'pettyCashReplenishment', label: 'PV' },
@@ -38,7 +38,8 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     { value: 'transferOrder', label: 'Order' },
     { value: 'employeeExit', label: 'Exit' },
     { value: 'hrServiceLetter', label: 'Letters' },
-    { value: 'overtime', label: 'Overtime' },
+    { value: 'overtimeWork', label: 'Overtime Request' },
+    { value: 'overtime', label: 'Overtime Payment' },
     { value: 'profileChange', label: 'Profile changes' },
   ]
   const sourceRows = useMemo(() => approvals.data ?? [], [approvals.data])
@@ -94,13 +95,13 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
       {type === 'pending' ? <LocalPurchaseWaiting /> : null}
       {type === 'pending' && !approvals.isLoading ? (
         <div className="mb-5 overflow-hidden rounded-2xl border border-blue-100 bg-white/90 shadow-[0_20px_60px_-35px_rgba(0,58,112,0.5)] backdrop-blur">
-          <div className="grid gap-4 bg-gradient-to-r from-[var(--portal-navy)] via-[#04a8b0] to-[var(--portal-navy-dark)] p-5 text-white md:grid-cols-[1fr_auto] md:items-center">
+          <div className="grid gap-4 portal-hero-band p-5 text-white md:grid-cols-[1fr_auto] md:items-center">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-blue-100">
+              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/75">
                 <FileCheck2 className="h-4 w-4" /> Approval workspace
               </div>
               <h2 className="text-xl font-semibold">{sourceRows.length} documents awaiting your decision</h2>
-              <p className="mt-1 text-sm text-blue-100">Filter by workflow, review the source record, then approve or reject with an audit comment.</p>
+              <p className="mt-1 text-sm text-white/75">Filter by workflow, review the source record, then approve or reject with an audit comment.</p>
             </div>
             <label className="relative block min-w-0 md:w-72">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-700" />

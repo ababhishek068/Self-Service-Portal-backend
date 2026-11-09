@@ -18,9 +18,12 @@ export function BrandLogo({
   variant: BrandLogoVariant
   className?: string
 }) {
+  // Dark teal/navy chrome (login brand pane, sidebar, mobile drawer) needs the
+  // white-lettering mark; light surfaces keep the indigo-lettering mark.
+  const onDark = variant === 'login' || variant === 'mobile' || variant === 'sidebar'
   return (
     <img
-      src={brand.logoSrc}
+      src={onDark ? brand.logoOnDarkSrc : brand.logoSrc}
       alt={brand.logoAlt}
       className={cn('select-none object-contain', variantClass[variant], className)}
       draggable={false}

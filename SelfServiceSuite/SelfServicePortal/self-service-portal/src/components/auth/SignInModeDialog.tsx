@@ -21,7 +21,7 @@ export function SignInModeDialog({ open, onClose, onSelect, disabled }: SignInMo
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-[#050610]/50 p-4 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sign-in-mode-title"

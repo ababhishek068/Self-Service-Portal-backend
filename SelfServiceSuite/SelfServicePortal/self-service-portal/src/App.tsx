@@ -48,6 +48,7 @@ import { GatePass } from '@/pages/facility/GatePass'
 import type { GatePassSource } from '@/api/endpoints/gatePass'
 import { ComingSoon } from '@/pages/shared/ComingSoon'
 import { OvertimeRequest } from '@/pages/hr/OvertimeRequest'
+import { OvertimeWorkRequest } from '@/pages/hr/OvertimeWorkRequest'
 import { SalaryAdvance } from '@/pages/hr/SalaryAdvance'
 import { IctHelpdesk } from '@/pages/ict/IctHelpdesk'
 
@@ -87,7 +88,8 @@ function ProtectedLayout() {
   return (
     <LayoutProvider>
       <div className="flex h-screen flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1">
+        {/* relative: the collapsed sidebar reveals itself over this row on hover */}
+        <div className="relative flex min-h-0 flex-1">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <Topbar />
@@ -109,8 +111,10 @@ export default function App() {
       <Route path="/register" element={<Navigate to="/forgot-password" replace />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
-        <Route path="finance/imprest" element={<ImprestRequest />} />
-        <Route path="finance/imprest-surrender" element={<ImprestSurrender />} />
+        <Route path="finance/advance-payment" element={<ImprestRequest />} />
+        <Route path="finance/advance-surrender" element={<ImprestSurrender />} />
+        <Route path="finance/imprest" element={<Navigate to="/finance/advance-payment" replace />} />
+        <Route path="finance/imprest-surrender" element={<Navigate to="/finance/advance-surrender" replace />} />
         <Route path="finance/staff-claim" element={<StaffClaim />} />
         <Route path="finance/medical-claim" element={<StaffClaim medicalOnly />} />
         <Route path="finance/petty-cash" element={<PettyCash />} />
@@ -153,6 +157,7 @@ export default function App() {
         <Route path="hr/payslip" element={<Payslip />} />
         <Route path="hr/salary-advance" element={<SalaryAdvance />} />
         <Route path="hr/document-requisition" element={<Navigate to="/hr/request-letters" replace />} />
+        <Route path="hr/overtime-work-request" element={<OvertimeWorkRequest />} />
         <Route path="hr/overtime-request" element={<OvertimeRequest />} />
         <Route path="hr/travel-request" element={<ComingSoon title="Travel Request" />} />
         <Route path="hr/request-letters" element={<HrServiceRequestLetters />} />

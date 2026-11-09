@@ -481,7 +481,7 @@ function RowDialog({
     onSave(Object.fromEntries(Object.entries(values).map(([key, entry]) => [key, entry.trim()])))
   }
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#050610]/40 p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
@@ -910,7 +910,7 @@ function SubmitDialog({ editor, onClose, onSubmit }: { editor: ProfileEditor; on
   const lines = changeLines(editor)
   const sections = [...new Set(lines.map((line) => line.section))]
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-label="Submit your changes to HR">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#050610]/40 p-4" role="dialog" aria-modal="true" aria-label="Submit your changes to HR">
       <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl bg-white shadow-xl">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-slate-950">Submit your changes to HR</h2>

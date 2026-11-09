@@ -6,8 +6,13 @@ import { AuthProvider } from '@/context/AuthContext'
 import { ToastProvider } from '@/components/feedback/ToastProvider'
 import { ConfirmProvider } from '@/components/feedback/ConfirmProvider'
 import { ProgressProvider } from '@/components/feedback/ProgressProvider'
+import { ThemeProvider } from '@/context/ThemeContext'
+import { applyTheme, readStoredTheme } from '@/lib/theme'
 import App from './App'
 import './index.css'
+
+// Before the first render, so the saved theme never flashes the other one.
+applyTheme(readStoredTheme())
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,18 +28,20 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
-          <ToastProvider>
-            <ConfirmProvider>
-              <ProgressProvider>
-                <App />
-              </ProgressProvider>
-            </ConfirmProvider>
-          </ToastProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AuthProvider>
+            <ToastProvider>
+              <ConfirmProvider>
+                <ProgressProvider>
+                  <App />
+                </ProgressProvider>
+              </ConfirmProvider>
+            </ToastProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 )

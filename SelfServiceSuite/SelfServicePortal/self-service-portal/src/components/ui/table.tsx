@@ -14,7 +14,11 @@ Table.displayName = 'Table'
 
 export const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
   ({ className, ...props }, ref) => (
-    <thead ref={ref} className={cn('bg-[var(--portal-navy)] text-white', className)} {...props} />
+    <thead
+      ref={ref}
+      className={cn('bg-slate-50/90 [&_tr]:border-b [&_tr]:border-slate-200', className)}
+      {...props}
+    />
   ),
 )
 TableHeader.displayName = 'TableHeader'
@@ -29,7 +33,7 @@ export const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttribut
     <tr
       ref={ref}
       className={cn(
-        'border-b border-slate-200 transition-colors duration-200 even:bg-slate-50/80 hover:bg-blue-50/60',
+        'border-b border-slate-100 transition-colors duration-150 last:border-b-0 hover:bg-slate-50/80',
         className,
       )}
       {...props}
@@ -43,7 +47,7 @@ export const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttr
     <th
       ref={ref}
       className={cn(
-        'border border-slate-400 px-2.5 py-2 text-left align-middle text-xs font-bold text-white sm:px-3 sm:py-2.5 sm:text-sm',
+        'whitespace-nowrap px-3 py-2.5 text-left align-middle text-[11px] font-semibold uppercase tracking-wider text-slate-500 sm:px-4 sm:py-3 sm:text-xs',
         className,
       )}
       {...props}
@@ -57,7 +61,7 @@ export const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttr
     <td
       ref={ref}
       className={cn(
-        'border border-slate-200 px-2.5 py-2 align-middle text-xs text-slate-800 sm:px-3 sm:text-sm',
+        'px-3 py-2.5 align-middle text-xs text-slate-700 sm:px-4 sm:py-3 sm:text-sm',
         className,
       )}
       {...props}

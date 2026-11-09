@@ -1,7 +1,7 @@
 import { authDelete, authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
 
-/** Staff Overtime Request (BC 1.0.3.606; BC workflow 1.0.3.622/623): Line Manager, FD, HR, Finance, then payroll. */
+/** Staff Overtime Payment Request (BC 1.0.3.606; BC workflow 1.0.3.622/623): Line Manager, FD, HR, Finance, then payroll. */
 /** Normal day (6 AM - 10 PM), night (10 PM - 6 AM), rest day, public holiday: the four overtime sheet bands. */
 export type OvertimeDayType = 'working' | 'night' | 'restDay' | 'holiday'
 
@@ -141,6 +141,8 @@ export interface OvertimeLineInput {
 
 export interface OvertimeDetails extends OvertimeLineInput {
   projectNo: string
+  /** Previously approved Overtime Work Request (required before payment can be processed). */
+  priorWorkRequestNo: string
   lines: OvertimeLineInput[]
 }
 

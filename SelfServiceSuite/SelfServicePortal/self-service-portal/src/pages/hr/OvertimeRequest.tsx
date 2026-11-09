@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addDays, format, isValid, parseISO } from 'date-fns'
+import { format, isValid, parseISO } from 'date-fns'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Eye,
   Flag,
   History,
   Info,
@@ -14,7 +15,7 @@ import {
   MinusCircle,
   Network,
   Pencil,
-  Plus,
+  Printer,
   RefreshCw,
   Save,
   Send,
@@ -26,8 +27,8 @@ import {
   Users,
   XCircle,
 } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   deleteOvertimeRequest,
   estimateOvertimeAmount,
@@ -42,6 +43,11 @@ import {
   type OvertimeRequest as OvertimeRequestRow,
   type OvertimeStep,
 } from '@/api/endpoints/overtime'
+import {
+  fetchApprovedOvertimeWorkRequests,
+  fetchOvertimeWorkByPayment,
+  type OvertimeWorkRequest as OvertimeWorkRow,
+} from '@/api/endpoints/overtimeWork'
 import { getLocalPurchaseProjects } from '@/api/endpoints/requestEndpoint'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -50,13 +56,10 @@ import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { ClockTimePicker } from '@/components/shared/ClockTimePicker'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
 
 const LIST_KEY = ['hr', 'overtime-requests'] as const
@@ -70,44 +73,6 @@ const DAY_TYPES: Array<{ value: OvertimeDayType; label: string }> = [
 ]
 
 type Mode = 'form' | 'list' | 'detail'
-
-/** The line being entered: everything blank until the employee fills it in (category too). */
-type EntryDraft = Omit<OvertimeLineInput, 'dayType'> & { dayType: OvertimeDayType | '' }
-
-function emptyEntry(): EntryDraft {
-  return { overtimeDate: '', startTime: '', endTime: '', dayType: '', reason: '' }
-}
-
-/** Start / End Time: chosen on a clock face (hour, minutes, AM / PM); the form keeps 24-hour time. */
-function TimeField({
-  id,
-  label,
-  value,
-  defaultMeridiem,
-  onChange,
-}: {
-  id: string
-  label: string
-  value: string
-  defaultMeridiem: 'AM' | 'PM'
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-sm text-slate-700">
-        {label}
-        <span className="text-red-500"> *</span>
-      </Label>
-      <ClockTimePicker
-        id={id}
-        value={value}
-        title={`Select ${label.toLowerCase()}`}
-        defaultMeridiem={defaultMeridiem}
-        onChange={onChange}
-      />
-    </div>
-  )
-}
 
 function linesOf(request: OvertimeRequestRow): OvertimeLineInput[] {
   return request.lines.map((line) => ({
@@ -123,23 +88,6 @@ function sortLines(lines: OvertimeLineInput[]) {
   return [...lines].sort((left, right) => (left.overtimeDate + left.startTime).localeCompare(right.overtimeDate + right.startTime))
 }
 
-/** Minutes a line covers from 1 January 1970 (an end before the start is the next morning). */
-function slotOf(line: OvertimeLineInput) {
-  const [startHour = 0, startMinute = 0] = line.startTime.split(':').map(Number)
-  const [endHour = 0, endMinute = 0] = line.endTime.split(':').map(Number)
-  const start = startHour * 60 + startMinute
-  let end = endHour * 60 + endMinute
-  if (end <= start) end += 1440
-  const base = (Date.parse(`${line.overtimeDate}T00:00:00Z`) / 60_000) || 0
-  return { start: base + start, end: base + end }
-}
-
-function overlaps(left: OvertimeLineInput, right: OvertimeLineInput) {
-  const a = slotOf(left)
-  const b = slotOf(right)
-  return Math.min(a.end, b.end) > Math.max(a.start, b.start)
-}
-
 /** "11/06/2026", as on the manager form. */
 function shortDate(value: string) {
   const parsed = parseISO(value)
@@ -152,57 +100,6 @@ function clockText(value: string) {
   if (!match) return value || '—'
   const hour = Number(match[1])
   return `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]} ${hour < 12 ? 'AM' : 'PM'}`
-}
-
-function minutesOfClock(value: string) {
-  const [hour = 0, minute = 0] = value.split(':').map(Number)
-  return hour * 60 + minute
-}
-
-function clockOf(minutes: number) {
-  const value = ((minutes % 1440) + 1440) % 1440
-  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
-}
-
-function shiftDate(date: string, days: number) {
-  const parsed = parseISO(date)
-  return days && isValid(parsed) ? format(addDays(parsed, days), 'yyyy-MM-dd') : date
-}
-
-/** Normal day hours lie within 6 AM - 10 PM and night hours within 10 PM - 6 AM (BC checks the same). */
-function categoryProblem(line: OvertimeLineInput) {
-  if (line.dayType !== 'working' && line.dayType !== 'night') return ''
-  const split = splitOvertimeHours(line.startTime, line.endTime, 'working')
-  if (!split.totalHours) return ''
-  if (line.dayType === 'working' && split.nightHours > 0) {
-    return 'Normal day hours are between 6 AM and 10 PM. Put the hours after 10 PM (or before 6 AM) in a second line with Night hours.'
-  }
-  if (line.dayType === 'night' && split.normalHours > 0) {
-    return 'Night hours are between 10 PM and 6 AM. Put the hours from 6 AM to 10 PM in a second line with Normal day hours.'
-  }
-  return ''
-}
-
-/** A line that crosses 6 AM or 10 PM, cut into normal day and night lines (the date moves on after midnight). */
-function splitAtBands(line: OvertimeLineInput): OvertimeLineInput[] {
-  if (line.dayType !== 'working' && line.dayType !== 'night') return []
-  const split = splitOvertimeHours(line.startTime, line.endTime, 'working')
-  if (!split.normalHours || !split.nightHours) return []
-  const start = minutesOfClock(line.startTime)
-  let end = minutesOfClock(line.endTime)
-  if (end <= start) end += 1440
-  const cuts = [start, ...[360, 1320, 1800, 2760].filter((point) => point > start && point < end), end]
-  return cuts.slice(0, -1).map((from, index) => {
-    const to = cuts[index + 1]!
-    const normal = (from >= 360 && to <= 1320) || (from >= 1800 && to <= 2760)
-    return {
-      ...line,
-      overtimeDate: shiftDate(line.overtimeDate, Math.floor(from / 1440)),
-      startTime: clockOf(from),
-      endTime: clockOf(to),
-      dayType: normal ? ('working' as const) : ('night' as const),
-    }
-  })
 }
 
 function dateRange(lines: Array<{ overtimeDate: string }>, fallback: string) {
@@ -580,6 +477,88 @@ function OvertimeLinesTable({
   )
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+/** Printable copy of an approved OT work request for verification / audit. */
+function printApprovedWorkRequest(work: OvertimeWorkRow) {
+  const lines = work.lines?.length
+    ? work.lines
+    : [
+        {
+          overtimeDate: work.overtimeDate,
+          startTime: work.overtimeFrom,
+          endTime: work.overtimeTo,
+          dayType: 'working',
+          reason: work.reason,
+          totalHours: work.totalHours,
+        },
+      ]
+  const rows = lines
+    .map(
+      (line) =>
+        `<tr>
+          <td>${escapeHtml(line.overtimeDate)}</td>
+          <td>${escapeHtml(line.startTime)} – ${escapeHtml(line.endTime)}</td>
+          <td>${escapeHtml(String(line.dayType))}</td>
+          <td>${Number(line.totalHours || 0).toFixed(2)}</td>
+          <td>${escapeHtml(line.reason || work.reason || '')}</td>
+        </tr>`,
+    )
+    .join('')
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(work.requestNo)} — Overtime Work Request</title>
+  <style>
+    body { font-family: Georgia, "Times New Roman", serif; color: #0f172a; margin: 2rem; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.25rem; }
+    .meta { color: #475569; margin-bottom: 1.25rem; font-size: 0.95rem; }
+    dl { display: grid; grid-template-columns: 11rem 1fr; gap: 0.35rem 1rem; margin: 0 0 1.25rem; }
+    dt { color: #64748b; } dd { margin: 0; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; }
+    th, td { border: 1px solid #cbd5e1; padding: 0.45rem 0.6rem; text-align: left; font-size: 0.92rem; }
+    th { background: #f8fafc; }
+    .footer { margin-top: 1.5rem; font-size: 0.85rem; color: #64748b; }
+    @media print { body { margin: 0.75rem; } }
+  </style>
+</head>
+<body>
+  <h1>Overtime Work Request ${escapeHtml(work.requestNo)}</h1>
+  <p class="meta">Status: ${escapeHtml(work.status)} · Printed ${escapeHtml(new Date().toLocaleString())}</p>
+  <dl>
+    <dt>Employee</dt><dd>${escapeHtml(work.employeeName)} (${escapeHtml(work.employeeNo)})</dd>
+    <dt>Designation</dt><dd>${escapeHtml(work.designation || '—')}</dd>
+    <dt>Department</dt><dd>${escapeHtml(work.departmentName || work.departmentCode || '—')}</dd>
+    <dt>Work location</dt><dd>${escapeHtml(work.workLocation || '—')}</dd>
+    <dt>Normal hours</dt><dd>${escapeHtml(work.normalHoursFrom || '—')} – ${escapeHtml(work.normalHoursTo || '—')}</dd>
+    <dt>Total hours</dt><dd>${Number(work.totalHours || 0).toFixed(2)}</dd>
+    <dt>Justification</dt><dd>${escapeHtml(work.reason || '—')}</dd>
+    <dt>Expected deliverables</dt><dd>${escapeHtml(work.expectedDeliverables || '—')}</dd>
+  </dl>
+  <h2 style="font-size:1.05rem;margin:0">Overtime lines</h2>
+  <table>
+    <thead><tr><th>Date</th><th>Time</th><th>Category</th><th>Hours</th><th>Reason</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <p class="footer">For verification, approval, record-keeping or audit. One approved work request may be linked to only one overtime payment claim.</p>
+  <script>window.onload = function () { window.print(); }</script>
+</body>
+</html>`
+  const popup = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
+  if (!popup) return false
+  popup.document.open()
+  popup.document.write(html)
+  popup.document.close()
+  return true
+}
+
 export function OvertimeRequest() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -588,14 +567,9 @@ export function OvertimeRequest() {
   const [mode, setMode] = useState<Mode>(searchParams.get('request') ? 'detail' : 'form')
   const [selectedNo, setSelectedNo] = useState<string | null>(searchParams.get('request'))
   const [editingNo, setEditingNo] = useState<string | null>(null)
-  const [entry, setEntry] = useState<EntryDraft>(emptyEntry)
   const [lines, setLines] = useState<OvertimeLineInput[]>([])
-  const [editingLine, setEditingLine] = useState<number | null>(null)
-  // The New Line card opens with Add Line (or the pencil of a line) and closes with Save / Cancel.
-  const [entryOpen, setEntryOpen] = useState(false)
-  const [entryKey, setEntryKey] = useState(0)
   const [projectNo, setProjectNo] = useState('')
-  const [entryError, setEntryError] = useState<string | null>(null)
+  const [priorWorkRequestNo, setPriorWorkRequestNo] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
   const contextQuery = useQuery({ queryKey: CONTEXT_KEY, queryFn: fetchOvertimeContext, staleTime: 60_000 })
@@ -611,6 +585,18 @@ export function OvertimeRequest() {
     queryFn: getLocalPurchaseProjects,
     staleTime: 10 * 60_000,
     enabled: mode === 'form',
+  })
+  const approvedWorkQuery = useQuery({
+    queryKey: ['hr', 'overtime-work-approved', priorWorkRequestNo],
+    queryFn: () => fetchApprovedOvertimeWorkRequests(priorWorkRequestNo || undefined),
+    staleTime: 30_000,
+    enabled: mode === 'form',
+  })
+  const linkedWorkQuery = useQuery({
+    queryKey: ['hr', 'overtime-work-by-payment', selectedNo],
+    queryFn: () => fetchOvertimeWorkByPayment(selectedNo!),
+    staleTime: 30_000,
+    enabled: mode === 'detail' && Boolean(selectedNo),
   })
 
   const context = contextQuery.data
@@ -630,20 +616,10 @@ export function OvertimeRequest() {
 
   const rates = context?.rates ?? { normal: 1.5, night: 1.75, restDay: 2, holiday: 2.5 }
   const hourlyRate = context?.hourlyRate ?? 0
-  const maxLines = context?.maxLines ?? 1
-  const entryHours = useMemo(
-    () => splitOvertimeHours(entry.startTime, entry.endTime, entry.dayType || 'working'),
-    [entry.startTime, entry.endTime, entry.dayType],
-  )
-  // The summary counts the saved lines only: 0.00 hours until the first line is saved.
+  // The summary counts the saved lines only: 0.00 hours until a work request is selected.
   const counted = lines
   const busiest = busiestMonth(rows, counted, editingNo ?? '')
   const limit = context?.maxHoursPerMonth ?? 0
-  const dateObject = parseISO(entry.overtimeDate)
-  const weekendHint =
-    entry.dayType === 'working' && isValid(dateObject) && (dateObject.getDay() === 0 || dateObject.getDay() === 6)
-      ? `${format(dateObject, 'EEEE')}: if it is your weekly rest day, choose Rest day hours.`
-      : ''
 
   const projectOptions = useMemo(
     () => [
@@ -667,107 +643,20 @@ export function OvertimeRequest() {
   const startNew = () => {
     setEditingNo(null)
     setLines([])
-    setEntry(emptyEntry())
-    setEntryOpen(false)
-    setEditingLine(null)
-    setEntryError(null)
     setProjectNo('')
+    setPriorWorkRequestNo('')
     goTo('form')
   }
 
   const startEdit = (request: OvertimeRequestRow) => {
     setEditingNo(request.requestNo)
     setLines(sortLines(linesOf(request)))
-    setEntry(emptyEntry())
-    setEntryOpen(false)
-    setEditingLine(null)
-    setEntryError(null)
     setProjectNo(request.projectNo)
+    // Restore the linked approved work request so the picker keeps it available.
+    void fetchOvertimeWorkByPayment(request.requestNo).then((work) => {
+      setPriorWorkRequestNo(work?.requestNo ?? '')
+    })
     goTo('form')
-  }
-
-  /** What is wrong with the line being entered (null when it can be saved). */
-  const lineProblem = (draft: EntryDraft, others: OvertimeLineInput[]) => {
-    if (!draft.overtimeDate) return 'Choose the overtime date.'
-    if (!draft.startTime) return 'Enter the start time as HH:MM and choose AM or PM.'
-    if (!draft.endTime) return 'Enter the end time as HH:MM and choose AM or PM.'
-    if (splitOvertimeHours(draft.startTime, draft.endTime, 'working').totalHours <= 0) {
-      return 'The end time must be different from the start time.'
-    }
-    if (!draft.dayType) return 'Choose the overtime category.'
-    if (draft.reason.trim().length < 3) return 'Enter the reason / justification for the overtime.'
-    const line: OvertimeLineInput = { ...draft, dayType: draft.dayType }
-    const category = categoryProblem(line)
-    if (category) return category
-    const clash = others.find((other) => overlaps(line, other))
-    if (clash) {
-      return `It overlaps the line of ${shortDate(clash.overtimeDate)} ${clockText(clash.startTime)} – ${clockText(clash.endTime)}.`
-    }
-    return null
-  }
-
-  const openEntry = (draft: EntryDraft, index: number | null) => {
-    setEntry(draft)
-    setEditingLine(index)
-    setEntryError(null)
-    setEntryKey((key) => key + 1)
-    setEntryOpen(true)
-  }
-
-  const openNewLine = () => openEntry(emptyEntry(), null)
-
-  const editLine = (index: number) => {
-    const line = lines[index]
-    if (line) openEntry(line, index)
-  }
-
-  const cancelEntry = () => {
-    setEntry(emptyEntry())
-    setEditingLine(null)
-    setEntryError(null)
-    setEntryOpen(false)
-  }
-
-  /** Save: the line goes into the table and the card closes (Add Line opens it again). */
-  const saveLine = () => {
-    const others = lines.filter((_, index) => index !== editingLine)
-    const problem = lineProblem(entry, others)
-    if (problem || !entry.dayType) {
-      setEntryError(problem ?? 'Choose the overtime category.')
-      return
-    }
-    const line: OvertimeLineInput = { ...entry, dayType: entry.dayType, reason: entry.reason.trim() }
-    setLines(sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item))))
-    cancelEntry()
-    setFormError(null)
-  }
-
-  /** One click: the entered line becomes a normal day line and a night line (or more), each checked. */
-  const splitEntry = () => {
-    if (!entry.dayType) return
-    const parts = splitAtBands({ ...entry, dayType: entry.dayType })
-    const others = lines.filter((_, index) => index !== editingLine)
-    const added: OvertimeLineInput[] = []
-    for (const part of parts) {
-      const problem = lineProblem(part, [...others, ...added])
-      if (problem) {
-        setEntryError(problem)
-        return
-      }
-      added.push({ ...part, reason: part.reason.trim() })
-    }
-    if (others.length + added.length > maxLines) {
-      setEntryError(`A request can hold ${maxLines} lines. Make a second request for the other days.`)
-      return
-    }
-    setLines(sortLines([...others, ...added]))
-    cancelEntry()
-    setFormError(null)
-  }
-
-  const deleteLine = (index: number) => {
-    setLines(lines.filter((_, item) => item !== index))
-    if (editingLine !== null) cancelEntry()
   }
 
   const rememberRow = (request: OvertimeRequestRow) => {
@@ -782,6 +671,8 @@ export function OvertimeRequest() {
     mutationFn: saveOvertimeRequest,
     onSuccess: (request, input) => {
       rememberRow(request)
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-approved'] })
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-by-payment'] })
       if (input.submit) {
         const first = request.steps.find((step) => step.status === 'Pending')
         toast.success(
@@ -819,6 +710,8 @@ export function OvertimeRequest() {
         current.filter((row) => row.requestNo !== requestNo),
       )
       void queryClient.invalidateQueries({ queryKey: LIST_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-approved'] })
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-by-payment'] })
       toast.success('Draft deleted', `${requestNo} was removed.`)
       goTo('list')
     },
@@ -828,39 +721,30 @@ export function OvertimeRequest() {
   const busy = saveMutation.isPending
 
   const send = (submit: boolean) => {
-    let all = lines
-    // A line filled in on the open card but not saved yet is saved for the employee.
-    const entryStarted = entryOpen && Boolean(entry.overtimeDate || entry.startTime || entry.endTime || entry.dayType || entry.reason.trim())
-    if (entryStarted) {
-      const others = lines.filter((_, index) => index !== editingLine)
-      const problem = lineProblem(entry, others)
-      if (problem || !entry.dayType) {
-        setEntryError(problem ?? 'Choose the overtime category.')
-        setFormError(`Save or cancel the overtime line you are entering first. ${problem ?? ''}`.trim())
-        return
-      }
-      if (editingLine === null && lines.length >= maxLines) {
-        setFormError(`This request can hold ${maxLines} line${maxLines === 1 ? '' : 's'}. Cancel the line you are entering, or make a second request.`)
-        return
-      }
-      const line: OvertimeLineInput = { ...entry, dayType: entry.dayType, reason: entry.reason.trim() }
-      all = sortLines(editingLine === null ? [...lines, line] : lines.map((item, index) => (index === editingLine ? line : item)))
+    if (!priorWorkRequestNo.trim()) {
+      setFormError(
+        'Select the previously approved Overtime Work Request. Payment has no Add Line — hours come from that work request.',
+      )
+      return
     }
-    if (!all.length) {
-      setFormError('Click Add Line to enter your overtime: the date, start and end time, category and reason, then Save.')
+    if (!lines.length) {
+      setFormError(
+        'The selected Overtime Work Request has no lines to pay. Open Overtime Request, add the hours there, get it approved, then come back.',
+      )
       return
     }
     setFormError(null)
-    setEntryError(null)
-    const first = all[0]!
-    const reasons = [...new Set(all.map((line) => line.reason.trim()).filter(Boolean))]
-    if (all !== lines) {
-      setLines(all)
-      cancelEntry()
-    }
+    const first = lines[0]!
+    const reasons = [...new Set(lines.map((line) => line.reason.trim()).filter(Boolean))]
     saveMutation.mutate({
       requestNo: editingNo ?? undefined,
-      details: { ...first, reason: reasons.join('; ').slice(0, 500), projectNo, lines: all },
+      details: {
+        ...first,
+        reason: reasons.join('; ').slice(0, 500),
+        projectNo,
+        priorWorkRequestNo: priorWorkRequestNo.trim().toUpperCase(),
+        lines,
+      },
       submit,
     })
   }
@@ -916,6 +800,35 @@ export function OvertimeRequest() {
   const steps = workflowSteps(mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null, context, employeeName)
   const routingProblem = overtimeRoutingMessage(context?.routingProblem ?? '')
 
+  // Payment has no Add Line: selecting an approved work request loads its hours.
+  useEffect(() => {
+    if (mode !== 'form' || shown) return
+    const work = (approvedWorkQuery.data ?? []).find((row) => row.requestNo === priorWorkRequestNo)
+    if (!work) {
+      if (!editingNo) setLines([])
+      return
+    }
+    const workLines = (work.lines?.length
+      ? work.lines
+      : [
+          {
+            overtimeDate: work.overtimeDate,
+            startTime: work.overtimeFrom,
+            endTime: work.overtimeTo,
+            dayType: 'working' as OvertimeDayType,
+            reason: work.reason,
+          },
+        ]
+    ).map((line) => ({
+      overtimeDate: line.overtimeDate,
+      startTime: line.startTime,
+      endTime: line.endTime,
+      dayType: line.dayType,
+      reason: line.reason || work.reason,
+    }))
+    setLines(sortLines(workLines))
+  }, [priorWorkRequestNo, approvedWorkQuery.data, mode, shown, editingNo])
+
   const headerActions =
     mode === 'list' ? (
       <div className="flex items-center gap-2">
@@ -923,7 +836,7 @@ export function OvertimeRequest() {
           <RefreshCw className={cn('mr-2 h-4 w-4', listQuery.isFetching && 'animate-spin')} />
           {listQuery.isFetching ? 'Syncing…' : 'Refresh'}
         </Button>
-        <PortalNewButton label="New overtime request" onClick={startNew} />
+        <PortalNewButton label="New payment request" onClick={startNew} />
       </div>
     ) : mode === 'form' ? (
       <div className="flex flex-wrap items-center gap-2">
@@ -965,11 +878,37 @@ export function OvertimeRequest() {
             Withdraw
           </Button>
         ) : null}
+        {linkedWorkQuery.data ? (
+          <>
+            <Button asChild type="button" variant="outline">
+              <Link
+                to={`/hr/overtime-work-request?request=${encodeURIComponent(linkedWorkQuery.data.requestNo)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                View work request
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (!printApprovedWorkRequest(linkedWorkQuery.data!)) {
+                  toast.error('Allow pop-ups to print the approved overtime work request.')
+                }
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print work request
+            </Button>
+          </>
+        ) : null}
         <Button type="button" variant="outline" onClick={() => goTo('list')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           My requests
         </Button>
-        <PortalNewButton label="New overtime request" onClick={startNew} />
+        <PortalNewButton label="New payment request" onClick={startNew} />
       </div>
     )
 
@@ -979,10 +918,28 @@ export function OvertimeRequest() {
       : 'Business Central did not answer.'
     : ''
 
+  const selectedPriorWork = useMemo(
+    () => (approvedWorkQuery.data ?? []).find((row) => row.requestNo === priorWorkRequestNo) ?? null,
+    [approvedWorkQuery.data, priorWorkRequestNo],
+  )
+
+  const priorWorkOptions = useMemo(
+    () => [
+      { value: '', label: 'Select approved Overtime Work Request…' },
+      ...(approvedWorkQuery.data ?? []).map((row) => ({
+        value: row.requestNo,
+        label: `${row.requestNo} · ${row.overtimeDate} · ${row.totalHours}h${
+          row.linkedPaymentRequestNo ? ` · linked ${row.linkedPaymentRequestNo}` : ''
+        }`,
+      })),
+    ],
+    [approvedWorkQuery.data],
+  )
+
   return (
     <PageWrapper
-      title="Overtime Request"
-      description="Overtime Entry — employee request form. Approved by the Line Manager, FD, HR (prepares the overtime payment) and Finance (pays), then paid through payroll."
+      title="Overtime Payment Request"
+      description="Select an approved Overtime Work Request to request payment for those hours. There is no Add Line here — hours are already captured on the work request. After FD approval, HR prepares payment and Finance pays through payroll."
       actions={headerActions}
     >
       {contextError ? (
@@ -993,8 +950,10 @@ export function OvertimeRequest() {
         <div className="portal-surface-card overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">My Overtime Requests</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Newest first. Click a request to see its approval workflow and history.</p>
+              <h2 className="text-sm font-semibold text-slate-900">My Overtime Payment Requests</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Payment for hours already worked. Chain: Line Manager → FD → HR (payment prep) → Finance → payroll.
+              </p>
             </div>
             {rows.length ? (
               <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{rows.length} total</span>
@@ -1048,6 +1007,17 @@ export function OvertimeRequest() {
             </div>
           ) : null}
 
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+            <p className="font-semibold">Select approved Overtime Work Request — no Add Line</p>
+            <p className="mt-1">
+              Hours and justification are entered on the{' '}
+              <a className="font-semibold underline-offset-2 hover:underline" href="/hr/overtime-work-request">
+                Overtime Request
+              </a>{' '}
+              form. After that work request is approved, select it below. This payment form only requests payroll for those lines.
+            </p>
+          </div>
+
           <div>
             <Section icon={<User className="h-4 w-4" />} title="Employee Information">
               {contextQuery.isLoading && !shown ? (
@@ -1086,12 +1056,63 @@ export function OvertimeRequest() {
                       />
                     )}
                   </Field>
+                  {shown ? null : (
+                    <Field label="Approved Overtime Work Request" required htmlFor="overtime-prior-work">
+                      <div className="space-y-2">
+                        <Select
+                          id="overtime-prior-work"
+                          value={priorWorkRequestNo}
+                          options={priorWorkOptions}
+                          placeholder={
+                            approvedWorkQuery.isLoading
+                              ? 'Loading approved work requests…'
+                              : priorWorkOptions.length <= 1
+                                ? 'No unused approved work requests yet'
+                                : 'Select approved work request'
+                          }
+                          onChange={(event) => setPriorWorkRequestNo(event.target.value)}
+                        />
+                        <p className="text-xs text-slate-500">
+                          Only approved Overtime Work Requests that are not already linked to another payment claim are listed.
+                        </p>
+                        {priorWorkRequestNo ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button asChild type="button" variant="outline" size="sm">
+                              <Link
+                                to={`/hr/overtime-work-request?request=${encodeURIComponent(priorWorkRequestNo)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                View
+                              </Link>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!selectedPriorWork}
+                              onClick={() => {
+                                if (!selectedPriorWork) return
+                                if (!printApprovedWorkRequest(selectedPriorWork)) {
+                                  toast.error('Allow pop-ups to print the approved overtime work request.')
+                                }
+                              }}
+                            >
+                              <Printer className="mr-2 h-4 w-4" />
+                              Print
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </Field>
+                  )}
                 </div>
               )}
             </Section>
           </div>
 
-          <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details">
+          <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details (from work request)">
             {shown || lines.length ? (
               <OvertimeLinesTable
                 lines={
@@ -1103,177 +1124,19 @@ export function OvertimeRequest() {
                       })
                 }
                 rates={rates}
-                editingIndex={editingLine}
-                onEdit={shown ? undefined : editLine}
-                onDelete={shown ? undefined : deleteLine}
+                editingIndex={null}
               />
-            ) : null}
-
-            {shown ? null : entryOpen ? (
-              <div key={entryKey} className={cn('rounded-xl border border-slate-200 bg-white p-4 shadow-sm', lines.length ? 'mt-4' : '')}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">
-                    Overtime Details – {editingLine === null ? 'New Line' : `Edit Line ${editingLine + 1}`}
-                  </p>
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
-                    {editingLine === null ? 'New Entry' : 'Editing'}
-                  </span>
-                </div>
-                <div className="mt-4 grid gap-6 md:grid-cols-2">
-                  <div className="space-y-4">
-                    <p className="text-sm font-semibold text-slate-800">Date &amp; Time</p>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="overtime-date" className="text-sm text-slate-700">
-                        Overtime Date<span className="text-red-500"> *</span>
-                      </Label>
-                      <Input
-                        id="overtime-date"
-                        type="date"
-                        value={entry.overtimeDate}
-                        onChange={(event) => setEntry((current) => ({ ...current, overtimeDate: event.target.value }))}
-                      />
-                    </div>
-                    <TimeField
-                      id="overtime-start"
-                      label="Start Time"
-                      value={entry.startTime}
-                      defaultMeridiem="AM"
-                      onChange={(value) => setEntry((current) => ({ ...current, startTime: value }))}
-                    />
-                    <TimeField
-                      id="overtime-end"
-                      label="End Time"
-                      value={entry.endTime}
-                      defaultMeridiem="PM"
-                      onChange={(value) => setEntry((current) => ({ ...current, endTime: value }))}
-                    />
-                    <div>
-                      <p className="text-xs font-medium text-slate-600">Calculated Hours</p>
-                      <p className="mt-1 text-xl font-bold tabular-nums text-slate-900">{entryHours.totalHours.toFixed(2)} Hours</p>
-                      <p className="text-xs text-slate-500">Automatic calculation</p>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <p className="text-sm font-semibold text-slate-800">Payment Details</p>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="overtime-category" className="text-sm text-slate-700">
-                        Overtime Category<span className="text-red-500"> *</span>
-                      </Label>
-                      <Select
-                        id="overtime-category"
-                        value={entry.dayType}
-                        options={DAY_TYPES}
-                        placeholder="Select category"
-                        onChange={(event) =>
-                          setEntry((current) => ({ ...current, dayType: event.target.value as OvertimeDayType | '' }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-slate-600">Rate</p>
-                      <p className="mt-1 text-base font-semibold text-slate-900">
-                        {entry.dayType ? rateType(entryHours, entry.dayType, rates) : 'Auto-filled'}
-                      </p>
-                      <p className="text-xs text-slate-500">Based on category</p>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="overtime-reason" className="text-sm text-slate-700">
-                        Reason / Justification<span className="text-red-500"> *</span>
-                      </Label>
-                      <Textarea
-                        id="overtime-reason"
-                        rows={4}
-                        maxLength={250}
-                        value={entry.reason}
-                        placeholder="Enter reason or justification…"
-                        onChange={(event) => setEntry((current) => ({ ...current, reason: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                </div>
-                {weekendHint ? (
-                  <p className="mt-3 flex items-center gap-2 text-xs text-amber-800">
-                    <Info className="h-3.5 w-3.5" />
-                    {weekendHint}
-                  </p>
-                ) : null}
-                {(() => {
-                  if (!entry.dayType || !entry.startTime || !entry.endTime || !entryHours.totalHours) return null
-                  const line: OvertimeLineInput = { ...entry, dayType: entry.dayType }
-                  const parts = splitAtBands(line)
-                  const allNight = line.dayType === 'working' && !parts.length && Boolean(categoryProblem(line))
-                  const allDay = line.dayType === 'night' && !parts.length && Boolean(categoryProblem(line))
-                  if (!parts.length && !allNight && !allDay) return null
-                  return (
-                    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      <Info className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        {parts.length
-                          ? `${clockText(line.startTime)} – ${clockText(line.endTime)} has normal day and night hours, which are paid at different rates: they go on separate lines (${parts
-                              .map((part) => `${clockText(part.startTime)} – ${clockText(part.endTime)} ${part.dayType === 'night' ? 'night' : 'normal day'}`)
-                              .join(', ')}).`
-                          : allNight
-                            ? 'These hours are at night (10 PM – 6 AM): choose Night hours.'
-                            : 'These hours are in the day (6 AM – 10 PM): choose Normal day hours.'}
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="border-amber-300 bg-white"
-                        onClick={() =>
-                          parts.length
-                            ? splitEntry()
-                            : setEntry((current) => ({ ...current, dayType: allNight ? 'night' : 'working' }))
-                        }
-                      >
-                        {parts.length ? `Split into ${parts.length} lines` : allNight ? 'Use Night hours' : 'Use Normal day hours'}
-                      </Button>
-                    </div>
-                  )
-                })()}
-                {entryError ? (
-                  <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-red-700">
-                    <AlertTriangle className="h-4 w-4 shrink-0" />
-                    {entryError}
-                  </p>
-                ) : null}
-                <div className="mt-4 flex justify-end gap-2">
-                  <Button type="button" variant="outline" className="rounded-full" disabled={busy} onClick={cancelEntry}>
-                    Cancel
-                  </Button>
-                  <Button
-                    type="button"
-                    className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
-                    disabled={busy}
-                    onClick={saveLine}
-                  >
-                    <Save className="mr-2 h-4 w-4" />
-                    Save
-                  </Button>
-                </div>
-              </div>
             ) : (
-              <div className={lines.length ? 'mt-4' : ''}>
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-center gap-2 rounded-full border border-slate-300 bg-white py-2.5 text-sm font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={busy || lines.length >= maxLines}
-                  onClick={openNewLine}
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Line
-                </button>
-                <p className="mt-2 text-xs text-slate-500">
-                  {lines.length >= maxLines
-                    ? maxLines === 1
-                      ? 'Several dates in one request need Business Central package 1.0.3.612. Make one request per date for now.'
-                      : `A request can hold ${maxLines} lines. Make a second request for the other days.`
-                    : lines.length
-                      ? 'Click Add Line to enter another overtime record.'
-                      : 'Click Add Line to open the overtime entry form.'}
-                </p>
-              </div>
+              <p className="text-sm text-slate-500">
+                {priorWorkRequestNo
+                  ? 'The selected work request has no overtime lines.'
+                  : 'Select an approved Overtime Work Request above to load the hours to pay.'}
+              </p>
+            )}
+            {shown || mode !== 'form' ? null : (
+              <p className="mt-3 text-xs text-slate-500">
+                These lines are read-only. To change hours, withdraw or correct the Overtime Work Request, then select it again.
+              </p>
             )}
           </Section>
 

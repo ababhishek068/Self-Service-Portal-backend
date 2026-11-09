@@ -8,11 +8,15 @@ export interface MedicalClaimAmountResult {
   amountToRefund?: number
   CoveragePercent?: number
   coveragePercent?: number
+  availableBalance?: number | null
+  budgetCapped?: boolean
+  policyCoveragePercent?: number
 }
 
 export async function validateHospitalCategory(payload: {
   medicalAmount: number
   hospitalCategory: string
+  patient?: string
 }) {
   requireAuthApiUrl()
   return authPost<MedicalClaimAmountResult>('/api/claims/validate-hospital-category', payload)

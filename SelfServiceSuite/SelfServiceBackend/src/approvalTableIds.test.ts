@@ -2359,6 +2359,26 @@ describe('salaryAdvance saveHeader params', () => {
     assert.equal(editParams.myAction, 'edit')
     assert.notEqual(editParams.recId, 'A00523')
   })
+
+  it('saves with Staff No only when employee has no Customer No', async () => {
+    const spec = findModuleSpec('salary-advance')
+    assert.ok(spec?.params?.saveHeader)
+    assert.equal(spec!.ownerField, 'StaffID')
+    assert.equal(spec!.ownerSource, 'employeeNo')
+    const createParams = await spec!.params!.saveHeader!({
+      req: { body: { purpose: 'UAT Final Test', percentageSalary: 100 } } as Request,
+      user: {
+        employeeNo: 'E001',
+        userID: 'USER1',
+        imprestNo: '',
+        accountNumber: '',
+      } as AuthUser,
+      no: '',
+    })
+    assert.equal(createParams.staffNo, 'E001')
+    assert.equal(createParams.customerNo, undefined)
+    assert.equal(createParams.myAction, 'create')
+  })
 })
 
 describe('ESS request mutation contracts', () => {

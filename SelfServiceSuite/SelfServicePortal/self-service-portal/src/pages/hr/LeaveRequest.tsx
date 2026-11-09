@@ -1165,7 +1165,7 @@ export function LeaveRequest() {
         onSubmit={handleSubmit}
         className="portal-form-card portal-leave-request-form animate-page-in relative z-20 w-full"
       >
-        <div className="portal-form-card-header relative px-4 py-3 text-center text-sm font-semibold tracking-wide text-white sm:text-base">
+        <div className="portal-form-card-header relative px-4 py-3.5 text-left text-sm font-semibold tracking-tight text-slate-900 sm:px-6 sm:text-base">
           New Leave Request
         </div>
 
@@ -1463,7 +1463,7 @@ export function LeaveRequest() {
 
       {selectedRequestId ? (
         <div ref={detailCardRef} className="portal-form-card mt-6 scroll-mt-24 overflow-hidden">
-          <div className="portal-form-card-header flex items-center justify-between gap-3 px-4 py-3 text-white">
+          <div className="portal-form-card-header flex items-center justify-between gap-3 px-4 py-3.5 text-slate-900 sm:px-6">
             <h2 className="font-semibold">Leave Application Details</h2>
             <Button
               type="button"

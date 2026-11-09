@@ -62,11 +62,11 @@ export function DataTable<T>({
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={cn(
                     onRowClick && 'portal-row-click',
-                    selectedRowId === rowId && 'bg-[var(--portal-green-light)]! text-white hover:bg-[var(--portal-green-light)]!',
+                    selectedRowId === rowId && 'portal-row-selected',
                   )}
                 >
                   {columns.map((column) => (
-                    <TableCell key={column.id} className={selectedRowId === rowId ? 'text-white' : undefined}>
+                    <TableCell key={column.id} className={selectedRowId === rowId ? 'font-medium text-slate-900' : undefined}>
                       {column.cell(row)}
                     </TableCell>
                   ))}
@@ -75,9 +75,9 @@ export function DataTable<T>({
             })
           ) : (
             <TableRow className="hover:bg-transparent">
-              <TableCell colSpan={columns.length} className="py-12 text-center">
-                <p className="text-base font-medium italic text-slate-500">{emptyTitle ?? '*** No records Found ***'}</p>
-                <p className="mt-1 text-xs text-slate-400">Create a new request to get started</p>
+              <TableCell colSpan={columns.length} className="py-14 text-center">
+                <p className="text-sm font-semibold text-slate-700">{emptyTitle ?? 'No records found'}</p>
+                <p className="mt-1 text-xs text-slate-500">Create a new request to get started</p>
                 {emptyAction ? <div className="mt-3">{emptyAction}</div> : null}
               </TableCell>
             </TableRow>

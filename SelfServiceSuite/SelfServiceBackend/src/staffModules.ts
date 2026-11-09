@@ -11,7 +11,7 @@ import {
 import { approvalTableFilter, type ApprovalTableKey } from './approvalTableIds.js'
 import { requireAuth } from './auth.js'
 import type { AuthUser } from './auth.js'
-import { fetchEmployeeCustomerAccountNo, ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap, resolveRequestingDepartmentCode } from './employeeProfile.js'
+import { ensureEmployeeDepartmentCodeForFinance, resolveFinanceDepartmentCodeForSoap, resolveRequestingDepartmentCode } from './employeeProfile.js'
 import { formatBcSoapDate, isErpWorkingDate } from './staff.js'
 import {
   approvalCancellationComplete,
@@ -72,6 +72,7 @@ export interface ModuleSpec {
     | 'RequesterID'
     | 'Employee_No'
     | 'CustomerNo'
+    | 'StaffID'
   /** Which session field feeds `ownerField` — defaults match Laravel. */
   ownerSource: 'employeeNo' | 'userID' | 'imprestNo'
   /** ESS intentionally lists these rows without an employee filter. */
@@ -1817,25 +1818,17 @@ const training: ModuleSpec = {
   },
 }
 
-async function resolveSalaryAdvanceCustomerNo(
-  user: AuthUser,
-  body: Record<string, unknown>,
-) {
-  const fromBody = String(body.customerNo ?? body.accountNo ?? body.accountNumber ?? '').trim()
-  if (fromBody) return fromBody
-
-  const fromUser = String(user.imprestNo || user.accountNumber || '').trim()
-  if (fromUser) return fromUser
-
-  return fetchEmployeeCustomerAccountNo(user.employeeNo)
-}
-
+/**
+ * Salary Advance is owned by Staff ID. BC `FnSalaryAdvanceHeader` validates Staff ID and
+ * sets Account No. from the Customer linked by Staff No. — the portal must not require a
+ * Customer No. on the employee card (Staff Number / Customer Account No. display is enough).
+ */
 async function fetchSalaryAdvanceRows(spec: ModuleSpec, user: AuthUser) {
-  const customerNo = await resolveSalaryAdvanceCustomerNo(user, {})
-  if (!customerNo) return [] as ODataRecord[]
+  const staffNo = String(user.employeeNo ?? '').trim()
+  if (!staffNo) return [] as ODataRecord[]
 
   const fetched = await fetchOData(spec.headerService, {
-    $filter: `CustomerNo eq '${odataString(customerNo)}'`,
+    $filter: `StaffID eq '${odataString(staffNo)}'`,
   })
   return Array.isArray(fetched) ? fetched : []
 }
@@ -1847,8 +1840,8 @@ const salaryAdvance: ModuleSpec = {
   module: 'salary-advance',
   headerService: 'QyStaffAdvanceHeader',
   headerTableId: 50880,
-  ownerField: 'CustomerNo',
-  ownerSource: 'imprestNo',
+  ownerField: 'StaffID',
+  ownerSource: 'employeeNo',
   lineService: 'QyStaffAdvanceLines',
   lineHeaderField: 'No',
   soap: {
@@ -1860,21 +1853,11 @@ const salaryAdvance: ModuleSpec = {
   params: {
     deleteDocument: draftDeleteParams('salary-advance'),
     saveHeader: async ({ req, user, no }) => {
-      const fromBody = String(
-        req.body?.customerNo ?? req.body?.accountNo ?? req.body?.accountNumber ?? '',
-      ).trim()
-      const fromUser = String(user.imprestNo || user.accountNumber || '').trim()
-      const customerNo = fromBody || fromUser
-      if (!customerNo) {
-        const resolved = await fetchEmployeeCustomerAccountNo(user.employeeNo)
-        if (!resolved) {
-          throw Object.assign(
-            new Error(
-              'Your employee profile does not have a customer/account number in Business Central. Contact HR to update your employee record.',
-            ),
-            { status: 422 },
-          )
-        }
+      if (!String(user.employeeNo ?? '').trim()) {
+        throw Object.assign(
+          new Error('Your session has no Staff No. Sign out and sign in again.'),
+          { status: 422 },
+        )
       }
       const percentageSalary = Number(req.body?.percentageSalary ?? 0)
       const requestPurpose = String(req.body?.requestPurpose ?? '').trim()
@@ -2833,10 +2816,10 @@ export async function getPortalModuleDocument(
   }
 
   if (spec.module === 'salary-advance') {
-    const customerNo = await resolveSalaryAdvanceCustomerNo(user, {})
-    if (!customerNo) return null
+    const staffNo = String(user.employeeNo ?? '').trim()
+    if (!staffNo) return null
     const rows = (await fetchOData(spec.headerService, {
-      $filter: `${headerKey} eq '${odataString(no)}' and CustomerNo eq '${odataString(customerNo)}'`,
+      $filter: `${headerKey} eq '${odataString(no)}' and StaffID eq '${odataString(staffNo)}'`,
       $top: 1,
     })) as ODataRecord[] | null
     return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null

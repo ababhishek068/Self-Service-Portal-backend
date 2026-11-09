@@ -104,7 +104,7 @@ export function StoreRequisitionCardDialog({
         type="button"
         aria-label="Close"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm"
+        className="absolute inset-0 bg-[#151722]/45 backdrop-blur-sm"
       />
       <div
         role="dialog"

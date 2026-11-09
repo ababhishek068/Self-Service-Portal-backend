@@ -285,6 +285,7 @@ export type PortalModuleKey =
   | 'gatePass'
   | 'leave'
   | 'overtime'
+  | 'overtimeWork'
   | 'travel'
   | 'salaryAdvance'
   | 'training'

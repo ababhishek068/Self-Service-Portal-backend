@@ -151,6 +151,8 @@ export type OvertimeLineInput = {
 /** The first line is also sent as the request's own date and time (BC before 1.0.3.612 reads only those). */
 export type OvertimeDetails = OvertimeLineInput & {
   projectNo: string
+  /** Approved Overtime Work Request no. (prior permission) — required before payment can be processed. */
+  priorWorkRequestNo: string
   lines: OvertimeLineInput[]
 }
 
@@ -459,10 +461,17 @@ export function validateOvertimeDetails(input: unknown, submit: boolean): Overti
   }
   const reasons = [...new Set(lines.map((line) => line.reason).filter(Boolean))]
   const first = lines[0]!
+  const priorWorkRequestNo = str(body.priorWorkRequestNo).toUpperCase().slice(0, 20)
+  if (submit && !priorWorkRequestNo) {
+    throw invalid(
+      'Select the previously approved Overtime Work Request. Payment requests without a prior-approved work request will not be processed.',
+    )
+  }
   return {
     ...first,
     reason: (str(body.reason) || reasons.join('; ')).slice(0, 500),
     projectNo: str(body.projectNo).toUpperCase().slice(0, 20),
+    priorWorkRequestNo,
     lines,
   }
 }

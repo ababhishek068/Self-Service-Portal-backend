@@ -123,9 +123,9 @@ export function NotificationBell() {
       {showCallout ? (
         <div
           role="status"
-          className="absolute right-0 top-full z-50 mt-2.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg bg-slate-900 p-3 pr-9 text-sm text-white shadow-xl"
+          className="absolute right-0 top-full z-50 mt-2.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg bg-[#151722] p-3 pr-9 text-sm text-white shadow-xl"
         >
-          <span className="absolute -top-1.5 right-3.5 h-3 w-3 rotate-45 bg-slate-900" aria-hidden />
+          <span className="absolute -top-1.5 right-3.5 h-3 w-3 rotate-45 bg-[#151722]" aria-hidden />
           <button type="button" onClick={toggle} className="text-left leading-snug">
             {items.length === 1
               ? `${items[0]!.title}. Open it now.`

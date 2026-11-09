@@ -33,3 +33,4 @@ deliverables/
 # Local Cursor / agent scratch
 work/
 .cursor/
+data/

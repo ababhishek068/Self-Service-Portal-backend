@@ -70,7 +70,7 @@ function MobileNavGroup({
                     'flex items-center gap-2 py-2.5 pr-4 text-sm text-white/95 transition-colors duration-200',
                     depth > 0 ? 'pl-16' : 'pl-12',
                     isActive && !child.underConstruction
-                      ? 'bg-white/15 font-semibold shadow-[inset_3px_0_0_#fff]'
+                      ? 'bg-white/12 font-semibold shadow-[inset_3px_0_0_#b2b435]'
                       : 'active:bg-white/10',
                     child.underConstruction && 'opacity-75',
                   )
@@ -130,7 +130,7 @@ export function MobileNav() {
         aria-hidden
         onClick={closeMobileNav}
         className={cn(
-          'absolute inset-0 bg-slate-950/55 backdrop-blur-sm transition-opacity duration-300',
+          'absolute inset-0 bg-[#050610]/55 backdrop-blur-sm transition-opacity duration-300',
           mobileNavOpen ? 'opacity-100' : 'opacity-0',
         )}
       />
@@ -146,9 +146,9 @@ export function MobileNav() {
         )}
       >
         <div className="portal-sidebar-brand portal-shimmer-bar relative flex items-center justify-between gap-3 px-3 py-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-white px-2 py-1">
-            <BrandLogo variant="mobile" />
-            <p className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--portal-navy)] xs:block">
+          <div className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
+            <BrandLogo variant="mobile" className="!max-w-[3rem]" />
+            <p className="hidden text-[10px] font-semibold uppercase tracking-[0.14em] text-white xs:block">
               {brand.productShort}
             </p>
           </div>
@@ -192,7 +192,7 @@ export function MobileNav() {
                   cn(
                     'flex items-center gap-2.5 border-b border-white/5 px-4 py-3 text-[15px] text-white transition-colors duration-200',
                     isActive && !item.underConstruction
-                      ? 'bg-white/15 font-semibold shadow-[inset_3px_0_0_#fff]'
+                      ? 'bg-white/12 font-semibold shadow-[inset_3px_0_0_#b2b435]'
                       : 'active:bg-white/10',
                     item.underConstruction && 'opacity-75',
                   )

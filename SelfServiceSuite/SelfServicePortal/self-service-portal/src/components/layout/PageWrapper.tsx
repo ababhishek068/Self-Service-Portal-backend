@@ -16,16 +16,18 @@ export function PageWrapper({ title, description, actions, children, showPageHea
     setPageTitle(title)
   }, [title, setPageTitle])
 
+  // The top bar already shows the page title, so repeating it here only cost
+  // vertical space. It stays in the document for screen readers.
+  const showHeaderRow = (showPageHeading && Boolean(description)) || Boolean(actions)
+
   return (
-    <div className="px-3 py-4 sm:px-4 sm:py-5 lg:px-6">
+    <div className="mx-auto w-full max-w-[1680px] px-3 py-4 sm:px-4 sm:py-5 lg:px-6">
       <div className="w-full">
-        {(showPageHeading || actions) && (
+        <h1 className="sr-only">{title}</h1>
+        {showHeaderRow && (
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {showPageHeading ? (
-              <div className="animate-page-in-subtle min-w-0">
-                <h1 className="portal-page-title text-lg font-semibold sm:text-xl">{title}</h1>
-                {description ? <p className="mt-0.5 text-sm text-slate-600">{description}</p> : null}
-              </div>
+            {showPageHeading && description ? (
+              <p className="animate-page-in-subtle min-w-0 text-sm text-slate-600">{description}</p>
             ) : (
               <span />
             )}

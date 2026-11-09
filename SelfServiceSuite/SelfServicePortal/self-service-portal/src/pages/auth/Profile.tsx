@@ -62,7 +62,7 @@ const bioFields: Field[] = [
   ['postalAddress','Postal Address'], ['residentialAddress','Residential Address'], ['city','City'], ['postCode','Postal Code'], ['region','Region'],
   ['jobTitle','Job Title'], ['jobId','Job ID'], ['jobGrade','Job Grade'], ['status','Employment Status'], ['department','Department'], ['division','Division'],
   ['sector','Sector'], ['district','District'], ['branch','Branch'], ['placeOfDuty','Place of Duty'], ['responsibilityCenter','Responsibility Center'],
-  ['supervisorName','Supervisor'], ['supervisorNo','Supervisor No.'], ['employeeAccountNo','Employee Account No.'], ['annualLeaveBalance','Annual Leave Balance'],
+  ['supervisorName','Supervisor'], ['supervisorNo','Supervisor No.'], ['employeeAccountNo','Staff Number'], ['annualLeaveBalance','Annual Leave Balance'],
 ]
 const contractFields: Field[] = [
   ['employmentType','Contract Type'], ['employeeType','Employee Type'], ['dateOfJoin','Joining Date','date'], ['lengthOfService','Length of Service'],
@@ -254,7 +254,7 @@ export function Profile() {
       editor.draft?.fields,
     )
   }catch{/* keep defaults */}
-  const completenessRing=`conic-gradient(#b1c836 ${completeness.percent}%, rgba(255,255,255,0.22) 0)`
+  const completenessRing=`conic-gradient(#b2b435 ${completeness.percent}%, rgba(255,255,255,0.22) 0)`
   const download=async(attachment:Attachment)=>{
     if(downloading)return
     setDownloading(String(attachment.id))
@@ -262,7 +262,7 @@ export function Profile() {
   }
   return <PageWrapper title="Employee Profile" showPageHeading={false}>
     <div className="space-y-5">
-      <div className="rounded-2xl bg-gradient-to-br from-[var(--portal-navy)] to-emerald-700 p-6 text-white shadow-lg sm:p-8">
+      <div className="portal-hero-band rounded-2xl p-6 text-white shadow-lg sm:p-8">
         <div className="flex flex-wrap items-center gap-5">
           <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/15 text-2xl font-bold ring-4 ring-white/20">{initials||<Users/>}</div>
           <div className="flex-1"><h1 className="text-2xl font-bold">{fullName||'Employee Profile'}</h1>
@@ -281,7 +281,7 @@ export function Profile() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold leading-tight">Profile Completeness</p>
                 <p className="text-xs text-white/75">{completeness.message}</p>
-                {completeness.missing.length?<p className="mt-1 text-[11px] text-amber-100">Add: {completeness.missing.map(item=>item.label).join(' · ')}</p>:null}
+                {completeness.missing.length?<p className="mt-1 text-[11px] text-[#fff1d7]">Add: {completeness.missing.map(item=>item.label).join(' · ')}</p>:null}
               </div>
             </div>
             <Button variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10 hover:text-white" onClick={()=>void refresh()} disabled={profileQuery.isFetching || attachmentsQuery.isFetching || editQuery.isFetching || editor.busy!==null}><RefreshCw className="h-4 w-4"/>Refresh</Button>

@@ -154,6 +154,7 @@ function approvalHeaderFacts(
     requestType === 'employeeExit' ||
     requestType === 'hrServiceLetter' ||
     requestType === 'overtime' ||
+    requestType === 'overtimeWork' ||
     requestType === 'profileChange'
   ) {
     const facts = Array.isArray(payload.detailFacts)
@@ -235,6 +236,11 @@ function preferredLineKeys(requestType: string | undefined, lines: Record<string
     const present = preferred.filter((key) => lines.some((line) => !isBlankLineValue(line[key])))
     if (present.length) return present
   }
+  if (requestType === 'overtime' || requestType === 'overtimeWork') {
+    const preferred = ['date', 'startTime', 'endTime', 'overtimeHours', 'category', 'hoursByRate', 'estimatedAmount', 'reason']
+    const present = preferred.filter((key) => lines.some((line) => !isBlankLineValue(line[key])))
+    if (present.length) return present
+  }
   return visibleLineKeys(lines)
 }
 
@@ -286,6 +292,10 @@ function approvalMetric(
   if (requestType === 'overtime') {
     const hours = firstPayloadNumber(payload, ['totalHours'])
     return { label: 'Overtime hours', value: `${Number(hours.toFixed(2))} hrs · est. ${formatCurrency(amount)}` }
+  }
+  if (requestType === 'overtimeWork') {
+    const hours = firstPayloadNumber(payload, ['totalHours'])
+    return { label: 'Overtime hours', value: `${Number(hours.toFixed(2))} hrs` }
   }
   if (requestType === 'hrServiceLetter') {
     const loan = firstPayloadNumber(payload, ['loanAmount'])
@@ -526,6 +536,16 @@ export function ApprovalDetail() {
                 </div>
               ) : null}
 
+              {request.requestType === 'overtimeWork' ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
+                  {`Overtime work (permission + hours): approve the dates, times, category and justification before the employee can raise an Overtime Payment Request.${
+                    payload.pendingStageLabel && request.status === 'Pending Approval'
+                      ? ` This request is waiting on ${String(payload.pendingStageLabel)}.`
+                      : ''
+                  }`}
+                </div>
+              ) : null}
+
               {request.requestType === 'profileChange' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
                   The employee changed their own profile. Check each change and the supporting documents. Approve
@@ -674,6 +694,7 @@ export function ApprovalDetail() {
                           ? 'Enter HR remarks (shown to the employee)'
                           : request.requestType === 'employeeExit' ||
                               request.requestType === 'overtime' ||
+                              request.requestType === 'overtimeWork' ||
                               request.requestType === 'profileChange'
                             ? 'Add a note. A reason is required to reject.'
                             : canSendBack
@@ -703,6 +724,11 @@ export function ApprovalDetail() {
                       <p className="mt-2 text-xs text-slate-500">
                         Approve sends the request to the next step; after Finance the hours go to the overtime sheet. A
                         rejection reason is required and is shown to the employee.
+                      </p>
+                    ) : request.requestType === 'overtimeWork' ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Approve confirms permission to work these overtime hours. The employee can then raise one payment
+                        claim against this document. A rejection reason is required and is shown to the employee.
                       </p>
                     ) : canSendBack ? (
                       <p className="mt-2 text-xs text-slate-500">

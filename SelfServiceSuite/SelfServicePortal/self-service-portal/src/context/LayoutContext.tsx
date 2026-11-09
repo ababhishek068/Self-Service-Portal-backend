@@ -1,12 +1,74 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LayoutContext } from './layoutContextValue'
+
+const PIN_KEY = 'ssp.sidebarPinned'
+
+/** Collapsed rail by default; a user who pins the menu open keeps it pinned. */
+function readPinned(): boolean {
+  try {
+    return localStorage.getItem(PIN_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 export function LayoutProvider({ children }: { children: ReactNode }) {
   const [pageTitle, setPageTitle] = useState('Dashboard')
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpenState] = useState(readPinned)
+  const [sidebarPeek, setSidebarPeek] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const peekTimer = useRef<number | null>(null)
 
-  const toggleSidebar = useCallback(() => setSidebarOpen((value) => !value), [])
+  const clearPeekTimer = useCallback(() => {
+    if (peekTimer.current !== null) {
+      window.clearTimeout(peekTimer.current)
+      peekTimer.current = null
+    }
+  }, [])
+
+  const openSidebarPeek = useCallback(
+    (delay = 0) => {
+      clearPeekTimer()
+      if (delay > 0) peekTimer.current = window.setTimeout(() => setSidebarPeek(true), delay)
+      else setSidebarPeek(true)
+    },
+    [clearPeekTimer],
+  )
+
+  const closeSidebarPeek = useCallback(
+    (delay = 0) => {
+      clearPeekTimer()
+      if (delay > 0) peekTimer.current = window.setTimeout(() => setSidebarPeek(false), delay)
+      else setSidebarPeek(false)
+    },
+    [clearPeekTimer],
+  )
+
+  const setSidebarOpen = useCallback(
+    (open: boolean) => {
+      clearPeekTimer()
+      setSidebarPeek(false)
+      setSidebarOpenState(open)
+    },
+    [clearPeekTimer],
+  )
+
+  const toggleSidebar = useCallback(() => {
+    clearPeekTimer()
+    setSidebarPeek(false)
+    setSidebarOpenState((value) => !value)
+  }, [clearPeekTimer])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PIN_KEY, String(sidebarOpen))
+    } catch {
+      /* not remembered in private mode */
+    }
+  }, [sidebarOpen])
+
+  useEffect(() => clearPeekTimer, [clearPeekTimer])
+
   const openMobileNav = useCallback(() => setMobileNavOpen(true), [])
   const closeMobileNav = useCallback(() => setMobileNavOpen(false), [])
   const toggleMobileNav = useCallback(() => setMobileNavOpen((value) => !value), [])
@@ -28,12 +90,27 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
       sidebarOpen,
       setSidebarOpen,
       toggleSidebar,
+      sidebarPeek,
+      openSidebarPeek,
+      closeSidebarPeek,
       mobileNavOpen,
       openMobileNav,
       closeMobileNav,
       toggleMobileNav,
     }),
-    [pageTitle, sidebarOpen, toggleSidebar, mobileNavOpen, openMobileNav, closeMobileNav, toggleMobileNav],
+    [
+      pageTitle,
+      sidebarOpen,
+      setSidebarOpen,
+      toggleSidebar,
+      sidebarPeek,
+      openSidebarPeek,
+      closeSidebarPeek,
+      mobileNavOpen,
+      openMobileNav,
+      closeMobileNav,
+      toggleMobileNav,
+    ],
   )
 
   return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>

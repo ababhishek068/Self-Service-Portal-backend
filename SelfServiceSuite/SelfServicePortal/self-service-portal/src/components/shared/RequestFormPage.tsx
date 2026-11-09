@@ -111,6 +111,8 @@ interface RequestFormPageProps {
   /** When set, list rows get Cancel / Delete actions wired to the mock/ERP backend. */
   moduleConfig?: EndpointConfig
   listContent?: ReactNode
+  /** Shown above the create/edit form fields (e.g. read-only employee profile). */
+  formHeader?: ReactNode
   detailFields?: DetailFieldConfig[]
   detailLineColumns?: DetailFieldConfig[]
   detailLineLabel?: string
@@ -327,6 +329,7 @@ export function RequestFormPage({
   newButtonLabel = 'New Request',
   moduleConfig,
   listContent,
+  formHeader,
   detailFields,
   detailLineColumns,
   detailLineLabel = 'Lines',
@@ -831,6 +834,8 @@ export function RequestFormPage({
       <PageWrapper title={editingRequestId ? `Edit ${title}` : title} showPageHeading={false}>
         <PortalFormCard title={editingRequestId ? `Edit ${title}` : title} allowOverflow>
           <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
+            {formHeader}
+            {description ? <p className="text-sm text-slate-600">{description}</p> : null}
             <div className="grid gap-3 sm:grid-cols-1 sm:gap-4 md:grid-cols-2">
               {fields.map((field) =>
                 field.type === 'lineItems' ? (
@@ -840,7 +845,6 @@ export function RequestFormPage({
                 ),
               )}
             </div>
-            {description ? <p className="text-sm text-slate-600">{description}</p> : null}
             {mutation.error ? (
               <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4" />

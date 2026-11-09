@@ -18,7 +18,7 @@ export function PortalFormCard({ title, children, className, allowOverflow }: Po
         className,
       )}
     >
-      <div className="portal-form-card-header relative px-4 py-3 text-center text-sm font-semibold tracking-wide text-white sm:text-base">
+      <div className="portal-form-card-header relative px-4 py-3.5 text-left text-sm font-semibold tracking-tight text-slate-900 sm:px-6 sm:text-base">
         {title}
       </div>
       <div className="p-4 sm:p-6">{children}</div>

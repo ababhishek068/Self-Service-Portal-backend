@@ -61,17 +61,24 @@ export function FinanceEmployeeOrgBanner({
         <div><span className="text-slate-500">Branch</span><p className="font-medium">{orgValue(profile?.branch, employee?.branchName, employee?.branchCode)}</p></div>
       </div>
       {showMedicalBalances ? (
-        <div className="mt-3 grid gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2">
-          <div>
-            <span className="text-slate-500">Medical Claim Balance — Self</span>
-            <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.self)}</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Medical Claim Balance — Dependant</span>
-            <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.dependant)}</p>
+        <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+          <p className="text-xs text-slate-600">
+            Policy: annual entitlement = Basic × 12 × 20% (Self 50% / Dependants 50%). Company reimburses{' '}
+            <span className="font-semibold text-slate-800">80%</span> of accepted medical receipts, capped by the
+            remaining balance below.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <span className="text-slate-500">Medical Claim Balance — Self</span>
+              <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.self)}</p>
+            </div>
+            <div>
+              <span className="text-slate-500">Medical Claim Balance — Dependant</span>
+              <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.dependant)}</p>
+            </div>
           </div>
           {medicalBalancesQuery.isError ? (
-            <p className="text-xs text-red-600 sm:col-span-2">Medical balances are temporarily unavailable from Business Central.</p>
+            <p className="text-xs text-red-600">Medical balances are temporarily unavailable from Business Central.</p>
           ) : null}
         </div>
       ) : null}

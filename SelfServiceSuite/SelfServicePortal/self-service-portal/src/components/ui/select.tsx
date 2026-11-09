@@ -224,7 +224,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                     className={cn(
                       'block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-100',
                       index === highlight ? 'bg-slate-100' : '',
-                      option.value === current ? 'font-semibold text-[var(--portal-navy,#1e3a8a)]' : 'text-slate-900',
+                      option.value === current ? 'font-semibold text-[var(--portal-navy,#03949b)]' : 'text-slate-900',
                     )}
                     onMouseDown={(event) => {
                       event.preventDefault()

@@ -178,10 +178,10 @@ function RelatedDocuments({ docs }: { docs: RelatedDoc[] }) {
           <>
             <Icon className={cn('h-4 w-4 shrink-0', doc.current ? 'text-white' : 'text-teal-600')} aria-hidden="true" />
             <span className="min-w-0 text-left leading-tight">
-              <span className={cn('block text-[11px]', doc.current ? 'text-teal-50' : 'text-slate-500')}>{doc.label}</span>
+              <span className={cn('block text-[11px]', doc.current ? 'text-white/85' : 'text-slate-500')}>{doc.label}</span>
               <span className="block text-sm font-semibold">{doc.no}</span>
               {doc.state ? (
-                <span className={cn('block text-[11px]', doc.current ? 'text-teal-50' : 'text-slate-500')}>{doc.state}</span>
+                <span className={cn('block text-[11px]', doc.current ? 'text-white/85' : 'text-slate-500')}>{doc.state}</span>
               ) : null}
             </span>
           </>

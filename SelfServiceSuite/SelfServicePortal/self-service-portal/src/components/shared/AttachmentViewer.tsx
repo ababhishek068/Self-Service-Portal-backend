@@ -50,7 +50,7 @@ export function AttachmentViewer({
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" />
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-[#151722]/45 backdrop-blur-sm" />
       <div
         role="dialog"
         aria-modal="true"

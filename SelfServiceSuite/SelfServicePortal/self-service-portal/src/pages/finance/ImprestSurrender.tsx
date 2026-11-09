@@ -74,31 +74,31 @@ export function ImprestSurrender() {
     value: row.requestNo,
   }))
   const emptyImprestHint = imprestQuery.isLoading
-    ? 'Loading imprests…'
+    ? 'Loading advance payments…'
     : imprestQuery.isError
-      ? 'Could not load imprests from Business Central.'
+      ? 'Could not load advance payments from Business Central.'
       : (imprestQuery.data ?? []).length === 0
-        ? 'No imprest requisitions found for your employee number.'
+        ? 'No advance payment requests found for your employee number.'
         : surrenderable.length === 0
-          ? 'No posted or approved imprest is available to surrender. Finance must post the imprest in Business Central first, and fully surrendered imprests are excluded.'
-          : 'Select imprest'
+          ? 'No posted or approved advance payment is available to surrender. Finance must post the advance in Business Central first, and fully settled advances are excluded.'
+          : 'Select advance payment'
 
   return (
     <MultiStepRequestPage
-      title="Imprest Surrender"
-      headerLabel="New Imprest Surrender"
-      description="Select a posted or approved imprest to surrender. Enter Actual Spent. Cash Receipt No. is only needed when unused cash is returned (fully spent → leave blank / amount 0). Then request approval."
+      title="Advance Surrender"
+      headerLabel="New Advance Surrender"
+      description="Settle a posted or approved advance payment (Phase 3 — within two working days of return). Enter actual spend and supporting evidence. Cash Receipt No. is only needed when unused cash is returned (fully spent → leave blank / amount 0)."
       module={module}
-      queryKey={['finance', 'imprest-surrender']}
+      queryKey={['finance', 'advance-surrender']}
       listRequests={() => listModuleRequests(module)}
-      newButtonLabel="New Imprest Surrender"
+      newButtonLabel="New Advance Surrender"
       headerSchema={imprestSurrenderHeaderSchema}
       headerDefaults={{ imprest: '' }}
       buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Surrender for ${values.imprest}` })}
       headerFields={[
         {
           name: 'imprest',
-          label: 'Imprest to Surrender',
+          label: 'Advance Payment to Surrender',
           type: 'select',
           valuePaths: ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo'],
           options: imprestOptions,
@@ -122,11 +122,11 @@ export function ImprestSurrender() {
         return (
           <div className="grid gap-x-8 gap-y-5 border-y border-slate-200 py-4 sm:grid-cols-2 lg:grid-cols-3">
             <Detail
-              label="Imprest Purpose"
+              label="Advance Purpose"
               value={String(firstValue(payload, ['Purpose', 'Description']) ?? selected?.title ?? '')}
             />
             <Detail
-              label="Imprest Amount"
+              label="Advance Amount"
               value={amount === undefined ? '—' : formatCurrency(Number(amount))}
             />
             <Detail
@@ -160,7 +160,7 @@ export function ImprestSurrender() {
           paths: ['payload.SurrenderDate', 'payload.Surrender_Date', 'payload.DateCreated', 'request.createdAt'],
           format: 'date',
         },
-        { label: 'Imprest No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No', 'payload.ImprestNo'] },
+        { label: 'Advance Payment No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No', 'payload.ImprestNo'] },
         { label: 'Purpose', paths: ['payload.Purpose', 'request.title'] },
         {
           label: 'Department',
@@ -197,14 +197,14 @@ export function ImprestSurrender() {
           ],
         },
         {
-          label: 'Imprest Amount',
+          label: 'Advance Amount',
           paths: ['payload.TotalNetAmount', 'payload.Total_Net_Amount', 'payload.Amount', 'request.amount'],
           format: 'currency',
         },
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
-        label: 'Imprest Surrender Lines',
+        label: 'Advance Surrender Lines',
         schema: imprestSurrenderHeaderSchema,
         defaultValues: {},
         canAdd: false,

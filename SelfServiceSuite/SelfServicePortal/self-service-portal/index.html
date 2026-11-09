@@ -7,6 +7,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a3d6b" />
     <title>ABH Partners — Smart ESSP | Employee Self-Service Portal</title>
+    <script>
+      // Saved theme before the stylesheet paints (src/lib/theme.ts does the same after load).
+      try {
+        if (localStorage.getItem('ssp.theme') === 'dark') {
+          document.documentElement.dataset.theme = 'dark'
+          document.documentElement.style.colorScheme = 'dark'
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

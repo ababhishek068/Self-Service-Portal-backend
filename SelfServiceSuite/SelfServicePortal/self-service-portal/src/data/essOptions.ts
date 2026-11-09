@@ -11,13 +11,19 @@ export const claimTypeOptions = [
   { label: 'Other Claim', value: 'OTHER' },
 ]
 
-/** BC hospital categories: 0 = Government, 1 = Private, 2 = Outline/Online. */
+/**
+ * BC hospital categories (classification only).
+ * Reimbursement rate is policy-driven: company covers 80% of the accepted receipt,
+ * capped by the remaining Self / Dependant medical claim budget — not by hospital %.
+ */
 export const hospitalCategoryOptions = [
-  { label: 'Government hospital (100% refund)', value: '0' },
-  // UAT (5 Nov 2026): non-government / no agreement refunds 80% (BC 1.0.3.605 Staff Medical Claims Refund).
-  { label: 'Non-Government / no agreement (80% refund)', value: '1' },
-  { label: 'Online / outline branch (90% refund)', value: '2' },
+  { label: 'Government hospital', value: '0' },
+  { label: 'Non-Government / no agreement', value: '1' },
+  { label: 'Online / outline branch', value: '2' },
 ]
+
+/** ABH Medical Claim & Reimbursement Policy — company coverage of accepted receipts. */
+export const MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT = 80
 
 /** Petty cash line types (ReceiptPaymentTypes G/L Account, Payment). */
 export const pettyCashTypeOptions = [
@@ -30,7 +36,7 @@ export const pettyCashTypeOptions = [
   'OTHER',
 ].map((value) => ({ label: value, value }))
 
-/** Imprest line advance types (ImprestType OData, Type = 'Imprest'). */
+/** Advance Payment line types (BC ImprestType OData, Type = 'Imprest'). */
 export const imprestTypeOptions = [
   'SALARY',
   'TRAVEL',

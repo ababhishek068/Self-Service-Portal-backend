@@ -2,8 +2,8 @@ import type { PortalModuleKey } from '@/types/erp.types'
 
 /** Human-readable label for each portal module. */
 export const moduleLabels: Record<PortalModuleKey, string> = {
-  imprest: 'Imprest Requisition',
-  imprestSurrender: 'Imprest Surrender',
+  imprest: 'Advance Payment',
+  imprestSurrender: 'Advance Surrender',
   staffClaim: 'Staff Claims',
   pettyCash: 'Petty Cash Request',
   pettyCashReplenishment: 'Petty Cash Replenishment',
@@ -16,9 +16,10 @@ export const moduleLabels: Record<PortalModuleKey, string> = {
   vehicleTransfer: 'Vehicle Transfer',
   gatePass: 'Gate Pass',
   leave: 'Leave Requisition',
-  overtime: 'Overtime Request',
+  overtime: 'Overtime Payment Request',
+  overtimeWork: 'Overtime Request',
   travel: 'Travel Request',
-  salaryAdvance: 'Salary Advance',
+  salaryAdvance: 'Salary Advance Request',
   training: 'Training Request',
   documentRequisition: 'Document Requisition',
   employeeExit: 'Employee Exit',

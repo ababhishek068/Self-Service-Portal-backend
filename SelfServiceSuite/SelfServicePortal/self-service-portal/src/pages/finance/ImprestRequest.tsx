@@ -224,16 +224,16 @@ export function ImprestRequest() {
 
   return (
     <MultiStepRequestPage
-      title="Imprest Requisition"
-      headerLabel="New Imprest Requisition"
-      description="Create the imprest header, then add advance lines. Daily rates are fetched from Business Central Destination Rates using the advance type, travel destination, and number of days."
+      title="Advance Payment"
+      headerLabel="New Advance Payment"
+      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Create the header, add budget lines, then submit for approval. Settle unused or spent funds later via Advance Surrender (within two working days of return)."
       module={module}
-      queryKey={['finance', 'imprest']}
+      queryKey={['finance', 'advance-payment']}
       listRequests={() => listModuleRequests(module)}
       listStatusFilter
       cancelStatuses={FINANCE_CANCEL_STATUSES}
       listSearchExtra={imprestListSearchExtra}
-      newButtonLabel="New Imprest Requisition"
+      newButtonLabel="New Advance Payment"
       headerSchema={imprestHeaderSchema}
       headerDefaults={{ dateRequired: today, purpose: '', travelDestination: '', travelDate: today, returnDate: tomorrow }}
       headerSupplement={() => <FinanceEmployeeOrgBanner />}
@@ -250,7 +250,7 @@ export function ImprestRequest() {
           travelDate,
           returnDate,
           startDate: travelDate,
-          title: String(values.purpose || 'Imprest Requisition'),
+          title: String(values.purpose || 'Advance Payment'),
         }
       }}
       headerOnValuesChange={(values, form) => {
@@ -278,7 +278,7 @@ export function ImprestRequest() {
             'Date',
           ],
         },
-        { name: 'purpose', label: 'Imprest Purpose', type: 'textarea', valuePaths: ['Purpose'] },
+        { name: 'purpose', label: 'Advance Purpose', type: 'textarea', valuePaths: ['Purpose'] },
         {
           name: 'travelDestination',
           label: 'Travel Destination (free text)',
@@ -365,8 +365,8 @@ export function ImprestRequest() {
         },
       ]}
       line={{
-        label: 'Imprest Lines',
-        addLabel: 'Add Imprest Line',
+        label: 'Advance Lines',
+        addLabel: 'Add Advance Line',
         schema: imprestLineHeaderSchema,
         defaultValues: {
           advanceType: '',
@@ -439,7 +439,7 @@ export function ImprestRequest() {
           { key: 'amount', header: 'Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
           { key: 'noOfDays', header: 'No of Days' },
         ],
-        emptyText: '*** No Imprest Lines Found ***',
+        emptyText: '*** No Advance Lines Found ***',
         canEdit: false,
       }}
     />

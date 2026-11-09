@@ -177,6 +177,23 @@ import {
   OVERTIME_MODULE,
 } from './overtimeRequests.js'
 import {
+  decideOvertimeWorkApproval,
+  deleteOvertimeWorkRequest,
+  getOvertimeWorkByPayment,
+  getOvertimeWorkRequest,
+  linkOvertimeWorkToPayment,
+  listApprovedOvertimeWorkRequests,
+  listOvertimeWorkApprovals,
+  listOvertimeWorkRequests,
+  overtimeWorkLinesForPayment,
+  overtimeWorkToPortalRequest,
+  saveOvertimeWorkRequest,
+  unlinkOvertimeWorkFromPayment,
+  validateOvertimeWorkDetails,
+  withdrawOvertimeWorkRequest,
+  OVERTIME_WORK_MODULE,
+} from './overtimeWorkRequests.js'
+import {
   decideProfileChange,
   discardProfileDraft,
   ensureProfileDraft,
@@ -503,13 +520,41 @@ function medicalClaimCoveragePercent(
   return Math.round((amountToRefund / medicalAmount) * 10000) / 100
 }
 
-function localMedicalRefundAmounts(hospitalCategory: number, medicalAmount: number) {
+/** ABH Medical Claim & Reimbursement Policy: company covers 80% of accepted receipts. */
+const MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT = 80
+
+function localMedicalRefundAmounts(_hospitalCategory: number, medicalAmount: number) {
   if (medicalAmount <= 0) return { amount: 0, amountToRefund: 0, coveragePercent: 0 }
-  // UAT (5 Nov 2026): non-government / no agreement refunds 80% (BC 1.0.3.605).
-  const rates: Record<number, number> = { 0: 100, 1: 80, 2: 90 }
-  const coveragePercent = rates[hospitalCategory] ?? rates[0]
+  // Hospital category is classification only — reimbursement rate is always 80%,
+  // then capped by Self / Dependant remaining budget (see validate-hospital-category).
+  const coveragePercent = MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT
   const amountToRefund = Math.round(medicalAmount * (coveragePercent / 100) * 100) / 100
   return { amount: amountToRefund, amountToRefund, coveragePercent }
+}
+
+function isDependantMedicalPatient(value: unknown) {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized === 'dependant' || normalized === 'dependent' || normalized === '2'
+}
+
+function applyMedicalBudgetCap(
+  amountToRefund: number,
+  patient: unknown,
+  balances: EmployeeMedicalBalances | null,
+) {
+  if (!balances || amountToRefund <= 0) {
+    return { amountToRefund, availableBalance: null as number | null, capped: false }
+  }
+  const availableBalance = isDependantMedicalPatient(patient) ? balances.dependant : balances.self
+  if (!Number.isFinite(availableBalance)) {
+    return { amountToRefund, availableBalance: null, capped: false }
+  }
+  const cappedAmount = Math.max(0, Math.min(amountToRefund, availableBalance))
+  return {
+    amountToRefund: Math.round(cappedAmount * 100) / 100,
+    availableBalance,
+    capped: cappedAmount < amountToRefund - 0.0001,
+  }
 }
 
 function claimTypeLookupCode(value: unknown) {
@@ -551,7 +596,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v316 — 1.0.3.477 (Imprest vs Advance Request labels; OT chain shown as LM→FD→HR→Finance; Profile white-screen fix)'
+export const PORTAL_API_BUILD = 'v348 — 1.0.3.509 (Imprest→Advance Payment/Surrender; HR Salary Advance Request)'
 
 interface LookupSpec {
   service: string
@@ -1108,6 +1153,100 @@ export async function fetchItemLocationBalance(itemNo: string, locationCode: str
     ? rows.reduce((sum, entry) => sum + Number(entry?.Quantity ?? 0), 0)
     : 0
   return Math.max(0, Math.round(balance))
+}
+
+/** Dashboard donut: map BC/portal statuses into a small set of workflow buckets. */
+function dashboardWorkflowBucket(status: unknown) {
+  const value = String(status ?? '')
+    .trim()
+    .toLowerCase()
+  if (!value) return 'Draft'
+  if (/(reject|cancel|denied)/.test(value)) return 'Rejected'
+  if (/(return|sent.?back)/.test(value)) return 'Returned'
+  if (/(pending|open|submitted|await)/.test(value)) return 'Pending'
+  if (/(draft|new)/.test(value)) return 'Draft'
+  if (/(post|approv|releas|complete|closed|paid|issued)/.test(value)) return 'Posted'
+  return 'Posted'
+}
+
+const DASHBOARD_LOW_STOCK_QTY = 5
+
+/**
+ * Stock on hand for the dashboard: open item ledger remaining qty, grouped by item.
+ * Fails soft when the Item Ledger query is unavailable.
+ */
+async function buildDashboardStockAvailability() {
+  try {
+    const rows = (await fetchOData('QyItemLedgerEntry', {
+      $filter: `Open eq true and RemainingQuantity gt 0`,
+      $top: 4000,
+    }).catch(() => null)) as ODataRecord[] | null
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return {
+        available: false,
+        stockOnHand: 0,
+        activeItems: 0,
+        lowStock: [] as Array<{
+          itemNo: string
+          description: string
+          quantity: number
+          locationCode: string
+        }>,
+      }
+    }
+    type Agg = { itemNo: string; description: string; quantity: number; locationCode: string }
+    const byItem = new Map<string, Agg>()
+    for (const row of rows) {
+      const itemNo = text(row, ['ItemNo', 'Item_No', 'No'])
+      if (!itemNo) continue
+      const qty = Math.max(0, number(row, ['RemainingQuantity', 'Remaining_Quantity', 'Quantity']))
+      if (!(qty > 0)) continue
+      const locationCode = text(row, ['LocationCode', 'Location_Code', 'Location'])
+      const existing = byItem.get(itemNo)
+      if (existing) {
+        existing.quantity += qty
+        if (!existing.description) existing.description = text(row, ['Description', 'ItemDescription'])
+        if (!existing.locationCode && locationCode) existing.locationCode = locationCode
+      } else {
+        byItem.set(itemNo, {
+          itemNo,
+          description: text(row, ['Description', 'ItemDescription'], itemNo),
+          quantity: qty,
+          locationCode,
+        })
+      }
+    }
+    const items = [...byItem.values()]
+    const stockOnHand = items.reduce((sum, item) => sum + item.quantity, 0)
+    const lowStock = items
+      .filter((item) => item.quantity > 0 && item.quantity <= DASHBOARD_LOW_STOCK_QTY)
+      .toSorted((a, b) => a.quantity - b.quantity || a.itemNo.localeCompare(b.itemNo))
+      .slice(0, 8)
+      .map((item) => ({
+        itemNo: item.itemNo,
+        description: item.description,
+        quantity: Math.round(item.quantity * 100) / 100,
+        locationCode: item.locationCode,
+      }))
+    return {
+      available: true,
+      stockOnHand: Math.round(stockOnHand * 100) / 100,
+      activeItems: items.length,
+      lowStock,
+    }
+  } catch {
+    return {
+      available: false,
+      stockOnHand: 0,
+      activeItems: 0,
+      lowStock: [] as Array<{
+        itemNo: string
+        description: string
+        quantity: number
+        locationCode: string
+      }>,
+    }
+  }
 }
 
 function storeLineIsItem(line: Record<string, unknown>) {
@@ -2015,6 +2154,7 @@ export { approvalModule }
 const SOAP_APPROVAL_MODULES = [
   EMPLOYEE_EXIT_MODULE,
   HR_SERVICE_LETTER_MODULE,
+  OVERTIME_WORK_MODULE,
   OVERTIME_MODULE,
   PROFILE_CHANGE_MODULE,
 ] as const
@@ -2082,26 +2222,46 @@ async function soapApproverIds(authUser: AuthUser) {
 
 async function soapApprovalQueues(authUser: AuthUser) {
   const joined = await soapApproverIds(authUser)
-  const [exitResult, letterResult, overtimeResult, profileResult] = await Promise.allSettled([
+  const actingIds = joined.split('|').filter(Boolean)
+  const [exitResult, letterResult, overtimeResult, overtimeWorkResult, profileResult] = await Promise.allSettled([
     listEmployeeExitApprovals(joined),
     listHrServiceLetterApprovals(joined),
     listOvertimeApprovals(joined, 'pending'),
+    listOvertimeWorkApprovals(actingIds, 'pending'),
     listProfileChangeApprovals(joined, 'pending'),
   ])
   const exitRows = exitResult.status === 'fulfilled' ? exitResult.value : []
   const letterRows = letterResult.status === 'fulfilled' ? letterResult.value : []
   const overtimeRows = overtimeResult.status === 'fulfilled' ? overtimeResult.value : []
+  const overtimeWorkRows = overtimeWorkResult.status === 'fulfilled' ? overtimeWorkResult.value : []
   const profileRows = profileResult.status === 'fulfilled' ? profileResult.value : []
   return {
     joined,
     exitRows,
     letterRows,
     overtimeRows,
+    overtimeWorkRows,
     profileRows,
     queueItems: [
       ...exitRows.map(employeeExitApprovalQueueItem),
       ...letterRows.map(hrLetterApprovalQueueItem),
       ...overtimeRows.map(overtimeApprovalQueueItem),
+      ...overtimeWorkRows.map((row) => {
+        const portal = overtimeWorkToPortalRequest(row)
+        return {
+          id: portal.id,
+          requestNo: portal.requestNo,
+          module: OVERTIME_WORK_MODULE,
+          title: portal.title,
+          makerEmployeeNo: portal.makerEmployeeNo,
+          makerName: portal.makerName,
+          amount: 0,
+          status: portal.status,
+          submittedAt: portal.submittedAt || portal.createdAt,
+          approverEmployeeNo: portal.approverEmployeeNo,
+          sourceDocumentNo: portal.requestNo,
+        }
+      }),
       ...profileRows.map(profileChangeApprovalQueueItem),
     ],
   }
@@ -2444,12 +2604,33 @@ function mapPettyCashLine(row: ODataRecord, index: number) {
   const lineNo = lineIdentity(row, index)
   const amount =
     number(row, ['amount', 'Amount', 'NetAmount', 'Net_Amount', 'AmountWithVAT', 'Amount_With_VAT']) || 0
+  const accountNo = text(row, [
+    'accountNo',
+    'AccountNo',
+    'Account_No',
+    'GLAccount',
+    'GL_Account',
+    'G_L_Account',
+    'GLAccountNo',
+    'GL_Account_No',
+  ])
+  const accountName = text(row, [
+    'accountName',
+    'AccountName',
+    'Account_Name',
+    'GLAccountName',
+    'GL_Account_Name',
+    'G_L_Account_Name',
+  ])
+  const typeName = text(row, ['name', 'Name', 'TransactionName', 'Transaction_Name', 'Description'])
   return {
     id: lineNo,
     lineNo,
     recId: lineNo,
-    type: text(row, ['type', 'Type']),
-    name: text(row, ['name', 'Name', 'TransactionName', 'Transaction_Name', 'AccountName', 'Account_Name']),
+    type: text(row, ['type', 'Type', 'Code']),
+    name: typeName || accountName,
+    accountNo,
+    accountName: accountNo && accountName ? `${accountNo} — ${accountName}` : accountName || accountNo,
     amount,
   }
 }
@@ -6446,6 +6627,23 @@ export function buildPortalApiRouter() {
           res.json({ ...detail, approvalComment: await approvalCommentLimits() })
           return
         }
+        if (soapRef.module === OVERTIME_WORK_MODULE) {
+          const actingIds = await approverIdCandidates(authUser)
+          const queued = (await listOvertimeWorkApprovals(actingIds, 'pending')).find(
+            (row) => row.requestNo === soapRef.no,
+          )
+          const request = queued ?? (await getOvertimeWorkRequest(soapRef.no))
+          if (
+            !request ||
+            (!queued &&
+              !request.steps.some((step) => actingIds.some((id) => id.toLowerCase() === step.approverUserId.toLowerCase())))
+          ) {
+            throw portalError('Overtime work request approval was not found for this user', 404)
+          }
+          const detail = overtimeWorkToPortalRequest(request, authUser.userID)
+          res.json({ ...detail, approvalComment: await approvalCommentLimits() })
+          return
+        }
         if (soapRef.module === PROFILE_CHANGE_MODULE) {
           const queued = (await listProfileChangeApprovals(joined, 'pending')).find(
             (row) => row.requestNo === soapRef.no,
@@ -6583,6 +6781,14 @@ export function buildPortalApiRouter() {
             remarks: comment,
           })
           forgetNotifications(authUser)
+        } else if (soapRef.module === OVERTIME_WORK_MODULE) {
+          await decideOvertimeWorkApproval({
+            requestNo: soapRef.no,
+            actingUserIds: await approverIdCandidates(authUser),
+            isApprove: decision === 'Approved',
+            comments: comment,
+          })
+          forgetNotifications(authUser)
         } else if (soapRef.module === PROFILE_CHANGE_MODULE) {
           await decideProfileChange({
             approverUserIds: joined,
@@ -6703,7 +6909,10 @@ export function buildPortalApiRouter() {
         pendingApprovals,
         decidedQueues,
         leaveApplications,
+        leaveRowsRaw,
         moduleRows,
+        overtimeRows,
+        overtimeWorkRows,
         soapQueue,
       ] = await Promise.all([
         countLiveApprovalEntries('Open'),
@@ -6712,17 +6921,64 @@ export function buildPortalApiRouter() {
         fetchODataCount('QyHRLeaveApplications', {
           $filter: `UserID eq '${odataString(authUser.userID)}'`,
         }),
+        fetchOData('QyHRLeaveApplications', {
+          $filter: `UserID eq '${odataString(authUser.userID)}'`,
+          $top: 50,
+        }).catch(() => [] as ODataRecord[]),
         Promise.all(listModules.map((module) => mappedModuleRows(module, authUser))),
+        listOvertimeRequests(authUser.employeeNo).catch(() => []),
+        listOvertimeWorkRequests(authUser.employeeNo).catch(() => []),
         soapApprovalQueues(authUser),
       ])
       const [imprest, surrender, claims, pettyCash, purchase, store] = moduleRows
-      const recentActivity = moduleRows
-        .flat()
-        .toSorted((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-        .slice(0, 8)
-      const openRequests = recentActivity.filter((row) =>
-        ['Draft', 'Pending Approval'].includes(row.status),
+      const leaveRecent = (Array.isArray(leaveRowsRaw) ? leaveRowsRaw : []).map((row) => {
+        const mapped = mapRequest(row, 'leave')
+        return {
+          ...mapped,
+          status: resolveLeaveStatus(row),
+          createdAt: mapped.createdAt || mapped.submittedAt || new Date().toISOString(),
+        }
+      })
+      const overtimeRecent = overtimeRows.map((row) => {
+        const portal = overtimeToPortalRequest(row)
+        return {
+          ...portal,
+          createdAt: portal.createdAt || portal.submittedAt || new Date().toISOString(),
+        }
+      })
+      const overtimeWorkRecent = overtimeWorkRows.map((row) => overtimeWorkToPortalRequest(row))
+      const allMine = [...moduleRows.flat(), ...leaveRecent, ...overtimeRecent, ...overtimeWorkRecent].toSorted(
+        (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
+      )
+      const recentActivity = allMine.slice(0, 12)
+      const openRequests = allMine.filter((row) =>
+        ['Draft', 'Pending Approval', 'Returned'].includes(row.status),
       ).length
+      const overtimeRequests = overtimeRows.length + overtimeWorkRows.length
+      const documentsByModule = [
+        { key: 'leave', label: 'Leave', count: leaveApplications },
+        { key: 'overtime', label: 'Overtime', count: overtimeRequests },
+        { key: 'staffClaim', label: 'Staff Claims', count: claims.length },
+        { key: 'imprest', label: 'Advance Payment', count: imprest.length },
+        { key: 'imprestSurrender', label: 'Advance Surrender', count: surrender.length },
+        { key: 'pettyCash', label: 'Petty Cash', count: pettyCash.length },
+        { key: 'storeRequisition', label: 'Store Req', count: store.length },
+        { key: 'purchaseRequisition', label: 'Local Purchase', count: purchase.length },
+      ]
+      const statusBuckets = new Map<string, number>()
+      for (const row of allMine) {
+        const bucket = dashboardWorkflowBucket(row.status)
+        statusBuckets.set(bucket, (statusBuckets.get(bucket) ?? 0) + 1)
+      }
+      const workflowStatus = (['Posted', 'Pending', 'Draft', 'Returned', 'Rejected'] as const).map((label) => ({
+        label,
+        count: statusBuckets.get(label) ?? 0,
+      }))
+      // Stock Power BI KPIs are for Store Managers only (job title or BC warehouse role).
+      const storeRoles = await storeUserRoles(authUser).catch(() => ({ manager: false, keeper: false }))
+      const stockAvailability = storeRoles.manager
+        ? await buildDashboardStockAvailability()
+        : undefined
       res.json({
         pendingApprovals: pendingApprovals + soapQueue.queueItems.length,
         approvedDocuments: decidedQueues.approved.length,
@@ -6734,10 +6990,14 @@ export function buildPortalApiRouter() {
         pettyCash: pettyCash.length,
         purchaseRequisitions: purchase.length,
         storeRequisitions: store.length,
+        overtimeRequests,
         leaveBalance: authUser.leaveBalance,
         openRequests,
         unresolved: openRequests,
         recentActivity,
+        documentsByModule,
+        workflowStatus,
+        ...(stockAvailability ? { stockAvailability } : {}),
       })
     }),
   )
@@ -6754,11 +7014,15 @@ export function buildPortalApiRouter() {
   router.post(
     '/claims/validate-hospital-category',
     safe(async (req, res) => {
+      const authUser = user(req)
       const medicalAmount = Number(req.body?.medicalAmount ?? 0)
       const hospitalCategory = hospitalCategoryCode(req.body?.hospitalCategory)
-      let amount = 0
-      let amountToRefund = 0
-      let coveragePercent = 0
+      const patient = req.body?.patient
+      // Policy: always 80% of accepted receipt (hospital category is classification only).
+      const policy = localMedicalRefundAmounts(hospitalCategory, medicalAmount)
+      let amountToRefund = policy.amountToRefund
+      let coveragePercent = policy.coveragePercent
+      // Prefer BC when it returns a value, but never exceed the policy 80% rate.
       try {
         const result = await callSoapMethod('FetchMedicalClaimAmount', {
           medicalAmount,
@@ -6771,32 +7035,40 @@ export function buildPortalApiRouter() {
         } catch {
           parsed = { Amount: Number(raw) || 0, AmountToRefund: 0 }
         }
-        amount = Number(parsed.Amount ?? parsed.amount ?? 0)
-        amountToRefund = Number(
+        const soapRefund = Number(
           parsed.AmountToRefund ?? parsed.amountToRefund ?? parsed.Amount ?? parsed.amount ?? 0,
         )
-        coveragePercent = medicalClaimCoveragePercent(
-          medicalAmount,
-          amountToRefund,
-          Number(parsed.CoveragePercent ?? parsed.coveragePercent ?? 0),
-        )
+        if (soapRefund > 0) {
+          amountToRefund = Math.min(soapRefund, policy.amountToRefund)
+          coveragePercent = medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
+        }
       } catch {
-        // Fall through to local refund rates when SOAP is unavailable.
+        // Local policy rates already applied above.
       }
-      if (medicalAmount > 0 && amountToRefund <= 0) {
-        const fallback = localMedicalRefundAmounts(hospitalCategory, medicalAmount)
-        amount = fallback.amount
-        amountToRefund = fallback.amountToRefund
-        coveragePercent = fallback.coveragePercent
+      let balances: EmployeeMedicalBalances | null = null
+      try {
+        const soapResult = await callSoapMethod('FnGetEmployeeMedicalBalances', {
+          employeeNo: authUser.employeeNo,
+        })
+        balances = parseEmployeeMedicalBalancesReturn(soapResult.returnValue)
+      } catch {
+        balances = null
       }
-      const netAmount = amountToRefund > 0 ? amountToRefund : amount
+      const capped = applyMedicalBudgetCap(amountToRefund, patient, balances)
+      amountToRefund = capped.amountToRefund
+      if (medicalAmount > 0 && amountToRefund > 0) {
+        coveragePercent = medicalClaimCoveragePercent(medicalAmount, amountToRefund, 0) || coveragePercent
+      }
       res.json({
-        Amount: netAmount,
-        amount: netAmount,
+        Amount: amountToRefund,
+        amount: amountToRefund,
         AmountToRefund: amountToRefund,
         amountToRefund,
         coveragePercent,
         CoveragePercent: coveragePercent,
+        availableBalance: capped.availableBalance,
+        budgetCapped: capped.capped,
+        policyCoveragePercent: MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT,
       })
     }),
   )
@@ -7114,15 +7386,68 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
       const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
-      res.json(
-        await saveOvertimeRequest({
-          employeeNo: authUser.employeeNo,
-          requesterUserId: authUser.userID,
-          requestNo,
-          details: validateOvertimeDetails(req.body?.details, submit),
+      let details = validateOvertimeDetails(req.body?.details, submit)
+      if (details.priorWorkRequestNo) {
+        const prior = await getOvertimeWorkRequest(details.priorWorkRequestNo, authUser.employeeNo)
+        if (!prior || prior.status !== 'Approved') {
+          throw portalError(
+            `Overtime Payment Request needs a previously approved Overtime Work Request. ${details.priorWorkRequestNo} is not an approved work request for this employee.`,
+            400,
+          )
+        }
+        if (
+          prior.linkedPaymentRequestNo &&
+          requestNo &&
+          prior.linkedPaymentRequestNo.toUpperCase() !== requestNo
+        ) {
+          throw portalError(
+            `Approved work request ${prior.requestNo} is already linked to payment ${prior.linkedPaymentRequestNo} and cannot be reused for another claim.`,
+            409,
+          )
+        }
+        if (prior.linkedPaymentRequestNo && !requestNo) {
+          throw portalError(
+            `Approved work request ${prior.requestNo} is already linked to payment ${prior.linkedPaymentRequestNo} and cannot be reused for another claim.`,
+            409,
+          )
+        }
+        // Payment has no Add Line: hours come from the approved work request.
+        const workLines = overtimeWorkLinesForPayment(prior)
+        if (!workLines.length) {
+          throw portalError(
+            `Approved work request ${prior.requestNo} has no overtime lines to pay.`,
+            400,
+          )
+        }
+        details = validateOvertimeDetails(
+          {
+            ...details,
+            lines: workLines,
+            reason: details.reason || prior.reason,
+          },
           submit,
-        }),
-      )
+        )
+      } else if (submit) {
+        throw portalError(
+          'Select the previously approved Overtime Work Request. Payment requests without a prior-approved work request will not be processed.',
+          400,
+        )
+      }
+      const saved = await saveOvertimeRequest({
+        employeeNo: authUser.employeeNo,
+        requesterUserId: authUser.userID,
+        requestNo,
+        details,
+        submit,
+      })
+      if (details.priorWorkRequestNo) {
+        await linkOvertimeWorkToPayment({
+          workRequestNo: details.priorWorkRequestNo,
+          paymentRequestNo: saved.requestNo,
+          employeeNo: authUser.employeeNo,
+        })
+      }
+      res.json(saved)
     }),
   )
 
@@ -7138,7 +7463,117 @@ export function buildPortalApiRouter() {
     '/hr/overtime/:no',
     safe(async (req, res) => {
       const authUser = user(req)
-      res.json(await deleteOvertimeRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
+      const paymentNo = String(req.params.no ?? '').trim()
+      const result = await deleteOvertimeRequest(authUser.employeeNo, paymentNo)
+      await unlinkOvertimeWorkFromPayment(paymentNo, authUser.employeeNo)
+      res.json(result)
+    }),
+  )
+
+  // Overtime Work Request (prior permission). Payment requests require an approved work request.
+  router.get(
+    '/hr/overtime-work',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ rows: await listOvertimeWorkRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.get(
+    '/hr/overtime-work/approved',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const keepRequestNo = String(req.query.keep ?? '').trim().toUpperCase()
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({
+        rows: await listApprovedOvertimeWorkRequests(authUser.employeeNo, {
+          keepRequestNo,
+          // Always return linkage flags; unused filter keeps used docs out of the picker.
+        }),
+      })
+    }),
+  )
+
+  router.get(
+    '/hr/overtime-work/by-payment/:paymentNo',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      const row = await getOvertimeWorkByPayment(String(req.params.paymentNo ?? '').trim(), authUser.employeeNo)
+      res.json({ row })
+    }),
+  )
+
+  router.post(
+    '/hr/overtime-work',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
+      const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
+      const context = await getOvertimeContext(authUser.employeeNo, authUser.userID).catch(() => null)
+      const lm = context?.approvers?.find((step) => /line\s*manager|supervisor/i.test(step.label)) ?? context?.approvers?.[0]
+      const hr = context?.approvers?.find((step) => /^hr$/i.test(step.label))
+      const manager =
+        context?.approvers?.find((step) => /fd|director|authorized|manager/i.test(step.label) && step !== lm) ??
+        context?.approvers?.[1]
+      res.json(
+        await saveOvertimeWorkRequest({
+          employeeNo: authUser.employeeNo,
+          requesterUserId: authUser.userID,
+          requestNo,
+          details: validateOvertimeWorkDetails(
+            {
+              ...(req.body?.details ?? {}),
+              employeeName: context?.employee.employeeName ?? authUser.displayName ?? authUser.name,
+              designation: context?.employee.designation ?? '',
+              departmentCode: context?.employee.departmentCode ?? '',
+              departmentName: context?.employee.departmentName ?? '',
+              lineManagerUserId: lm?.approverUserId ?? '',
+              lineManagerName: lm?.approverName ?? '',
+              hrUserId: hr?.approverUserId ?? '',
+              hrName: hr?.approverName ?? '',
+              managerUserId: manager?.approverUserId ?? '',
+              managerName: manager?.approverName ?? '',
+            },
+            submit,
+          ),
+          submit,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/overtime-work/:no/withdraw',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await withdrawOvertimeWorkRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
+    }),
+  )
+
+  router.delete(
+    '/hr/overtime-work/:no',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await deleteOvertimeWorkRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
+    }),
+  )
+
+  router.post(
+    '/hr/overtime-work/:no/decide',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const isApprove = req.body?.isApprove === true || String(req.body?.isApprove).toLowerCase() === 'true'
+      const comments = String(req.body?.comments ?? '').trim()
+      res.json(
+        await decideOvertimeWorkApproval({
+          requestNo: String(req.params.no ?? '').trim(),
+          actingUserIds: await approverIdCandidates(authUser),
+          isApprove,
+          comments,
+        }),
+      )
     }),
   )
 

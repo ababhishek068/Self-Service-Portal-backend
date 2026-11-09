@@ -140,7 +140,7 @@ function buildRequest(
 /** Demo seed so dashboard tiles and recent activity are populated on first load. */
 let mockRequests: PortalRequest[] = [
   buildRequest('leave', { status: 'Pending Approval', title: 'Annual Leave — 3 days', amount: 0, daysAgo: 2 }),
-  buildRequest('imprest', { status: 'Approved', title: 'Imprest for field visit', amount: 15000, daysAgo: 5 }),
+  buildRequest('imprest', { status: 'Approved', title: 'Advance payment for field visit', amount: 15000, daysAgo: 5 }),
   buildRequest('staffClaim', { status: 'Pending Approval', title: 'Medical claim — panel hospital', amount: 4200, daysAgo: 1 }),
   buildRequest('storeRequisition', { status: 'Rejected', title: 'Store items — stationery', amount: 0, daysAgo: 7 }),
   buildRequest('purchaseRequisition', {
@@ -157,7 +157,7 @@ let mockRequests: PortalRequest[] = [
     } as Employee,
     approver: { employeeNo: currentEmployee.employeeNo, name: currentEmployee.displayName },
   }),
-  buildRequest('imprestSurrender', { status: 'Approved', title: 'Surrender IMP-2026-00025', amount: 12000, daysAgo: 4 }),
+  buildRequest('imprestSurrender', { status: 'Approved', title: 'Advance surrender IMP-2026-00025', amount: 12000, daysAgo: 4 }),
   buildRequest('transport', { status: 'Pending Approval', title: 'City transport — client meeting', amount: 0, daysAgo: 0 }),
 ]
 

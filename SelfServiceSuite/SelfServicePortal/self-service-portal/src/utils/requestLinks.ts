@@ -2,12 +2,17 @@ import type { PortalNotification } from '@/api/endpoints/notifications'
 
 /** The requester pages of the modules (each opens a request with ?open=<id>). */
 export const REQUEST_PAGES: Partial<Record<string, string>> = {
-  imprest: '/finance/imprest',
-  imprestSurrender: '/finance/imprest-surrender',
+  imprest: '/finance/advance-payment',
+  imprestSurrender: '/finance/advance-surrender',
   staffClaim: '/finance/staff-claim',
   pettyCash: '/finance/petty-cash',
   purchaseRequisition: '/facility/local-purchase-request',
   storeRequisition: '/facility/store-requisition',
+  leave: '/hr/leave-request',
+  leaveApplication: '/hr/leave-request',
+  overtime: '/hr/overtime-request',
+  overtimeWork: '/hr/overtime-work-request',
+  overtimePayment: '/hr/overtime-request',
 }
 
 /** The module page, opened on one request when `requestId` is given. */

@@ -54,7 +54,7 @@ export const imprestRequestSchema = z
     employeeAccountNumber: z.string().min(6, 'Employee account number is required'),
     responsibleCenter: z.string().min(2, 'Responsible center is required'),
     purpose: z.string().min(8, 'Purpose is required'),
-    lines: z.array(imprestLineSchema).min(1, 'Add at least one imprest line'),
+    lines: z.array(imprestLineSchema).min(1, 'Add at least one advance line'),
     attachments: z.array(attachmentSchema).default([]),
     submit: z.boolean().default(true),
   })
@@ -76,7 +76,7 @@ export const imprestRequestSchema = z
   })
 
 export const imprestSurrenderSchema = z.object({
-  imprestNo: z.string().min(3, 'Imprest document number is required'),
+  imprestNo: z.string().min(3, 'Advance payment document number is required'),
   surrenderDate: dateField,
   amountUsed: moneyField,
   amountReturned: z.coerce.number().min(0, 'Returned amount cannot be negative'),
@@ -179,7 +179,7 @@ export const staffClaimLineSchema = z
 export const imprestHeaderSchema = z
   .object({
     dateRequired: workingDateField,
-    purpose: z.string().min(3, 'Imprest purpose is required'),
+    purpose: z.string().min(3, 'Advance purpose is required'),
     travelDestination: optionalText,
     travelDate: dateField,
     returnDate: dateField,
@@ -191,7 +191,7 @@ export const imprestHeaderSchema = z
   })
 
 export const imprestLineHeaderSchema = z.object({
-  advanceType: z.string().min(1, 'Imprest type is required'),
+  advanceType: z.string().min(1, 'Advance type is required'),
   destination: z.string().min(1, 'Travel destination is required'),
   dutyArea: z.string().min(1, 'Duty area is required'),
   noOfDays: z.coerce.number().positive('No. of days is required'),
@@ -207,11 +207,13 @@ export const pettyCashHeaderSchema = z.object({
 export const pettyCashLineSchema = z.object({
   type: z.string().min(1, 'Type is required'),
   name: optionalText,
+  accountNo: optionalText,
+  accountName: optionalText,
   amount: moneyField,
 })
 
 export const imprestSurrenderHeaderSchema = z.object({
-  imprest: z.string().min(1, 'Select the imprest to surrender'),
+  imprest: z.string().min(1, 'Select the advance payment to surrender'),
 })
 
 /** Original document date from BC — read-only on edit; do not force ERP working date. */
