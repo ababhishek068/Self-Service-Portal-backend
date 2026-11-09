@@ -179,21 +179,39 @@ export const staffClaimLineSchema = z
 export const imprestHeaderSchema = z
   .object({
     dateRequired: workingDateField,
+    /** BC purpose code from PortalAdvancePaymentContext (e.g. AC-RES, GN-OTH). */
     requestPurpose: z.string().min(1, 'Request purpose is required'),
     otherPurposeDetails: z.string().optional().default(''),
     justification: z.string().min(10, 'Request justification is required'),
-    /** Built for Business Central SOAP — filled before create/edit. */
+    activityLocation: optionalText,
+    activityStartDate: z.string().optional().default(''),
+    activityEndDate: z.string().optional().default(''),
+    /** Legacy SOAP Purpose — filled from justification before create/edit. */
     purpose: z.string().optional().default(''),
     travelDestination: optionalText,
     travelDate: dateField,
     returnDate: dateField,
   })
   .superRefine((data, ctx) => {
-    if (data.requestPurpose === 'Other' && !String(data.otherPurposeDetails ?? '').trim()) {
+    const purposeCode = String(data.requestPurpose ?? '').trim()
+    const needsOther =
+      purposeCode === 'GN-OTH' || purposeCode.toLowerCase() === 'other'
+    if (needsOther && !String(data.otherPurposeDetails ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['otherPurposeDetails'],
         message: 'Enter details when Other (Specify) is selected',
+      })
+    }
+    if (
+      data.activityStartDate &&
+      data.activityEndDate &&
+      data.activityEndDate < data.activityStartDate
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['activityEndDate'],
+        message: 'Activity end date cannot be earlier than the start date',
       })
     }
     if (isBefore(parseISO(data.returnDate), parseISO(data.travelDate))) {

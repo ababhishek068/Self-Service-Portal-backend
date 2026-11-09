@@ -1,49 +1,41 @@
-/** Purpose options by division family — ESSP Advance Request requirements. */
-export const PURPOSE_BY_DIVISION: Record<string, { value: string; label: string }[]> = {
+import type { LookupOption } from '@/api/endpoints/lookups'
+
+/** Offline / pre-BC-630 fallback — same codes as ABH Advance Purpose SeedDefaults. */
+export const PURPOSE_BY_DIVISION: Record<string, LookupOption[]> = {
   consulting: [
-    { value: 'Research', label: 'Research' },
-    { value: 'Surveys', label: 'Surveys' },
-    { value: 'Field assessments', label: 'Field assessments' },
-    { value: 'Project implementation', label: 'Project implementation' },
+    { value: 'AC-RES', label: 'Research', meta: { requiresOtherDetails: false } },
+    { value: 'AC-SUR', label: 'Surveys', meta: { requiresOtherDetails: false } },
+    { value: 'AC-FLD', label: 'Field assessments', meta: { requiresOtherDetails: false } },
+    { value: 'AC-PRJ', label: 'Project implementation', meta: { requiresOtherDetails: false } },
   ],
   workforce: [
-    { value: 'Staff deployment', label: 'Staff deployment' },
-    { value: 'Field supervision', label: 'Field supervision' },
-    { value: 'Recruitment activities', label: 'Recruitment activities' },
+    { value: 'AW-DEP', label: 'Staff deployment', meta: { requiresOtherDetails: false } },
+    { value: 'AW-SUP', label: 'Field supervision', meta: { requiresOtherDetails: false } },
+    { value: 'AW-REC', label: 'Recruitment activities', meta: { requiresOtherDetails: false } },
   ],
   academy: [
-    { value: 'Training', label: 'Training' },
-    { value: 'Workshops', label: 'Workshops' },
-    { value: 'Field-based learning', label: 'Field-based learning' },
+    { value: 'AA-TRN', label: 'Training', meta: { requiresOtherDetails: false } },
+    { value: 'AA-WKS', label: 'Workshops', meta: { requiresOtherDetails: false } },
+    { value: 'AA-FLD', label: 'Field-based learning', meta: { requiresOtherDetails: false } },
   ],
   corporate: [
-    { value: 'Procurement missions', label: 'Procurement missions' },
-    { value: 'Administration', label: 'Administration' },
-    { value: 'Logistics', label: 'Logistics' },
-    { value: 'Operational assignments', label: 'Operational assignments' },
+    { value: 'CO-PRC', label: 'Procurement missions', meta: { requiresOtherDetails: false } },
+    { value: 'CO-ADM', label: 'Administration', meta: { requiresOtherDetails: false } },
+    { value: 'CO-LOG', label: 'Logistics', meta: { requiresOtherDetails: false } },
+    { value: 'CO-OPS', label: 'Operational assignments', meta: { requiresOtherDetails: false } },
   ],
-  general: [{ value: 'Other', label: 'Other (Specify)' }],
+  general: [{ value: 'GN-OTH', label: 'Other (Specify)', meta: { requiresOtherDetails: true } }],
 }
 
 export function divisionFamily(divisionOrDept: string) {
   const text = divisionOrDept.toLowerCase()
-  if (text.includes('academy') || text.includes('training')) return 'academy'
-  if (text.includes('workforce') || text.includes('hr') || text.includes('recruit')) return 'workforce'
-  if (text.includes('consult') || text.includes('research') || text.includes('project')) return 'consulting'
-  if (
-    text.includes('finance') ||
-    text.includes('admin') ||
-    text.includes('corporate') ||
-    text.includes('procure') ||
-    text.includes('logistics') ||
-    text.includes('it')
-  ) {
-    return 'corporate'
-  }
-  return 'general'
+  if (text.includes('acd') || text.includes('consult') || text.includes('research')) return 'consulting'
+  if (text.includes('aws') || text.includes('workforce') || text.includes('recruit')) return 'workforce'
+  if (text.includes('aad') || text.includes('academy') || text.includes('training')) return 'academy'
+  return 'corporate'
 }
 
-export function purposeOptionsForDivision(divisionOrDept: string) {
+export function purposeOptionsForDivision(divisionOrDept: string): LookupOption[] {
   const family = divisionFamily(divisionOrDept)
   const specific = PURPOSE_BY_DIVISION[family] ?? PURPOSE_BY_DIVISION.corporate
   const merged = [...specific, ...PURPOSE_BY_DIVISION.general]
@@ -55,22 +47,39 @@ export function purposeOptionsForDivision(divisionOrDept: string) {
   })
 }
 
-export function buildAdvancePurposePayload(values: {
-  requestPurpose?: string
-  otherPurposeDetails?: string
-  justification?: string
-  purpose?: string
-}) {
-  if (String(values.purpose ?? '').trim()) {
-    return String(values.purpose).trim().slice(0, 250)
-  }
-  const purposeLabel =
-    values.requestPurpose === 'Other' && values.otherPurposeDetails
-      ? `Other: ${String(values.otherPurposeDetails).trim()}`
-      : String(values.requestPurpose ?? '').trim()
-  const parts = [
-    purposeLabel,
-    values.justification?.trim() ? `Justification: ${values.justification.trim()}` : '',
-  ].filter(Boolean)
-  return parts.join(' | ').slice(0, 250)
+export function purposeRequiresOtherDetails(
+  purposeCode: string,
+  options: LookupOption[] = [],
+) {
+  const code = purposeCode.trim()
+  if (!code) return false
+  const selected = options.find((option) => String(option.value) === code)
+  if (selected) return Boolean(selected.meta?.requiresOtherDetails)
+  return code === 'GN-OTH' || code.toLowerCase() === 'other'
+}
+
+export type AdvancePaymentPurposeRow = {
+  code: string
+  description: string
+  purposeGroup?: string
+  requiresOtherDetails?: boolean
+  sortOrder?: number
+}
+
+export function mapAdvancePaymentPurposes(
+  purposes: AdvancePaymentPurposeRow[] | undefined,
+): LookupOption[] {
+  if (!Array.isArray(purposes) || purposes.length === 0) return []
+  return [...purposes]
+    .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0) || a.code.localeCompare(b.code))
+    .map((row) => ({
+      value: String(row.code ?? '').trim(),
+      label: String(row.description ?? row.code ?? '').trim(),
+      meta: {
+        purposeGroup: row.purposeGroup ?? '',
+        requiresOtherDetails: Boolean(row.requiresOtherDetails),
+        sortOrder: row.sortOrder ?? 0,
+      },
+    }))
+    .filter((row) => row.value)
 }

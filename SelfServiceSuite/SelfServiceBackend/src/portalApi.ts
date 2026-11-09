@@ -596,7 +596,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v350 — 1.0.3.511 (Advance Payment purpose + salary advance as before)'
+export const PORTAL_API_BUILD = 'v351 — 1.0.3.512 (Advance Payment purposes from BC PortalAdvancePaymentContext)'
 
 interface LookupSpec {
   service: string
@@ -7102,6 +7102,20 @@ export function buildPortalApiRouter() {
       const dailyRate =
         noOfDays > 0 ? Math.round((amount / noOfDays) * 100) / 100 : 0
       res.json({ amount, dailyRate, requiresManualRate: false })
+    }),
+  )
+
+  /** BC 1.0.3.630 — ESSP purpose dropdown by employee division (Finance Advance Payment). */
+  router.get(
+    '/advance-payment/context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const employeeNo = String(req.query.employeeNo ?? authUser.employeeNo ?? '').trim()
+      if (!employeeNo) {
+        throw portalError('Employee number is required for Advance Payment purpose context.', 422)
+      }
+      const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
+      res.json(parseSoapJson(result.returnValue))
     }),
   )
 

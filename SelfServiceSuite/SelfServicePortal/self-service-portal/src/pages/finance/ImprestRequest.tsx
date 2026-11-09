@@ -1,13 +1,15 @@
+import { useQuery } from '@tanstack/react-query'
 import { addDays, differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
 import { useMemo } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
+import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
-  buildAdvancePurposePayload,
   purposeOptionsForDivision,
+  purposeRequiresOtherDetails,
 } from '@/data/advanceRequestPurpose'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
 import { imprestTypeOptions } from '@/data/essOptions'
@@ -228,13 +230,25 @@ export function ImprestRequest() {
   const { employee } = useAuth()
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
   const destinations = useLookupOptions('travel-destinations')
-  const purposeOptions = useMemo(
+  const fallbackPurposes = useMemo(
     () =>
       purposeOptionsForDivision(
         `${employee?.departmentCode ?? ''} ${employee?.placeOfDuty ?? ''} ${employee?.jobGrade ?? ''}`,
       ),
     [employee?.departmentCode, employee?.placeOfDuty, employee?.jobGrade],
   )
+  const purposeContext = useQuery({
+    queryKey: ['advance-payment-context', employee?.employeeNo ?? ''],
+    queryFn: () => fetchAdvancePaymentContext(String(employee?.employeeNo ?? '')),
+    staleTime: 5 * 60 * 1000,
+  })
+  const purposeOptions =
+    purposeContext.data?.purposes?.length ? purposeContext.data.purposes : fallbackPurposes
+  const purposeHint = purposeContext.data?.purposeGroupCaption
+    ? `Purposes for ${purposeContext.data.purposeGroupCaption}${
+        purposeContext.data.divisionCode ? ` (${purposeContext.data.divisionCode})` : ''
+      }. Choose Other (Specify) when needed.`
+    : 'Purpose list comes from Business Central for your division. Choose Other (Specify) to add details.'
 
   return (
     <MultiStepRequestPage
@@ -251,9 +265,12 @@ export function ImprestRequest() {
       headerSchema={imprestHeaderSchema}
       headerDefaults={{
         dateRequired: today,
-        requestPurpose: purposeOptions[0]?.value ?? 'Other',
+        requestPurpose: purposeOptions[0]?.value ?? 'GN-OTH',
         otherPurposeDetails: '',
         justification: '',
+        activityLocation: '',
+        activityStartDate: '',
+        activityEndDate: '',
         purpose: '',
         travelDestination: '',
         travelDate: today,
@@ -267,7 +284,7 @@ export function ImprestRequest() {
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
               Line Manager approves every request first. Then by amount (ETB): below 50,000 → FAD;
               50,000–100,000 → COO; above 100,000 → CEO. Status, comments, and payment reference
-              come from BC after each step.
+              come from BC after each step. Settlement is only via Advance Surrender.
             </p>
           </div>
         </div>
@@ -280,19 +297,19 @@ export function ImprestRequest() {
           next.setDate(next.getDate() + 1)
           returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
         }
-        const purpose = buildAdvancePurposePayload({
-          requestPurpose: String(values.requestPurpose ?? ''),
-          otherPurposeDetails: String(values.otherPurposeDetails ?? ''),
-          justification: String(values.justification ?? ''),
-          purpose: String(values.purpose ?? ''),
-        })
+        const justification = String(values.justification ?? '').trim()
+        const purposeCode = String(values.requestPurpose ?? '').trim()
+        const purposeLabel =
+          purposeOptions.find((option) => option.value === purposeCode)?.label ?? purposeCode
         return {
           ...values,
           travelDate,
           returnDate,
           startDate: travelDate,
-          purpose,
-          title: purpose || 'Advance Payment',
+          purposeCode,
+          requestPurpose: purposeCode,
+          purpose: justification || purposeLabel,
+          title: justification || purposeLabel || 'Advance Payment',
         }
       }}
       headerOnValuesChange={(values, form) => {
@@ -310,7 +327,7 @@ export function ImprestRequest() {
       headerFields={[
         {
           name: 'dateRequired',
-          label: 'Date Required',
+          label: 'Required Advance Date',
           type: 'date',
           valuePaths: [
             'DateRequired',
@@ -319,31 +336,54 @@ export function ImprestRequest() {
             'Payment_Release_Date',
             'Date',
           ],
+          hint: 'Date you need the funds',
         },
         {
           name: 'requestPurpose',
           label: 'Request Purpose',
           type: 'select',
           options: purposeOptions,
-          hint: 'Purpose list is filtered for your division. Choose Other (Specify) to add details.',
+          valuePaths: ['RequestPurposeCode', 'Request_Purpose_Code'],
+          hint: purposeHint,
         },
         {
           name: 'otherPurposeDetails',
           label: 'Other Purpose Details',
           type: 'textarea',
           fullWidth: true,
-          maxLength: 200,
-          visibleWhen: (values) => String(values.requestPurpose ?? '') === 'Other',
+          maxLength: 250,
+          visibleWhen: (values) =>
+            purposeRequiresOtherDetails(String(values.requestPurpose ?? ''), purposeOptions),
           placeholder: 'Describe the purpose when Other is selected',
+          valuePaths: ['OtherPurposeDetails', 'Other_Purpose_Details'],
         },
         {
           name: 'justification',
           label: 'Request Justification',
           type: 'textarea',
           fullWidth: true,
-          maxLength: 500,
+          maxLength: 250,
           placeholder: 'Explain why the advance is needed',
-          valuePaths: ['Purpose'],
+          valuePaths: ['RequestJustification', 'Request_Justification', 'Purpose'],
+        },
+        {
+          name: 'activityStartDate',
+          label: 'Activity Start Date',
+          type: 'date',
+          valuePaths: ['ActivityStartDate', 'Activity_Start_Date'],
+        },
+        {
+          name: 'activityEndDate',
+          label: 'Activity End Date',
+          type: 'date',
+          valuePaths: ['ActivityEndDate', 'Activity_End_Date'],
+        },
+        {
+          name: 'activityLocation',
+          label: 'Activity Location',
+          type: 'text',
+          placeholder: 'Where the activity will take place',
+          valuePaths: ['ActivityLocation', 'Activity_Location'],
         },
         {
           name: 'travelDestination',
@@ -367,7 +407,7 @@ export function ImprestRequest() {
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
         {
-          label: 'Date Required',
+          label: 'Required Advance Date',
           paths: [
             'payload.DateRequired',
             'payload.Date_Required',
@@ -378,7 +418,32 @@ export function ImprestRequest() {
           ],
           format: 'date',
         },
-        { label: 'Purpose', paths: ['payload.Purpose', 'payload.purpose'] },
+        {
+          label: 'Request Purpose',
+          paths: ['payload.RequestPurposeText', 'payload.RequestPurposeCode', 'payload.Purpose'],
+        },
+        {
+          label: 'Other Purpose Details',
+          paths: ['payload.OtherPurposeDetails', 'payload.Other_Purpose_Details'],
+        },
+        {
+          label: 'Request Justification',
+          paths: ['payload.RequestJustification', 'payload.Request_Justification', 'payload.Purpose'],
+        },
+        {
+          label: 'Activity Start Date',
+          paths: ['payload.ActivityStartDate', 'payload.Activity_Start_Date'],
+          format: 'date',
+        },
+        {
+          label: 'Activity End Date',
+          paths: ['payload.ActivityEndDate', 'payload.Activity_End_Date'],
+          format: 'date',
+        },
+        {
+          label: 'Activity Location',
+          paths: ['payload.ActivityLocation', 'payload.Activity_Location'],
+        },
         { label: 'Travel Destination', paths: ['payload.TravelDestination', 'payload.Travel_Destination'] },
         {
           label: 'Travel Start Date',

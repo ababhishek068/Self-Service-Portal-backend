@@ -556,37 +556,46 @@ const imprest: ModuleSpec = {
         next.setDate(next.getDate() + 1)
         returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
       }
-      const requestPurpose = String(req.body?.requestPurpose ?? '').trim()
+      const purposeCode = String(
+        req.body?.purposeCode ?? req.body?.requestPurpose ?? '',
+      ).trim()
       const otherPurposeDetails = String(req.body?.otherPurposeDetails ?? '').trim()
-      const justification = String(req.body?.justification ?? '').trim()
-      let purpose = String(req.body?.purpose ?? '').trim()
-      if (!purpose) {
-        const purposeLabel =
-          requestPurpose === 'Other' && otherPurposeDetails
-            ? `Other: ${otherPurposeDetails}`
-            : requestPurpose
-        purpose = [purposeLabel, justification ? `Justification: ${justification}` : '']
-          .filter(Boolean)
-          .join(' | ')
-          .slice(0, 250)
-      }
-      if (!purpose) {
-        throw Object.assign(new Error('Enter the advance request purpose before saving.'), {
+      const justification = String(
+        req.body?.justification ?? req.body?.requestJustification ?? '',
+      ).trim()
+      const purpose = (justification || String(req.body?.purpose ?? '').trim() || purposeCode).slice(
+        0,
+        250,
+      )
+      if (!purposeCode) {
+        throw Object.assign(new Error('Select a request purpose before saving.'), {
           status: 422,
         })
       }
-      if (requestPurpose === 'Other' && !otherPurposeDetails && !String(req.body?.purpose ?? '').trim()) {
+      if (!justification) {
+        throw Object.assign(new Error('Enter the request justification before saving.'), {
+          status: 422,
+        })
+      }
+      if (
+        (purposeCode === 'GN-OTH' || purposeCode.toLowerCase() === 'other') &&
+        !otherPurposeDetails
+      ) {
         throw Object.assign(new Error('Enter details when Other (Specify) is selected.'), {
           status: 422,
         })
+      }
+      const dateRequired = formatBcSoapDate(
+        String(req.body?.dateRequired ?? req.body?.startDate ?? ''),
+      )
+      if (!dateRequired) {
+        throw Object.assign(new Error('Required Advance Date is required.'), { status: 422 })
       }
       return {
         action: no ? 'edit' : 'create',
         docNo: no,
         employeeNo: user.employeeNo,
-        dateRequired: formatBcSoapDate(
-          String(req.body?.dateRequired ?? req.body?.startDate ?? ''),
-        ),
+        dateRequired,
         purpose,
         myUserId: user.userID,
         travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
@@ -658,6 +667,28 @@ const imprest: ModuleSpec = {
       employeeNo: user.employeeNo,
       tableID: 50891,
     }),
+  },
+  // ESSP purpose / activity fields live on Imprest Header after BC 1.0.3.630.
+  afterSaveHeader: async ({ req, user, no }) => {
+    if (!no) return
+    const purposeCode = String(req.body?.purposeCode ?? req.body?.requestPurpose ?? '').trim()
+    if (!purposeCode) return
+    const soapDate = (raw: unknown) => formatBcSoapDate(String(raw ?? '')) || '0001-01-01'
+    await callSoapMethod('PortalAdvancePaymentDetails', {
+      employeeNo: user.employeeNo,
+      docNo: no,
+      purposeCode,
+      otherPurposeDetails: String(req.body?.otherPurposeDetails ?? '').trim().slice(0, 250),
+      requestJustification: String(
+        req.body?.justification ?? req.body?.requestJustification ?? '',
+      )
+        .trim()
+        .slice(0, 250),
+      activityLocation: String(req.body?.activityLocation ?? '').trim().slice(0, 250),
+      activityStartDate: soapDate(req.body?.activityStartDate),
+      activityEndDate: soapDate(req.body?.activityEndDate),
+      dateRequired: soapDate(req.body?.dateRequired),
+    })
   },
 }
 
