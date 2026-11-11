@@ -352,6 +352,66 @@ export function parseEmployeeMedicalBalancesReturn(value: unknown): EmployeeMedi
   return balances
 }
 
+export type MedicalClaimDependant = {
+  no: string
+  systemId: string
+  memberId: string
+  fullName: string
+  relationship: string
+  dateOfBirth: string
+  identificationType: string
+  cardNo: string
+  eligible: boolean
+  ineligibleReason: string
+}
+
+/** BC 1.0.3.642 FnGetMedicalClaimDependants — Spouse/Father/Mother/Child&lt;18 with birth cert. */
+export function parseMedicalClaimDependantsReturn(value: unknown): MedicalClaimDependant[] {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    const raw = value.trim()
+    if (!raw) return []
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
+  const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  const rows = Array.isArray(root?.dependants)
+    ? root!.dependants
+    : Array.isArray(parsed)
+      ? parsed
+      : []
+  return rows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null
+      const item = row as Record<string, unknown>
+      const systemId = String(item.systemId ?? item.SystemId ?? '').trim()
+      const no = String(item.no ?? item.No ?? item.memberId ?? item.MemberId ?? '').trim()
+      const surName = String(item.surName ?? item.SurName ?? '').trim()
+      const otherNames = String(item.otherNames ?? item.OtherNames ?? '').trim()
+      const fullName =
+        String(item.fullName ?? item.FullName ?? '').trim() ||
+        [surName, otherNames].filter(Boolean).join(' ').trim() ||
+        no
+      if (!systemId && !no) return null
+      return {
+        no,
+        systemId: systemId || no,
+        memberId: String(item.memberId ?? item.MemberId ?? no).trim(),
+        fullName,
+        relationship: String(item.relationship ?? item.Relationship ?? '').trim(),
+        dateOfBirth: String(item.dateOfBirth ?? item.DateOfBirth ?? '').trim().slice(0, 10),
+        identificationType: String(item.identificationType ?? item.IdentificationType ?? '').trim(),
+        cardNo: String(item.cardNo ?? item.CardNo ?? '').trim(),
+        eligible: item.eligible === true || item.Eligible === true || String(item.eligible ?? '').toLowerCase() === 'true',
+        ineligibleReason: String(item.ineligibleReason ?? item.IneligibleReason ?? '').trim(),
+      } satisfies MedicalClaimDependant
+    })
+    .filter((row): row is MedicalClaimDependant => Boolean(row))
+}
+
 function portalError(message: string, status = 400, code?: string) {
   return Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
 }
@@ -643,7 +703,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v360 — 1.0.3.521 (Medical Claim hides claim-type; OT period/date edit guidance)'
+export const PORTAL_API_BUILD = 'v361 — 1.0.3.522 (Medical Claim 642: eligible dependants SOAP, no hospital-refund UI, available budget on lines)'
 
 interface LookupSpec {
   service: string
@@ -8115,6 +8175,52 @@ export function buildPortalApiRouter() {
         throw portalError('Business Central did not return the employee medical balances.', 502)
       }
       res.json(balances)
+    }),
+  )
+
+  /** BC 1.0.3.642 — eligible medical claim dependants (Spouse / Father / Mother / Child under 18). */
+  router.get(
+    '/profile/medical-dependants',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      try {
+        const soapResult = await callSoapMethod('FnGetMedicalClaimDependants', {
+          employeeNo: authUser.employeeNo,
+        })
+        const dependants = parseMedicalClaimDependantsReturn(soapResult.returnValue)
+        res.json({ employeeNo: authUser.employeeNo, dependants })
+      } catch (error) {
+        // Older BC without 642: fall back to HR Employee Kin OData (portal will still filter).
+        if (/Method '?FnGetMedicalClaimDependants'? is invalid|not found|not published/i.test(String((error as Error)?.message ?? ''))) {
+          const employeeNo = odataString(authUser.employeeNo)
+          const rows = await fetchOData('QyHREmployeeKin', {
+            $filter: `EmployeeCode eq '${employeeNo}'`,
+          }).catch(() => [] as ODataRecord[])
+          const mapped = mapEmployeeDependantLookupRows(Array.isArray(rows) ? rows : [])
+          res.json({
+            employeeNo: authUser.employeeNo,
+            dependants: mapped.map((row) => {
+              const item = row as { value: string; label: string; meta?: Record<string, string> }
+              return {
+                no: String(item.meta?.dependantNo ?? ''),
+                systemId: item.value,
+                memberId: String(item.meta?.dependantNo ?? ''),
+                fullName: item.label.replace(/\s*\([^)]*\)\s*$/, ''),
+                relationship: String(item.meta?.relationship ?? ''),
+                dateOfBirth: String(item.meta?.dateOfBirth ?? ''),
+                identificationType: '',
+                cardNo: '',
+                eligible: true,
+                ineligibleReason: '',
+              }
+            }),
+            fallback: true,
+          })
+          return
+        }
+        throw error
+      }
     }),
   )
 

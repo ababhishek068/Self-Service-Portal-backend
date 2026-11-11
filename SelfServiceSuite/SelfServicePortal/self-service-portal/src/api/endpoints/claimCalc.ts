@@ -18,6 +18,21 @@ export interface MedicalClaimAmountResult {
   usedBcPolicy?: boolean
 }
 
+/** Alias used by Medical Claim UX (same BC FetchMedicalClaimAmountPolicy endpoint). */
+export async function fetchMedicalClaimAmountPolicy(payload: {
+  medicalAmount: number
+  hospitalCategory?: string
+  patient?: string
+  dependant?: string
+}) {
+  return validateHospitalCategory({
+    medicalAmount: payload.medicalAmount,
+    hospitalCategory: payload.hospitalCategory || '0',
+    patient: payload.patient,
+    dependant: payload.dependant,
+  })
+}
+
 export async function validateHospitalCategory(payload: {
   medicalAmount: number
   hospitalCategory: string

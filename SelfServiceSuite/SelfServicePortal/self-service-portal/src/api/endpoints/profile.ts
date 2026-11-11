@@ -26,6 +26,29 @@ export async function getEmployeeMedicalBalances(): Promise<EmployeeMedicalBalan
   return authGet<EmployeeMedicalBalances>('/api/profile/medical-balances')
 }
 
+/** BC 1.0.3.642 — Spouse / Father / Mother / Child under 18 (birth cert + card no). */
+export type MedicalClaimDependant = {
+  no: string
+  systemId: string
+  memberId: string
+  fullName: string
+  relationship: string
+  dateOfBirth: string
+  identificationType: string
+  cardNo: string
+  eligible: boolean
+  ineligibleReason: string
+}
+
+export async function getMedicalClaimDependants(): Promise<{
+  employeeNo: string
+  dependants: MedicalClaimDependant[]
+  fallback?: boolean
+}> {
+  requireAuthApiUrl()
+  return authGet('/api/profile/medical-dependants')
+}
+
 export async function listEmployeeAttachments(): Promise<Attachment[]> {
   requireAuthApiUrl()
   const { rows } = await authGet<{ rows: Attachment[] }>('/api/profile/attachments')

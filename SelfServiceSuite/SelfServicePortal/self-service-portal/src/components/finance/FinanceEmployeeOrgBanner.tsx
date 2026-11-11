@@ -65,16 +65,28 @@ export function FinanceEmployeeOrgBanner({
           <p className="text-xs text-slate-600">
             Policy: annual entitlement = Basic × 12 × 20% (Self 50% / Dependants 50%). Company reimburses{' '}
             <span className="font-semibold text-slate-800">80%</span> of accepted medical receipts, capped by the
-            remaining balance below.
+            remaining available budget (includes submitted drafts reserved in BC 1.0.3.642+).
           </p>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <span className="text-slate-500">Medical Claim Balance — Self</span>
+              <span className="text-slate-500">Available — Self</span>
               <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.self)}</p>
             </div>
             <div>
-              <span className="text-slate-500">Medical Claim Balance — Dependant</span>
+              <span className="text-slate-500">Available — Dependants</span>
               <p className="font-semibold text-teal-700">{medicalBalanceValue(medicalBalancesQuery.data?.dependant)}</p>
+            </div>
+            <div>
+              <span className="text-slate-500">Allocation — Self</span>
+              <p className="font-medium text-slate-800">
+                {medicalBalanceValue(medicalBalancesQuery.data?.selfAllocation)}
+              </p>
+            </div>
+            <div>
+              <span className="text-slate-500">Allocation — Dependants</span>
+              <p className="font-medium text-slate-800">
+                {medicalBalanceValue(medicalBalancesQuery.data?.dependantAllocation)}
+              </p>
             </div>
           </div>
           {medicalBalancesQuery.isError ? (

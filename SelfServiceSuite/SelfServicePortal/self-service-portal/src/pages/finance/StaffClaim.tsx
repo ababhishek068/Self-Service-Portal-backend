@@ -1,8 +1,10 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { validateHospitalCategory } from '@/api/endpoints/claimCalc'
+import { getMedicalClaimDependants } from '@/api/endpoints/profile'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
@@ -140,11 +142,12 @@ function localMedicalRefund(medicalAmount: number) {
 
 async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn<FieldValues>) {
   if (!isMedicalClaim(values.claimType)) return
-  const hospitalCategory = String(values.hospitalCategory ?? '').trim()
+  // BC 1.0.3.642: hospital category does not drive refund % (flat 80% + budget cap).
+  const hospitalCategory = String(values.hospitalCategory ?? '0').trim() || '0'
   const medicalAmount = Number(values.medicalAmount ?? 0)
   const patient = String(values.patient ?? 'self').trim()
   const dependant = String(values.dependant ?? '').trim()
-  if (!hospitalCategory || !medicalAmount) return
+  if (!medicalAmount) return
   if (isDependantPatient(patient) && !dependant) return
 
   const requestKey = ++medicalAmountRequest
@@ -174,9 +177,19 @@ async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn
     if (Number.isFinite(available) && available >= 0) {
       form.setValue('availableBalance', available, { shouldValidate: false })
     }
+    const employeeContribution = Number(data.employeeContribution ?? data.EmployeeContribution)
+    if (Number.isFinite(employeeContribution) && employeeContribution >= 0) {
+      form.setValue('employeeContribution', employeeContribution, { shouldValidate: false })
+    } else if (medicalAmount > 0 && amountToRefund >= 0) {
+      form.setValue(
+        'employeeContribution',
+        Math.round((medicalAmount - amountToRefund) * 100) / 100,
+        { shouldValidate: false },
+      )
+    }
     if (data.budgetCapped) {
       const balanceLabel = Number.isFinite(available)
-        ? ` Remaining budget: ${formatCurrency(available)}.`
+        ? ` Available budget: ${formatCurrency(available)}.`
         : ''
       form.setValue(
         'budgetNote',
@@ -192,6 +205,11 @@ async function applyMedicalClaimAmounts(values: FieldValues, form: UseFormReturn
     form.setValue('amount', fallback.amount, { shouldValidate: true })
     form.setValue('amountToRefund', fallback.amountToRefund, { shouldValidate: true })
     form.setValue('coveragePercent', fallback.coveragePercent, { shouldValidate: false })
+    form.setValue(
+      'employeeContribution',
+      Math.round((medicalAmount - fallback.amountToRefund) * 100) / 100,
+      { shouldValidate: false },
+    )
   }
 }
 
@@ -287,12 +305,12 @@ const medicalPatientOptions = [
   { value: 'dependant', label: 'Dependant' },
 ]
 
+/** Meeting 11 Nov 2026 / BC 642: only Spouse, Father, Mother, Child (under 18). */
 const medicalRelationshipOptions = [
   { value: 'Spouse', label: 'Spouse' },
-  { value: 'Child', label: 'Child' },
   { value: 'Father', label: 'Father' },
   { value: 'Mother', label: 'Mother' },
-  { value: 'Other', label: 'Other' },
+  { value: 'Child', label: 'Child' },
 ]
 
 function hospitalCategoryLabel(value: unknown) {
@@ -304,7 +322,36 @@ function hospitalCategoryLabel(value: unknown) {
 export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
   const claimTypesQuery = useLookupOptions('claim-types', claimTypeOptions)
   const glAccounts = useLookupOptions('gl-accounts')
-  const dependants = useLookupOptions('employee-dependants')
+  const kinDependants = useLookupOptions('employee-dependants')
+  const medicalDependantsQuery = useQuery({
+    queryKey: ['profile', 'medical-dependants'],
+    queryFn: getMedicalClaimDependants,
+    enabled: medicalOnly,
+    staleTime: 60_000,
+  })
+  const medicalDependantOptions = useMemo<LookupOption[]>(() => {
+    const rows = medicalDependantsQuery.data?.dependants ?? []
+    return rows
+      .filter((row) => row.eligible)
+      .map((row) => ({
+        value: row.systemId || row.no,
+        label: row.relationship ? `${row.fullName} (${row.relationship})` : row.fullName,
+        meta: {
+          dependantNo: row.no || row.memberId,
+          relationship: row.relationship,
+          dateOfBirth: row.dateOfBirth,
+          cardNo: row.cardNo,
+          identificationType: row.identificationType,
+        },
+      }))
+  }, [medicalDependantsQuery.data?.dependants])
+  const dependants = medicalOnly
+    ? {
+        options: medicalDependantOptions,
+        isLoading: medicalDependantsQuery.isLoading,
+        isError: medicalDependantsQuery.isError,
+      }
+    : kinDependants
   const claimTypeChoices = medicalOnly
     ? medicalClaimTypeOptions(claimTypesQuery.options)
     : nonMedicalClaimTypeOptions(
@@ -344,7 +391,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       headerLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       description={
         medicalOnly
-          ? `Medical Claim & Reimbursement Policy: company covers ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by your remaining Self or Dependant medical claim balance (annual entitlement = Basic × 12 × 20%, split 50/50). Attach valid medical receipts.`
+          ? `Medical Claim (BC 1.0.3.642): company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self / Dependants budget (Basic × 12 × 20%, split 50/50). Eligible dependants: Spouse, Father, Mother, Child under 18 with birth certificate. Attach the invoice before requesting approval.`
           : 'Add claim lines by type. Business Central sets the G/L account from the claim type; you enter amount and expenditure details. For medical reimbursement use Finance → Medical Claim (not listed here).'
       }
       module={module}
@@ -410,7 +457,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           claimType: medicalOnly ? defaultMedicalClaimType : '',
           accountNo: '',
           accountName: '',
-          hospitalCategory: '',
+          // Classification only — BC 642 ignores hospital % (flat 80% + budget).
+          hospitalCategory: medicalOnly ? '0' : '',
           patient: medicalOnly ? 'self' : '',
           relationship: '',
           dependant: '',
@@ -419,6 +467,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           amount: '',
           amountToRefund: '',
           coveragePercent: '',
+          availableBalance: '',
+          employeeContribution: '',
           claimReceiptNo: '',
           expenditureDate: todayIsoDate(),
           expenditureDescription: '',
@@ -431,7 +481,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           const payload: Record<string, unknown> = {
             claimType,
             accountNo,
-            hospitalCategory: medical ? values.hospitalCategory : '',
+            hospitalCategory: medical ? String(values.hospitalCategory ?? '0').trim() || '0' : '',
             patient: medical ? (dependantPatient ? 'dependant' : 'self') : '',
             relationship: dependantPatient ? String(values.relationship ?? '') : '',
             dependant: dependantPatient ? String(values.dependant ?? '') : '',
@@ -486,28 +536,29 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
               claimTypeNeedsAccount(values.claimType, claimTypeChoices, glAccounts.options),
           },
           {
+            // Meeting 11 Nov / BC 642: remove government/hospital-driven refund UI on Medical Claim.
             name: 'hospitalCategory',
             label: 'Hospital / Facility Category',
             type: 'select',
             options: hospitalCategoryOptions,
             placeholder: 'Select hospital / facility category',
-            hint: `Company refund is ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self/Dependant budget.`,
-            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
+            visibleWhen: (values) => !medicalOnly && isMedicalClaim(values.claimType),
           },
           {
             name: 'patient',
             label: 'Patient',
             type: 'select',
             options: medicalPatientOptions,
-            visibleWhen: (values) => isMedicalClaim(values.claimType),
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
           },
           {
             name: 'relationship',
             label: 'Relationship',
             type: 'select',
             options: medicalRelationshipOptions,
+            readOnlyWhen: () => medicalOnly,
             visibleWhen: (values) =>
-              isMedicalClaim(values.claimType) && isDependantPatient(values.patient),
+              (medicalOnly || isMedicalClaim(values.claimType)) && isDependantPatient(values.patient),
           },
           {
             name: 'dependant',
@@ -515,41 +566,62 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             type: 'select',
             options: dependants.options,
             placeholder: dependants.isLoading
-              ? 'Loading dependants from Business Central…'
-              : 'Select a dependant from HR Employee Kin',
+              ? 'Loading eligible dependants from Business Central…'
+              : medicalOnly
+                ? dependants.options.length
+                  ? 'Select eligible dependant (Spouse / Father / Mother / Child under 18)'
+                  : 'No eligible dependants — ask HR to update Employee Dependants (DOB + birth certificate for children)'
+                : 'Select a dependant from HR Employee Kin',
             visibleWhen: (values) =>
-              isMedicalClaim(values.claimType) && isDependantPatient(values.patient),
+              (medicalOnly || isMedicalClaim(values.claimType)) && isDependantPatient(values.patient),
           },
           {
             name: 'medicalAmount',
-            label: 'Medical Amount',
+            label: 'Accepted Receipt Amount',
             type: 'number',
-            visibleWhen: (values) => isMedicalClaim(values.claimType),
+            placeholder: 'Enter the accepted medical receipt amount',
+            hint: medicalOnly
+              ? `Company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% (capped by Available Budget for Self or Dependants).`
+              : undefined,
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
           },
-          // Medical claims derive the net amount in BC, everything else is
-          // entered by hand. Two entries rather than one conditionally-readonly
-          // field, so each case gets the label and placeholder that fit it.
           {
-            name: 'amount',
-            label: 'Calculated Net Claim Amount',
+            name: 'availableBalance',
+            label: 'Available Budget (this category)',
             type: 'number',
             readOnly: true,
-            visibleWhen: (values) => isMedicalClaim(values.claimType),
-            placeholder: 'Enter Medical Amount above to calculate',
+            placeholder: 'Filled from Business Central when you enter the receipt amount',
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
+          },
+          {
+            name: 'amountToRefund',
+            label: 'Company Reimbursement (Amount to Refund)',
+            type: 'number',
+            readOnlyWhen: (values) => isMedicalClaim(values.claimType),
+            visibleWhen: (values) =>
+              medicalOnly || isMedicalClaim(values.claimType) || isOtherClaim(values.claimType),
+          },
+          {
+            name: 'employeeContribution',
+            label: 'Employee Contribution',
+            type: 'number',
+            readOnly: true,
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
+          },
+          {
+            name: 'amount',
+            label: 'Net Claim Amount (company pays)',
+            type: 'number',
+            readOnly: true,
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
+            placeholder: 'Enter receipt amount to calculate',
           },
           {
             name: 'amount',
             label: 'Claim Amount',
             type: 'number',
-            visibleWhen: (values) => !isMedicalClaim(values.claimType),
+            visibleWhen: (values) => !medicalOnly && !isMedicalClaim(values.claimType),
             placeholder: 'Enter the amount being claimed',
-          },
-          {
-            name: 'amountToRefund',
-            label: 'Refund Amount',
-            type: 'number',
-            readOnlyWhen: (values) => isMedicalClaim(values.claimType),
-            visibleWhen: (values) => isMedicalClaim(values.claimType) || isOtherClaim(values.claimType),
           },
           {
             name: 'coveragePercent',
@@ -557,7 +629,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             type: 'number',
             readOnly: true,
             visibleWhen: (values) =>
-              isMedicalClaim(values.claimType) && Number(values.coveragePercent ?? 0) > 0,
+              (medicalOnly || isMedicalClaim(values.claimType)) &&
+              Number(values.coveragePercent ?? 0) > 0,
           },
           { name: 'claimReceiptNo', label: 'Claim Receipt No.', type: 'text' },
           { name: 'expenditureDate', label: 'Expenditure Date', type: 'date', readOnly: true },
