@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { AlertTriangle, ArrowLeft, Check, CloudUpload, Loader2, Plus, Trash2 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -7,6 +7,7 @@ import {
   getModuleRequest,
   uploadRequestAttachment,
 } from '@/api/endpoints/requestEndpoint'
+import { validateHospitalCategory } from '@/api/endpoints/claimCalc'
 import { getEmployeeMedicalBalances } from '@/api/endpoints/profile'
 import { fetchMonthlySalaryBase } from '@/api/endpoints/hrServiceLetters'
 import type { LookupOption } from '@/api/endpoints/lookups'
@@ -41,6 +42,15 @@ type Receipt = {
   description: string
   amount: string
   files: File[]
+}
+
+/** Per-receipt refund from BC FetchMedicalClaimAmountPolicy (1.0.3.631+). */
+type BcReceiptRefund = {
+  reimbursement: number
+  availableBalance: number | null
+  remainingBalance: number | null
+  budgetCapped: boolean
+  usedBcPolicy: boolean
 }
 
 type Props = {
@@ -104,9 +114,12 @@ export function MedicalClaimTemplate({
   const [patient, setPatient] = useState<MedicalCategory>('self')
   const [dependant, setDependant] = useState('')
   const [receipts, setReceipts] = useState<Receipt[]>([newReceipt()])
+  const [bcRefunds, setBcRefunds] = useState<Record<string, BcReceiptRefund>>({})
+  const [policyLoading, setPolicyLoading] = useState(false)
   const [agreed, setAgreed] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const policyRequest = useRef(0)
 
   const employeeName = employee?.displayName ?? ''
   const staffNo = employee?.employeeNo ?? ''
@@ -141,12 +154,87 @@ export function MedicalClaimTemplate({
   }
   const categoryLabel = patient === 'dependant' ? 'Dependents' : 'Self'
 
-  // Policy sections 3–5 for the receipts of this claim, in order against one budget.
+  // Local preview (same 80% + budget arithmetic) when BC policy is unreachable.
   const calc = useMemo(
     () => calculateMedicalClaim(receipts.map((row) => Number(row.amount) || 0), budget[patient].available),
     // budget[patient].available is a primitive derived from balances
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [receipts, patient, balances?.self, balances?.dependant],
+  )
+
+  // Nitish 1.0.3.631: call FetchMedicalClaimAmountPolicy as each receipt amount/category is entered.
+  useEffect(() => {
+    if (patient === 'dependant' && !dependant) {
+      setBcRefunds({})
+      return
+    }
+    const ready = receipts.filter((row) => row.hospitalCategory && Number(row.amount) > 0)
+    if (!ready.length) {
+      setBcRefunds({})
+      return
+    }
+    const requestKey = ++policyRequest.current
+    setPolicyLoading(true)
+    void (async () => {
+      const next: Record<string, BcReceiptRefund> = {}
+      let remaining: number | null = budget[patient].available
+      for (const row of ready) {
+        try {
+          const data = await validateHospitalCategory({
+            medicalAmount: Number(row.amount),
+            hospitalCategory: row.hospitalCategory,
+            patient,
+            dependant: patient === 'dependant' ? dependant : '',
+          })
+          if (requestKey !== policyRequest.current) return
+          let reimbursement = Number(data.AmountToRefund ?? data.amountToRefund ?? data.Amount ?? data.amount ?? 0)
+          if (!Number.isFinite(reimbursement) || reimbursement < 0) reimbursement = 0
+          // Draft lines are not yet in BC — keep sequential cap across this form.
+          if (remaining !== null && Number.isFinite(remaining)) {
+            reimbursement = Math.min(reimbursement, Math.max(0, remaining))
+            remaining = Math.round((remaining - reimbursement) * 100) / 100
+          }
+          const available = Number(data.availableBalance)
+          next[row.id] = {
+            reimbursement,
+            availableBalance: Number.isFinite(available) ? available : null,
+            remainingBalance: remaining,
+            budgetCapped: Boolean(data.budgetCapped) || reimbursement < Number(row.amount) * 0.8 - 0.01,
+            usedBcPolicy: Boolean(data.usedBcPolicy ?? true),
+          }
+        } catch {
+          // Keep local calc for this row.
+        }
+      }
+      if (requestKey !== policyRequest.current) return
+      setBcRefunds(next)
+      setPolicyLoading(false)
+    })()
+    return () => {
+      policyRequest.current += 1
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    patient,
+    dependant,
+    budget.self.available,
+    budget.dependant.available,
+    receipts.map((row) => `${row.id}:${row.hospitalCategory}:${row.amount}`).join('|'),
+  ])
+
+  const reimbursementFor = (rowId: string, index: number) => {
+    const bc = bcRefunds[rowId]
+    if (bc) return bc.reimbursement
+    return calc.receipts[index]?.reimbursement ?? 0
+  }
+
+  const totalBcReimbursement = receipts.reduce(
+    (sum, row, index) => sum + reimbursementFor(row.id, index),
+    0,
+  )
+  const totalEmployeeContribution = Math.max(
+    0,
+    Math.round((calc.totalReceipts - totalBcReimbursement) * 100) / 100,
   )
 
   const receiptProblem = (row: Receipt) => {
@@ -213,9 +301,9 @@ export function MedicalClaimTemplate({
           dependant: patient === 'dependant' ? dependant : '',
           dependantDateOfBirth: patient === 'dependant' ? dateOfBirth : '',
           medicalAmount: Number(row.amount),
-          // Business Central recalculates this (80%, capped by the remaining budget) on save.
-          amountToRefund: calc.receipts[index]?.reimbursement ?? 0,
-          amount: calc.receipts[index]?.reimbursement ?? 0,
+          // Prefer FetchMedicalClaimAmountPolicy preview; BC revalidates again on line save / approval.
+          amountToRefund: reimbursementFor(row.id, index),
+          amount: reimbursementFor(row.id, index),
           claimReceiptNo: row.receiptNo.trim(),
           expenditureDate: claimDate,
           expenditureDescription: row.description.trim(),
@@ -495,15 +583,26 @@ export function MedicalClaimTemplate({
                         <input
                           id={`mc-reimb-${row.id}`}
                           className={fieldClass}
-                          value={line && line.amount > 0 ? formatAmount(line.reimbursement) : ''}
-                          placeholder={`${MEDICAL_POLICY.companyCoveragePercent}% of the receipt`}
+                          value={
+                            Number(row.amount) > 0
+                              ? formatAmount(reimbursementFor(row.id, index))
+                              : ''
+                          }
+                          placeholder={
+                            policyLoading
+                              ? 'Calculating from Business Central…'
+                              : `${MEDICAL_POLICY.companyCoveragePercent}% of the receipt`
+                          }
                           readOnly
                           disabled
                         />
-                        {line?.capped ? (
+                        {bcRefunds[row.id]?.budgetCapped || line?.capped ? (
                           <p className="mt-1.5 text-xs text-amber-700">
-                            Limited to the remaining {categoryLabel} budget ({formatAmount(line.companyCoverage)} at{' '}
-                            {MEDICAL_POLICY.companyCoveragePercent}%).
+                            Limited to the remaining {categoryLabel} budget (FetchMedicalClaimAmountPolicy
+                            {bcRefunds[row.id]?.availableBalance != null
+                              ? ` · available ${formatAmount(bcRefunds[row.id]!.availableBalance!)}`
+                              : ''}
+                            ).
                           </p>
                         ) : null}
                       </div>
@@ -589,26 +688,34 @@ export function MedicalClaimTemplate({
                 <dd className="font-semibold">{formatAmount(calc.totalCompanyCoverage)}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-slate-600">Employee contribution ({MEDICAL_POLICY.employeeContributionPercent}%)</dt>
-                <dd className="font-semibold">{formatAmount(calc.totalEmployeeContribution)}</dd>
+                <dt className="text-slate-600">Employee contribution</dt>
+                <dd className="font-semibold">{formatAmount(totalEmployeeContribution)}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-slate-600">Available {categoryLabel} budget</dt>
                 <dd className="font-semibold">{money(calc.availableBefore)}</dd>
               </div>
-              {calc.capped ? (
+              {calc.totalReceipts - totalBcReimbursement > 0.009 || calc.capped ? (
                 <div className="flex justify-between gap-3 text-amber-800">
-                  <dt>Not reimbursed (above the remaining budget)</dt>
-                  <dd className="font-semibold">{formatAmount(calc.totalNotReimbursed)}</dd>
+                  <dt>Not reimbursed (employee share + above remaining budget)</dt>
+                  <dd className="font-semibold">
+                    {formatAmount(Math.max(0, calc.totalReceipts - totalBcReimbursement))}
+                  </dd>
                 </div>
               ) : null}
               <div className="flex justify-between gap-3 border-t border-slate-200 pt-2">
                 <dt className="font-medium text-slate-900">Company reimbursement</dt>
-                <dd className="text-lg font-bold text-slate-900">{formatAmount(calc.totalReimbursement)}</dd>
+                <dd className="text-lg font-bold text-slate-900">{formatAmount(totalBcReimbursement)}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-slate-600">Remaining {categoryLabel} budget after this claim</dt>
-                <dd className="font-semibold">{money(calc.remainingAfter)}</dd>
+                <dd className="font-semibold">
+                  {money(
+                    calc.availableBefore === null
+                      ? null
+                      : Math.max(0, Math.round((calc.availableBefore - totalBcReimbursement) * 100) / 100),
+                  )}
+                </dd>
               </div>
             </dl>
             {calc.exhausted ? (
