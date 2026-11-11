@@ -4,8 +4,16 @@ import type { EmployeeProfileDetails } from '@/data/employeeProfile'
 import type { Attachment } from '@/types/erp.types'
 
 export interface EmployeeMedicalBalances {
+  /** Available now per category (BC 1.0.3.638: allocation less posted and submitted claims). */
   self: number
   dependant: number
+  /** BC 1.0.3.638+: Basic x 12 x 20% split 50/50, and what claims already use. */
+  selfAllocation?: number
+  dependantAllocation?: number
+  selfUsed?: number
+  dependantUsed?: number
+  entitlement?: number
+  coveragePercent?: number
 }
 
 export async function getEmployeeProfileDetails(): Promise<EmployeeProfileDetails> {

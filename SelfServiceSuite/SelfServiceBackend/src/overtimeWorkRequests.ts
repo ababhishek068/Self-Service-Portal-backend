@@ -420,30 +420,25 @@ function nextNo(sequence: number) {
   return `OTW-${String(sequence).padStart(5, '0')}`
 }
 
+/** Local draft preview only — BC Stage 1 is Superior → FAD (Portal-Handoff-1.0.3.636). */
 function buildSteps(details: OvertimeWorkDetails, submit: boolean): OvertimeWorkStep[] {
   const chain = [
     {
       stage: 1,
-      label: 'Immediate Supervisor',
+      label: 'Superior',
       approverUserId: details.lineManagerUserId || '',
-      approverName: details.lineManagerName || details.lineManagerUserId || 'Line Manager',
+      approverName: details.lineManagerName || details.lineManagerUserId || 'Superior',
     },
     {
       stage: 2,
-      label: 'HR',
-      approverUserId: details.hrUserId || '',
-      approverName: details.hrName || details.hrUserId || 'HR',
-    },
-    {
-      stage: 3,
-      label: 'Authorized Manager',
-      approverUserId: details.managerUserId || details.lineManagerUserId || '',
+      label: 'FAD',
+      approverUserId: details.managerUserId || details.hrUserId || '',
       approverName:
         details.managerName ||
         details.managerUserId ||
-        details.lineManagerName ||
-        details.lineManagerUserId ||
-        'Authorized Manager',
+        details.hrName ||
+        details.hrUserId ||
+        'FAD',
     },
   ]
   return chain.map((step, index) => ({

@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
+import { MedicalClaimTemplate } from '@/pages/finance/MedicalClaimTemplate'
 import { validateHospitalCategory } from '@/api/endpoints/claimCalc'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -64,6 +65,18 @@ function medicalClaimTypeOptions(options: LookupOption[]) {
     (option) => isMedicalClaim(option.value) || isMedicalClaim(option.label),
   )
   return medical.length > 0 ? medical : claimTypeOptions.filter((option) => option.value === 'MEDICAL')
+}
+
+/**
+ * Medical Claim and Staff Claims share the BC Staff Claim document. List rows often carry no lines, so
+ * the claim purpose decides the menu ("Medical Claim — …" from the ESSP form). Fall back to header
+ * claim type when present so older medical drafts stay on the Medical Claim list only.
+ */
+function isMedicalClaimRequest(row: PortalRequest) {
+  const purpose = String(row.title || row.payload?.Purpose || row.payload?.ClaimDescription || '')
+  if (/medical/i.test(purpose)) return true
+  const headerType = row.payload?.ClaimType ?? row.payload?.claimType ?? row.payload?.Claim_Type
+  return isMedicalClaim(headerType)
 }
 
 /** Staff Claims exclude Medical — Medical Claim is a separate menu/page. */
@@ -307,6 +320,10 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
         ? 'Select claim type'
         : 'Select claim type (Medical Claim is under Medical Claim)'
   const onLineValuesChange = useStaffClaimLineChange(claimTypeChoices, glAccounts.options)
+  const medicalAccountNo =
+    glAccountForClaimType(defaultMedicalClaimType, claimTypeChoices) ||
+    findMedicalAllowanceAccount(glAccounts.options)?.value ||
+    ''
 
   const applyDependantMeta = useCallback(
     async (values: FieldValues, form: UseFormReturn<FieldValues>) => {
@@ -339,25 +356,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       queryKey={medicalOnly ? ['hr', 'staff-medical-claim'] : ['finance', 'staff-claim']}
       listRequests={async () => {
         const rows = await listModuleRequests(module)
-        const requestLines = (row: PortalRequest) => {
-          const lines = (row as unknown as { lines?: unknown }).lines
-          return Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : []
-        }
-        if (medicalOnly) {
-          return rows.filter((row) => {
-            const purpose = String(row.title ?? row.payload?.Purpose ?? row.payload?.ClaimDescription ?? '')
-            const lineTypes = requestLines(row)
-            return (
-              /medical/i.test(purpose) ||
-              lineTypes.some((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
-            )
-          })
-        }
-        return rows.filter((row) => {
-          const lineTypes = requestLines(row)
-          if (lineTypes.length === 0) return true
-          return !lineTypes.every((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
-        })
+        return rows.filter((row) => isMedicalClaimRequest(row) === medicalOnly)
       }}
       listStatusFilter
       requiresAttachmentBeforeSubmit
@@ -366,7 +365,21 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       newButtonLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       headerSchema={staffClaimHeaderSchema}
       headerDefaults={{ claimDate: todayIsoDate(), purpose: medicalOnly ? 'Medical Claim' : '' }}
-      headerSupplement={() => <FinanceEmployeeOrgBanner showMedicalBalances />}
+      headerSupplement={() => <FinanceEmployeeOrgBanner showMedicalBalances={medicalOnly} />}
+      customCreate={
+        medicalOnly
+          ? ({ onCreated, onCancel }) => (
+              <MedicalClaimTemplate
+                claimType={defaultMedicalClaimType}
+                accountNo={medicalAccountNo}
+                dependants={dependants.options}
+                dependantsLoading={dependants.isLoading}
+                onCreated={onCreated}
+                onCancel={onCancel}
+              />
+            )
+          : undefined
+      }
       buildHeaderPayload={(values) => ({
         ...values,
         // Always stamp ERP working date (today) — never reuse a stale form default.

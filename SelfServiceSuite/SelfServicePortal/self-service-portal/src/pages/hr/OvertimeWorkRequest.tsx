@@ -382,13 +382,19 @@ export function OvertimeWorkRequest() {
       return
     }
     const overallReason = reason.trim()
+    const sorted = sortLines(all)
+    // BC 1.0.3.636: send period + daily lines together (Portal-Handoff-1.0.3.636).
+    const periodStartDate = sorted[0]?.overtimeDate ?? ''
+    const periodEndDate = sorted[sorted.length - 1]?.overtimeDate ?? ''
     saveMutation.mutate({
       requestNo: editingNo ?? undefined,
       details: {
         reason: overallReason,
         expectedDeliverables: expectedDeliverables.trim(),
+        periodStartDate,
+        periodEndDate,
         // Stamp the single justification onto each line for payment / approvals.
-        lines: all.map((line) => ({ ...line, reason: overallReason || line.reason })),
+        lines: sorted.map((line) => ({ ...line, reason: overallReason || line.reason })),
       },
       submit: forApproval,
     })

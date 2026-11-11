@@ -305,8 +305,16 @@ function number(row: ODataRecord, keys: string[], fallback = 0) {
 }
 
 export interface EmployeeMedicalBalances {
+  /** Available now (BC 1.0.3.638: allocation less posted and submitted claims). */
   self: number
   dependant: number
+  /** BC 1.0.3.638+: Basic x 12 x 20% split 50/50, and what claims already use. */
+  selfAllocation?: number
+  dependantAllocation?: number
+  selfUsed?: number
+  dependantUsed?: number
+  entitlement?: number
+  coveragePercent?: number
 }
 
 /** Parse the authoritative Employee Card medical balances returned by StaffPortal SOAP. */
@@ -327,7 +335,21 @@ export function parseEmployeeMedicalBalancesReturn(value: unknown): EmployeeMedi
   const self = Number(row.self ?? row.Self ?? row.medicalClaimBalanceSelf)
   const dependant = Number(row.dependant ?? row.Dependant ?? row.medicalClaimBalanceDependant)
   if (!Number.isFinite(self) || !Number.isFinite(dependant)) return null
-  return { self, dependant }
+  const balances: EmployeeMedicalBalances = { self, dependant }
+  for (const key of [
+    'selfAllocation',
+    'dependantAllocation',
+    'selfUsed',
+    'dependantUsed',
+    'entitlement',
+    'coveragePercent',
+  ] as const) {
+    const raw = row[key]
+    if (raw === undefined || raw === null || raw === '') continue
+    const value = Number(raw)
+    if (Number.isFinite(value)) balances[key] = value
+  }
+  return balances
 }
 
 function portalError(message: string, status = 400, code?: string) {
@@ -621,7 +643,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v356 — 1.0.3.517 (BC 1.0.3.636 fixes: OT Stage 1 BC numbers, OT Payment approvals, Advance Settlement checks)'
+export const PORTAL_API_BUILD = 'v357 — 1.0.3.518 (BC 1.0.3.636 handoff: OT Superior→FAD + period/lines; Advance Settlement settleableAdvances)'
 
 interface LookupSpec {
   service: string
@@ -7869,10 +7891,16 @@ export function buildPortalApiRouter() {
       const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
       const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
       const context = await getOvertimeContext(authUser.employeeNo, authUser.userID).catch(() => null)
-      const lm = context?.approvers?.find((step) => /line\s*manager|supervisor/i.test(step.label)) ?? context?.approvers?.[0]
-      const hr = context?.approvers?.find((step) => /^hr$/i.test(step.label))
-      const manager =
-        context?.approvers?.find((step) => /fd|director|authorized|manager/i.test(step.label) && step !== lm) ??
+      // BC 1.0.3.636 Stage 1 routing: Superior → FAD (not LM → HR → FD).
+      const superior =
+        context?.approvers?.find((step) => /superior/i.test(step.label)) ??
+        context?.approvers?.find((step) => /line\s*manager|supervisor/i.test(step.label)) ??
+        context?.approvers?.[0]
+      const fad =
+        context?.approvers?.find((step) => /\bfad\b/i.test(step.label)) ??
+        context?.approvers?.find(
+          (step) => /fd|finance|director|authorized/i.test(step.label) && step !== superior,
+        ) ??
         context?.approvers?.[1]
       const workDetails = validateOvertimeWorkDetails(
         {
@@ -7881,12 +7909,12 @@ export function buildPortalApiRouter() {
           designation: context?.employee.designation ?? '',
           departmentCode: context?.employee.departmentCode ?? '',
           departmentName: context?.employee.departmentName ?? '',
-          lineManagerUserId: lm?.approverUserId ?? '',
-          lineManagerName: lm?.approverName ?? '',
-          hrUserId: hr?.approverUserId ?? '',
-          hrName: hr?.approverName ?? '',
-          managerUserId: manager?.approverUserId ?? '',
-          managerName: manager?.approverName ?? '',
+          lineManagerUserId: superior?.approverUserId ?? '',
+          lineManagerName: superior?.approverName ?? '',
+          hrUserId: '',
+          hrName: '',
+          managerUserId: fad?.approverUserId ?? '',
+          managerName: fad?.approverName ?? '',
         },
         submit,
       )
@@ -7895,7 +7923,7 @@ export function buildPortalApiRouter() {
       if (existing && !existing.bcStage1 && existing.status !== 'Draft' && existing.status !== 'Rejected') {
         throw portalError(`Overtime request ${existing.requestNo} can no longer be changed.`, 409)
       }
-      // BC 1.0.3.636 Stage 1 lives in BC (PortalOvertime*, Superior → FAD). Sorted lines give the period.
+      // BC 1.0.3.636 Stage 1 lives in BC (PortalOvertime*, Superior → FAD). Send period + daily lines.
       const stage1Lines = workDetails.lines
         .map((line) => ({
           overtimeDate: line.overtimeDate,
@@ -7905,14 +7933,26 @@ export function buildPortalApiRouter() {
           reason: line.reason || workDetails.reason,
         }))
         .toSorted((a, b) => `${a.overtimeDate} ${a.startTime}`.localeCompare(`${b.overtimeDate} ${b.startTime}`))
+      const bodyDetails =
+        req.body?.details && typeof req.body.details === 'object'
+          ? (req.body.details as Record<string, unknown>)
+          : {}
+      const periodStartDate =
+        String(bodyDetails.periodStartDate ?? bodyDetails.startDate ?? '').trim() ||
+        stage1Lines[0]?.overtimeDate ||
+        ''
+      const periodEndDate =
+        String(bodyDetails.periodEndDate ?? bodyDetails.endDate ?? '').trim() ||
+        stage1Lines[stage1Lines.length - 1]?.overtimeDate ||
+        ''
       let bc: OvertimeRequest | null = null
       try {
         const stage1 = validateOvertimeDetails(
           {
             reason: workDetails.reason,
             projectNo: '',
-            periodStartDate: stage1Lines[0]?.overtimeDate,
-            periodEndDate: stage1Lines[stage1Lines.length - 1]?.overtimeDate,
+            periodStartDate,
+            periodEndDate,
             lines: stage1Lines,
           },
           submit,

@@ -89,7 +89,7 @@ export function ImprestSurrender() {
     <MultiStepRequestPage
       title="Advance Settlement"
       headerLabel="New Advance Settlement"
-      description="Settle a posted/paid Advance Payment (Phase 3). Enter actual expenses and attachments. The system reconciles advance received vs actual spend: equal → Fully Settled; less → return unused balance (receipt required); more → additional reimbursement claim with justification."
+      description="Settle only an approved and paid Advance Payment (BC PortalAdvanceSettlementContext → settleableAdvances). Enter actual expenses and attachments. Business Central reconciles advance vs spend: fullySettled, refundDue (refund date + payment reference + proof), or additionalClaim (justification)."
       module={module}
       queryKey={['finance', 'advance-settlement']}
       listRequests={() => listModuleRequests(module)}

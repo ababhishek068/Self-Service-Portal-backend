@@ -65,6 +65,9 @@ export interface OvertimeWorkRequest {
 export interface OvertimeWorkDetails {
   reason: string
   expectedDeliverables: string
+  /** BC 1.0.3.636 PortalOvertimeSave: period covering the daily lines. */
+  periodStartDate?: string
+  periodEndDate?: string
   lines: Array<{
     overtimeDate: string
     startTime: string
