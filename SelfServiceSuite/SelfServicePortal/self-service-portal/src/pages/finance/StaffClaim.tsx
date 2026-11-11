@@ -468,6 +468,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             type: 'select',
             options: claimTypeChoices,
             placeholder: claimTypePlaceholder,
+            // Medical Claim menu always uses MEDICAL — do not show Staff Claim's claim-type picker.
+            visibleWhen: () => !medicalOnly,
           },
           // UAT (5 Nov): the G/L account means nothing to the requester; it comes from the claim type. The
           // selector shows only when Business Central has no account for the chosen claim type.
@@ -479,15 +481,18 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             placeholder: glAccounts.isLoading
               ? 'Loading G/L accounts from Business Central…'
               : 'This claim type has no G/L account in Business Central — choose one',
-            visibleWhen: (values) => claimTypeNeedsAccount(values.claimType, claimTypeChoices, glAccounts.options),
+            visibleWhen: (values) =>
+              !medicalOnly &&
+              claimTypeNeedsAccount(values.claimType, claimTypeChoices, glAccounts.options),
           },
           {
             name: 'hospitalCategory',
-            label: 'Hospital Category (classification)',
+            label: 'Hospital / Facility Category',
             type: 'select',
             options: hospitalCategoryOptions,
-            placeholder: `Refund is always ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the bill, capped by balance`,
-            visibleWhen: (values) => isMedicalClaim(values.claimType),
+            placeholder: 'Select hospital / facility category',
+            hint: `Company refund is ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self/Dependant budget.`,
+            visibleWhen: (values) => medicalOnly || isMedicalClaim(values.claimType),
           },
           {
             name: 'patient',

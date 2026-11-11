@@ -646,13 +646,23 @@ export function OvertimeWorkRequest() {
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <header className="flex items-center justify-between gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
               <span className="inline-flex items-center gap-2">
-                <CalendarDays className="h-4 w-4" /> Overtime Details
+                <CalendarDays className="h-4 w-4" /> Overtime Details (period + daily dates)
               </span>
               <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-medium tabular-nums">
                 {totalHours.toFixed(2)} hrs
               </span>
             </header>
             <div className="p-4">
+              <p className="mb-3 text-sm text-slate-600">
+                Add <span className="font-medium text-slate-800">one line per overtime day</span>. Use{' '}
+                <span className="font-medium text-slate-800">Edit</span> on any saved line to change its{' '}
+                <span className="font-medium text-slate-800">Overtime Date</span>, start/end time, category, or
+                location. The request period is from the earliest to the latest line date
+                {lines.length
+                  ? ` (${shortDate(sortLines(lines)[0]!.overtimeDate)} → ${shortDate(sortLines(lines)[lines.length - 1]!.overtimeDate)})`
+                  : ''}
+                .
+              </p>
               {lines.length ? (
                 <ul className="mb-4 space-y-2">
                   {lines.map((line, index) => (
