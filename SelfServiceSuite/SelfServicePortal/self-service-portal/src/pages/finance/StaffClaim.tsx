@@ -2,7 +2,6 @@ import { useCallback, useRef } from 'react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
-import { MedicalClaimTemplate } from '@/pages/finance/MedicalClaimTemplate'
 import { validateHospitalCategory } from '@/api/endpoints/claimCalc'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -320,10 +319,6 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
         ? 'Select claim type'
         : 'Select claim type (Medical Claim is under Medical Claim)'
   const onLineValuesChange = useStaffClaimLineChange(claimTypeChoices, glAccounts.options)
-  const medicalAccountNo =
-    glAccountForClaimType(defaultMedicalClaimType, claimTypeChoices) ||
-    findMedicalAllowanceAccount(glAccounts.options)?.value ||
-    ''
 
   const applyDependantMeta = useCallback(
     async (values: FieldValues, form: UseFormReturn<FieldValues>) => {
@@ -366,20 +361,6 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       headerSchema={staffClaimHeaderSchema}
       headerDefaults={{ claimDate: todayIsoDate(), purpose: medicalOnly ? 'Medical Claim' : '' }}
       headerSupplement={() => <FinanceEmployeeOrgBanner showMedicalBalances={medicalOnly} />}
-      customCreate={
-        medicalOnly
-          ? ({ onCreated, onCancel }) => (
-              <MedicalClaimTemplate
-                claimType={defaultMedicalClaimType}
-                accountNo={medicalAccountNo}
-                dependants={dependants.options}
-                dependantsLoading={dependants.isLoading}
-                onCreated={onCreated}
-                onCancel={onCancel}
-              />
-            )
-          : undefined
-      }
       buildHeaderPayload={(values) => ({
         ...values,
         // Always stamp ERP working date (today) — never reuse a stale form default.

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
-import { AdvanceSettlementTemplate } from '@/pages/finance/AdvanceSettlementTemplate'
+import { fetchAdvanceSettlementContext } from '@/api/endpoints/advanceSettlement'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
@@ -64,26 +64,35 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 export function ImprestSurrender() {
   const receipts = useLookupOptions('posted-receipts')
-  // ESS lets you surrender against a posted/approved imprest. Offer those as the picker source.
+  // BC 1.0.3.636: only approved + paid advances from PortalAdvanceSettlementContext.
+  const settleableQuery = useQuery({
+    queryKey: ['finance', 'advance-settlement', 'context', 'create'],
+    queryFn: () => fetchAdvanceSettlementContext(''),
+  })
+  // Fallback display details when BC context is unavailable.
   const imprestQuery = useQuery({
     queryKey: ['finance', 'imprest', 'for-surrender'],
     queryFn: () => listModuleRequests(imprestModule),
   })
 
-  const surrenderable = (imprestQuery.data ?? []).filter(isSurrenderableImprest)
-  const imprestOptions = surrenderable.map((row) => ({
-    label: `${row.requestNo}${row.status && row.status !== 'Posted' ? ` (${row.status})` : ''}`,
-    value: row.requestNo,
-  }))
-  const emptyImprestHint = imprestQuery.isLoading
-    ? 'Loading advance payments…'
-    : imprestQuery.isError
-      ? 'Could not load advance payments from Business Central.'
-      : (imprestQuery.data ?? []).length === 0
-        ? 'No advance payment requests found for your employee number.'
-        : surrenderable.length === 0
-          ? 'No posted or approved advance payment is available to settle. Finance must post the advance in Business Central first, and fully settled advances are excluded.'
-          : 'Select advance payment'
+  const settleable = settleableQuery.data?.settleableAdvances ?? []
+  const imprestOptions =
+    settleable.length > 0
+      ? settleable.map((row) => ({
+          label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}`,
+          value: row.advanceNo,
+        }))
+      : (imprestQuery.data ?? []).filter(isSurrenderableImprest).map((row) => ({
+          label: `${row.requestNo}${row.status && row.status !== 'Posted' ? ` (${row.status})` : ''}`,
+          value: row.requestNo,
+        }))
+  const emptyImprestHint = settleableQuery.isLoading
+    ? 'Loading settleable advances from Business Central…'
+    : settleableQuery.isError && imprestQuery.isError
+      ? 'Could not load advances from Business Central.'
+      : imprestOptions.length === 0
+        ? 'No approved and paid advance is available to settle. Finance must mark the advance Fully Paid in Business Central first.'
+        : 'Select advance payment'
 
   return (
     <MultiStepRequestPage
@@ -97,9 +106,6 @@ export function ImprestSurrender() {
       headerSchema={imprestSurrenderHeaderSchema}
       headerDefaults={{ imprest: '' }}
       buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Settlement for ${values.imprest}` })}
-      customCreate={({ onCreated, onCancel }) => (
-        <AdvanceSettlementTemplate onCreated={onCreated} onCancel={onCancel} />
-      )}
       // Re-saving the header makes BC re-copy the advance lines and drop the expense lines.
       allowHeaderEdit={false}
       detailSupplement={({ request }) => <AdvanceSettlementPanel request={request} />}
@@ -114,28 +120,33 @@ export function ImprestSurrender() {
         },
       ]}
       headerSupplement={(values) => {
-        const selected = (imprestQuery.data ?? []).find(
-          (row) => row.requestNo === String(values.imprest ?? ''),
-        )
+        const advanceNo = String(values.imprest ?? '')
+        const settleableRow = settleable.find((row) => row.advanceNo === advanceNo)
+        const selected = (imprestQuery.data ?? []).find((row) => row.requestNo === advanceNo)
         const payload = selected?.payload ?? {}
-        const amount = firstValue(payload, ['TotalNetAmount', 'Total_Net_Amount', 'NetAmount'])
-          ?? selected?.amount
-        const dateRequired = firstValue(payload, [
-          'PaymentReleaseDate',
-          'Payment_Release_Date',
-          'DateRequired',
-          'Date_Required',
-        ])
+        const amount =
+          settleableRow?.amount ??
+          firstValue(payload, ['TotalNetAmount', 'Total_Net_Amount', 'NetAmount']) ??
+          selected?.amount
+        const purpose =
+          settleableRow?.purpose ||
+          settleableRow?.requestPurposeText ||
+          String(firstValue(payload, ['Purpose', 'Description']) ?? selected?.title ?? '')
+        const dateRequired =
+          settleableRow?.date ||
+          firstValue(payload, [
+            'PaymentReleaseDate',
+            'Payment_Release_Date',
+            'DateRequired',
+            'Date_Required',
+          ])
 
         return (
           <div className="grid gap-x-8 gap-y-5 border-y border-slate-200 py-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Detail
-              label="Advance Purpose"
-              value={String(firstValue(payload, ['Purpose', 'Description']) ?? selected?.title ?? '')}
-            />
+            <Detail label="Advance Purpose" value={purpose} />
             <Detail
               label="Advance Amount"
-              value={amount === undefined ? '—' : formatCurrency(Number(amount))}
+              value={amount === undefined || amount === '' ? '—' : formatCurrency(Number(amount))}
             />
             <Detail
               label="Department"
@@ -155,8 +166,8 @@ export function ImprestSurrender() {
               )}
             />
             <Detail
-              label="Date Required"
-              value={dateRequired === undefined ? '—' : formatDate(String(dateRequired))}
+              label="Payment / Advance Date"
+              value={dateRequired === undefined || dateRequired === '' ? '—' : formatDate(String(dateRequired))}
             />
           </div>
         )

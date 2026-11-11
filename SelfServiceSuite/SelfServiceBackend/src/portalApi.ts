@@ -643,7 +643,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v358 — 1.0.3.519 (Nitish handoffs: Medical FetchMedicalClaimAmountPolicy, Petty Cash ESSP categories, OT/Settlement 636)'
+export const PORTAL_API_BUILD = 'v359 — 1.0.3.520 (full-width MultiStep create for Medical Claim, Petty Cash, Advance Settlement)'
 
 interface LookupSpec {
   service: string

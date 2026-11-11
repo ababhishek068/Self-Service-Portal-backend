@@ -3,7 +3,6 @@ import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { formatISO } from 'date-fns'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
-import { PettyCashRequestTemplate } from '@/pages/finance/PettyCashRequestTemplate'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
@@ -87,9 +86,6 @@ export function PettyCash() {
         ...values,
         title: String(values.description || 'Petty Cash Request'),
       })}
-      customCreate={({ onCreated, onCancel }) => (
-        <PettyCashRequestTemplate onCreated={onCreated} onCancel={onCancel} />
-      )}
       headerFields={[
         {
           name: 'dateNeeded',
