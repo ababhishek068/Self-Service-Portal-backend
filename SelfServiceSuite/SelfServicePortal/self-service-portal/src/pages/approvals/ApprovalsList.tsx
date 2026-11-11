@@ -30,7 +30,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     { value: 'all', label: 'All' },
     { value: 'leave', label: 'Leave' },
     { value: 'imprest', label: 'Advance Payment' },
-    { value: 'imprestSurrender', label: 'Advance Surrender' },
+    { value: 'imprestSurrender', label: 'Advance Settlement' },
     { value: 'purchaseRequisition', label: 'Purchase' },
     { value: 'storeRequisition', label: 'Store' },
     { value: 'pettyCashReplenishment', label: 'PV' },
@@ -38,8 +38,9 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     { value: 'transferOrder', label: 'Order' },
     { value: 'employeeExit', label: 'Exit' },
     { value: 'hrServiceLetter', label: 'Letters' },
-    { value: 'overtimeWork', label: 'Overtime Request' },
-    { value: 'overtime', label: 'Overtime Payment' },
+    { value: 'overtimeWork', label: 'OT Request' },
+    { value: 'overtime', label: 'OT Stage 1' },
+    { value: 'overtimePayment', label: 'OT Payment' },
     { value: 'profileChange', label: 'Profile changes' },
   ]
   const sourceRows = useMemo(() => approvals.data ?? [], [approvals.data])

@@ -30,19 +30,23 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  deleteOvertimeRequest,
   estimateOvertimeAmount,
   fetchOvertimeContext,
   fetchOvertimeRequests,
-  saveOvertimeRequest,
   splitOvertimeHours,
-  withdrawOvertimeRequest,
   type OvertimeContext,
   type OvertimeDayType,
   type OvertimeLineInput,
   type OvertimeRequest as OvertimeRequestRow,
   type OvertimeStep,
 } from '@/api/endpoints/overtime'
+import {
+  deleteOtPaymentRequest,
+  fetchOtPaymentRequests,
+  saveOtPaymentRequest,
+  withdrawOtPaymentRequest,
+  type OtPaymentRequest,
+} from '@/api/endpoints/overtimePayments'
 import {
   fetchApprovedOvertimeWorkRequests,
   fetchOvertimeWorkByPayment,
@@ -62,7 +66,61 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
 
-const LIST_KEY = ['hr', 'overtime-requests'] as const
+const LIST_KEY = ['hr', 'overtime-payments'] as const
+
+function otPaymentAsListRow(row: OtPaymentRequest): OvertimeRequestRow {
+  return {
+    id: row.paymentNo,
+    requestNo: row.paymentNo,
+    status: row.status === 'Cancelled' ? 'Rejected' : row.status,
+    stage: 0,
+    stageLabel: row.status,
+    employeeNo: row.employeeNo,
+    employeeName: row.employeeName,
+    designation: '',
+    departmentCode: '',
+    departmentName: '',
+    costCentre: '',
+    projectNo: '',
+    projectName: '',
+    overtimeDate: row.workCompletedOn,
+    startTime: '',
+    endTime: '',
+    dayType: 'working',
+    dayTypeLabel: '',
+    totalHours: 0,
+    normalHours: 0,
+    nightHours: 0,
+    restDayHours: 0,
+    holidayHours: 0,
+    hourlyRate: 0,
+    estimatedAmount: 0,
+    reason: row.employeeRemarks || `Payment for ${row.otRequestNo}`,
+    warnings: '',
+    requesterUserId: '',
+    createdAt: row.createdAt,
+    submittedAt: row.submittedAt,
+    approvedAt: row.approvedAt,
+    rejectedAtStage: '',
+    decisionRemarks: row.superiorJustification,
+    sheetNo: '',
+    addedToSheet: row.addedToSheet,
+    addedAt: '',
+    sheetNote: '',
+    sheetStatus: '',
+    payrollPeriodName: '',
+    sentToPayroll: false,
+    sentToPayrollAt: '',
+    steps: [],
+    log: [],
+    lines: [],
+    linesFromBc: false,
+    canRequestPayment: false,
+    workAuthorized: true,
+    paymentRequestNo: row.paymentNo,
+    paymentApproved: row.status === 'Approved',
+  }
+}
 const CONTEXT_KEY = ['hr', 'overtime-context'] as const
 
 const DAY_TYPES: Array<{ value: OvertimeDayType; label: string }> = [
@@ -564,18 +622,27 @@ export function OvertimeRequest() {
   const confirm = useConfirm()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [mode, setMode] = useState<Mode>(searchParams.get('request') ? 'detail' : 'form')
+  const [mode, setMode] = useState<Mode>(
+    searchParams.get('request') ? 'detail' : searchParams.get('otRequestNo') ? 'form' : 'list',
+  )
   const [selectedNo, setSelectedNo] = useState<string | null>(searchParams.get('request'))
   const [editingNo, setEditingNo] = useState<string | null>(null)
   const [lines, setLines] = useState<OvertimeLineInput[]>([])
   const [projectNo, setProjectNo] = useState('')
-  const [priorWorkRequestNo, setPriorWorkRequestNo] = useState('')
+  const [priorWorkRequestNo, setPriorWorkRequestNo] = useState(
+    () => searchParams.get('otRequestNo')?.trim().toUpperCase() ?? '',
+  )
   const [formError, setFormError] = useState<string | null>(null)
 
   const contextQuery = useQuery({ queryKey: CONTEXT_KEY, queryFn: fetchOvertimeContext, staleTime: 60_000 })
+  const stage1PayableQuery = useQuery({
+    queryKey: ['hr', 'overtime-stage1-payable'],
+    queryFn: fetchOvertimeRequests,
+    staleTime: 30_000,
+  })
   const listQuery = useQuery({
     queryKey: LIST_KEY,
-    queryFn: fetchOvertimeRequests,
+    queryFn: async () => (await fetchOtPaymentRequests()).map(otPaymentAsListRow),
     refetchOnWindowFocus: true,
     refetchInterval: mode === 'form' ? false : 20_000,
     staleTime: 15_000,
@@ -588,7 +655,51 @@ export function OvertimeRequest() {
   })
   const approvedWorkQuery = useQuery({
     queryKey: ['hr', 'overtime-work-approved', priorWorkRequestNo],
-    queryFn: () => fetchApprovedOvertimeWorkRequests(priorWorkRequestNo || undefined),
+    queryFn: async () => {
+      const stage1 = (stage1PayableQuery.data ?? []).filter(
+        (row) => row.canRequestPayment || (row.status === 'Approved' && !row.paymentApproved),
+      )
+      if (stage1.length > 0) {
+        return stage1.map((row) => ({
+          id: row.requestNo,
+          requestNo: row.requestNo,
+          status: 'Approved' as const,
+          employeeNo: row.employeeNo,
+          employeeName: row.employeeName,
+          designation: row.designation,
+          departmentCode: row.departmentCode,
+          departmentName: row.departmentName,
+          overtimeDate: row.overtimeDate,
+          normalHoursFrom: row.startTime,
+          normalHoursTo: row.endTime,
+          overtimeFrom: row.startTime,
+          overtimeTo: row.endTime,
+          totalHours: row.totalHours,
+          overtimeType: 'weekday' as const,
+          workLocation: 'office' as const,
+          reason: row.reason,
+          expectedDeliverables: '',
+          lines: row.lines.map((line) => ({
+            overtimeDate: line.overtimeDate,
+            startTime: line.startTime,
+            endTime: line.endTime,
+            dayType: line.dayType,
+            workLocation: 'office' as const,
+            reason: line.reason,
+            totalHours: line.totalHours,
+          })),
+          requesterUserId: row.requesterUserId,
+          createdAt: row.createdAt,
+          submittedAt: row.submittedAt,
+          approvedAt: row.approvedAt,
+          decisionRemarks: row.decisionRemarks,
+          steps: [],
+          linkedPaymentRequestNo: row.paymentRequestNo ?? '',
+          linkedAt: '',
+        }))
+      }
+      return fetchApprovedOvertimeWorkRequests(priorWorkRequestNo || undefined)
+    },
     staleTime: 30_000,
     enabled: mode === 'form',
   })
@@ -668,51 +779,47 @@ export function OvertimeRequest() {
   }
 
   const saveMutation = useMutation({
-    mutationFn: saveOvertimeRequest,
-    onSuccess: (request, input) => {
-      rememberRow(request)
-      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-approved'] })
-      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-by-payment'] })
+    mutationFn: saveOtPaymentRequest,
+    onSuccess: (payment, input) => {
+      rememberRow(otPaymentAsListRow(payment))
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-stage1-payable'] })
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY })
       if (input.submit) {
-        const first = request.steps.find((step) => step.status === 'Pending')
         toast.success(
-          'Overtime request submitted',
-          request.status === 'Approved'
-            ? `${request.requestNo} is approved and goes to the overtime sheet.`
-            : `${request.requestNo} was sent to ${first ? `${first.label} (${first.approverName})` : 'approval'}.`,
+          'Overtime payment submitted',
+          `${payment.paymentNo} was sent to Superior for justification and approval. Hours are added to the overtime sheet only after Stage 2 approval.`,
         )
       } else {
-        toast.success('Draft saved', `${request.requestNo} is saved. Submit it for approval when it is ready.`)
+        toast.success('Draft saved', `${payment.paymentNo} is saved. Submit it for approval when it is ready.`)
       }
       setEditingNo(null)
-      goTo('detail', request.requestNo)
+      goTo('detail', payment.paymentNo)
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : 'Please check the form and try again.'
       setFormError(message)
-      toast.error('Overtime request not saved', message)
+      toast.error('Overtime payment not saved', message)
     },
   })
 
   const withdrawMutation = useMutation({
-    mutationFn: withdrawOvertimeRequest,
-    onSuccess: (request) => {
-      rememberRow(request)
-      toast.success('Request withdrawn', `${request.requestNo} is a draft again. Change it and submit, or delete it.`)
+    mutationFn: withdrawOtPaymentRequest,
+    onSuccess: (payment) => {
+      rememberRow(otPaymentAsListRow(payment))
+      toast.success('Request withdrawn', `${payment.paymentNo} is a draft again. Change it and submit, or delete it.`)
     },
     onError: (error) => toast.error('Withdraw failed', error instanceof Error ? error.message : 'Please try again.'),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: deleteOvertimeRequest,
-    onSuccess: (_result, requestNo) => {
+    mutationFn: deleteOtPaymentRequest,
+    onSuccess: (_result, paymentNo) => {
       queryClient.setQueryData<OvertimeRequestRow[]>(LIST_KEY, (current = []) =>
-        current.filter((row) => row.requestNo !== requestNo),
+        current.filter((row) => row.requestNo !== paymentNo),
       )
       void queryClient.invalidateQueries({ queryKey: LIST_KEY })
-      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-approved'] })
-      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-work-by-payment'] })
-      toast.success('Draft deleted', `${requestNo} was removed.`)
+      void queryClient.invalidateQueries({ queryKey: ['hr', 'overtime-stage1-payable'] })
+      toast.success('Draft deleted', `${paymentNo} was removed.`)
       goTo('list')
     },
     onError: (error) => toast.error('Delete failed', error instanceof Error ? error.message : 'Please try again.'),
@@ -723,28 +830,20 @@ export function OvertimeRequest() {
   const send = (submit: boolean) => {
     if (!priorWorkRequestNo.trim()) {
       setFormError(
-        'Select the previously approved Overtime Work Request. Payment has no Add Line — hours come from that work request.',
+        'Select the approved Overtime Request (Stage 1 work authorization). Stage 2 payment links to that document.',
       )
       return
     }
-    if (!lines.length) {
-      setFormError(
-        'The selected Overtime Work Request has no lines to pay. Open Overtime Request, add the hours there, get it approved, then come back.',
-      )
-      return
-    }
+    const workCompletedOn = lines[0]?.overtimeDate || new Date().toISOString().slice(0, 10)
+    const remarks = [...new Set(lines.map((line) => line.reason.trim()).filter(Boolean))]
+      .join('; ')
+      .slice(0, 250)
     setFormError(null)
-    const first = lines[0]!
-    const reasons = [...new Set(lines.map((line) => line.reason.trim()).filter(Boolean))]
     saveMutation.mutate({
-      requestNo: editingNo ?? undefined,
-      details: {
-        ...first,
-        reason: reasons.join('; ').slice(0, 500),
-        projectNo,
-        priorWorkRequestNo: priorWorkRequestNo.trim().toUpperCase(),
-        lines,
-      },
+      paymentNo: editingNo ?? undefined,
+      otRequestNo: priorWorkRequestNo.trim().toUpperCase(),
+      workCompletedOn,
+      employeeRemarks: remarks || 'Work completed as approved',
       submit,
     })
   }

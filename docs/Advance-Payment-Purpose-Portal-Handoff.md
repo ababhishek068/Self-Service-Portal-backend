@@ -44,7 +44,7 @@ Finance **Advance Payment** (`Imprest Header`) stores ESSP purpose fields and ex
 4. Always show **Request Justification** (required).
 5. Capture Required Advance Date, Activity Start/End, Activity Location.
 6. After save header: call `PortalAdvancePaymentDetails(...)` with the selected purpose code + fields.
-7. Keep Settlement on **Advance Surrender** only (not inside Advance Payment form).
+7. Keep Settlement on **Advance Settlement** only (not inside Advance Payment form).
 8. Approval ladder is already BC-owned (LM → FAD/COO/CEO by amount in 1.0.3.629+).
 
 ## BC admin once after publish 630

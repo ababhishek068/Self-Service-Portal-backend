@@ -107,7 +107,7 @@ const tiles: DashboardTile[] = [
   { id: 'staffClaims', label: 'Staff Claims', href: '/finance/staff-claim', icon: Receipt, tone: 'blue' },
   { id: 'imprestRequisitions', label: 'Advance Payments', href: '/finance/advance-payment', icon: Banknote, tone: 'blue' },
   { id: 'pettyCash', label: 'Petty Cash Request', href: '/finance/petty-cash', icon: Coins, tone: 'blue' },
-  { id: 'imprestSurrenders', label: 'Advance Surrenders', href: '/finance/advance-surrender', icon: ReceiptText, tone: 'blue' },
+  { id: 'imprestSurrenders', label: 'Advance Settlements', href: '/finance/advance-settlement', icon: ReceiptText, tone: 'blue' },
   {
     id: 'purchaseRequisitions',
     label: 'Local Purchase',
@@ -135,6 +135,7 @@ const QUICK_LINK_META: Record<string, { icon: LucideIcon; tone: Tone }> = {
   '/finance/staff-claim': { icon: Receipt, tone: 'blue' },
   '/finance/medical-claim': { icon: HeartPulse, tone: 'blue' },
   '/finance/petty-cash': { icon: Coins, tone: 'blue' },
+  '/finance/advance-settlement': { icon: ReceiptText, tone: 'blue' },
   '/finance/advance-surrender': { icon: ReceiptText, tone: 'blue' },
   '/finance/imprest-surrender': { icon: ReceiptText, tone: 'blue' },
   '/facility/local-purchase-request': { icon: ShoppingCart, tone: 'indigo' },

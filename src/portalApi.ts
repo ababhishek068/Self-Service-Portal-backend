@@ -177,6 +177,21 @@ import {
   OVERTIME_MODULE,
 } from './overtimeRequests.js'
 import {
+  addAdvanceSettlementExpense,
+  getAdvanceSettlementContext,
+  saveAdvanceSettlementDetails,
+} from './advanceSettlement.js'
+import {
+  decideOtPaymentApproval,
+  deleteOtPaymentRequest,
+  getOtPaymentByNo,
+  getOtPaymentContext,
+  listOtPaymentApprovals,
+  listOtPaymentRequests,
+  saveOtPaymentRequest,
+  withdrawOtPaymentRequest,
+} from './otPaymentRequests.js'
+import {
   decideOvertimeWorkApproval,
   deleteOvertimeWorkRequest,
   getOvertimeWorkByPayment,
@@ -596,7 +611,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v354 — 1.0.3.515 (BC 1.0.3.633 Advance/Medical/Petty Cash SOAP)'
+export const PORTAL_API_BUILD = 'v355 — 1.0.3.516 (BC 1.0.3.636 Advance Settlement + OT two-stage)'
 
 interface LookupSpec {
   service: string
@@ -2161,6 +2176,7 @@ const SOAP_APPROVAL_MODULES = [
   HR_SERVICE_LETTER_MODULE,
   OVERTIME_WORK_MODULE,
   OVERTIME_MODULE,
+  'overtimePayment',
   PROFILE_CHANGE_MODULE,
 ] as const
 
@@ -2228,17 +2244,20 @@ async function soapApproverIds(authUser: AuthUser) {
 async function soapApprovalQueues(authUser: AuthUser) {
   const joined = await soapApproverIds(authUser)
   const actingIds = joined.split('|').filter(Boolean)
-  const [exitResult, letterResult, overtimeResult, overtimeWorkResult, profileResult] = await Promise.allSettled([
-    listEmployeeExitApprovals(joined),
-    listHrServiceLetterApprovals(joined),
-    listOvertimeApprovals(joined, 'pending'),
-    listOvertimeWorkApprovals(actingIds, 'pending'),
-    listProfileChangeApprovals(joined, 'pending'),
-  ])
+  const [exitResult, letterResult, overtimeResult, overtimeWorkResult, otPaymentResult, profileResult] =
+    await Promise.allSettled([
+      listEmployeeExitApprovals(joined),
+      listHrServiceLetterApprovals(joined),
+      listOvertimeApprovals(joined, 'pending'),
+      listOvertimeWorkApprovals(actingIds, 'pending'),
+      listOtPaymentApprovals(joined, 'pending'),
+      listProfileChangeApprovals(joined, 'pending'),
+    ])
   const exitRows = exitResult.status === 'fulfilled' ? exitResult.value : []
   const letterRows = letterResult.status === 'fulfilled' ? letterResult.value : []
   const overtimeRows = overtimeResult.status === 'fulfilled' ? overtimeResult.value : []
   const overtimeWorkRows = overtimeWorkResult.status === 'fulfilled' ? overtimeWorkResult.value : []
+  const otPaymentRows = otPaymentResult.status === 'fulfilled' ? otPaymentResult.value : []
   const profileRows = profileResult.status === 'fulfilled' ? profileResult.value : []
   return {
     joined,
@@ -2246,11 +2265,25 @@ async function soapApprovalQueues(authUser: AuthUser) {
     letterRows,
     overtimeRows,
     overtimeWorkRows,
+    otPaymentRows,
     profileRows,
     queueItems: [
       ...exitRows.map(employeeExitApprovalQueueItem),
       ...letterRows.map(hrLetterApprovalQueueItem),
       ...overtimeRows.map(overtimeApprovalQueueItem),
+      ...otPaymentRows.map((row) => ({
+        id: `overtimePayment-${row.paymentNo}`,
+        requestNo: row.paymentNo,
+        module: 'overtimePayment',
+        title: `Overtime Payment — ${row.otRequestNo || row.paymentNo}`,
+        makerEmployeeNo: row.employeeNo,
+        makerName: row.employeeName,
+        amount: 0,
+        status: row.status,
+        submittedAt: row.submittedAt || row.createdAt,
+        approverEmployeeNo: '',
+        sourceDocumentNo: row.paymentNo,
+      })),
       ...overtimeWorkRows.map((row) => {
         const portal = overtimeWorkToPortalRequest(row)
         return {
@@ -6690,6 +6723,32 @@ export function buildPortalApiRouter() {
           res.json({ ...detail, approvalComment: await approvalCommentLimits() })
           return
         }
+        if (soapRef.module === 'overtimePayment') {
+          const queued = (await listOtPaymentApprovals(joined, 'pending')).find(
+            (row) => row.paymentNo === soapRef.no,
+          )
+          const request = queued ?? (await getOtPaymentByNo(soapRef.no))
+          if (!request) {
+            throw portalError('Overtime payment approval was not found for this user', 404)
+          }
+          res.json({
+            id: `overtimePayment-${request.paymentNo}`,
+            requestNo: request.paymentNo,
+            requestType: 'overtimePayment',
+            title: `Overtime Payment — ${request.otRequestNo || request.paymentNo}`,
+            status: request.status,
+            makerEmployeeNo: request.employeeNo,
+            makerName: request.employeeName,
+            amount: 0,
+            createdAt: request.createdAt,
+            submittedAt: request.submittedAt,
+            payload: request.raw,
+            approvalComment: await approvalCommentLimits(),
+            approvalNote:
+              'Superior must enter a justification (at least 3 characters) when approving Stage 2 overtime payment.',
+          })
+          return
+        }
         if (soapRef.module === OVERTIME_WORK_MODULE) {
           const actingIds = await approverIdCandidates(authUser)
           const queued = (await listOvertimeWorkApprovals(actingIds, 'pending')).find(
@@ -6840,6 +6899,14 @@ export function buildPortalApiRouter() {
           await decideOvertimeApproval({
             approverUserIds: joined,
             requestNo: soapRef.no,
+            approve: decision === 'Approved',
+            remarks: comment,
+          })
+          forgetNotifications(authUser)
+        } else if (soapRef.module === 'overtimePayment') {
+          await decideOtPaymentApproval({
+            approverUserIds: joined,
+            paymentNo: soapRef.no,
             approve: decision === 'Approved',
             remarks: comment,
           })
@@ -7023,7 +7090,7 @@ export function buildPortalApiRouter() {
         { key: 'overtime', label: 'Overtime', count: overtimeRequests },
         { key: 'staffClaim', label: 'Staff Claims', count: claims.length },
         { key: 'imprest', label: 'Advance Payment', count: imprest.length },
-        { key: 'imprestSurrender', label: 'Advance Surrender', count: surrender.length },
+        { key: 'imprestSurrender', label: 'Advance Settlement', count: surrender.length },
         { key: 'pettyCash', label: 'Petty Cash', count: pettyCash.length },
         { key: 'storeRequisition', label: 'Store Req', count: store.length },
         { key: 'purchaseRequisition', label: 'Local Purchase', count: purchase.length },
@@ -7226,6 +7293,67 @@ export function buildPortalApiRouter() {
       }
       const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
       res.json(parseSoapJson(result.returnValue))
+    }),
+  )
+
+  /** BC 1.0.3.636 — Advance Settlement (Surrender): settleable advances + balance/outcome. */
+  router.get(
+    '/advance-settlement/context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const employeeNo = String(req.query.employeeNo ?? authUser.employeeNo ?? '').trim()
+      const surrenderNo = String(req.query.surrenderNo ?? '').trim()
+      if (!employeeNo) {
+        throw portalError('Employee number is required for Advance Settlement context.', 422)
+      }
+      res.json(await getAdvanceSettlementContext(employeeNo, surrenderNo))
+    }),
+  )
+
+  router.post(
+    '/advance-settlement/save',
+    safe(async (req, res) => {
+      const surrenderNo = String(req.body?.surrenderNo ?? req.body?.docNo ?? '').trim()
+      if (!surrenderNo) throw portalError('Settlement document number is required.', 422)
+      res.json(
+        await saveAdvanceSettlementDetails({
+          surrenderNo,
+          refundDateText: String(req.body?.refundDateText ?? req.body?.refundDate ?? '').trim(),
+          refundPaymentReference: String(
+            req.body?.refundPaymentReference ?? req.body?.refundReference ?? '',
+          ).trim(),
+          additionalClaimJustification: String(
+            req.body?.additionalClaimJustification ?? req.body?.claimJustification ?? '',
+          ).trim(),
+          declarationConfirmed: Boolean(req.body?.declarationConfirmed ?? req.body?.agreed),
+          settlementRemarks: String(req.body?.settlementRemarks ?? req.body?.remarks ?? '').trim(),
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/advance-settlement/expenses',
+    safe(async (req, res) => {
+      const surrenderNo = String(req.body?.surrenderNo ?? req.body?.docNo ?? '').trim()
+      const expenseCategory = String(req.body?.expenseCategory ?? req.body?.category ?? '').trim()
+      const expenseDescription = String(
+        req.body?.expenseDescription ?? req.body?.description ?? '',
+      ).trim()
+      const expenseAmount = Number(req.body?.expenseAmount ?? req.body?.amount ?? 0)
+      if (!surrenderNo) throw portalError('Settlement document number is required.', 422)
+      if (!expenseCategory) throw portalError('Expense category is required.', 422)
+      if (expenseDescription.length < 3) {
+        throw portalError('Enter an expense description (at least 3 characters).', 422)
+      }
+      if (!(expenseAmount > 0)) throw portalError('Enter an expense amount greater than zero.', 422)
+      const lineNo = await addAdvanceSettlementExpense({
+        surrenderNo,
+        expenseCategory,
+        expenseDescription,
+        expenseAmount,
+      })
+      res.json({ lineNo, surrenderNo })
     }),
   )
 
@@ -7527,7 +7655,7 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  // Staff Overtime Request (BC 1.0.3.606; BC workflow 1.0.3.623): Line Manager, FD, HR, Finance, then payroll.
+  // Stage 1 — Overtime Request / work authorization (BC 1.0.3.636): Superior → FAD; period + daily lines.
   router.get(
     '/hr/overtime/context',
     safe(async (req, res) => {
@@ -7552,52 +7680,24 @@ export function buildPortalApiRouter() {
       const authUser = user(req)
       const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
       const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
+      // BC 1.0.3.636: PortalOvertime* is Stage 1 work authorization (period + daily lines).
+      // Optional legacy priorWorkRequestNo still accepted for older portal clients.
       let details = validateOvertimeDetails(req.body?.details, submit)
       if (details.priorWorkRequestNo) {
         const prior = await getOvertimeWorkRequest(details.priorWorkRequestNo, authUser.employeeNo)
-        if (!prior || prior.status !== 'Approved') {
-          throw portalError(
-            `Overtime Payment Request needs a previously approved Overtime Work Request. ${details.priorWorkRequestNo} is not an approved work request for this employee.`,
-            400,
-          )
+        if (prior?.status === 'Approved') {
+          const workLines = overtimeWorkLinesForPayment(prior)
+          if (workLines.length) {
+            details = validateOvertimeDetails(
+              {
+                ...details,
+                lines: workLines,
+                reason: details.reason || prior.reason,
+              },
+              submit,
+            )
+          }
         }
-        if (
-          prior.linkedPaymentRequestNo &&
-          requestNo &&
-          prior.linkedPaymentRequestNo.toUpperCase() !== requestNo
-        ) {
-          throw portalError(
-            `Approved work request ${prior.requestNo} is already linked to payment ${prior.linkedPaymentRequestNo} and cannot be reused for another claim.`,
-            409,
-          )
-        }
-        if (prior.linkedPaymentRequestNo && !requestNo) {
-          throw portalError(
-            `Approved work request ${prior.requestNo} is already linked to payment ${prior.linkedPaymentRequestNo} and cannot be reused for another claim.`,
-            409,
-          )
-        }
-        // Payment has no Add Line: hours come from the approved work request.
-        const workLines = overtimeWorkLinesForPayment(prior)
-        if (!workLines.length) {
-          throw portalError(
-            `Approved work request ${prior.requestNo} has no overtime lines to pay.`,
-            400,
-          )
-        }
-        details = validateOvertimeDetails(
-          {
-            ...details,
-            lines: workLines,
-            reason: details.reason || prior.reason,
-          },
-          submit,
-        )
-      } else if (submit) {
-        throw portalError(
-          'Select the previously approved Overtime Work Request. Payment requests without a prior-approved work request will not be processed.',
-          400,
-        )
       }
       const saved = await saveOvertimeRequest({
         employeeNo: authUser.employeeNo,
@@ -7611,9 +7711,81 @@ export function buildPortalApiRouter() {
           workRequestNo: details.priorWorkRequestNo,
           paymentRequestNo: saved.requestNo,
           employeeNo: authUser.employeeNo,
-        })
+        }).catch(() => undefined)
       }
       res.json(saved)
+    }),
+  )
+
+  // Stage 2 — Overtime Payment Request (BC 1.0.3.636 PortalOTPayment*).
+  router.get(
+    '/hr/overtime-payments/context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const otRequestNo = String(req.query.otRequestNo ?? '').trim()
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await getOtPaymentContext(authUser.employeeNo, authUser.userID, otRequestNo))
+    }),
+  )
+
+  router.get(
+    '/hr/overtime-payments',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ rows: await listOtPaymentRequests(authUser.employeeNo) })
+    }),
+  )
+
+  router.get(
+    '/hr/overtime-payments/:no',
+    safe(async (req, res) => {
+      const row = await getOtPaymentByNo(String(req.params.no ?? '').trim())
+      if (!row) throw portalError('Overtime payment request was not found', 404)
+      res.json(row)
+    }),
+  )
+
+  router.post(
+    '/hr/overtime-payments',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
+      const paymentNo = String(req.body?.paymentNo ?? '').trim().toUpperCase().slice(0, 20)
+      const details = {
+        otRequestNo: String(req.body?.otRequestNo ?? req.body?.details?.otRequestNo ?? '').trim(),
+        workCompletedOn: String(
+          req.body?.workCompletedOn ?? req.body?.details?.workCompletedOn ?? '',
+        ).trim(),
+        employeeRemarks: String(
+          req.body?.employeeRemarks ?? req.body?.details?.employeeRemarks ?? '',
+        ).trim(),
+      }
+      res.json(
+        await saveOtPaymentRequest({
+          employeeNo: authUser.employeeNo,
+          requesterUserId: authUser.userID,
+          paymentNo,
+          details,
+          submit,
+        }),
+      )
+    }),
+  )
+
+  router.post(
+    '/hr/overtime-payments/:no/withdraw',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await withdrawOtPaymentRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
+    }),
+  )
+
+  router.delete(
+    '/hr/overtime-payments/:no',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      res.json(await deleteOtPaymentRequest(authUser.employeeNo, String(req.params.no ?? '').trim()))
     }),
   )
 
@@ -7683,27 +7855,59 @@ export function buildPortalApiRouter() {
       const manager =
         context?.approvers?.find((step) => /fd|director|authorized|manager/i.test(step.label) && step !== lm) ??
         context?.approvers?.[1]
+      const workDetails = validateOvertimeWorkDetails(
+        {
+          ...(req.body?.details ?? {}),
+          employeeName: context?.employee.employeeName ?? authUser.displayName ?? authUser.name,
+          designation: context?.employee.designation ?? '',
+          departmentCode: context?.employee.departmentCode ?? '',
+          departmentName: context?.employee.departmentName ?? '',
+          lineManagerUserId: lm?.approverUserId ?? '',
+          lineManagerName: lm?.approverName ?? '',
+          hrUserId: hr?.approverUserId ?? '',
+          hrName: hr?.approverName ?? '',
+          managerUserId: manager?.approverUserId ?? '',
+          managerName: manager?.approverName ?? '',
+        },
+        submit,
+      )
+      // BC 1.0.3.636 Stage 1: also persist through PortalOvertime* (Superior → FAD).
+      const stage1Lines = workDetails.lines.map((line) => ({
+        overtimeDate: line.overtimeDate,
+        startTime: line.startTime,
+        endTime: line.endTime,
+        dayType: line.dayType,
+        reason: line.reason || workDetails.reason,
+      }))
+      let bcRequestNo = requestNo
+      try {
+        const stage1 = validateOvertimeDetails(
+          {
+            reason: workDetails.reason,
+            projectNo: '',
+            periodStartDate: stage1Lines[0]?.overtimeDate,
+            periodEndDate: stage1Lines[stage1Lines.length - 1]?.overtimeDate,
+            lines: stage1Lines,
+          },
+          submit,
+        )
+        const savedStage1 = await saveOvertimeRequest({
+          employeeNo: authUser.employeeNo,
+          requesterUserId: authUser.userID,
+          requestNo,
+          details: stage1,
+          submit,
+        })
+        bcRequestNo = savedStage1.requestNo
+      } catch (error) {
+        if (submit) throw error
+      }
       res.json(
         await saveOvertimeWorkRequest({
           employeeNo: authUser.employeeNo,
           requesterUserId: authUser.userID,
-          requestNo,
-          details: validateOvertimeWorkDetails(
-            {
-              ...(req.body?.details ?? {}),
-              employeeName: context?.employee.employeeName ?? authUser.displayName ?? authUser.name,
-              designation: context?.employee.designation ?? '',
-              departmentCode: context?.employee.departmentCode ?? '',
-              departmentName: context?.employee.departmentName ?? '',
-              lineManagerUserId: lm?.approverUserId ?? '',
-              lineManagerName: lm?.approverName ?? '',
-              hrUserId: hr?.approverUserId ?? '',
-              hrName: hr?.approverName ?? '',
-              managerUserId: manager?.approverUserId ?? '',
-              managerName: manager?.approverName ?? '',
-            },
-            submit,
-          ),
+          requestNo: bcRequestNo,
+          details: workDetails,
           submit,
         }),
       )

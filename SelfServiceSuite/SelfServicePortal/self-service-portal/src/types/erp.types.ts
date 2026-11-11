@@ -286,6 +286,7 @@ export type PortalModuleKey =
   | 'leave'
   | 'overtime'
   | 'overtimeWork'
+  | 'overtimePayment'
   | 'travel'
   | 'salaryAdvance'
   | 'training'

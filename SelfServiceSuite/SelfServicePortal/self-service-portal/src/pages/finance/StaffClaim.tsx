@@ -65,6 +65,13 @@ function medicalClaimTypeOptions(options: LookupOption[]) {
   return medical.length > 0 ? medical : claimTypeOptions.filter((option) => option.value === 'MEDICAL')
 }
 
+/** Staff Claims exclude Medical — Medical Claim is a separate menu/page. */
+function nonMedicalClaimTypeOptions(options: LookupOption[]) {
+  return options.filter(
+    (option) => !isMedicalClaim(option.value) && !isMedicalClaim(option.label),
+  )
+}
+
 function accountNameForNo(accountNo: string, glAccounts: LookupOption[]) {
   const normalizedAccountNo = accountNo.trim().toUpperCase()
   const match = glAccounts.find(
@@ -287,13 +294,17 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
   const dependants = useLookupOptions('employee-dependants')
   const claimTypeChoices = medicalOnly
     ? medicalClaimTypeOptions(claimTypesQuery.options)
-    : mergeClaimTypeOptions(claimTypesQuery.options, claimTypeOptions)
+    : nonMedicalClaimTypeOptions(
+        mergeClaimTypeOptions(claimTypesQuery.options, claimTypeOptions),
+      )
   const defaultMedicalClaimType = claimTypeChoices[0]?.value ?? 'MEDICAL'
   const claimTypePlaceholder = claimTypesQuery.isLoading
     ? 'Loading claim types from Business Central…'
     : claimTypesQuery.isError
       ? 'Could not load claim types'
-      : 'Select claim type'
+      : medicalOnly
+        ? 'Select claim type'
+        : 'Select claim type (Medical Claim is under Medical Claim)'
   const onLineValuesChange = useStaffClaimLineChange(claimTypeChoices, glAccounts.options)
 
   const applyDependantMeta = useCallback(
@@ -321,11 +332,32 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       description={
         medicalOnly
           ? `Medical Claim & Reimbursement Policy: company covers ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by your remaining Self or Dependant medical claim balance (annual entitlement = Basic × 12 × 20%, split 50/50). Attach valid medical receipts.`
-          : 'Add claim lines by type. Business Central sets the G/L account from the claim type; you enter amount and expenditure details. Medical lines use the 80% company coverage policy, capped by Self/Dependant balance.'
+          : 'Add claim lines by type. Business Central sets the G/L account from the claim type; you enter amount and expenditure details. For medical reimbursement use Finance → Medical Claim (not listed here).'
       }
       module={module}
       queryKey={medicalOnly ? ['hr', 'staff-medical-claim'] : ['finance', 'staff-claim']}
-      listRequests={() => listModuleRequests(module)}
+      listRequests={async () => {
+        const rows = await listModuleRequests(module)
+        if (medicalOnly) {
+          return rows.filter((row) => {
+            const purpose = String(row.title ?? row.payload?.Purpose ?? row.payload?.ClaimDescription ?? '')
+            const lineTypes = Array.isArray((row as { lines?: Array<Record<string, unknown>> }).lines)
+              ? ((row as { lines: Array<Record<string, unknown>> }).lines ?? [])
+              : []
+            return (
+              /medical/i.test(purpose) ||
+              lineTypes.some((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
+            )
+          })
+        }
+        return rows.filter((row) => {
+          const lineTypes = Array.isArray((row as { lines?: Array<Record<string, unknown>> }).lines)
+            ? ((row as { lines: Array<Record<string, unknown>> }).lines ?? [])
+            : []
+          if (lineTypes.length === 0) return true
+          return !lineTypes.every((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
+        })
+      }}
       listStatusFilter
       requiresAttachmentBeforeSubmit
       requiredAttachmentMessage="Attach at least one supporting document before requesting approval for a claim."

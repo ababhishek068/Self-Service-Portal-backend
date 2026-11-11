@@ -254,7 +254,7 @@ export function ImprestRequest() {
     <MultiStepRequestPage
       title="Advance Payment"
       headerLabel="New Advance Payment"
-      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Create the header, add budget lines, then submit for approval. Approval: Line Manager first, then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Settle unused or spent funds later via Advance Surrender (within two working days of return)."
+      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Create the header, add budget lines, then submit for approval. Approval: Line Manager first, then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Settle unused or spent funds later via Advance Settlement (within two working days of return)."
       module={module}
       queryKey={['finance', 'advance-payment']}
       listRequests={() => listModuleRequests(module)}
@@ -284,7 +284,7 @@ export function ImprestRequest() {
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
               Line Manager approves every request first. Then by amount (ETB): below 50,000 → FAD;
               50,000–100,000 → COO; above 100,000 → CEO. Status, comments, and payment reference
-              come from BC after each step. Settlement is only via Advance Surrender.
+              come from BC after each step. Settlement is only via Advance Settlement.
             </p>
           </div>
         </div>
@@ -483,7 +483,7 @@ export function ImprestRequest() {
           ],
           format: 'currency',
         },
-        { label: 'Surrender Status (BC)', paths: ['payload.SurrenderStatus', 'payload.Surrender_Status'] },
+        { label: 'Settlement Status (BC)', paths: ['payload.SurrenderStatus', 'payload.Surrender_Status'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
         {
           label: 'Rejection Reason',

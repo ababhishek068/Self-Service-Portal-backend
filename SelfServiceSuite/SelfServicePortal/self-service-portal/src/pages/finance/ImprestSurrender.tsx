@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
+import { AdvanceSettlementTemplate } from '@/pages/finance/AdvanceSettlementTemplate'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
@@ -80,25 +81,28 @@ export function ImprestSurrender() {
       : (imprestQuery.data ?? []).length === 0
         ? 'No advance payment requests found for your employee number.'
         : surrenderable.length === 0
-          ? 'No posted or approved advance payment is available to surrender. Finance must post the advance in Business Central first, and fully settled advances are excluded.'
+          ? 'No posted or approved advance payment is available to settle. Finance must post the advance in Business Central first, and fully settled advances are excluded.'
           : 'Select advance payment'
 
   return (
     <MultiStepRequestPage
-      title="Advance Surrender"
-      headerLabel="New Advance Surrender"
-      description="Settle a posted or approved advance payment (Phase 3 — within two working days of return). Enter actual spend and supporting evidence. Cash Receipt No. is only needed when unused cash is returned (fully spent → leave blank / amount 0)."
+      title="Advance Settlement"
+      headerLabel="New Advance Settlement"
+      description="Settle a posted/paid Advance Payment (Phase 3). Enter actual expenses and attachments. The system reconciles advance received vs actual spend: equal → Fully Settled; less → return unused balance (receipt required); more → additional reimbursement claim with justification."
       module={module}
-      queryKey={['finance', 'advance-surrender']}
+      queryKey={['finance', 'advance-settlement']}
       listRequests={() => listModuleRequests(module)}
-      newButtonLabel="New Advance Surrender"
+      newButtonLabel="New Advance Settlement"
       headerSchema={imprestSurrenderHeaderSchema}
       headerDefaults={{ imprest: '' }}
-      buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Surrender for ${values.imprest}` })}
+      buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Settlement for ${values.imprest}` })}
+      customCreate={({ onCreated, onCancel }) => (
+        <AdvanceSettlementTemplate onCreated={onCreated} onCancel={onCancel} />
+      )}
       headerFields={[
         {
           name: 'imprest',
-          label: 'Advance Payment to Surrender',
+          label: 'Advance Payment to Settle',
           type: 'select',
           valuePaths: ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo'],
           options: imprestOptions,
@@ -154,9 +158,9 @@ export function ImprestSurrender() {
         )
       }}
       detailFields={[
-        { label: 'Surrender No.', paths: ['request.requestNo'] },
+        { label: 'Settlement No.', paths: ['request.requestNo'] },
         {
-          label: 'Surrender Date',
+          label: 'Settlement Date',
           paths: ['payload.SurrenderDate', 'payload.Surrender_Date', 'payload.DateCreated', 'request.createdAt'],
           format: 'date',
         },
@@ -204,7 +208,7 @@ export function ImprestSurrender() {
         { label: 'Status', paths: ['request.status'], format: 'status' },
       ]}
       line={{
-        label: 'Advance Surrender Lines',
+        label: 'Advance Settlement Lines',
         schema: imprestSurrenderHeaderSchema,
         defaultValues: {},
         canAdd: false,
@@ -213,7 +217,7 @@ export function ImprestSurrender() {
           { name: 'actualSpent', label: 'Actual Spent', type: 'number' },
           {
             name: 'cashReceiptNo',
-            label: 'Cash Receipt No. (optional if fully spent)',
+            label: 'Cash Receipt No. (when returning unused balance)',
             type: receipts.options.length > 0 ? 'select' : 'text',
             options:
               receipts.options.length > 0
@@ -228,14 +232,14 @@ export function ImprestSurrender() {
         ],
         columns: [
           { key: 'accountNo', header: 'Account No.' },
-          { key: 'surrenderDocNo', header: 'Surrender Doc No' },
+          { key: 'surrenderDocNo', header: 'Settlement Doc No' },
           { key: 'accountName', header: 'Account Name' },
           { key: 'amount', header: 'Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
           { key: 'actualSpent', header: 'Actual Spent' },
           { key: 'cashReceiptNo', header: 'Cash Receipt No.' },
           { key: 'cashReceiptAmount', header: 'Cash Receipt Amount' },
         ],
-        emptyText: '*** No surrender lines ***',
+        emptyText: '*** No settlement lines ***',
       }}
     />
   )

@@ -101,6 +101,12 @@ export interface OvertimeRequest {
   log: OvertimeLogEntry[]
   lines: OvertimeLine[]
   linesFromBc: boolean
+  periodStartDate?: string
+  periodEndDate?: string
+  workAuthorized?: boolean
+  canRequestPayment?: boolean
+  paymentRequestNo?: string
+  paymentApproved?: boolean
 }
 
 export interface OvertimeContext {
@@ -129,6 +135,10 @@ export interface OvertimeContext {
   /** BC 1.0.3.612: several dates and times in one request. */
   supportsLines: boolean
   maxLines: number
+  supportsPeriod?: boolean
+  stage?: string
+  stageCaption?: string
+  paymentNote?: string
 }
 
 export interface OvertimeLineInput {
@@ -141,8 +151,10 @@ export interface OvertimeLineInput {
 
 export interface OvertimeDetails extends OvertimeLineInput {
   projectNo: string
-  /** Previously approved Overtime Work Request (required before payment can be processed). */
+  /** @deprecated Prefer Stage 2 PortalOTPayment with otRequestNo. */
   priorWorkRequestNo: string
+  periodStartDate?: string
+  periodEndDate?: string
   lines: OvertimeLineInput[]
 }
 

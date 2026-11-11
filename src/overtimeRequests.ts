@@ -110,6 +110,14 @@ export type OvertimeRequest = {
   lines: OvertimeLine[]
   /** False when BC (before 1.0.3.612) returned no lines: the one line comes from the request. */
   linesFromBc: boolean
+  /** BC 1.0.3.635 — overtime period covering the daily lines. */
+  periodStartDate: string
+  periodEndDate: string
+  /** BC 1.0.3.636 — Stage 1 work authorization vs Stage 2 payment. */
+  workAuthorized: boolean
+  canRequestPayment: boolean
+  paymentRequestNo: string
+  paymentApproved: boolean
 }
 
 export type OvertimeContext = {
@@ -138,6 +146,11 @@ export type OvertimeContext = {
   /** BC 1.0.3.612: one request can hold several dates and times. */
   supportsLines: boolean
   maxLines: number
+  /** BC 1.0.3.635: period start/end plus daily lines. */
+  supportsPeriod: boolean
+  stage: string
+  stageCaption: string
+  paymentNote: string
 }
 
 export type OvertimeLineInput = {
@@ -151,8 +164,11 @@ export type OvertimeLineInput = {
 /** The first line is also sent as the request's own date and time (BC before 1.0.3.612 reads only those). */
 export type OvertimeDetails = OvertimeLineInput & {
   projectNo: string
-  /** Approved Overtime Work Request no. (prior permission) — required before payment can be processed. */
+  /** @deprecated BC 1.0.3.636 Stage 1 is work authorization; Stage 2 uses PortalOTPayment + otRequestNo. */
   priorWorkRequestNo: string
+  /** BC 1.0.3.635 — period covering daily lines (aliases: startDate/endDate). */
+  periodStartDate: string
+  periodEndDate: string
   lines: OvertimeLineInput[]
 }
 
@@ -303,6 +319,12 @@ export function parseOvertimeRequest(value: unknown): OvertimeRequest {
     }),
     lines,
     linesFromBc,
+    periodStartDate: str(row.periodStartDate ?? row.startDate),
+    periodEndDate: str(row.periodEndDate ?? row.endDate),
+    workAuthorized: bool(row.workAuthorized),
+    canRequestPayment: bool(row.canRequestPayment),
+    paymentRequestNo: str(row.paymentRequestNo),
+    paymentApproved: bool(row.paymentApproved),
   }
 }
 
@@ -343,6 +365,10 @@ export function parseOvertimeContext(value: unknown): OvertimeContext {
     approvalWorkflow: str(root.approvalWorkflow),
     supportsLines: bool(root.supportsLines),
     maxLines: num(root.maxLines) || (bool(root.supportsLines) ? OVERTIME_MAX_LINES : 1),
+    supportsPeriod: bool(root.supportsPeriod),
+    stage: str(root.stage) || 'workAuthorization',
+    stageCaption: str(root.stageCaption),
+    paymentNote: str(root.paymentNote),
   }
 }
 
@@ -461,17 +487,32 @@ export function validateOvertimeDetails(input: unknown, submit: boolean): Overti
   }
   const reasons = [...new Set(lines.map((line) => line.reason).filter(Boolean))]
   const first = lines[0]!
+  const last = lines[lines.length - 1]!
   const priorWorkRequestNo = str(body.priorWorkRequestNo).toUpperCase().slice(0, 20)
-  if (submit && !priorWorkRequestNo) {
-    throw invalid(
-      'Select the previously approved Overtime Work Request. Payment requests without a prior-approved work request will not be processed.',
-    )
+  let periodStartDate = str(body.periodStartDate ?? body.startDate)
+  let periodEndDate = str(body.periodEndDate ?? body.endDate)
+  if (!periodStartDate) periodStartDate = first.overtimeDate
+  if (!periodEndDate) periodEndDate = last.overtimeDate
+  if (!isIsoDate(periodStartDate) || !isIsoDate(periodEndDate)) {
+    throw invalid('Enter the overtime period start and end dates.')
+  }
+  if (periodEndDate < periodStartDate) {
+    throw invalid('The overtime period end date must be on or after the start date.')
+  }
+  for (const line of lines) {
+    if (line.overtimeDate < periodStartDate || line.overtimeDate > periodEndDate) {
+      throw invalid(
+        `Every overtime date must fall inside the period (${periodStartDate} to ${periodEndDate}).`,
+      )
+    }
   }
   return {
     ...first,
     reason: (str(body.reason) || reasons.join('; ')).slice(0, 500),
     projectNo: str(body.projectNo).toUpperCase().slice(0, 20),
     priorWorkRequestNo,
+    periodStartDate,
+    periodEndDate,
     lines,
   }
 }

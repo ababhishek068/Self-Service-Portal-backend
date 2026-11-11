@@ -266,7 +266,7 @@ export function OvertimeWorkRequest() {
       toast.success(
         input.submit ? 'Overtime work request submitted' : 'Draft saved',
         input.submit
-          ? `${request.requestNo} was sent for supervisor → HR → authorized manager approval.`
+          ? `${request.requestNo} was sent for Superior → FAD approval (Stage 1 work authorization).`
           : `${request.requestNo} is saved as a draft.`,
       )
       setEditingNo(null)
@@ -480,18 +480,18 @@ export function OvertimeWorkRequest() {
   return (
     <PageWrapper
       title="Overtime Request"
-      description="Request permission to work overtime and capture the hours (same line form as payment). After approval and completion, raise an Overtime Payment Request — payment only selects this approved work request."
+      description="Stage 1 — work authorization. Approvers: Superior → FAD. Approved means you may work the overtime; hours are not on the overtime sheet yet. After the work is done, raise Stage 2 Overtime Payment Request."
       actions={headerActions}
     >
       <div className="mb-4 rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
-        <p className="font-semibold">Work request first — then payment</p>
+        <p className="font-semibold">Stage 1 (work authorization) → Stage 2 (payment)</p>
         <p className="mt-1 text-teal-900/90">
-          Enter OT lines here (date, times, category, work location). Enter reason / justification and expected deliverables once below.
-          After approval, use{' '}
+          Enter the overtime period and daily lines (date, start/end time). Superior then FAD approve the work.
+          After completion, use{' '}
           <Link className="font-semibold underline-offset-2 hover:underline" to="/hr/overtime-request">
             Overtime Payment Request
           </Link>{' '}
-          and select this request — no Add Line on payment.
+          — Superior justification is required on Stage 2; only then are hours added to the overtime sheet.
         </p>
       </div>
 
@@ -526,7 +526,26 @@ export function OvertimeWorkRequest() {
             <span className="text-sm text-slate-600">
               {dateRangeLabel(shown.lines ?? [], shown.overtimeDate)} · {shown.totalHours} hrs
             </span>
+            {shown.status === 'Approved' && !shown.linkedPaymentRequestNo ? (
+              <Link
+                className="ml-auto inline-flex items-center rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-800"
+                to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(shown.requestNo)}`}
+              >
+                Request overtime payment
+              </Link>
+            ) : null}
+            {shown.status === 'Approved' && shown.linkedPaymentRequestNo ? (
+              <span className="ml-auto text-xs font-medium text-slate-500">
+                Payment {shown.linkedPaymentRequestNo}
+              </span>
+            ) : null}
           </div>
+          {shown.status === 'Approved' && !shown.linkedPaymentRequestNo ? (
+            <div className="rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
+              Work authorized — submit an Overtime Payment Request after the work is done. Hours are added to the
+              overtime sheet only after Stage 2 approval.
+            </div>
+          ) : null}
           <section className="rounded-2xl border border-slate-200 bg-white p-4">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
               <ClipboardList className="h-4 w-4" /> Overtime lines
