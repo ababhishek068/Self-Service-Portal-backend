@@ -16,6 +16,7 @@ import { staffClaimHeaderSchema, staffClaimLineSchema } from '@/schemas/requestS
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
+import type { PortalRequest } from '@/types/erp.types'
 
 const module = { module: 'staffClaim', entity: 'selfServiceStaffClaims' } as const
 
@@ -338,12 +339,14 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       queryKey={medicalOnly ? ['hr', 'staff-medical-claim'] : ['finance', 'staff-claim']}
       listRequests={async () => {
         const rows = await listModuleRequests(module)
+        const requestLines = (row: PortalRequest) => {
+          const lines = (row as unknown as { lines?: unknown }).lines
+          return Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : []
+        }
         if (medicalOnly) {
           return rows.filter((row) => {
             const purpose = String(row.title ?? row.payload?.Purpose ?? row.payload?.ClaimDescription ?? '')
-            const lineTypes = Array.isArray((row as { lines?: Array<Record<string, unknown>> }).lines)
-              ? ((row as { lines: Array<Record<string, unknown>> }).lines ?? [])
-              : []
+            const lineTypes = requestLines(row)
             return (
               /medical/i.test(purpose) ||
               lineTypes.some((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
@@ -351,9 +354,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           })
         }
         return rows.filter((row) => {
-          const lineTypes = Array.isArray((row as { lines?: Array<Record<string, unknown>> }).lines)
-            ? ((row as { lines: Array<Record<string, unknown>> }).lines ?? [])
-            : []
+          const lineTypes = requestLines(row)
           if (lineTypes.length === 0) return true
           return !lineTypes.every((line) => isMedicalClaim(line.claimType ?? line.ClaimType ?? line.type))
         })
