@@ -4,12 +4,17 @@
  * values; the BC365 backend resolves the same labels through OData.
  */
 
-export const claimTypeOptions = [
-  { label: 'Medical Claim', value: 'MEDICAL' },
+/** Staff Claims only — Medical Claim is a separate Finance menu. */
+export const staffClaimTypeOptions = [
   { label: 'Accommodation Claim', value: 'ACC' },
   { label: 'Travel Claim', value: 'TRAVEL' },
   { label: 'Other Claim', value: 'OTHER' },
 ]
+
+export const medicalClaimTypeSeed = [{ label: 'Medical Claim', value: 'MEDICAL' }]
+
+/** Full claim-type seed (Medical + Staff). Prefer staffClaimTypeOptions / medicalClaimTypeSeed per page. */
+export const claimTypeOptions = [...medicalClaimTypeSeed, ...staffClaimTypeOptions]
 
 /**
  * BC hospital categories (classification only).

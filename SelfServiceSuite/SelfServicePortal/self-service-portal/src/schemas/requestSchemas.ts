@@ -194,8 +194,13 @@ export const imprestHeaderSchema = z
   })
   .superRefine((data, ctx) => {
     const purposeCode = String(data.requestPurpose ?? '').trim()
+    const purposeUpper = purposeCode.toUpperCase()
+    // BC flags Other via requiresOtherDetails; portal fallback matches GN-OTH / *OTH codes.
     const needsOther =
-      purposeCode === 'GN-OTH' || purposeCode.toLowerCase() === 'other'
+      purposeUpper === 'GN-OTH' ||
+      purposeUpper.endsWith('-OTH') ||
+      purposeUpper === 'OTHER' ||
+      purposeCode.toLowerCase() === 'other'
     if (needsOther && !String(data.otherPurposeDetails ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

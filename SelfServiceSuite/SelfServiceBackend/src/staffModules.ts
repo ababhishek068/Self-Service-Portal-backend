@@ -577,10 +577,13 @@ const imprest: ModuleSpec = {
           status: 422,
         })
       }
-      if (
-        (purposeCode === 'GN-OTH' || purposeCode.toLowerCase() === 'other') &&
-        !otherPurposeDetails
-      ) {
+      const purposeUpper = purposeCode.toUpperCase()
+      const needsOtherDetails =
+        purposeUpper === 'GN-OTH' ||
+        purposeUpper.endsWith('-OTH') ||
+        purposeUpper === 'OTHER' ||
+        purposeCode.toLowerCase() === 'other'
+      if (needsOtherDetails && !otherPurposeDetails) {
         throw Object.assign(new Error('Enter details when Other (Specify) is selected.'), {
           status: 422,
         })

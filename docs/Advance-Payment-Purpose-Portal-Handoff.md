@@ -1,7 +1,8 @@
 # Advance Payment — Request Purpose by division (portal handoff)
 
-**BC app:** `1.0.3.630`  
-**ESSP docs:** Advance Request DOCX §3.2 + Advance & Settlement Infographic  
+**BC app:** `1.0.3.643` (Purpose list + division filter since 630; BC card lookup filtered in 643)  
+**ESSP docs:** Advance Request DOCX §3.2 + Developer Handover “3.2 Request Purpose”  
+
 
 ## What BC now provides
 
@@ -44,7 +45,7 @@ Finance **Advance Payment** (`Imprest Header`) stores ESSP purpose fields and ex
 4. Always show **Request Justification** (required).
 5. Capture Required Advance Date, Activity Start/End, Activity Location.
 6. After save header: call `PortalAdvancePaymentDetails(...)` with the selected purpose code + fields.
-7. Keep Settlement on **Advance Settlement** only (not inside Advance Payment form).
+7. Keep Settlement on **Advance Surrender** only (not inside Advance Payment form).
 8. Approval ladder is already BC-owned (LM → FAD/COO/CEO by amount in 1.0.3.629+).
 
 ## BC admin once after publish 630

@@ -55,7 +55,13 @@ export function purposeRequiresOtherDetails(
   if (!code) return false
   const selected = options.find((option) => String(option.value) === code)
   if (selected) return Boolean(selected.meta?.requiresOtherDetails)
-  return code === 'GN-OTH' || code.toLowerCase() === 'other'
+  const upper = code.toUpperCase()
+  return (
+    upper === 'GN-OTH' ||
+    upper.endsWith('-OTH') ||
+    upper === 'OTHER' ||
+    code.toLowerCase() === 'other'
+  )
 }
 
 export type AdvancePaymentPurposeRow = {
