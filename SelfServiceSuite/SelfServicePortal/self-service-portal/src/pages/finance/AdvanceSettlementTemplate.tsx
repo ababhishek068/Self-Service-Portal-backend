@@ -71,7 +71,7 @@ export function AdvanceSettlementTemplate({ onCreated, onCancel }: Props) {
 
   const contextQuery = useQuery({
     queryKey: ['finance', 'advance-settlement', 'context', employee?.employeeNo ?? ''],
-    queryFn: () => fetchAdvanceSettlementContext('', employee?.employeeNo ?? ''),
+    queryFn: () => fetchAdvanceSettlementContext(''),
     enabled: Boolean(employee?.employeeNo),
   })
   const categoriesQuery = useQuery({

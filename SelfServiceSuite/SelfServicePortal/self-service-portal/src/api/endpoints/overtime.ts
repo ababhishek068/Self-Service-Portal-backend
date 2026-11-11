@@ -107,6 +107,11 @@ export interface OvertimeRequest {
   canRequestPayment?: boolean
   paymentRequestNo?: string
   paymentApproved?: boolean
+  /** Stage 2 list rows only: the Stage 1 Overtime Request this payment is for. */
+  otRequestNo?: string
+  workCompletedOn?: string
+  employeeRemarks?: string
+  superiorJustification?: string
 }
 
 export interface OvertimeContext {

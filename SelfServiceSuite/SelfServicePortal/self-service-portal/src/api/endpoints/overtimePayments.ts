@@ -1,5 +1,6 @@
 import { authDelete, authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
+import type { OvertimeRequest, OvertimeStep } from './overtime'
 
 /** Stage 2 — Overtime Payment Request (BC 1.0.3.636 PortalOTPayment*). */
 export type OtPaymentStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected' | 'Cancelled'
@@ -8,23 +9,50 @@ export type OtPaymentRequest = {
   id: string
   paymentNo: string
   status: OtPaymentStatus
+  stage: number
+  stageLabel: string
   employeeNo: string
   employeeName: string
+  designation: string
+  departmentCode: string
+  departmentName: string
+  costCentre: string
   otRequestNo: string
+  totalHours: number
+  estimatedAmount: number
   workCompletedOn: string
   employeeRemarks: string
   superiorJustification: string
+  superiorUserId: string
+  rejectedAtStage: string
+  decisionRemarks: string
   addedToSheet: boolean
   createdAt: string
   submittedAt: string
   approvedAt: string
-  otRequest?: Record<string, unknown>
+  /** Stage 2 BC workflow steps (Superior). */
+  steps: OvertimeStep[]
+  /** The linked, approved Stage 1 Overtime Request. */
+  otRequest?: OvertimeRequest
 }
 
-export async function fetchOtPaymentContext(otRequestNo = '') {
+export type OtPaymentContext = {
+  stage: string
+  stageCaption: string
+  otRequestNo: string
+  otRequest?: OvertimeRequest
+  /** Stage 2 approver preview: the Superior only. */
+  approvers: OvertimeStep[]
+  routingProblem: string
+  usesWorkflow: boolean
+  approvalWorkflow: string
+}
+
+export async function fetchOtPaymentContext(otRequestNo: string) {
   requireAuthApiUrl()
-  const query = otRequestNo ? `?otRequestNo=${encodeURIComponent(otRequestNo)}` : ''
-  return authGet<Record<string, unknown>>(`/api/hr/overtime-payments/context${query}`)
+  return authGet<OtPaymentContext>(
+    `/api/hr/overtime-payments/context?otRequestNo=${encodeURIComponent(otRequestNo)}`,
+  )
 }
 
 export async function fetchOtPaymentRequests() {

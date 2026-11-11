@@ -190,6 +190,11 @@ export interface MultiStepRequestConfig {
   }>
   /** Keep the default top action bar or place it after all detail sections. */
   detailActionsPlacement?: 'top' | 'bottom'
+  /**
+   * False hides the header Edit button on drafts (default true). Advance Settlement: saving the
+   * header again makes BC re-copy the advance lines, wiping the settlement's expense lines.
+   */
+  allowHeaderEdit?: boolean
 }
 
 function pathValue(source: unknown, path: string) {
@@ -1095,7 +1100,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       'order-last justify-end border-t border-slate-200 pt-4',
                   )}
                 >
-                  {editable ? (
+                  {editable && config.allowHeaderEdit !== false ? (
                     <Button
                       type="button"
                       variant="outline"

@@ -42,16 +42,13 @@ import {
 } from '@/api/endpoints/overtime'
 import {
   deleteOtPaymentRequest,
+  fetchOtPaymentContext,
   fetchOtPaymentRequests,
   saveOtPaymentRequest,
   withdrawOtPaymentRequest,
   type OtPaymentRequest,
 } from '@/api/endpoints/overtimePayments'
-import {
-  fetchApprovedOvertimeWorkRequests,
-  fetchOvertimeWorkByPayment,
-  type OvertimeWorkRequest as OvertimeWorkRow,
-} from '@/api/endpoints/overtimeWork'
+import { fetchOvertimeWorkRequests, type OvertimeWorkRequest as OvertimeWorkRow } from '@/api/endpoints/overtimeWork'
 import { getLocalPurchaseProjects } from '@/api/endpoints/requestEndpoint'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -60,67 +57,82 @@ import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
 
 const LIST_KEY = ['hr', 'overtime-payments'] as const
 
 function otPaymentAsListRow(row: OtPaymentRequest): OvertimeRequestRow {
+  const stage1 = row.otRequest
   return {
     id: row.paymentNo,
     requestNo: row.paymentNo,
     status: row.status === 'Cancelled' ? 'Rejected' : row.status,
-    stage: 0,
-    stageLabel: row.status,
+    stage: row.stage ?? 0,
+    stageLabel: row.stageLabel || row.status,
     employeeNo: row.employeeNo,
     employeeName: row.employeeName,
-    designation: '',
-    departmentCode: '',
-    departmentName: '',
-    costCentre: '',
-    projectNo: '',
-    projectName: '',
-    overtimeDate: row.workCompletedOn,
-    startTime: '',
-    endTime: '',
-    dayType: 'working',
-    dayTypeLabel: '',
-    totalHours: 0,
-    normalHours: 0,
-    nightHours: 0,
-    restDayHours: 0,
-    holidayHours: 0,
-    hourlyRate: 0,
-    estimatedAmount: 0,
+    designation: row.designation ?? stage1?.designation ?? '',
+    departmentCode: row.departmentCode ?? stage1?.departmentCode ?? '',
+    departmentName: row.departmentName ?? stage1?.departmentName ?? '',
+    costCentre: row.costCentre ?? stage1?.costCentre ?? '',
+    projectNo: stage1?.projectNo ?? '',
+    projectName: stage1?.projectName ?? '',
+    overtimeDate: stage1?.overtimeDate || row.workCompletedOn,
+    startTime: stage1?.startTime ?? '',
+    endTime: stage1?.endTime ?? '',
+    dayType: stage1?.dayType ?? 'working',
+    dayTypeLabel: stage1?.dayTypeLabel ?? '',
+    totalHours: row.totalHours || stage1?.totalHours || 0,
+    normalHours: stage1?.normalHours ?? 0,
+    nightHours: stage1?.nightHours ?? 0,
+    restDayHours: stage1?.restDayHours ?? 0,
+    holidayHours: stage1?.holidayHours ?? 0,
+    hourlyRate: stage1?.hourlyRate ?? 0,
+    estimatedAmount: row.estimatedAmount || stage1?.estimatedAmount || 0,
     reason: row.employeeRemarks || `Payment for ${row.otRequestNo}`,
-    warnings: '',
+    warnings: stage1?.warnings ?? '',
     requesterUserId: '',
     createdAt: row.createdAt,
     submittedAt: row.submittedAt,
     approvedAt: row.approvedAt,
-    rejectedAtStage: '',
-    decisionRemarks: row.superiorJustification,
-    sheetNo: '',
+    rejectedAtStage: row.rejectedAtStage ?? '',
+    decisionRemarks: row.decisionRemarks || row.superiorJustification,
+    sheetNo: stage1?.sheetNo ?? '',
     addedToSheet: row.addedToSheet,
-    addedAt: '',
-    sheetNote: '',
-    sheetStatus: '',
-    payrollPeriodName: '',
-    sentToPayroll: false,
-    sentToPayrollAt: '',
-    steps: [],
+    addedAt: stage1?.addedAt ?? '',
+    sheetNote: stage1?.sheetNote ?? '',
+    sheetStatus: stage1?.sheetStatus ?? '',
+    payrollPeriodName: stage1?.payrollPeriodName ?? '',
+    sentToPayroll: stage1?.sentToPayroll ?? false,
+    sentToPayrollAt: stage1?.sentToPayrollAt ?? '',
+    steps: row.steps ?? [],
     log: [],
-    lines: [],
-    linesFromBc: false,
+    lines: stage1?.lines ?? [],
+    linesFromBc: Boolean(stage1?.lines?.length),
     canRequestPayment: false,
     workAuthorized: true,
     paymentRequestNo: row.paymentNo,
     paymentApproved: row.status === 'Approved',
+    otRequestNo: row.otRequestNo,
+    workCompletedOn: row.workCompletedOn,
+    employeeRemarks: row.employeeRemarks,
+    superiorJustification: row.superiorJustification,
   }
 }
+
+/** Default "work completed on": the last overtime date, never in the future. */
+function defaultWorkCompletedOn(lines: Array<{ overtimeDate: string }>) {
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const last = lines.map((line) => line.overtimeDate).filter(Boolean).sort().at(-1) ?? ''
+  return last && last <= today ? last : today
+}
+
 const CONTEXT_KEY = ['hr', 'overtime-context'] as const
 
 const DAY_TYPES: Array<{ value: OvertimeDayType; label: string }> = [
@@ -345,7 +357,9 @@ function orderedOtApprovers(steps: OvertimeStep[]): OvertimeStep[] {
   }))
 }
 
-function workflowSteps(request: OvertimeRequestRow | null, context: OvertimeContext | undefined, employeeName: string): StepView[] {
+type WorkflowPreview = { approvers: OvertimeStep[]; approvalWorkflow: string }
+
+function workflowSteps(request: OvertimeRequestRow | null, context: WorkflowPreview | undefined, employeeName: string): StepView[] {
   // Before BC 1.0.3.622 a draft showed who it would go to; since then the BC workflow sets them on submit.
   const rawSteps =
     request && request.status !== 'Draft' && request.steps.length ? request.steps : (context?.approvers ?? [])
@@ -632,6 +646,8 @@ export function OvertimeRequest() {
   const [priorWorkRequestNo, setPriorWorkRequestNo] = useState(
     () => searchParams.get('otRequestNo')?.trim().toUpperCase() ?? '',
   )
+  const [workCompletedOn, setWorkCompletedOn] = useState('')
+  const [employeeRemarks, setEmployeeRemarks] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
   const contextQuery = useQuery({ queryKey: CONTEXT_KEY, queryFn: fetchOvertimeContext, staleTime: 60_000 })
@@ -653,14 +669,13 @@ export function OvertimeRequest() {
     staleTime: 10 * 60_000,
     enabled: mode === 'form',
   })
-  const approvedWorkQuery = useQuery({
-    queryKey: ['hr', 'overtime-work-approved', priorWorkRequestNo],
-    queryFn: async () => {
-      const stage1 = (stage1PayableQuery.data ?? []).filter(
-        (row) => row.canRequestPayment || (row.status === 'Approved' && !row.paymentApproved),
-      )
-      if (stage1.length > 0) {
-        return stage1.map((row) => ({
+  // Stage 2 can only pay a BC Stage 1 request that BC marks payable (approved, no payment yet).
+  // While editing a draft payment, its own (already linked) Stage 1 request is the only choice.
+  const payableStage1 = useMemo(
+    () =>
+      (stage1PayableQuery.data ?? [])
+        .filter((row) => (editingNo ? row.requestNo === priorWorkRequestNo : row.canRequestPayment))
+        .map((row) => ({
           id: row.requestNo,
           requestNo: row.requestNo,
           status: 'Approved' as const,
@@ -696,16 +711,22 @@ export function OvertimeRequest() {
           steps: [],
           linkedPaymentRequestNo: row.paymentRequestNo ?? '',
           linkedAt: '',
-        }))
-      }
-      return fetchApprovedOvertimeWorkRequests(priorWorkRequestNo || undefined)
-    },
+        })),
+    [stage1PayableQuery.data, editingNo, priorWorkRequestNo],
+  )
+  const approvedWorkQuery = { data: payableStage1, isLoading: stage1PayableQuery.isLoading }
+  // Stage 2 routing (Superior + Stage 2 workflow) for a new payment request.
+  const paymentContextQuery = useQuery({
+    queryKey: ['hr', 'overtime-payment-context', priorWorkRequestNo],
+    queryFn: () => fetchOtPaymentContext(priorWorkRequestNo),
+    enabled: mode === 'form' && !editingNo && Boolean(priorWorkRequestNo),
     staleTime: 30_000,
-    enabled: mode === 'form',
+    retry: false,
   })
-  const linkedWorkQuery = useQuery({
-    queryKey: ['hr', 'overtime-work-by-payment', selectedNo],
-    queryFn: () => fetchOvertimeWorkByPayment(selectedNo!),
+  // The Stage 1 Overtime Request (portal copy) behind the payment shown, for View / Print.
+  const stage1WorkQuery = useQuery({
+    queryKey: ['hr', 'overtime-work-for-payment'],
+    queryFn: fetchOvertimeWorkRequests,
     staleTime: 30_000,
     enabled: mode === 'detail' && Boolean(selectedNo),
   })
@@ -756,6 +777,8 @@ export function OvertimeRequest() {
     setLines([])
     setProjectNo('')
     setPriorWorkRequestNo('')
+    setWorkCompletedOn('')
+    setEmployeeRemarks('')
     goTo('form')
   }
 
@@ -763,10 +786,10 @@ export function OvertimeRequest() {
     setEditingNo(request.requestNo)
     setLines(sortLines(linesOf(request)))
     setProjectNo(request.projectNo)
-    // Restore the linked approved work request so the picker keeps it available.
-    void fetchOvertimeWorkByPayment(request.requestNo).then((work) => {
-      setPriorWorkRequestNo(work?.requestNo ?? '')
-    })
+    // A draft payment stays linked to its Stage 1 request (BC does not allow switching).
+    setPriorWorkRequestNo(request.otRequestNo ?? '')
+    setWorkCompletedOn(request.workCompletedOn ?? '')
+    setEmployeeRemarks(request.employeeRemarks ?? '')
     goTo('form')
   }
 
@@ -834,16 +857,25 @@ export function OvertimeRequest() {
       )
       return
     }
-    const workCompletedOn = lines[0]?.overtimeDate || new Date().toISOString().slice(0, 10)
-    const remarks = [...new Set(lines.map((line) => line.reason.trim()).filter(Boolean))]
-      .join('; ')
-      .slice(0, 250)
+    const firstDate = lines.map((line) => line.overtimeDate).filter(Boolean).sort()[0] ?? ''
+    if (submit && !workCompletedOn) {
+      setFormError('Enter the date the overtime work was completed.')
+      return
+    }
+    if (workCompletedOn && workCompletedOn > format(new Date(), 'yyyy-MM-dd')) {
+      setFormError('The work completed date cannot be in the future. Request payment after the work is done.')
+      return
+    }
+    if (workCompletedOn && firstDate && workCompletedOn < firstDate) {
+      setFormError(`The work completed date cannot be before the first overtime date (${firstDate}).`)
+      return
+    }
     setFormError(null)
     saveMutation.mutate({
       paymentNo: editingNo ?? undefined,
       otRequestNo: priorWorkRequestNo.trim().toUpperCase(),
       workCompletedOn,
-      employeeRemarks: remarks || 'Work completed as approved',
+      employeeRemarks: employeeRemarks.trim().slice(0, 250) || 'Work completed as approved',
       submit,
     })
   }
@@ -896,8 +928,22 @@ export function OvertimeRequest() {
 
   const employeeName = context?.employee.employeeName ?? ''
   const shown = mode === 'detail' ? selected : null
-  const steps = workflowSteps(mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null, context, employeeName)
-  const routingProblem = overtimeRoutingMessage(context?.routingProblem ?? '')
+  const paymentContext = paymentContextQuery.data
+  const steps = workflowSteps(
+    mode === 'form' && !editingNo ? null : shown ?? rows.find((row) => row.requestNo === editingNo) ?? null,
+    paymentContext ? { approvers: paymentContext.approvers, approvalWorkflow: paymentContext.approvalWorkflow } : undefined,
+    employeeName,
+  )
+  // Stage 2 routing only (Superior + Stage 2 workflow); Stage 1 FAD setup does not block payment.
+  const routingProblem =
+    mode === 'form' && !editingNo
+      ? paymentContextQuery.error instanceof Error
+        ? paymentContextQuery.error.message
+        : overtimeRoutingMessage(paymentContext?.routingProblem ?? '')
+      : ''
+  const linkedWork = shown?.otRequestNo
+    ? (stage1WorkQuery.data ?? []).find((row) => row.requestNo === shown.otRequestNo) ?? null
+    : null
 
   // Payment has no Add Line: selecting an approved work request loads its hours.
   useEffect(() => {
@@ -926,6 +972,7 @@ export function OvertimeRequest() {
       reason: line.reason || work.reason,
     }))
     setLines(sortLines(workLines))
+    setWorkCompletedOn((current) => current || defaultWorkCompletedOn(workLines))
   }, [priorWorkRequestNo, approvedWorkQuery.data, mode, shown, editingNo])
 
   const headerActions =
@@ -977,29 +1024,29 @@ export function OvertimeRequest() {
             Withdraw
           </Button>
         ) : null}
-        {linkedWorkQuery.data ? (
+        {linkedWork ? (
           <>
             <Button asChild type="button" variant="outline">
               <Link
-                to={`/hr/overtime-work-request?request=${encodeURIComponent(linkedWorkQuery.data.requestNo)}`}
+                to={`/hr/overtime-work-request?request=${encodeURIComponent(linkedWork.requestNo)}`}
                 target="_blank"
                 rel="noreferrer"
               >
                 <Eye className="mr-2 h-4 w-4" />
-                View work request
+                View Overtime Request
               </Link>
             </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => {
-                if (!printApprovedWorkRequest(linkedWorkQuery.data!)) {
-                  toast.error('Allow pop-ups to print the approved overtime work request.')
+                if (!printApprovedWorkRequest(linkedWork)) {
+                  toast.error('Allow pop-ups to print the approved overtime request.')
                 }
               }}
             >
               <Printer className="mr-2 h-4 w-4" />
-              Print work request
+              Print Overtime Request
             </Button>
           </>
         ) : null}
@@ -1024,21 +1071,19 @@ export function OvertimeRequest() {
 
   const priorWorkOptions = useMemo(
     () => [
-      { value: '', label: 'Select approved Overtime Work Request…' },
-      ...(approvedWorkQuery.data ?? []).map((row) => ({
+      { value: '', label: 'Select approved Overtime Request (Stage 1)…' },
+      ...payableStage1.map((row) => ({
         value: row.requestNo,
-        label: `${row.requestNo} · ${row.overtimeDate} · ${row.totalHours}h${
-          row.linkedPaymentRequestNo ? ` · linked ${row.linkedPaymentRequestNo}` : ''
-        }`,
+        label: `${row.requestNo} · ${dateRange(row.lines, row.overtimeDate)} · ${row.totalHours}h`,
       })),
     ],
-    [approvedWorkQuery.data],
+    [payableStage1],
   )
 
   return (
     <PageWrapper
       title="Overtime Payment Request"
-      description="Select an approved Overtime Work Request to request payment for those hours. There is no Add Line here — hours are already captured on the work request. After FD approval, HR prepares payment and Finance pays through payroll."
+      description="Stage 2 — after the overtime authorized by an approved Overtime Request (Stage 1) is worked, request payment for it. Your Superior approves with a justification; only then are the hours added to the overtime sheet, which HR sends to payroll."
       actions={headerActions}
     >
       {contextError ? (
@@ -1051,7 +1096,8 @@ export function OvertimeRequest() {
             <div>
               <h2 className="text-sm font-semibold text-slate-900">My Overtime Payment Requests</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Payment for hours already worked. Chain: Line Manager → FD → HR (payment prep) → Finance → payroll.
+                Stage 2 payment for authorized overtime already worked. Approver: Superior (justification required) →
+                overtime sheet → payroll.
               </p>
             </div>
             {rows.length ? (
@@ -1072,7 +1118,7 @@ export function OvertimeRequest() {
               columns={columns}
               rows={rows}
               getRowId={(row) => row.requestNo}
-              emptyTitle="No overtime requests yet."
+              emptyTitle="No overtime payment requests yet."
               onRowClick={(row) => goTo('detail', row.requestNo)}
             />
           )}
@@ -1084,7 +1130,7 @@ export function OvertimeRequest() {
           <Skeleton className="h-64 w-full" />
         ) : (
           <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">
-            Overtime request {selectedNo} was not found among your requests.
+            Overtime payment request {selectedNo} was not found among your requests.
           </div>
         )
       ) : null}
@@ -1102,18 +1148,19 @@ export function OvertimeRequest() {
             </div>
           ) : editingNo ? (
             <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm text-blue-900">
-              Editing draft {editingNo}. Save keeps it as a draft; Submit for Approval sends it to your line manager.
+              Editing draft {editingNo}. Save keeps it as a draft; Submit for Approval sends it to your Superior.
             </div>
           ) : null}
 
           <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
-            <p className="font-semibold">Select approved Overtime Work Request — no Add Line</p>
+            <p className="font-semibold">Select the approved Overtime Request (Stage 1) — no Add Line</p>
             <p className="mt-1">
-              Hours and justification are entered on the{' '}
-              <a className="font-semibold underline-offset-2 hover:underline" href="/hr/overtime-work-request">
+              Hours are entered on the{' '}
+              <Link className="font-semibold underline-offset-2 hover:underline" to="/hr/overtime-work-request">
                 Overtime Request
-              </a>{' '}
-              form. After that work request is approved, select it below. This payment form only requests payroll for those lines.
+              </Link>{' '}
+              form and approved by Superior → FAD. After the work is done, select it below, enter when the work was
+              completed, and submit. Your Superior approves with a justification; then the hours go to the overtime sheet.
             </p>
           </div>
 
@@ -1156,23 +1203,27 @@ export function OvertimeRequest() {
                     )}
                   </Field>
                   {shown ? null : (
-                    <Field label="Approved Overtime Work Request" required htmlFor="overtime-prior-work">
+                    <Field label="Approved Overtime Request (Stage 1)" required htmlFor="overtime-prior-work">
                       <div className="space-y-2">
                         <Select
                           id="overtime-prior-work"
                           value={priorWorkRequestNo}
                           options={priorWorkOptions}
+                          disabled={Boolean(editingNo)}
                           placeholder={
                             approvedWorkQuery.isLoading
-                              ? 'Loading approved work requests…'
+                              ? 'Loading approved overtime requests…'
                               : priorWorkOptions.length <= 1
-                                ? 'No unused approved work requests yet'
-                                : 'Select approved work request'
+                                ? 'No approved overtime request waiting for payment'
+                                : 'Select approved overtime request'
                           }
-                          onChange={(event) => setPriorWorkRequestNo(event.target.value)}
+                          onChange={(event) => {
+                            setPriorWorkRequestNo(event.target.value)
+                            setWorkCompletedOn('')
+                          }}
                         />
                         <p className="text-xs text-slate-500">
-                          Only approved Overtime Work Requests that are not already linked to another payment claim are listed.
+                          Only Overtime Requests approved by Superior and FAD with no payment request yet are listed.
                         </p>
                         {priorWorkRequestNo ? (
                           <div className="flex flex-wrap gap-2">
@@ -1211,7 +1262,7 @@ export function OvertimeRequest() {
             </Section>
           </div>
 
-          <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details (from work request)">
+          <Section icon={<CalendarDays className="h-4 w-4" />} title="Overtime Details (from the approved Overtime Request)">
             {shown || lines.length ? (
               <OvertimeLinesTable
                 lines={
@@ -1228,15 +1279,59 @@ export function OvertimeRequest() {
             ) : (
               <p className="text-sm text-slate-500">
                 {priorWorkRequestNo
-                  ? 'The selected work request has no overtime lines.'
-                  : 'Select an approved Overtime Work Request above to load the hours to pay.'}
+                  ? 'The selected Overtime Request has no overtime lines.'
+                  : 'Select an approved Overtime Request (Stage 1) above to load the hours to pay.'}
               </p>
             )}
             {shown || mode !== 'form' ? null : (
               <p className="mt-3 text-xs text-slate-500">
-                These lines are read-only. To change hours, withdraw or correct the Overtime Work Request, then select it again.
+                These lines come from the approved Overtime Request (Stage 1) and cannot be changed here.
               </p>
             )}
+          </Section>
+
+          <Section icon={<Clock className="h-4 w-4" />} title="Payment Request">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Work completed on" required htmlFor="ot-payment-completed">
+                {shown ? (
+                  <ReadValue value={shown.workCompletedOn} />
+                ) : (
+                  <Input
+                    id="ot-payment-completed"
+                    type="date"
+                    value={workCompletedOn}
+                    max={format(new Date(), 'yyyy-MM-dd')}
+                    onChange={(event) => setWorkCompletedOn(event.target.value)}
+                  />
+                )}
+              </Field>
+              <Field label="Overtime Request" htmlFor="ot-payment-stage1">
+                <ReadValue value={shown ? shown.otRequestNo : priorWorkRequestNo} placeholder="Select above" />
+              </Field>
+              <div className="md:col-span-2">
+                <Field label="Employee remarks" htmlFor="ot-payment-remarks">
+                  {shown ? (
+                    <ReadValue value={shown.employeeRemarks} />
+                  ) : (
+                    <Textarea
+                      id="ot-payment-remarks"
+                      rows={2}
+                      maxLength={250}
+                      value={employeeRemarks}
+                      placeholder="e.g. Work completed as approved"
+                      onChange={(event) => setEmployeeRemarks(event.target.value)}
+                    />
+                  )}
+                </Field>
+              </div>
+              {shown?.superiorJustification ? (
+                <div className="md:col-span-2">
+                  <Field label="Superior justification">
+                    <ReadValue value={shown.superiorJustification} />
+                  </Field>
+                </div>
+              ) : null}
+            </div>
           </Section>
 
           <div className="grid gap-4 lg:grid-cols-3">

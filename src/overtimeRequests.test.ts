@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { after, before, describe, it } from 'node:test'
 import {
+  OT_PAYMENT_MODULE,
+  otPaymentActingUserMayView,
+  otPaymentApprovalQueueItem,
+  otPaymentApproverOutcome,
+  otPaymentServiceMissing,
+  otPaymentToPortalRequest,
+  parseOtPaymentContext,
+  parseOtPaymentRequests,
+} from './otPaymentRequests.js'
+import {
+  applyBcStage1,
+  bcStage1Snapshot,
+  decideOvertimeWorkApproval,
+  listOvertimeWorkApprovals,
+  listOvertimeWorkRequests,
+  saveOvertimeWorkRequest,
+  validateOvertimeWorkDetails,
+} from './overtimeWorkRequests.js'
+import {
+  parseOvertimeRequest,
   overtimeCategoryProblem,
   overtimeActingUserMayView,
   overtimeDocumentLines,
@@ -252,5 +275,185 @@ describe('overtime with the Business Central workflow (BC 1.0.3.622)', () => {
     assert.equal(context.usesWorkflow, true)
     assert.equal(context.approvalWorkflow, 'Overtime Request approval')
     assert.equal(context.approvers.length, 0)
+  })
+})
+
+/** BC 1.0.3.636 PortalOvertime* JSON for a Stage 1 request (Superior → FAD). */
+function bcStage1Json(overrides: Record<string, unknown> = {}) {
+  return {
+    requestNo: 'OTR-00012',
+    status: 'Pending Approval',
+    employeeNo: 'E001',
+    employeeName: 'Abebe K.',
+    periodStartDate: '2026-11-10',
+    periodEndDate: '2026-11-11',
+    overtimeDate: '2026-11-10',
+    startTime: '18:00',
+    endTime: '21:00',
+    dayType: 'working',
+    totalHours: 5.5,
+    estimatedAmount: 1200,
+    reason: 'Month-end closing',
+    paymentRequestNo: '',
+    paymentApproved: false,
+    workAuthorized: false,
+    canRequestPayment: false,
+    addedToSheet: false,
+    lines: [
+      { lineNo: 10000, overtimeDate: '2026-11-10', startTime: '18:00', endTime: '21:00', dayType: 'working', totalHours: 3 },
+      { lineNo: 20000, overtimeDate: '2026-11-11', startTime: '18:00', endTime: '20:30', dayType: 'working', totalHours: 2.5 },
+    ],
+    steps: [
+      { stage: 1, label: 'Superior', approverUserId: 'SUP1', approverName: 'Superior One', status: 'Pending' },
+      { stage: 2, label: 'FAD', approverUserId: 'FAD1', approverName: 'FAD One', status: 'Waiting' },
+    ],
+    ...overrides,
+  }
+}
+
+describe('overtime Stage 1 mirrors Business Central (BC 1.0.3.636)', () => {
+  const originalCwd = process.cwd()
+  let dir = ''
+  before(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'otw-store-'))
+    process.chdir(dir)
+  })
+  after(async () => {
+    process.chdir(originalCwd)
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  const details = () =>
+    validateOvertimeWorkDetails(
+      {
+        reason: 'Month-end closing',
+        expectedDeliverables: 'Closed books',
+        lineManagerUserId: 'SUP1',
+        hrUserId: 'HR1',
+        managerUserId: 'FD1',
+        lines: [
+          { overtimeDate: '2026-11-10', startTime: '18:00', endTime: '21:00', dayType: 'working', workLocation: 'office' },
+          { overtimeDate: '2026-11-11', startTime: '18:00', endTime: '20:30', dayType: 'working', workLocation: 'office' },
+        ],
+      },
+      true,
+    )
+
+  it('keeps the BC Stage 1 number and Superior → FAD steps, replacing a portal-only draft', async () => {
+    const draft = await saveOvertimeWorkRequest({
+      employeeNo: 'E001',
+      requesterUserId: 'U1',
+      details: details(),
+      submit: false,
+    })
+    assert.match(draft.requestNo, /^OTW-/)
+    const bc = parseOvertimeRequest(bcStage1Json())
+    const saved = await saveOvertimeWorkRequest({
+      employeeNo: 'E001',
+      requesterUserId: 'U1',
+      requestNo: draft.requestNo,
+      details: details(),
+      submit: true,
+      bc: bcStage1Snapshot(bc),
+    })
+    assert.equal(saved.requestNo, 'OTR-00012')
+    assert.equal(saved.bcStage1, true)
+    assert.equal(saved.status, 'Pending Approval')
+    assert.deepEqual(saved.steps.map((step) => step.label), ['Superior', 'FAD'])
+    const rows = await listOvertimeWorkRequests('E001')
+    assert.deepEqual(rows.map((row) => row.requestNo), ['OTR-00012'])
+  })
+
+  it('never queues the local copy of a BC Stage 1 request (BC lists it as overtime)', async () => {
+    assert.deepEqual(await listOvertimeWorkApprovals(['SUP1']), [])
+    await assert.rejects(
+      decideOvertimeWorkApproval({ requestNo: 'OTR-00012', actingUserIds: ['SUP1'], isApprove: true, comments: 'ok' }),
+      /approved in Business Central/,
+    )
+  })
+
+  it('takes status and the payment CTA from BC, and never offers payment on portal-only rows', async () => {
+    const [row] = await listOvertimeWorkRequests('E001')
+    const approved = applyBcStage1(
+      row!,
+      parseOvertimeRequest(bcStage1Json({ status: 'Approved', workAuthorized: true, canRequestPayment: true })),
+    )
+    assert.equal(approved.status, 'Approved')
+    assert.equal(approved.canRequestPayment, true)
+    const paid = applyBcStage1(
+      row!,
+      parseOvertimeRequest(bcStage1Json({ status: 'Approved', paymentRequestNo: 'OTP-00012' })),
+    )
+    assert.equal(paid.canRequestPayment, false)
+    assert.equal(paid.linkedPaymentRequestNo, 'OTP-00012')
+    const legacy = applyBcStage1({ ...row!, bcStage1: false, status: 'Approved' }, null)
+    assert.equal(legacy.canRequestPayment, false)
+  })
+})
+
+describe('overtime Stage 2 payment approvals (BC 1.0.3.636)', () => {
+  const payment = {
+    paymentNo: 'OTP-00012',
+    otRequestNo: 'OTR-00012',
+    status: 'Pending Approval',
+    stage: 1,
+    stageLabel: 'Superior',
+    employeeNo: 'E001',
+    employeeName: 'Abebe K.',
+    totalHours: 5.5,
+    estimatedAmount: 1200,
+    workCompletedOn: '2026-11-11',
+    employeeRemarks: 'Work completed as approved',
+    superiorJustification: '',
+    superiorUserId: 'SUP1',
+    addedToSheet: false,
+    steps: [{ stage: 1, label: 'Superior', approverUserId: 'SUP1', approverName: 'Superior One', status: 'Pending' }],
+    otRequest: bcStage1Json({ status: 'Approved', paymentRequestNo: 'OTP-00012' }),
+  }
+
+  it('shows the Superior what they justify: Stage 1 lines, hours, work date, and the pending step', () => {
+    const [request] = parseOtPaymentRequests(JSON.stringify([payment]))
+    const queue = otPaymentApprovalQueueItem(request!)
+    assert.equal(queue.id, 'overtimePayment-OTP-00012')
+    assert.equal(queue.module, OT_PAYMENT_MODULE)
+    assert.equal(queue.approverEmployeeNo, 'SUP1')
+    const detail = otPaymentToPortalRequest(request!, 'SUP1')
+    assert.equal(detail.requestType, 'overtimePayment')
+    assert.equal(detail.payload.lines.length, 2)
+    assert.equal(detail.payload.commentRequiredOnApprove, true)
+    const pending = detail.approvalSteps.find((step) => step.status === 'Pending Approval')
+    assert.equal(pending?.actorEmployeeNo, 'SUP1')
+    const facts = Object.fromEntries(detail.payload.detailFacts.map((fact) => [fact.label, fact.value]))
+    assert.equal(facts['Overtime Request (Stage 1)'], 'OTR-00012')
+    assert.equal(facts['Work completed on'], '2026-11-11')
+    assert.equal(facts['Overtime hours'], '5.5 hrs')
+  })
+
+  it('lets only the employee or the Superior view it, and records the Superior outcome', () => {
+    const [request] = parseOtPaymentRequests(
+      JSON.stringify([{ ...payment, status: 'Approved', steps: [{ ...payment.steps[0], status: 'Approved' }] }]),
+    )
+    assert.equal(otPaymentActingUserMayView(request!, ['SUP1']), true)
+    assert.equal(otPaymentActingUserMayView(request!, ['SOMEONE'], 'E001'), true)
+    assert.equal(otPaymentActingUserMayView(request!, ['SOMEONE'], 'E999'), false)
+    assert.equal(otPaymentApproverOutcome(request!, ['SUP1']), 'Approved')
+    assert.equal(otPaymentApproverOutcome(request!, ['FAD1']), null)
+  })
+
+  it('reads the Stage 2 context (Superior only) and spots BC without PortalOTPayment', () => {
+    const context = parseOtPaymentContext(
+      JSON.stringify({
+        stage: 'paymentRequest',
+        otRequestNo: 'OTR-00012',
+        otRequest: bcStage1Json({ status: 'Approved' }),
+        approvers: [{ stage: 1, label: 'Superior', approverUserId: 'SUP1', status: 'Not started' }],
+        routingProblem: '',
+        usesWorkflow: true,
+      }),
+    )
+    assert.equal(context.approvers.length, 1)
+    assert.equal(context.otRequest?.lines.length, 2)
+    assert.equal(otPaymentServiceMissing(new Error("Method 'PortalOTPaymentList' is invalid")), true)
+    assert.equal(otPaymentServiceMissing(new Error('Overtime request OTR-1 was not found.')), false)
   })
 })

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
+import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
 import { AdvanceSettlementTemplate } from '@/pages/finance/AdvanceSettlementTemplate'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
@@ -99,6 +100,9 @@ export function ImprestSurrender() {
       customCreate={({ onCreated, onCancel }) => (
         <AdvanceSettlementTemplate onCreated={onCreated} onCancel={onCancel} />
       )}
+      // Re-saving the header makes BC re-copy the advance lines and drop the expense lines.
+      allowHeaderEdit={false}
+      detailSupplement={({ request }) => <AdvanceSettlementPanel request={request} />}
       headerFields={[
         {
           name: 'imprest',

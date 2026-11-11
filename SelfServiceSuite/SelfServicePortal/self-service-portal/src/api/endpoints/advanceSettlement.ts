@@ -41,11 +41,10 @@ export type AdvanceSettlementContext = {
   lines: Array<Record<string, unknown>>
 }
 
-export async function fetchAdvanceSettlementContext(surrenderNo = '', employeeNo = '') {
+export async function fetchAdvanceSettlementContext(surrenderNo = '') {
   requireAuthApiUrl()
   const params = new URLSearchParams()
   if (surrenderNo) params.set('surrenderNo', surrenderNo)
-  if (employeeNo) params.set('employeeNo', employeeNo)
   const query = params.toString() ? `?${params}` : ''
   return authGet<AdvanceSettlementContext>(`/api/advance-settlement/context${query}`)
 }

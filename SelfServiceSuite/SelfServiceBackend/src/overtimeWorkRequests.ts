@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { OvertimeRequest, OvertimeStep } from './overtimeRequests.js'
 
 /**
  * Overtime Work Request (permission to work OT + the hours).
@@ -75,6 +76,75 @@ export type OvertimeWorkRequest = {
    */
   linkedPaymentRequestNo: string
   linkedAt: string
+  /**
+   * BC 1.0.3.636: this row mirrors BC Stage 1 Overtime Request `requestNo` (PortalOvertime*).
+   * BC owns its status, Superior → FAD steps and Stage 2 link; the portal keeps only the extras
+   * BC has no field for (expected deliverables, work location).
+   */
+  bcStage1?: boolean
+  /** From BC on read: show "Request overtime payment" (Stage 1 approved, no Stage 2 yet). */
+  canRequestPayment?: boolean
+  paymentApproved?: boolean
+  addedToSheet?: boolean
+}
+
+/** The BC Stage 1 state the local row mirrors after PortalOvertimeSave / Withdraw. */
+export type BcStage1Snapshot = {
+  requestNo: string
+  status: OvertimeWorkStatus
+  steps: OvertimeWorkStep[]
+  approvedAt: string
+  submittedAt: string
+}
+
+function bcStepStatus(status: OvertimeStep['status']): OvertimeWorkStepStatus {
+  if (status === 'Pending' || status === 'Approved' || status === 'Rejected' || status === 'Skipped') return status
+  return 'Waiting'
+}
+
+/** BC Stage 1 steps (Superior → FAD) in the work-request step shape. */
+export function bcStage1Steps(steps: OvertimeStep[]): OvertimeWorkStep[] {
+  return steps.map((step, index) => ({
+    stage: step.stage || index + 1,
+    label: step.label,
+    approverUserId: step.approverUserId,
+    approverName: step.approverName,
+    status: bcStepStatus(step.status),
+    decidedAt: step.decidedAt,
+    comment: step.status === 'Skipped' ? step.skipReason : step.comment,
+  }))
+}
+
+export function bcStage1Snapshot(request: OvertimeRequest): BcStage1Snapshot {
+  return {
+    requestNo: request.requestNo,
+    status: request.status,
+    steps: bcStage1Steps(request.steps),
+    approvedAt: request.approvedAt,
+    submittedAt: request.submittedAt,
+  }
+}
+
+/**
+ * Overlay the live BC Stage 1 request on its local row. Rows not backed by BC (portal-only
+ * drafts, pre-636 work requests) can never start Stage 2: BC only pays its own Stage 1 numbers.
+ */
+export function applyBcStage1(row: OvertimeWorkRequest, bc: OvertimeRequest | null | undefined): OvertimeWorkRequest {
+  if (!row.bcStage1 || !bc) {
+    return { ...row, canRequestPayment: false, paymentApproved: false, addedToSheet: false }
+  }
+  return {
+    ...row,
+    status: bc.status,
+    steps: bc.steps.length ? bcStage1Steps(bc.steps) : row.steps,
+    submittedAt: bc.submittedAt || row.submittedAt,
+    approvedAt: bc.approvedAt,
+    decisionRemarks: bc.decisionRemarks,
+    linkedPaymentRequestNo: bc.paymentRequestNo,
+    canRequestPayment: bc.canRequestPayment,
+    paymentApproved: bc.paymentApproved,
+    addedToSheet: bc.addedToSheet,
+  }
 }
 
 export type OvertimeWorkDetails = {
@@ -500,20 +570,29 @@ export async function saveOvertimeWorkRequest(input: {
   requestNo?: string
   details: OvertimeWorkDetails
   submit: boolean
+  /** BC Stage 1 state after PortalOvertimeSave: the local row takes BC's number, status and steps. */
+  bc?: BcStage1Snapshot
 }) {
   const store = await readStore()
   const existing = input.requestNo
     ? store.rows.find((row) => sameId(row.requestNo, input.requestNo!) && sameId(row.employeeNo, input.employeeNo))
     : undefined
-  if (existing && existing.status !== 'Draft' && existing.status !== 'Rejected') {
+  // BC already enforced its own draft rule when it accepted the save.
+  if (!input.bc && existing && existing.status !== 'Draft' && existing.status !== 'Rejected') {
     throw Object.assign(new Error(`Overtime work request ${existing.requestNo} can no longer be changed.`), {
       status: 409,
     })
   }
 
   const now = new Date().toISOString()
-  const sequence = existing ? Number(existing.requestNo.replace(/\D/g, '')) || store.sequence : store.sequence + 1
-  const requestNo = existing?.requestNo || nextNo(sequence)
+  const bcNo = str(input.bc?.requestNo).toUpperCase()
+  const sequence = bcNo
+    ? store.sequence
+    : existing
+      ? Number(existing.requestNo.replace(/\D/g, '')) || store.sequence
+      : store.sequence + 1
+  // A portal-only draft (OTW-…) becomes the BC Stage 1 number once BC has it.
+  const requestNo = bcNo || existing?.requestNo || nextNo(sequence)
   const lines: OvertimeWorkLine[] = input.details.lines.map((line) => ({
     ...line,
     totalHours: hoursBetween(line.startTime, line.endTime),
@@ -521,11 +600,11 @@ export async function saveOvertimeWorkRequest(input: {
   const first = lines[0]!
   const last = lines[lines.length - 1]!
   const totalHours = Number(lines.reduce((sum, line) => sum + line.totalHours, 0).toFixed(2))
-  const steps = buildSteps(input.details, input.submit)
+  const steps = input.bc ? input.bc.steps : buildSteps(input.details, input.submit)
   const row: OvertimeWorkRequest = {
     id: existing?.id || createHash('sha1').update(`${requestNo}-${randomUUID()}`).digest('hex').slice(0, 16),
     requestNo,
-    status: input.submit ? 'Pending Approval' : 'Draft',
+    status: input.bc ? input.bc.status : input.submit ? 'Pending Approval' : 'Draft',
     employeeNo: input.employeeNo,
     employeeName: input.details.employeeName || existing?.employeeName || '',
     designation: input.details.designation || existing?.designation || '',
@@ -544,39 +623,51 @@ export async function saveOvertimeWorkRequest(input: {
     lines,
     requesterUserId: input.requesterUserId,
     createdAt: existing?.createdAt || now,
-    submittedAt: input.submit ? now : existing?.submittedAt || '',
-    approvedAt: '',
+    submittedAt: input.bc?.submittedAt || (input.submit ? now : existing?.submittedAt || ''),
+    approvedAt: input.bc?.approvedAt || '',
     decisionRemarks: '',
     steps,
     linkedPaymentRequestNo: existing?.linkedPaymentRequestNo || '',
     linkedAt: existing?.linkedAt || '',
+    ...(input.bc ? { bcStage1: true } : {}),
   }
 
   store.sequence = Math.max(store.sequence, sequence)
-  store.rows = [row, ...store.rows.filter((item) => item.requestNo !== requestNo)]
+  const replaced = existing?.requestNo ?? ''
+  store.rows = [
+    row,
+    ...store.rows.filter((item) => item.requestNo !== requestNo && (!replaced || item.requestNo !== replaced)),
+  ]
   await writeStore(store)
   return row
 }
 
-export async function withdrawOvertimeWorkRequest(employeeNo: string, requestNo: string) {
+export async function withdrawOvertimeWorkRequest(
+  employeeNo: string,
+  requestNo: string,
+  bc?: BcStage1Snapshot,
+) {
   const store = await readStore()
   const row = store.rows.find((item) => sameId(item.requestNo, requestNo) && sameId(item.employeeNo, employeeNo))
   if (!row) throw Object.assign(new Error(`Overtime work request ${requestNo} was not found.`), { status: 404 })
-  if (row.status !== 'Pending Approval') {
+  // A BC Stage 1 row was already withdrawn in BC (PortalOvertimeWithdraw); mirror it.
+  if (!bc && row.status !== 'Pending Approval') {
     throw Object.assign(new Error(`Only a pending overtime work request can be withdrawn.`), { status: 409 })
   }
-  row.status = 'Draft'
+  row.status = bc ? bc.status : 'Draft'
   row.submittedAt = ''
-  row.steps = row.steps.map((step) => ({ ...step, status: 'Waiting', decidedAt: '', comment: '' }))
+  row.steps = bc
+    ? bc.steps
+    : row.steps.map((step) => ({ ...step, status: 'Waiting', decidedAt: '', comment: '' }))
   await writeStore(store)
   return normalizeOvertimeWorkRequest(row)
 }
 
-export async function deleteOvertimeWorkRequest(employeeNo: string, requestNo: string) {
+export async function deleteOvertimeWorkRequest(employeeNo: string, requestNo: string, deletedInBc = false) {
   const store = await readStore()
   const row = store.rows.find((item) => sameId(item.requestNo, requestNo) && sameId(item.employeeNo, employeeNo))
   if (!row) throw Object.assign(new Error(`Overtime work request ${requestNo} was not found.`), { status: 404 })
-  if (row.status !== 'Draft' && row.status !== 'Rejected') {
+  if (!deletedInBc && row.status !== 'Draft' && row.status !== 'Rejected') {
     throw Object.assign(new Error(`Only a draft overtime work request can be deleted.`), { status: 409 })
   }
   store.rows = store.rows.filter((item) => item.requestNo !== row.requestNo)
@@ -588,6 +679,8 @@ export async function listOvertimeWorkApprovals(actingUserIds: string[], scope: 
   const store = await readStore()
   const ids = actingUserIds.map((id) => id.trim()).filter(Boolean)
   return store.rows.filter((row) => {
+    // BC Stage 1 (Superior → FAD) is listed and decided through PortalOvertimeApprovals / Decide.
+    if (row.bcStage1) return false
     if (scope === 'pending') {
       return row.steps.some(
         (step) => step.status === 'Pending' && ids.some((id) => sameId(id, step.approverUserId)),
@@ -750,6 +843,14 @@ export async function decideOvertimeWorkApproval(input: {
   const store = await readStore()
   const row = store.rows.find((item) => sameId(item.requestNo, input.requestNo))
   if (!row) throw Object.assign(new Error(`Overtime work request ${input.requestNo} was not found.`), { status: 404 })
+  if (row.bcStage1) {
+    throw Object.assign(
+      new Error(
+        `Overtime Request ${row.requestNo} is approved in Business Central (Superior → FAD). Open it from Approvals as Overtime Request (Stage 1).`,
+      ),
+      { status: 409 },
+    )
+  }
   if (row.status !== 'Pending Approval') {
     throw Object.assign(new Error(`Overtime work request ${row.requestNo} is not waiting for approval.`), {
       status: 409,

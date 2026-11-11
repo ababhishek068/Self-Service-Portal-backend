@@ -498,8 +498,8 @@ export function OvertimeWorkRequest() {
       {mode === 'list' ? (
         <div className="portal-surface-card overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">My Overtime Work Requests</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Permission + hours — supervisor, HR, then authorized manager.</p>
+            <h2 className="text-sm font-semibold text-slate-900">My Overtime Requests</h2>
+            <p className="mt-0.5 text-xs text-slate-500">Stage 1 work authorization — Superior, then FAD (Business Central).</p>
           </div>
           {listQuery.isLoading ? (
             <div className="space-y-2 p-4">
@@ -526,7 +526,7 @@ export function OvertimeWorkRequest() {
             <span className="text-sm text-slate-600">
               {dateRangeLabel(shown.lines ?? [], shown.overtimeDate)} · {shown.totalHours} hrs
             </span>
-            {shown.status === 'Approved' && !shown.linkedPaymentRequestNo ? (
+            {shown.canRequestPayment ? (
               <Link
                 className="ml-auto inline-flex items-center rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-800"
                 to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(shown.requestNo)}`}
@@ -535,12 +535,16 @@ export function OvertimeWorkRequest() {
               </Link>
             ) : null}
             {shown.status === 'Approved' && shown.linkedPaymentRequestNo ? (
-              <span className="ml-auto text-xs font-medium text-slate-500">
+              <Link
+                className="ml-auto text-xs font-medium text-teal-800 underline-offset-2 hover:underline"
+                to={`/hr/overtime-request?request=${encodeURIComponent(shown.linkedPaymentRequestNo)}`}
+              >
                 Payment {shown.linkedPaymentRequestNo}
-              </span>
+                {shown.paymentApproved ? ' · approved' : ''}
+              </Link>
             ) : null}
           </div>
-          {shown.status === 'Approved' && !shown.linkedPaymentRequestNo ? (
+          {shown.canRequestPayment ? (
             <div className="rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
               Work authorized — submit an Overtime Payment Request after the work is done. Hours are added to the
               overtime sheet only after Stage 2 approval.
