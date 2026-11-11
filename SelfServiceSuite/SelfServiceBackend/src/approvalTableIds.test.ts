@@ -2276,6 +2276,30 @@ describe('mapApprovalSteps', () => {
     assert.deepEqual(steps.map((step) => step.sequenceNo), [1, 2])
   })
 
+  it('uses Approval Entry Description for Advance Payment Superior → FAD roles (BC 1.0.3.646)', () => {
+    const steps = mapApprovalSteps([
+      {
+        EntryNo: 10,
+        ApproverID: 'SUP1',
+        Status: 'Open',
+        SequenceNo: 1,
+        Description: 'Superior',
+        ApproverJobTitle: 'Officer',
+      },
+      {
+        EntryNo: 20,
+        ApproverID: 'FAD1',
+        Status: 'Created',
+        SequenceNo: 2,
+        Description: 'FAD',
+      },
+    ])
+    assert.deepEqual(
+      steps.map((step) => step.role),
+      ['Superior', 'FAD'],
+    )
+  })
+
   it('maps pending placeholder rows for submitted transfer orders', () => {
     const steps = mapApprovalSteps([
       {

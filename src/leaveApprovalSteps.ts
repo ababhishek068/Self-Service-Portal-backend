@@ -33,6 +33,19 @@ function workflowCycle(row: ODataRecord) {
   return text(row, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
 }
 
+/** BC 1.0.3.646 stamps Superior / FAD / COO / CEO on Approval Entry.Description for portal history. */
+function approvalRoleLabel(row: ODataRecord, approverId: string) {
+  const description = text(row, ['Description', 'ApproverRole', 'Approver_Role', 'Role'])
+  const known =
+    /^(Superior|Line Manager|FAD|COO|CEO|FD|HR|Finance|Approver\s*\d+)$/i.test(description.trim())
+  if (known) return description.trim()
+  return text(
+    row,
+    ['ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation', 'Description'],
+    approverId ? 'Approver' : 'Requester',
+  )
+}
+
 export function mapApprovalSteps(value: unknown) {
   const rows = Array.isArray(value) ? (value as ODataRecord[]) : []
   // "Send Back for Correction" is a BC rejection with a [RETURNED] comment; BC rejects the steps
@@ -60,11 +73,7 @@ export function mapApprovalSteps(value: unknown) {
         id: text(row, ['EntryNo', 'Entry_No'], `approval-${index}`),
         actorEmployeeNo: approverId || senderId,
         actorName: text(row, ['ApproverName', 'SenderName', 'ApproverID', 'SenderID'], approverId || senderId),
-        role: text(
-          row,
-          ['ApproverJobTitle', 'JobTitle', 'Job_Title', 'Designation'],
-          approverId ? 'Approver' : 'Requester',
-        ),
+        role: approvalRoleLabel(row, approverId),
         status,
         timestamp: text(row, [
           'ApprovalCommentDateTime',
