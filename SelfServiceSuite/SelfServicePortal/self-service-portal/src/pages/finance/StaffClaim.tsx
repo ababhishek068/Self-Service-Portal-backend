@@ -579,14 +579,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             visibleWhen: () => medicalOnly,
           },
           {
-            name: 'relationship',
-            label: 'Relationship',
-            type: 'select',
-            options: medicalRelationshipOptions,
-            readOnlyWhen: () => medicalOnly,
-            visibleWhen: (values) => medicalOnly && isDependantPatient(values.patient),
-          },
-          {
+            // Select dependant first; Relationship fills from the chosen person (smoother than reverse).
             name: 'dependant',
             label: 'Dependant',
             type: 'select',
@@ -599,17 +592,26 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
                   ? 'No selectable dependants — greyed rows show the BC reason (age or birth certificate)'
                   : 'No dependants found — ask HR to add Employee Dependants',
             hint: medicalOnly
-              ? 'Child appears only when HR Employee Dependants has Date of Birth and Identification Type = Birth Cert. No. with Card No. filled. Over-18 children stay listed but disabled.'
+              ? 'Child needs DOB + Birth Cert. No. (Card No.) on HR Employee Dependants. Over-18 stays listed but disabled.'
               : undefined,
             visibleWhen: (values) => medicalOnly && isDependantPatient(values.patient),
           },
           {
+            name: 'relationship',
+            label: 'Relationship',
+            type: 'select',
+            options: medicalRelationshipOptions,
+            readOnlyWhen: () => medicalOnly,
+            hint: medicalOnly ? 'Filled automatically from the selected dependant.' : undefined,
+            visibleWhen: (values) => medicalOnly && isDependantPatient(values.patient),
+          },
+          {
             name: 'medicalAmount',
-            label: 'Accepted Receipt Amount',
+            label: 'Received Amount',
             type: 'number',
-            placeholder: 'Enter the accepted medical receipt amount',
+            placeholder: 'Enter the received medical receipt amount',
             hint: medicalOnly
-              ? `Company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% (capped by Available Budget for Self or Dependants).`
+              ? `Not yet verified by Finance. Company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% (capped by Available Budget for Self or Dependants).`
               : undefined,
             visibleWhen: () => medicalOnly,
           },
@@ -688,20 +690,20 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             visibleWhen: () => medicalOnly,
           },
           {
-            key: 'relationship',
-            header: 'Relationship',
-            visibleWhen: (lines) =>
-              medicalOnly && lines.some((line) => isDependantPatient(line.patient)),
-          },
-          {
             key: 'dependant',
             header: 'Dependant',
             visibleWhen: (lines) =>
               medicalOnly && lines.some((line) => isDependantPatient(line.patient)),
           },
           {
+            key: 'relationship',
+            header: 'Relationship',
+            visibleWhen: (lines) =>
+              medicalOnly && lines.some((line) => isDependantPatient(line.patient)),
+          },
+          {
             key: 'medicalAmount',
-            header: 'Medical Bill Amount',
+            header: 'Received Amount',
             visibleWhen: () => medicalOnly,
             format: (value) => formatCurrency(Number(value ?? 0)),
           },
