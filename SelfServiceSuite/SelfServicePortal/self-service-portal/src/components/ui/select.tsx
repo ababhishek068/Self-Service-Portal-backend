@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 export interface SelectOption {
   label: string
   value: string
+  /** Shown in the list but not selectable (e.g. ineligible medical dependants). */
+  disabled?: boolean
 }
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
@@ -78,6 +80,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     }, [controlledValue, props.defaultValue, options])
 
     const commit = (value: string) => {
+      if (value && options.some((option) => option.value === value && option.disabled)) return
       const element = innerRef.current
       if (!element) return
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
@@ -138,7 +141,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         >
           <option value="">{placeholder ?? ''}</option>
           {options.map((option) => (
-            <option key={option.value} value={option.value}>
+            <option key={option.value} value={option.value} disabled={option.disabled}>
               {option.label}
             </option>
           ))}
@@ -180,7 +183,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                 event.preventDefault()
                 setHighlight((index) => Math.max(index - 1, 0))
               } else if (event.key === 'Enter') {
-                if (open && filtered[highlight]) {
+                if (open && filtered[highlight] && !filtered[highlight]!.disabled) {
                   event.preventDefault()
                   commit(filtered[highlight]!.value)
                 }
@@ -221,14 +224,22 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                   <button
                     key={option.value}
                     type="button"
+                    disabled={option.disabled}
                     className={cn(
-                      'block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-100',
-                      index === highlight ? 'bg-slate-100' : '',
-                      option.value === current ? 'font-semibold text-[var(--portal-navy,#03949b)]' : 'text-slate-900',
+                      'block w-full truncate px-3 py-2 text-left text-sm',
+                      option.disabled
+                        ? 'cursor-not-allowed text-slate-400'
+                        : 'hover:bg-slate-100',
+                      !option.disabled && index === highlight ? 'bg-slate-100' : '',
+                      !option.disabled && option.value === current
+                        ? 'font-semibold text-[var(--portal-navy,#03949b)]'
+                        : !option.disabled
+                          ? 'text-slate-900'
+                          : '',
                     )}
                     onMouseDown={(event) => {
                       event.preventDefault()
-                      commit(option.value)
+                      if (!option.disabled) commit(option.value)
                     }}
                     onMouseEnter={() => setHighlight(index)}
                   >

@@ -336,20 +336,30 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
   })
   const medicalDependantOptions = useMemo<LookupOption[]>(() => {
     const rows = medicalDependantsQuery.data?.dependants ?? []
-    return rows
-      .filter((row) => row.eligible)
-      .map((row) => ({
+    // Show eligible + ineligible Children so HR can see why a child is blocked (age / birth cert).
+    return rows.map((row) => {
+      const base = row.relationship ? `${row.fullName} (${row.relationship})` : row.fullName
+      const reason = String(row.ineligibleReason ?? '').trim()
+      return {
         value: row.systemId || row.no,
-        label: row.relationship ? `${row.fullName} (${row.relationship})` : row.fullName,
+        label: row.eligible ? base : reason ? `${base} — ${reason}` : `${base} — not eligible`,
+        disabled: !row.eligible,
         meta: {
           dependantNo: row.no || row.memberId,
           relationship: row.relationship,
           dateOfBirth: row.dateOfBirth,
           cardNo: row.cardNo,
           identificationType: row.identificationType,
+          eligible: row.eligible,
+          ineligibleReason: reason,
         },
-      }))
+      }
+    })
   }, [medicalDependantsQuery.data?.dependants])
+  const eligibleMedicalDependantCount = useMemo(
+    () => medicalDependantOptions.filter((option) => !option.disabled).length,
+    [medicalDependantOptions],
+  )
   const dependants = medicalOnly
     ? {
         options: medicalDependantOptions,
@@ -396,7 +406,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       headerLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       description={
         medicalOnly
-          ? `Medical Claim (BC 1.0.3.642): company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self / Dependants budget (Basic × 12 × 20%, split 50/50). Eligible dependants: Spouse, Father, Mother, Child under 18 with birth certificate. Attach the invoice before requesting approval.`
+          ? `Medical Claim (BC 1.0.3.642): company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self / Dependants budget (Basic × 12 × 20%, split 50/50). Eligible dependants: Spouse, Father, Mother, Child under 18 with Date of Birth and Birth Certificate No. on HR Employee Dependants. Attach the invoice, then Submit to HR.`
           : 'Add claim lines by type (Accommodation, Travel, Other, and any non-medical BC types). Medical Claim is not available here — use Finance → Medical Claim.'
       }
       module={module}
@@ -407,7 +417,19 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       }}
       listStatusFilter
       requiresAttachmentBeforeSubmit
-      requiredAttachmentMessage="Attach at least one supporting document before requesting approval for a claim."
+      requiredAttachmentMessage={
+        medicalOnly
+          ? 'Attach at least one supporting document before Submit.'
+          : 'Attach at least one supporting document before requesting approval for a claim.'
+      }
+      submitButtonLabel={medicalOnly ? 'Submit' : undefined}
+      submitConfirmTitle={medicalOnly ? 'Submit medical claim' : undefined}
+      submitConfirmMessage={
+        medicalOnly
+          ? 'Submit this medical claim to HR?'
+          : undefined
+      }
+      submitSuccessMessage={medicalOnly ? 'Medical claim submitted to HR' : undefined}
       cancelStatuses={FINANCE_CANCEL_STATUSES}
       newButtonLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       headerSchema={staffClaimHeaderSchema}
@@ -570,10 +592,15 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             type: 'select',
             options: dependants.options,
             placeholder: dependants.isLoading
-              ? 'Loading eligible dependants from Business Central…'
-              : dependants.options.length
+              ? 'Loading dependants from Business Central…'
+              : eligibleMedicalDependantCount > 0
                 ? 'Select eligible dependant (Spouse / Father / Mother / Child under 18)'
-                : 'No eligible dependants — ask HR to update Employee Dependants (DOB + birth certificate for children)',
+                : dependants.options.length
+                  ? 'No selectable dependants — greyed rows show the BC reason (age or birth certificate)'
+                  : 'No dependants found — ask HR to add Employee Dependants',
+            hint: medicalOnly
+              ? 'Child appears only when HR Employee Dependants has Date of Birth and Identification Type = Birth Cert. No. with Card No. filled. Over-18 children stay listed but disabled.'
+              : undefined,
             visibleWhen: (values) => medicalOnly && isDependantPatient(values.patient),
           },
           {
@@ -634,7 +661,14 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           },
           { name: 'claimReceiptNo', label: 'Claim Receipt No.', type: 'text' },
           { name: 'expenditureDate', label: 'Expenditure Date', type: 'date', readOnly: true },
-          { name: 'expenditureDescription', label: 'Expenditure Description', type: 'textarea', fullWidth: true },
+          {
+            name: 'expenditureDescription',
+            label: medicalOnly ? 'Other Details' : 'Expenditure Description',
+            type: 'textarea',
+            fullWidth: true,
+            placeholder: medicalOnly ? 'Optional notes (not required for medical claims)' : undefined,
+            hint: medicalOnly ? 'Optional — leave blank if not needed.' : undefined,
+          },
         ],
         columns: [
           {
@@ -697,7 +731,10 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
             header: 'Expenditure Date',
             format: (value) => formatDate(String(value ?? '')),
           },
-          { key: 'expenditureDescription', header: 'Expenditure Description' },
+          {
+            key: 'expenditureDescription',
+            header: medicalOnly ? 'Other Details' : 'Expenditure Description',
+          },
         ],
         emptyText: '*** No Claim Lines Found ***',
       }}

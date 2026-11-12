@@ -166,6 +166,11 @@ export interface MultiStepRequestConfig {
   /** Prevent approval until at least one BC document attachment exists. */
   requiresAttachmentBeforeSubmit?: boolean
   requiredAttachmentMessage?: string
+  /** Detail action label (default Request Approval). Medical Claim uses Submit → HR. */
+  submitButtonLabel?: string
+  submitConfirmTitle?: string
+  submitConfirmMessage?: string
+  submitSuccessMessage?: string
   /** Extra validation before Request Approval (return an error message or null). */
   validateBeforeSubmit?: (request: PortalRequest) => string | null
   /** Extra block on the detail screen (e.g. Operations stock check on purchase requests). */
@@ -1116,10 +1121,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       variant="gradient"
                       disabled={actionId === selected.id}
                       onClick={() => {
+                        const submitLabel = config.submitButtonLabel || 'Request Approval'
                         if (config.line && config.line.required !== false && lines.length === 0) {
                           toast.warning(
                             config.line.requiredMessage ||
-                              `Add at least one ${config.line.label.toLowerCase()} entry before requesting approval.`,
+                              `Add at least one ${config.line.label.toLowerCase()} entry before ${submitLabel.toLowerCase()}.`,
                             'Lines required',
                           )
                           return
@@ -1127,33 +1133,35 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                         if (config.requiresAttachmentBeforeSubmit && selected.attachments.length === 0) {
                           toast.warning(
                             config.requiredAttachmentMessage ||
-                              'Attach at least one supporting document before requesting approval.',
+                              `Attach at least one supporting document before ${submitLabel.toLowerCase()}.`,
                             'Attachment required',
                           )
                           return
                         }
                         const submitValidation = config.validateBeforeSubmit?.(selected)
                         if (submitValidation) {
-                          toast.warning(submitValidation, 'Cannot request approval')
+                          toast.warning(submitValidation, `Cannot ${submitLabel.toLowerCase()}`)
                           return
                         }
                         void confirm({
-                          title: 'Request approval',
-                          message: 'Send this request into the approval workflow?',
-                          confirmLabel: 'Request Approval',
+                          title: config.submitConfirmTitle || 'Request approval',
+                          message:
+                            config.submitConfirmMessage ||
+                            'Send this request into the approval workflow?',
+                          confirmLabel: submitLabel,
                         }).then((yes) => {
                           if (yes)
                             void runAction(
                               selected.id,
                               () => submitModuleRequest(config.module, selected.id),
                               'Submission failed',
-                              'Request sent for approval',
+                              config.submitSuccessMessage || 'Request sent for approval',
                             )
                         })
                       }}
                     >
                       <Send className="h-4 w-4" />
-                      Request Approval
+                      {config.submitButtonLabel || 'Request Approval'}
                     </Button>
                   ) : null}
                   {!bcCard && cancelStatuses.includes(selected.status) ? (

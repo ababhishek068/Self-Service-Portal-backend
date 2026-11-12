@@ -140,18 +140,32 @@ export const staffClaimLineSchema = z
     amountToRefund: z.coerce.number().min(0).optional().default(0),
     claimReceiptNo: optionalText,
     expenditureDate: workingDateField,
-    expenditureDescription: z.string().min(3, 'Expenditure description is required'),
+    /** Staff Claim: required. Medical Claim: optional "Other Details". */
+    expenditureDescription: z.string().optional().default(''),
   })
   .superRefine((data, ctx) => {
     const claimType = String(data.claimType ?? '').toUpperCase()
-    if (!claimType.includes('MEDICAL') && !claimType.startsWith('MED')) return
+    const isMedical = claimType.includes('MEDICAL') || claimType.startsWith('MED')
+    const description = String(data.expenditureDescription ?? '').trim()
+    if (!isMedical && description.length < 3) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expenditureDescription'],
+        message: 'Expenditure description is required',
+      })
+    }
+    if (!isMedical) return
     const patient = String(data.patient ?? 'self').toLowerCase()
-    if (patient !== 'dependant') return
+    if (patient !== 'dependant' && patient !== 'dependent' && patient !== '2') return
     if (!String(data.relationship ?? '').trim()) {
       ctx.addIssue({ code: 'custom', path: ['relationship'], message: 'Relationship is required for dependant claims' })
     }
     if (!String(data.dependant ?? '').trim()) {
-      ctx.addIssue({ code: 'custom', path: ['dependant'], message: 'Select the dependant from HR next of kin' })
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dependant'],
+        message: 'Select an eligible dependant (Spouse / Father / Mother / Child under 18 with birth certificate)',
+      })
     }
     if (String(data.relationship ?? '').toLowerCase() === 'child') {
       const dob = String(data.dependantDateOfBirth ?? '').trim()
@@ -159,7 +173,7 @@ export const staffClaimLineSchema = z
         ctx.addIssue({
           code: 'custom',
           path: ['dependant'],
-          message: 'Child dependants need a date of birth in Business Central (HR Employee Kin)',
+          message: 'Child dependants need a date of birth in Business Central (HR Employee Dependants)',
         })
         return
       }
