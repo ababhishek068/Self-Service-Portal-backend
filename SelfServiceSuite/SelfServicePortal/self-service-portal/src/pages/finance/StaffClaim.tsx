@@ -607,9 +607,9 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           },
           {
             name: 'medicalAmount',
-            label: 'Received Amount',
+            label: 'Receipt Amount',
             type: 'number',
-            placeholder: 'Enter the received medical receipt amount',
+            placeholder: 'Enter the medical receipt amount',
             hint: medicalOnly
               ? `Not yet verified by Finance. Company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% (capped by Available Budget for Self or Dependants).`
               : undefined,
@@ -703,7 +703,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           },
           {
             key: 'medicalAmount',
-            header: 'Received Amount',
+            header: 'Receipt Amount',
             visibleWhen: () => medicalOnly,
             format: (value) => formatCurrency(Number(value ?? 0)),
           },
