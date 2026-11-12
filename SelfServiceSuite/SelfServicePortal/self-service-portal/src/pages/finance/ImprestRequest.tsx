@@ -252,16 +252,16 @@ export function ImprestRequest() {
 
   return (
     <MultiStepRequestPage
-      title="Advance Payment"
-      headerLabel="New Advance Payment"
+      title="Advance Request"
+      headerLabel="New Advance Request"
       description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Create the header, add budget lines, then submit for approval. Approval (BC 1.0.3.646): Superior first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Purpose options come from Business Central for your division (1.0.3.643). Settle unused or spent funds later via Advance Settlement (within two working days of return)."
       module={module}
-      queryKey={['finance', 'advance-payment']}
+      queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
       listStatusFilter
       cancelStatuses={FINANCE_CANCEL_STATUSES}
       listSearchExtra={imprestListSearchExtra}
-      newButtonLabel="New Advance Payment"
+      newButtonLabel="New Advance Request"
       headerSchema={imprestHeaderSchema}
       headerDefaults={{
         dateRequired: today,
@@ -283,7 +283,7 @@ export function ImprestRequest() {
             <p className="font-semibold">Finance approval (Business Central 1.0.3.646)</p>
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
               History: Superior → FAD | COO | CEO. Superior is the Workflow User Group on the Advance
-              Payment workflow (same idea as Store). Then by amount (ETB): below 50,000 → FAD;
+              Request workflow (same idea as Store). Then by amount (ETB): below 50,000 → FAD;
               50,000–100,000 → COO; above 100,000 → CEO. Request Purpose comes from BC for your
               division — choose Other (Specify) when needed. Settlement is only via Advance Settlement.
             </p>
@@ -310,7 +310,7 @@ export function ImprestRequest() {
           purposeCode,
           requestPurpose: purposeCode,
           purpose: justification || purposeLabel,
-          title: justification || purposeLabel || 'Advance Payment',
+          title: justification || purposeLabel || 'Advance Request',
         }
       }}
       headerOnValuesChange={(values, form) => {

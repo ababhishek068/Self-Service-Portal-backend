@@ -88,7 +88,7 @@ export const navigationMenu: NavItem[] = [
     label: 'My Requests - Finance',
     icon: Landmark,
     children: [
-      { label: 'Advance Payment', path: '/finance/advance-payment', icon: Banknote },
+      { label: 'Advance Request', path: '/finance/advance-request', icon: Banknote },
       { label: 'Advance Settlement', path: '/finance/advance-settlement', icon: ReceiptText },
       { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Medical Claim', path: '/finance/medical-claim', icon: BadgeCheck },

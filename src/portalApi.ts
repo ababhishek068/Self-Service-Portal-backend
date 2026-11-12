@@ -703,7 +703,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v364 — 1.0.3.525 (Medical Claim: Submit to HR, Other Details optional, show why Child is blocked)'
+export const PORTAL_API_BUILD = 'v365 — 1.0.3.526 (Rename Advance Payment → Advance Request; Medical Submit UX)'
 
 interface LookupSpec {
   service: string
@@ -7165,7 +7165,7 @@ export function buildPortalApiRouter() {
         { key: 'leave', label: 'Leave', count: leaveApplications },
         { key: 'overtime', label: 'Overtime', count: overtimeRequests },
         { key: 'staffClaim', label: 'Staff Claims', count: claims.length },
-        { key: 'imprest', label: 'Advance Payment', count: imprest.length },
+        { key: 'imprest', label: 'Advance Request', count: imprest.length },
         { key: 'imprestSurrender', label: 'Advance Settlement', count: surrender.length },
         { key: 'pettyCash', label: 'Petty Cash', count: pettyCash.length },
         { key: 'storeRequisition', label: 'Store Req', count: store.length },
@@ -7358,14 +7358,14 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  /** BC 1.0.3.630 — ESSP purpose dropdown by employee division (Finance Advance Payment). */
+  /** BC 1.0.3.630/643 — ESSP purpose dropdown by employee division (Finance Advance Request). */
   router.get(
     '/advance-payment/context',
     safe(async (req, res) => {
       const authUser = user(req)
       const employeeNo = String(req.query.employeeNo ?? authUser.employeeNo ?? '').trim()
       if (!employeeNo) {
-        throw portalError('Employee number is required for Advance Payment purpose context.', 422)
+        throw portalError('Employee number is required for Advance Request purpose context.', 422)
       }
       const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
       res.json(parseSoapJson(result.returnValue))

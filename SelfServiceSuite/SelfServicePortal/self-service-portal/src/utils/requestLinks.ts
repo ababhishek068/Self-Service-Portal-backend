@@ -2,7 +2,7 @@ import type { PortalNotification } from '@/api/endpoints/notifications'
 
 /** The requester pages of the modules (each opens a request with ?open=<id>). */
 export const REQUEST_PAGES: Partial<Record<string, string>> = {
-  imprest: '/finance/advance-payment',
+  imprest: '/finance/advance-request',
   imprestSurrender: '/finance/advance-settlement',
   staffClaim: '/finance/staff-claim',
   pettyCash: '/finance/petty-cash',

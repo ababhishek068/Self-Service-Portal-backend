@@ -105,7 +105,7 @@ const tiles: DashboardTile[] = [
   },
   { id: 'leaveApplications', label: 'Leave Applications', href: '/hr/leave-request', icon: CalendarDays, tone: 'lime' },
   { id: 'staffClaims', label: 'Staff Claims', href: '/finance/staff-claim', icon: Receipt, tone: 'blue' },
-  { id: 'imprestRequisitions', label: 'Advance Payments', href: '/finance/advance-payment', icon: Banknote, tone: 'blue' },
+  { id: 'imprestRequisitions', label: 'Advance Requests', href: '/finance/advance-request', icon: Banknote, tone: 'blue' },
   { id: 'pettyCash', label: 'Petty Cash Request', href: '/finance/petty-cash', icon: Coins, tone: 'blue' },
   { id: 'imprestSurrenders', label: 'Advance Settlements', href: '/finance/advance-settlement', icon: ReceiptText, tone: 'blue' },
   {
@@ -130,6 +130,7 @@ const QUICK_LINK_META: Record<string, { icon: LucideIcon; tone: Tone }> = {
   '/hr/request-letters': { icon: Mail, tone: 'lime' },
   '/hr/employee-exit': { icon: DoorOpen, tone: 'lime' },
   '/approvals': { icon: ClipboardCheck, tone: 'teal' },
+  '/finance/advance-request': { icon: Banknote, tone: 'blue' },
   '/finance/advance-payment': { icon: Banknote, tone: 'blue' },
   '/finance/imprest': { icon: Banknote, tone: 'blue' },
   '/finance/staff-claim': { icon: Receipt, tone: 'blue' },

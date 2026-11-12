@@ -29,7 +29,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
   const filters = [
     { value: 'all', label: 'All' },
     { value: 'leave', label: 'Leave' },
-    { value: 'imprest', label: 'Advance Payment' },
+    { value: 'imprest', label: 'Advance Request' },
     { value: 'imprestSurrender', label: 'Advance Settlement' },
     { value: 'purchaseRequisition', label: 'Purchase' },
     { value: 'storeRequisition', label: 'Store' },

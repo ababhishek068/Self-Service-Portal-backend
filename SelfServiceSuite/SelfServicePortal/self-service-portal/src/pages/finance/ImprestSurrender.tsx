@@ -92,13 +92,13 @@ export function ImprestSurrender() {
       ? 'Could not load advances from Business Central.'
       : imprestOptions.length === 0
         ? 'No approved and paid advance is available to settle. Finance must mark the advance Fully Paid in Business Central first.'
-        : 'Select advance payment'
+        : 'Select advance request'
 
   return (
     <MultiStepRequestPage
       title="Advance Settlement"
       headerLabel="New Advance Settlement"
-      description="Settle only an approved and paid Advance Payment (BC PortalAdvanceSettlementContext → settleableAdvances). Enter actual expenses and attachments. Business Central reconciles advance vs spend: fullySettled, refundDue (refund date + payment reference + proof), or additionalClaim (justification)."
+      description="Settle only an approved and paid Advance Request (BC PortalAdvanceSettlementContext → settleableAdvances). Enter actual expenses and attachments. Business Central reconciles advance vs spend: fullySettled, refundDue (refund date + payment reference + proof), or additionalClaim (justification)."
       module={module}
       queryKey={['finance', 'advance-settlement']}
       listRequests={() => listModuleRequests(module)}
@@ -112,7 +112,7 @@ export function ImprestSurrender() {
       headerFields={[
         {
           name: 'imprest',
-          label: 'Advance Payment to Settle',
+          label: 'Advance Request to Settle',
           type: 'select',
           valuePaths: ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo'],
           options: imprestOptions,
@@ -179,7 +179,7 @@ export function ImprestSurrender() {
           paths: ['payload.SurrenderDate', 'payload.Surrender_Date', 'payload.DateCreated', 'request.createdAt'],
           format: 'date',
         },
-        { label: 'Advance Payment No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No', 'payload.ImprestNo'] },
+        { label: 'Advance Request No.', paths: ['payload.ImprestIssueDocNo', 'payload.Imprest_Issue_Doc_No', 'payload.ImprestNo'] },
         { label: 'Purpose', paths: ['payload.Purpose', 'request.title'] },
         {
           label: 'Department',

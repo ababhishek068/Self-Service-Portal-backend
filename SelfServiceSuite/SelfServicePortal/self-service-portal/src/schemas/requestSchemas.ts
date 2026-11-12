@@ -261,7 +261,7 @@ export const pettyCashLineSchema = z.object({
 })
 
 export const imprestSurrenderHeaderSchema = z.object({
-  imprest: z.string().min(1, 'Select the advance payment to settle'),
+  imprest: z.string().min(1, 'Select the advance request to settle'),
 })
 
 /** Original document date from BC — read-only on edit; do not force ERP working date. */

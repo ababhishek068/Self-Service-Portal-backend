@@ -111,10 +111,11 @@ export default function App() {
       <Route path="/register" element={<Navigate to="/forgot-password" replace />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
-        <Route path="finance/advance-payment" element={<ImprestRequest />} />
+        <Route path="finance/advance-request" element={<ImprestRequest />} />
+        <Route path="finance/advance-payment" element={<Navigate to="/finance/advance-request" replace />} />
         <Route path="finance/advance-settlement" element={<ImprestSurrender />} />
         <Route path="finance/advance-surrender" element={<Navigate to="/finance/advance-settlement" replace />} />
-        <Route path="finance/imprest" element={<Navigate to="/finance/advance-payment" replace />} />
+        <Route path="finance/imprest" element={<Navigate to="/finance/advance-request" replace />} />
         <Route path="finance/imprest-surrender" element={<Navigate to="/finance/advance-settlement" replace />} />
         <Route path="finance/staff-claim" element={<StaffClaim />} />
         <Route path="finance/medical-claim" element={<StaffClaim medicalOnly />} />

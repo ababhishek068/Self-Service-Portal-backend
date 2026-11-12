@@ -19,7 +19,7 @@ export function ComingSoon({
         <h2 className="mt-4 text-lg font-semibold text-slate-900">Coming soon</h2>
         <p className="mt-2 text-sm text-slate-600">
           <span className="font-medium text-[var(--portal-navy)]">{title}</span> is not enabled for this UAT
-          cycle. Live modules such as leave, payslip, claims, advance payment, petty cash, purchase and store
+          cycle. Live modules such as leave, payslip, claims, advance request, petty cash, purchase and store
           requisitions remain available.
         </p>
         <Button asChild className="mt-6">
