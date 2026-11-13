@@ -6,6 +6,7 @@ import { after, before, describe, it } from 'node:test'
 import {
   OT_PAYMENT_MODULE,
   decideOtPaymentApproval,
+  stage2RoutingError,
   otPaymentActingUserMayView,
   otPaymentApprovalQueueItem,
   otPaymentApproverOutcome,
@@ -521,5 +522,28 @@ describe('overtime with the Workflow User Group (BC 1.0.3.649)', () => {
       JSON.stringify({ employee: { employeeNo: 'E001', divisionCode: 'FA', divisionName: 'Finance and Admin' }, approvers: [] }),
     )
     assert.equal(context.employee.divisionName, 'Finance and Admin')
+  })
+})
+
+describe('Stage 2 routing failure (BC 1.0.3.649)', () => {
+  const bcError = new Error(
+    'Business Central did not create approval entries for overtime payment request OTP-00001. Enable the Stage 2 overtime payment workflow with Approver Type = Workflow User Group.',
+  )
+
+  it('names the Division and Department the payment request carries', async () => {
+    const stage1 = parseOvertimeRequest(bcStage1Json({ divisionCode: 'FA', departmentCode: 'IT' }))
+    const error = (await stage2RoutingError(bcError, 'OTR-00012', async () => stage1)) as Error
+    assert.match(error.message, /OTP-00001/)
+    assert.match(error.message, /Division Code FA and Department Code IT \(copied from OTR-00012\)/)
+    assert.doesNotMatch(error.message, /saved before BC 1\.0\.3\.649/)
+  })
+
+  it('points at a Stage 1 request saved before 649 when its division is blank, and leaves other errors alone', async () => {
+    const stage1 = parseOvertimeRequest(bcStage1Json({ divisionCode: '', departmentCode: 'IT' }))
+    const error = (await stage2RoutingError(bcError, 'OTR-00012', async () => stage1)) as Error
+    assert.match(error.message, /Division Code \(blank\)/)
+    assert.match(error.message, /saved before BC 1\.0\.3\.649/)
+    const other = new Error('Overtime request OTR-1 was not found.')
+    assert.equal(await stage2RoutingError(other, 'OTR-1', async () => null), other)
   })
 })

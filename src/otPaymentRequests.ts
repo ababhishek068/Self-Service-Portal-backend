@@ -1,5 +1,6 @@
 import { callSoapMethod } from './bcClient.js'
 import {
+  getOvertimeRequestByNo,
   overtimeDateRange,
   overtimeDocumentLines,
   parseOvertimeRequest,
@@ -247,18 +248,54 @@ export async function saveOtPaymentRequest(input: {
   if (input.submit && !/^\d{4}-\d{2}-\d{2}$/.test(workCompletedOn)) {
     throw Object.assign(new Error('Enter the work completed date.'), { status: 422 })
   }
-  const result = await callOtPayment('PortalOTPaymentSave', {
-    employeeNo: input.employeeNo,
-    requesterUserId: input.requesterUserId,
-    paymentNo: input.paymentNo ?? '',
-    detailsJson: JSON.stringify({
-      otRequestNo,
-      workCompletedOn,
-      employeeRemarks,
-    }),
-    submitRequest: input.submit,
-  })
+  let result: Awaited<ReturnType<typeof callOtPayment>>
+  try {
+    result = await callOtPayment('PortalOTPaymentSave', {
+      employeeNo: input.employeeNo,
+      requesterUserId: input.requesterUserId,
+      paymentNo: input.paymentNo ?? '',
+      detailsJson: JSON.stringify({
+        otRequestNo,
+        workCompletedOn,
+        employeeRemarks,
+      }),
+      submitRequest: input.submit,
+    })
+  } catch (error) {
+    throw await stage2RoutingError(error, otRequestNo)
+  }
   return parseOtPaymentRequest(parseJson(result.returnValue))
+}
+
+/**
+ * BC 1.0.3.649 refuses a Stage 2 submit with "did not create approval entries" when a Stage 2
+ * workflow is enabled but none matched: its Event Conditions (Division Code + Department Code,
+ * copied from the Stage 1 request) differ, or its Workflow User Group is empty. Name the values
+ * the payment request carries so HR can compare them with the workflow in BC.
+ */
+export async function stage2RoutingError(
+  error: unknown,
+  otRequestNo: string,
+  lookup: (requestNo: string) => Promise<OvertimeRequest | null> = getOvertimeRequestByNo,
+) {
+  const message = String((error as { message?: unknown } | null)?.message ?? '')
+  if (!/did not create approval entries for overtime payment request/i.test(message)) return error
+  const stage1 = await lookup(otRequestNo).catch(() => null)
+  const division = stage1?.divisionCode || '(blank)'
+  const department = stage1?.departmentCode || '(blank)'
+  const blank = !stage1?.divisionCode || !stage1?.departmentCode
+  const detail =
+    ` This payment request has Division Code ${division} and Department Code ${department}` +
+    ` (copied from ${otRequestNo}). In Business Central, HR checks Workflows: the enabled Stage 2 workflow` +
+    ` ("An Approval Request for an Overtime Payment Request has been Requested.") needs Event Conditions` +
+    ` with these values and a Workflow User Group with at least one member.` +
+    (blank
+      ? ` A blank value means ${otRequestNo} was saved before BC 1.0.3.649: the Stage 1 request needs its Division / Department set (or a new Stage 1 request).`
+      : '')
+  return Object.assign(new Error(`${message.trim()}${detail}`), {
+    status: (error as { status?: number }).status ?? 422,
+    cause: error,
+  })
 }
 
 export async function withdrawOtPaymentRequest(employeeNo: string, paymentNo: string) {
