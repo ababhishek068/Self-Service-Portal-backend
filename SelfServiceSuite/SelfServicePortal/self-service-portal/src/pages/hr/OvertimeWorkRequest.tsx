@@ -308,7 +308,7 @@ function printWorkRequest(work: OvertimeWorkRow) {
 }
 
 /** Stage 1 on the live Workflow Progress tracker: the employee, each BC approver (Workflow User Group, BC 1.0.3.649), then work authorized. */
-function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
+function OvertimeWorkProgress({ request, className }: { request: OvertimeWorkRow; className?: string }) {
   const submitted = request.status !== 'Draft'
   const rows = [
     { key: 'employee', heading: 'Employee', owner: request.employeeName || 'You', icon: UserRound, state: submitted ? 'done' : 'open', caption: 'Draft' },
@@ -332,6 +332,7 @@ function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
   const steps = rows.map((row) => ({ state: row.state, caption: row.caption }))
   return (
     <ProcessTracker
+      className={className}
       title="Workflow Progress"
       steps={rows.map(({ key, heading, owner, icon }) => ({ key, heading, owner, icon }))}
       stage={stageFromSteps(steps as Array<{ state: 'done' | 'rejected' | 'open'; caption?: string }>)}
@@ -349,7 +350,9 @@ function OvertimeWorkFormProgress({
   employeeName,
   lineCount,
   hasReason,
+  className,
 }: {
+  className?: string
   approvers: Array<{ label?: string; approverName?: string; approverUserId?: string }>
   employeeName?: string
   lineCount: number
@@ -366,6 +369,7 @@ function OvertimeWorkFormProgress({
     : [{ key: 'group', heading: 'Workflow User Group', owner: 'Set by the BC overtime workflow', icon: Users }]
   return (
     <ProcessTracker
+      className={className}
       title="Workflow Progress"
       steps={[
         { key: 'employee', heading: 'Employee', owner: employeeName || 'You', icon: UserRound },
@@ -723,11 +727,19 @@ export function OvertimeWorkRequest() {
     )
 
   return (
-    <PageWrapper
-      title="Overtime Request"
-      description="Stage 1 — work authorization. Approver: the Workflow User Group in Business Central (set per division and department). Approved means you may work the overtime; hours are not on the overtime sheet yet. After the work is done, raise Stage 2 Overtime Payment Request."
-      actions={headerActions}
-    >
+    <PageWrapper title="Overtime Request" actions={headerActions}>
+      {/* Standard: the Workflow Progress tracker is the very first thing on the form and the document. */}
+      {mode === 'form' ? (
+        <OvertimeWorkFormProgress
+          className="mb-4"
+          approvers={contextQuery.data?.approvers ?? []}
+          employeeName={employee?.employeeName}
+          lineCount={lines.length}
+          hasReason={reason.trim().length >= 5 && expectedDeliverables.trim().length >= 3}
+        />
+      ) : mode === 'detail' && shown ? (
+        <OvertimeWorkProgress request={shown} className="mb-4" />
+      ) : null}
       <div className="mb-4 rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
         <p className="font-semibold">Stage 1 (work authorization) → Stage 2 (payment)</p>
         <p className="mt-1 text-teal-900/90">
@@ -766,7 +778,6 @@ export function OvertimeWorkRequest() {
 
       {mode === 'detail' && shown ? (
         <div className="portal-rise-children space-y-4">
-          <OvertimeWorkProgress request={shown} />
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <span className="text-sm font-semibold text-slate-900">{shown.requestNo}</span>
             <StatusBadge status={shown.status} />
@@ -868,12 +879,6 @@ export function OvertimeWorkRequest() {
 
       {mode === 'form' ? (
         <div className="space-y-4">
-          <OvertimeWorkFormProgress
-            approvers={contextQuery.data?.approvers ?? []}
-            employeeName={employee?.employeeName}
-            lineCount={lines.length}
-            hasReason={reason.trim().length >= 5 && expectedDeliverables.trim().length >= 3}
-          />
           {formError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
           ) : null}

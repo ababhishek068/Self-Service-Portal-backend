@@ -658,6 +658,10 @@ export function RequestFormPage({
       <PageWrapper title={`${title} Details`} showPageHeading={false}>
         <PortalFormCard title={`${title} Details`}>
           <div className="portal-rise-children space-y-6">
+            {/* Standard: Workflow Progress at the very top of the document. */}
+            {selected ? (
+              <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} approvalSteps={selected.approvalSteps} />
+            ) : null}
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
               <Button type="button" variant="outline" onClick={() => setSelectedId(null)}>
                 <ArrowLeft className="h-4 w-4" />
@@ -742,7 +746,6 @@ export function RequestFormPage({
                     />
                   ) : null
                 })()}
-                <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} approvalSteps={selected.approvalSteps} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {detailFields ? detailFields.map((field) => (
@@ -831,6 +834,8 @@ export function RequestFormPage({
       <PageWrapper title={editingRequestId ? `Edit ${title}` : title} showPageHeading={false}>
         <PortalFormCard title={editingRequestId ? `Edit ${title}` : title} allowOverflow>
           <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
+            {/* Standard: the Workflow Progress tracker is the first thing on every request form. */}
+            <RequestProgress status="Draft" creating={editingRequestId ? 'edit' : 'new'} requiresLines={false} />
             {formHeader}
             {description ? <p className="text-sm text-slate-600">{description}</p> : null}
             <div className="grid gap-3 sm:grid-cols-1 sm:gap-4 md:grid-cols-2">

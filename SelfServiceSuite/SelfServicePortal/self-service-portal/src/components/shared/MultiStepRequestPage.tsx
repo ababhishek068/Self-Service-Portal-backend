@@ -1114,6 +1114,20 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
             )}
           >
             {bcCard && !stageBanner ? null : renderProcessBanner(config, selected ?? null)}
+            {/* Standard: Workflow Progress at the very top of the document. */}
+            {selected && !bcCard && !stageBanner ? (
+              <RequestProgress
+                status={selected.status}
+                hasLines={lines.length > 0}
+                requiresLines={Boolean(config.line && config.line.required !== false)}
+                module={config.module.module}
+                lines={lines}
+                payload={payload}
+                approvalSteps={selected.approvalSteps}
+                afterApproval={config.progressAfterApproval?.(selected)}
+                expectedApprovers={config.progressApprovers}
+              />
+            ) : null}
             <div
               className={cn(
                 'flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4',
@@ -1340,17 +1354,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                {bcCard || stageBanner ? null : <RequestProgress
-                  status={selected.status}
-                  hasLines={lines.length > 0}
-                  requiresLines={Boolean(config.line && config.line.required !== false)}
-                  module={config.module.module}
-                  lines={lines}
-                  payload={payload}
-                  approvalSteps={selected.approvalSteps}
-                  afterApproval={config.progressAfterApproval?.(selected)}
-                  expectedApprovers={config.progressApprovers}
-                />}
                 {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
                 {(() => {
                   const details = (

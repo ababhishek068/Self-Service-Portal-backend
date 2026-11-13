@@ -11,7 +11,6 @@ import {
   History,
   Info,
   Landmark,
-  Network,
   Pencil,
   Printer,
   RefreshCw,
@@ -408,7 +407,7 @@ function workflowSteps(request: OvertimeRequestRow | null, context: WorkflowPrev
 }
 
 /** The overtime payment chain on the live Workflow Progress tracker; View details keeps each step's status, date and note. */
-function WorkflowTracker({ steps }: { steps: StepView[] }) {
+function WorkflowTracker({ steps, className }: { steps: StepView[]; className?: string }) {
   const stage = stageFromSteps(
     steps.map((step) => ({
       state: step.tone === 'done' || step.tone === 'skipped' ? 'done' : step.tone === 'rejected' ? 'rejected' : 'open',
@@ -417,6 +416,7 @@ function WorkflowTracker({ steps }: { steps: StepView[] }) {
   )
   return (
     <ProcessTracker
+      className={className}
       title="Workflow Progress"
       stage={stage}
       steps={steps.map((step) => ({ key: step.key, heading: step.label, owner: step.person || '—', icon: step.icon as ReactElement }))}
@@ -1069,11 +1069,29 @@ export function OvertimeRequest() {
   )
 
   return (
-    <PageWrapper
-      title="Overtime Payment Request"
-      description="Stage 2 — after the overtime authorized by an approved Overtime Request (Stage 1) is worked, request payment for it. The Workflow User Group in Business Central approves it; only then are the hours added to the overtime sheet, which HR sends to payroll."
-      actions={headerActions}
-    >
+    <PageWrapper title="Overtime Payment Request" actions={headerActions}>
+      {/* Standard: the Workflow Progress tracker is the very first thing on the form and the document. */}
+      {mode === 'form' || shown ? (
+        <>
+          <WorkflowTracker steps={steps} className="mb-4" />
+          {routingProblem && (!shown || shown.status === 'Draft') ? (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{routingProblem}</span>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      <div className="mb-4 flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50/80 px-4 py-3 text-sm text-teal-950">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" aria-hidden />
+        <p>
+          <span className="font-semibold">Validity Requirement:</span> This Overtime Request is valid only if an
+          approved Overtime Request Record/Document from Stage 1 is available, the requested job/activity has been
+          completed, and the completed work has been verified by the Line Supervisor.
+        </p>
+      </div>
+
       {contextError ? (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{contextError}</div>
       ) : null}
@@ -1322,7 +1340,7 @@ export function OvertimeRequest() {
             </div>
           </Section>
 
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-4">
             <Section icon={<CheckCircle2 className="h-4 w-4" />} title="Attendance Check">
               {(() => {
                 const active = context?.employee.active ?? true
@@ -1366,15 +1384,6 @@ export function OvertimeRequest() {
               })()}
             </Section>
 
-            <Section icon={<Network className="h-4 w-4" />} title="Approval Workflow" className="lg:col-span-2">
-              {routingProblem && (!shown || shown.status === 'Draft') ? (
-                <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{routingProblem}</span>
-                </div>
-              ) : null}
-              <WorkflowTracker steps={steps} />
-            </Section>
           </div>
 
           {formError && mode === 'form' ? (

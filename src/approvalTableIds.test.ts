@@ -3787,3 +3787,15 @@ describe('Advance Request without travel fields (ABH ESSP spec)', () => {
     )
   })
 })
+
+describe('Business Central unreachable', () => {
+  it('turns a bare "fetch failed" into a clear message with the network code', async () => {
+    const { bcConnectionError } = await import('./bcClient.js')
+    const raw = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+    const error = bcConnectionError(raw) as Error & { status?: number; code?: string }
+    assert.match(error.message, /Could not reach Business Central \(ECONNREFUSED\)/)
+    assert.equal(error.status, 502)
+    const other = new Error('Overtime request OTR-1 was not found.')
+    assert.equal(bcConnectionError(other), other)
+  })
+})

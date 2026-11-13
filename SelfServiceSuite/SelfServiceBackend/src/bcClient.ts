@@ -269,7 +269,7 @@ export async function fetchODataRaw(
     return data
   } catch (error) {
     failBcCall(call, error, statusCode)
-    throw error
+    throw bcConnectionError(error)
   }
 }
 
@@ -349,7 +349,7 @@ export async function patchODataRecord(
     completeBcCall(call, response.status, responseBytes(text))
   } catch (error) {
     failBcCall(call, error, statusCode)
-    throw error
+    throw bcConnectionError(error)
   }
 }
 
@@ -398,7 +398,7 @@ export async function fetchODataMetadata(baseUrl: string) {
     return text
   } catch (error) {
     failBcCall(call, error, statusCode)
-    throw error
+    throw bcConnectionError(error)
   }
 }
 
@@ -462,7 +462,7 @@ export async function postOData(serviceName: string, payload: Record<string, unk
     return data as ODataRecord | null
   } catch (error) {
     failBcCall(call, error, statusCode)
-    throw error
+    throw bcConnectionError(error)
   }
 }
 
@@ -537,6 +537,23 @@ function decodeXml(value: string) {
     .replaceAll('&quot;', '"')
     .replaceAll('&apos;', "'")
     .replaceAll('&amp;', '&')
+}
+
+/**
+ * Node's fetch reports any network failure (BC down, connection refused or reset, DNS, TLS, timeout)
+ * as a bare "fetch failed", which the portal then showed as is. Say plainly that Business Central
+ * could not be reached, with the network code, so users and IT know it is not the form.
+ */
+export function bcConnectionError(error: unknown) {
+  if (!(error instanceof TypeError) || !/fetch failed/i.test(error.message)) return error
+  const cause = (error as { cause?: { code?: unknown; message?: unknown } }).cause
+  const detail = String(cause?.code ?? cause?.message ?? '').trim()
+  return Object.assign(
+    new Error(
+      `Could not reach Business Central${detail ? ` (${detail})` : ''}. Check that the BC server is running and reachable from the portal server, then try again.`,
+    ),
+    { status: 502, code: 'BC_UNREACHABLE', cause: error },
+  )
 }
 
 export function soapFaultMessage(xml: string) {
@@ -665,6 +682,6 @@ export async function callSoapMethod(
     }
   } catch (error) {
     failBcCall(call, error, statusCode)
-    throw error
+    throw bcConnectionError(error)
   }
 }
