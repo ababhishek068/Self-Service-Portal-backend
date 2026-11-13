@@ -1,4 +1,6 @@
+import { BadgeCheck, Banknote } from 'lucide-react'
 import type { LocalPurchaseState } from '@/api/endpoints/requestEndpoint'
+import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import type { PortalRequest } from '@/types/erp.types'
 import { approvalStepsSummary } from '@/utils/requestStatus'
 
@@ -140,4 +142,28 @@ export function stageFromSteps(steps: Array<{ state: 'done' | 'rejected' | 'open
   const at = steps.findIndex((step) => step.state !== 'done')
   if (at < 0) return { index: steps.length, state: 'active' }
   return { index: at, state: 'active', caption: steps[at].caption }
+}
+
+/**
+ * Medical Claim after HR → Finance (BC 1.0.3.648): Finance creates the payment voucher, FAD then the
+ * Finance Manager approve it, and the Finance Manager posts and pays it. Posting closes the claim
+ * (Posted) and the Self / Dependants medical balance drops.
+ */
+export const MEDICAL_CLAIM_AFTER_APPROVAL: { steps: TrackerStep[]; caption: string } = {
+  caption: 'Payment voucher with Finance',
+  steps: [
+    { key: 'payment-voucher', heading: 'Payment Voucher', owner: 'FAD → Finance Manager', icon: Banknote },
+    { key: 'paid', heading: 'Paid', owner: 'Medical balance updated', icon: BadgeCheck },
+  ],
+}
+
+/** A Staff Claim document that is a Medical Claim (BC Is Medical Claim, or its medical purpose / type). */
+export function isMedicalClaimDocument(request: { requestType?: string; title?: string; payload?: Record<string, unknown> }) {
+  if (request.requestType && request.requestType !== 'staffClaim') return false
+  const payload = request.payload ?? {}
+  const flag = payload.IsMedicalClaim ?? payload.Is_Medical_Claim
+  if (flag === true || String(flag ?? '').toLowerCase() === 'true') return true
+  const purpose = String(request.title || payload.Purpose || payload.ClaimDescription || '')
+  if (/medical/i.test(purpose)) return true
+  return /^medical$/i.test(String(payload.ClaimType ?? payload.claimType ?? payload.Claim_Type ?? '').trim())
 }

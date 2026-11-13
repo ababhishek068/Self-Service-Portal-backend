@@ -49,7 +49,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     return sourceRows.filter((row) => {
       if (moduleFilter !== 'all' && row.module !== moduleFilter) return false
       if (!query) return true
-      return [row.requestNo, row.makerName, row.makerEmployeeNo, row.module, row.title]
+      return [row.requestNo, row.makerName, row.makerEmployeeNo, row.module, row.label, row.title]
         .some((value) => String(value ?? '').toLowerCase().includes(query))
     })
   }, [moduleFilter, search, sourceRows])
@@ -72,7 +72,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
     },
   ] : [
     { id: 'requestNo', header: 'No.', cell: (row) => row.requestNo },
-    { id: 'module', header: 'Module', cell: (row) => row.module },
+    { id: 'module', header: 'Module', cell: (row) => row.label ?? moduleLabels[row.module as PortalModuleKey] ?? row.module },
     { id: 'maker', header: 'Maker', cell: (row) => row.makerName },
     { id: 'amount', header: 'Amount', cell: (row) => formatCurrency(row.amount) },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
@@ -152,7 +152,7 @@ export function ApprovalsList({ type, title, emptyTitle }: ApprovalsListProps) {
                         <FileCheck2 className="h-5 w-5" />
                       </span>
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{moduleLabels[row.module as PortalModuleKey] ?? row.title ?? row.module}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{row.label ?? moduleLabels[row.module as PortalModuleKey] ?? row.title ?? row.module}</p>
                         <h3 className="truncate text-lg font-bold text-slate-900">{row.requestNo}</h3>
                       </div>
                     </div>

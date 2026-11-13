@@ -33,11 +33,16 @@ function workflowCycle(row: ODataRecord) {
   return text(row, ['WorkflowStepInstanceID', 'Workflow_Step_Instance_ID']).toLowerCase()
 }
 
-/** BC 1.0.3.646 stamps Superior / FAD / COO / CEO on Approval Entry.Description for portal history. */
+/**
+ * Role labels BC stamps on Approval Entry.Description for the portal history: Superior / FAD / COO /
+ * CEO (1.0.3.646), HR → Finance on a Medical Claim and FAD → Finance Manager on its payment voucher
+ * (1.0.3.648).
+ */
+export const BC_APPROVAL_ROLE_LABEL = /^(Superior|Line Manager|FAD|COO|CEO|FD|HR|Finance|Finance Manager|Approver\s*\d+)$/i
+
 function approvalRoleLabel(row: ODataRecord, approverId: string) {
   const description = text(row, ['Description', 'ApproverRole', 'Approver_Role', 'Role'])
-  const known =
-    /^(Superior|Line Manager|FAD|COO|CEO|FD|HR|Finance|Approver\s*\d+)$/i.test(description.trim())
+  const known = BC_APPROVAL_ROLE_LABEL.test(description.trim())
   if (known) return description.trim()
   return text(
     row,

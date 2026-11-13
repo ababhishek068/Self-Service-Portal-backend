@@ -1,4 +1,4 @@
-import { BadgeCheck, Banknote, FileCheck2, HeartPulse, ListPlus, Send, ShieldCheck, UserCheck, Users, type LucideIcon } from 'lucide-react'
+import { BadgeCheck, Banknote, Calculator, FileCheck2, Landmark, ListPlus, Send, ShieldCheck, UserCheck, UserCog, Users, type LucideIcon } from 'lucide-react'
 import { ProcessTracker, type TrackerStep } from '@/components/shared/ProcessTracker'
 import type { ProcessStage } from '@/data/processStages'
 import type { ApprovalStep, PortalModuleKey } from '@/types/erp.types'
@@ -13,6 +13,11 @@ interface RequestProgressProps {
   lines?: Record<string, unknown>[]
   payload?: Record<string, unknown>
   approvalSteps?: ApprovalStep[]
+  /**
+   * Stages after the approvals, in place of the closing Approved step (Medical Claim: the payment
+   * voucher, then Paid). Reached when the document is approved, done when it is posted.
+   */
+  afterApproval?: { steps: TrackerStep[]; caption: string }
   className?: string
 }
 
@@ -26,16 +31,25 @@ type ApproverGroup = {
   note?: string
 }
 
-const ROLE_HEADING: Partial<Record<ApprovalStep['role'], string>> = {
-  Finance: 'Finance',
-  HR: 'HR',
-  Facility: 'Facility',
+/**
+ * BC's role on the approval entry (Superior, FAD, HR → Finance on a Medical Claim, FAD → Finance
+ * Manager on its payment voucher; BC 1.0.3.646 / 648) names the step; otherwise Approver 1, 2, ...
+ */
+const ROLE_HEADING = /^(Superior|Line Manager|FAD|COO|CEO|FD|HR|Finance|Finance Manager|Facility)$/i
+
+const ROLE_ICON: Record<string, LucideIcon> = {
+  superior: UserCheck,
+  'line manager': UserCheck,
+  hr: UserCog,
+  finance: Banknote,
+  'finance manager': Calculator,
+  fad: Landmark,
+  facility: ShieldCheck,
 }
 
-const ROLE_ICON: Partial<Record<ApprovalStep['role'], LucideIcon>> = {
-  Finance: Banknote,
-  HR: HeartPulse,
-  Facility: ShieldCheck,
+function roleHeading(role: string) {
+  const label = String(role ?? '').trim()
+  return ROLE_HEADING.test(label) ? label : ''
 }
 
 /**
@@ -82,6 +96,7 @@ function approverOwner(group: ApproverGroup) {
 }
 
 const isApproved = (status: string) => ['approved', 'posted', 'released', 'completed', 'closed'].includes(status.trim().toLowerCase())
+const isPosted = (status: string) => ['posted', 'completed', 'closed', 'paid'].includes(status.trim().toLowerCase())
 const isPending = (status: string) => ['pending approval', 'submitted', 'pending'].includes(status.trim().toLowerCase())
 
 /**
@@ -93,6 +108,7 @@ function workflow({
   hasLines = false,
   requiresLines = false,
   approvalSteps = [],
+  afterApproval,
 }: RequestProgressProps): { steps: TrackerStep[]; stage: ProcessStage; groups: ApproverGroup[] } {
   const normalized = status.trim().toLowerCase()
   const detailReady = !requiresLines || hasLines
@@ -109,19 +125,21 @@ function workflow({
   if (groups.length) {
     let approverNo = 0
     for (const group of groups) {
-      const roleHeading = ROLE_HEADING[group.role]
-      approverNo += roleHeading ? 0 : 1
+      const heading = roleHeading(group.role)
+      approverNo += heading ? 0 : 1
       steps.push({
         key: group.key,
-        heading: roleHeading ?? (groups.length === 1 ? 'Approval' : `Approver ${approverNo}`),
+        heading: heading || (groups.length === 1 ? 'Approval' : `Approver ${approverNo}`),
         owner: approverOwner(group),
-        icon: ROLE_ICON[group.role] ?? (group.names.length > 1 ? Users : UserCheck),
+        icon: ROLE_ICON[heading.toLowerCase()] ?? (group.names.length > 1 ? Users : UserCheck),
       })
     }
   } else {
     steps.push({ key: 'approval', heading: 'Approval workflow', owner: 'Business Central approvers', icon: Send })
   }
-  steps.push({ key: 'approved', heading: 'Approved', owner: 'Document complete', icon: BadgeCheck })
+  const firstAfter = steps.length
+  if (afterApproval?.steps.length) steps.push(...afterApproval.steps)
+  else steps.push({ key: 'approved', heading: 'Approved', owner: 'Document complete', icon: BadgeCheck })
 
   const firstApproval = 2
   const groupIndex = (wanted: (group: ApproverGroup) => boolean) => {
@@ -129,7 +147,11 @@ function workflow({
     return found >= 0 ? firstApproval + found : -1
   }
   let stage: ProcessStage
-  if (isApproved(status) || (groups.length > 0 && groups.every((group) => group.status === 'Approved') && !normalized.includes('reject'))) {
+  const approvalsDone =
+    isApproved(status) || (groups.length > 0 && groups.every((group) => group.status === 'Approved') && !normalized.includes('reject'))
+  if (approvalsDone && afterApproval?.steps.length && !isPosted(status)) {
+    stage = { index: firstAfter, state: 'active', caption: afterApproval.caption }
+  } else if (approvalsDone) {
     stage = { index: steps.length, state: 'active' }
   } else if (normalized.includes('reject')) {
     const at = groupIndex((group) => group.status === 'Rejected')
@@ -171,7 +193,10 @@ export function RequestProgress(props: RequestProgressProps) {
           <ol className="space-y-1.5 pl-6 marker:font-semibold marker:text-slate-800">
             {groups.map((group) => (
               <li key={group.key} className="list-decimal pl-1 leading-relaxed">
-                <span className="font-semibold text-slate-900">{group.names.join(' / ') || 'Approver'}</span>
+                <span className="font-semibold text-slate-900">
+                  {roleHeading(group.role) ? `${roleHeading(group.role)}: ` : ''}
+                  {group.names.join(' / ') || 'Approver'}
+                </span>
                 {' — '}
                 {group.status === 'Waiting' ? 'Not reached yet' : group.status}
                 {group.timestamp && group.status !== 'Waiting' ? ` · ${formatDate(group.timestamp)}` : ''}

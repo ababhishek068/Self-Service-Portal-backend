@@ -28,6 +28,7 @@ import {
   resolveRequestingDepartmentCode,
 } from './employeeProfile.js'
 import {
+  APPROVAL_TABLE_IDS,
   approvalModuleFromEntry,
   approvalTableFilter,
   approvalTableIdsFor,
@@ -74,6 +75,7 @@ import {
   mapApprovalStepsWithSequence,
   mergeApprovalComments,
   newestApprovalEntry,
+  BC_APPROVAL_ROLE_LABEL,
   resolveLeaveApprovalSteps,
   resolveLeaveApprovalStepsAsync,
   selectApprovalWorkflowEntries,
@@ -703,7 +705,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v370 — 1.0.3.531 (Live animated Workflow Progress tracker on every document, process banners show the current stage; for BC 1.0.3.647)'
+export const PORTAL_API_BUILD = 'v371 — 1.0.3.532 (Medical Claim separate from Staff Claim: HR then Finance, payment voucher FAD then Finance Manager, Medical Claim labels; for BC 1.0.3.648)'
 
 interface LookupSpec {
   service: string
@@ -2179,7 +2181,7 @@ async function decidedApprovalQueues(authUser: AuthUser) {
   const approverIds = new Set(ids.map((id) => id.trim().toUpperCase()).filter(Boolean))
   const isApprover = (id: string) => approverIds.has(id.trim().toUpperCase())
   // The OData queue items, and the Overtime Requests (BC 1.0.3.606) the approver decided.
-  type DecidedItem = Omit<ReturnType<typeof approvalQueueItem>, 'module'> & { module: string }
+  type DecidedItem = Omit<ReturnType<typeof approvalQueueItem>, 'module' | 'label'> & { module: string; label?: string }
   const approved: DecidedItem[] = []
   const rejected: DecidedItem[] = []
   for (const [key, rows] of mine) {
@@ -2216,7 +2218,7 @@ async function decidedApprovalQueues(authUser: AuthUser) {
     if (outcome === 'Approved') approved.push(item)
     else rejected.push(item)
   }
-  return { approved, rejected }
+  return { approved: await labelMedicalClaims(approved), rejected: await labelMedicalClaims(rejected) }
 }
 
 /** ESS uses plain document numbers (e.g. LV00077); the portal also accepts module-prefixed ids. */
@@ -2395,15 +2397,60 @@ async function soapApprovalQueues(authUser: AuthUser) {
   }
 }
 
+/** BC 1.0.3.648: a Staff Claim header that is a Medical Claim (Is Medical Claim, or a medical purpose / type). */
+export function isMedicalClaimHeader(row: ODataRecord) {
+  const flag = row.IsMedicalClaim ?? row.Is_Medical_Claim
+  if (flag === true || String(flag ?? '').toLowerCase() === 'true') return true
+  if (/medical/i.test(text(row, ['Purpose', 'ClaimDescription', 'Claim_Description']))) return true
+  return /^medical$/i.test(text(row, ['ClaimType', 'Claim_Type']))
+}
+
+/**
+ * Medical Claims among queued Staff Claims are labelled Medical Claim (BC 1.0.3.648: separate from
+ * Staff Claim, approved HR → Finance). One header lookup per 10 claims; a failed lookup labels nothing.
+ */
+async function labelMedicalClaims<T extends { module: string; requestNo: string; label?: string; title: string }>(items: T[]) {
+  const claimNos = [...new Set(items.filter((item) => item.module === 'staffClaim').map((item) => item.requestNo.trim()).filter(Boolean))]
+  if (!claimNos.length) return items
+  const medical = new Set<string>()
+  for (let offset = 0; offset < claimNos.length; offset += 10) {
+    const chunk = claimNos.slice(offset, offset + 10)
+    const rows = (await fetchOData('QyStaffClaimHeader', {
+      $filter: `(${chunk.map((no) => `No eq '${odataString(no)}'`).join(' or ')})`,
+      $top: 50,
+    }).catch(() => [])) as ODataRecord[] | null
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (isMedicalClaimHeader(row)) medical.add(normalizedApprovalDocKey(text(row, ['No'])))
+    }
+  }
+  return items.map((item) =>
+    item.module === 'staffClaim' && medical.has(normalizedApprovalDocKey(item.requestNo))
+      ? { ...item, label: 'Medical Claim', title: 'Medical Claim' }
+      : item,
+  )
+}
+
 function approvalQueueItem(row: ODataRecord) {
   const module = approvalModule(row)
   const documentNo = text(row, ['DocumentNo', 'Document_No'])
   const status = text(row, ['Status'], 'Open')
+  // BC 1.0.3.648: a Medical Claim's Payment Voucher (FAD → Finance Manager) reaches the approver's
+  // queue too. It is no Purchase Requisition; DocumentApproval decides it by its entry like any other.
+  const paymentVoucher = Number(row.TableID ?? row.TableId ?? 0) === APPROVAL_TABLE_IDS.paymentVoucher
+  // Description carries the approver's role (HR, Finance, FAD, ...) since 646, never the document.
+  const description = text(row, ['Description'])
+  const title =
+    (paymentVoucher ? 'Payment Voucher' : '') ||
+    text(row, ['DocumentType', 'Document_Type']) ||
+    (BC_APPROVAL_ROLE_LABEL.test(description) ? '' : description) ||
+    `${module} approval`
   return {
     id: `${module}-${documentNo}`,
     requestNo: documentNo,
     module,
-    title: text(row, ['DocumentType', 'Description'], `${module} approval`),
+    /** The document kind to show instead of the module's (Payment Voucher, Medical Claim). */
+    label: paymentVoucher ? 'Payment Voucher' : undefined as string | undefined,
+    title,
     makerEmployeeNo: text(row, ['SenderID', 'UserID', 'EmployeeNo']),
     makerName: text(row, ['SenderName', 'EmployeeName', 'UserID'], text(row, ['SenderID', 'EmployeeNo'])),
     amount: number(row, ['Amount', 'TotalAmount']),
@@ -6779,7 +6826,9 @@ export function buildPortalApiRouter() {
       const liveRows = await filterApprovalEntriesWithExistingSource(
         (Array.isArray(rows) ? rows : []).filter((row) => !isEmployeeExitApprovalEntry(row)),
       )
-      const financeItems = liveRows.map((row) => approvalQueueItem(row)).filter((item) => item.requestNo)
+      const financeItems = await labelMedicalClaims(
+        liveRows.map((row) => approvalQueueItem(row)).filter((item) => item.requestNo),
+      )
       res.json({
         rows: sortNewestFirst([...financeItems, ...soapQueue.queueItems.filter((item) => item.requestNo)]),
       })

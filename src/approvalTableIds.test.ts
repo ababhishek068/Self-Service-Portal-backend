@@ -96,6 +96,7 @@ import {
   weeklyLateAttendanceSummary,
   authUserCanManageHrPolicies,
   parseHrPolicyUpload,
+  isMedicalClaimHeader,
 } from './portalApi.js'
 
 import { deriveCodeunitSoapUrl, codeunitSoapNamespace } from './bcClient.js'
@@ -848,6 +849,29 @@ describe('approval workflow instance isolation', () => {
       selected.map((row) => row.EntryNo),
       [42, 43],
     )
+  })
+
+  it('shows the Medical Claim roles BC 1.0.3.648 stamps: HR then Finance, FAD then Finance Manager', () => {
+    const steps = mapApprovalSteps([
+      { ApproverID: 'HR_USER', ApproverName: 'Hana HR', SequenceNo: 1, Status: 'Approved', Description: 'HR', ApproverJobTitle: 'HR Officer' },
+      { ApproverID: 'FIN_USER', ApproverName: 'Fikru Finance', SequenceNo: 2, Status: 'Open', Description: 'Finance' },
+      { ApproverID: 'FM_USER', ApproverName: 'Meron FM', SequenceNo: 3, Status: 'Created', Description: 'Finance Manager', ApproverJobTitle: 'Accountant' },
+    ])
+    assert.deepEqual(
+      steps.map((step) => [step.role, step.status]),
+      [
+        ['HR', 'Approved'],
+        ['Finance', 'Pending Approval'],
+        ['Finance Manager', 'Waiting'],
+      ],
+    )
+  })
+
+  it('tells a Medical Claim header from a Staff Claim (BC 1.0.3.648)', () => {
+    assert.equal(isMedicalClaimHeader({ No: 'ABH-STC1', IsMedicalClaim: true }), true)
+    assert.equal(isMedicalClaimHeader({ No: 'ABH-STC2', Purpose: 'Medical Claim' }), true)
+    assert.equal(isMedicalClaimHeader({ No: 'ABH-STC3', ClaimType: 'MEDICAL' }), true)
+    assert.equal(isMedicalClaimHeader({ No: 'ABH-STC4', Purpose: 'Field travel', ClaimType: 'TRAVEL' }), false)
   })
 
   it('renders only the newest timestamp for each repeated sequence and approver', () => {

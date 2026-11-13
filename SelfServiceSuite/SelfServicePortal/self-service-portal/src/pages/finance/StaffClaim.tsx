@@ -21,6 +21,7 @@ import { formatCurrency, formatDate } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
+import { MEDICAL_CLAIM_AFTER_APPROVAL } from '@/data/processStages'
 
 const module = { module: 'staffClaim', entity: 'selfServiceStaffClaims' } as const
 
@@ -76,6 +77,9 @@ function medicalClaimTypeOptions(options: LookupOption[]) {
  * claim type when present so older medical drafts stay on the Medical Claim list only.
  */
 function isMedicalClaimRequest(row: PortalRequest) {
+  // BC 1.0.3.648 flags the header Is Medical Claim (kept off the Staff Claim list).
+  const flag = row.payload?.IsMedicalClaim ?? row.payload?.Is_Medical_Claim
+  if (flag === true || String(flag ?? '').toLowerCase() === 'true') return true
   const purpose = String(row.title || row.payload?.Purpose || row.payload?.ClaimDescription || '')
   if (/medical/i.test(purpose)) return true
   const headerType = row.payload?.ClaimType ?? row.payload?.claimType ?? row.payload?.Claim_Type
@@ -406,7 +410,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       headerLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       description={
         medicalOnly
-          ? `Medical Claim (BC 1.0.3.642): company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self / Dependants budget (Basic × 12 × 20%, split 50/50). Eligible dependants: Spouse, Father, Mother, Child under 18 with Date of Birth and Birth Certificate No. on HR Employee Dependants. Attach the invoice, then Submit to HR.`
+          ? `Medical Claim (BC 1.0.3.642): company pays ${MEDICAL_CLAIM_COMPANY_COVERAGE_PERCENT}% of the accepted receipt, capped by remaining Self / Dependants budget (Basic × 12 × 20%, split 50/50). Eligible dependants: Spouse, Father, Mother, Child under 18 with Date of Birth and Birth Certificate No. on HR Employee Dependants. Attach the invoice, then Submit: HR verifies, Finance approves (BC 1.0.3.648). Finance then pays it through a payment voucher (FAD → Finance Manager); once paid, the claim closes and your medical balance updates.`
           : 'Add claim lines by type (Accommodation, Travel, Other, and any non-medical BC types). Medical Claim is not available here — use Finance → Medical Claim.'
       }
       module={module}
@@ -430,6 +434,8 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
           : undefined
       }
       submitSuccessMessage={medicalOnly ? 'Medical claim submitted to HR' : undefined}
+      // BC 1.0.3.648: after HR → Finance, the payment voucher (FAD → Finance Manager), then Paid.
+      progressAfterApproval={medicalOnly ? () => MEDICAL_CLAIM_AFTER_APPROVAL : undefined}
       cancelStatuses={FINANCE_CANCEL_STATUSES}
       newButtonLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       headerSchema={staffClaimHeaderSchema}

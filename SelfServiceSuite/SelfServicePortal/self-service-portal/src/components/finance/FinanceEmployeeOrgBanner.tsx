@@ -40,7 +40,10 @@ export function FinanceEmployeeOrgBanner({
     queryKey: ['profile', 'medical-balances'],
     queryFn: getEmployeeMedicalBalances,
     enabled: showMedicalBalances,
-    staleTime: 60 * 1000,
+    // BC 1.0.3.648 lowers the balance when the Finance Manager posts the claim's payment voucher,
+    // outside the portal: read it fresh each time the Medical Claim form opens.
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   const profile = profileQuery.data
 

@@ -248,6 +248,8 @@ export interface ApprovalQueueItem {
   id: string
   requestNo: string
   module: string
+  /** The document kind when it differs from the module's (Medical Claim, Payment Voucher; BC 1.0.3.648). */
+  label?: string
   title: string
   makerEmployeeNo: string
   makerName: string

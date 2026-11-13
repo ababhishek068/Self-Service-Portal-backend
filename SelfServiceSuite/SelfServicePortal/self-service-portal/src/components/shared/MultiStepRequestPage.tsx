@@ -25,6 +25,7 @@ import { DataTable, type DataTableColumn } from './DataTable'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
+import type { TrackerStep } from './ProcessTracker'
 import { ApprovalHistorySection } from './ApprovalHistory'
 import { SentBackNotice } from './SentBackNotice'
 import {
@@ -123,6 +124,8 @@ export interface MultiStepRequestConfig {
    * the Workflow Progress tracker and shows on a BC card too.
    */
   processBanner?: ReactNode | ((request: PortalRequest | null) => ReactNode)
+  /** Stages after the approvals on the Workflow Progress tracker (Medical Claim: payment voucher, then Paid). */
+  progressAfterApproval?: (request: PortalRequest) => { steps: TrackerStep[]; caption: string } | undefined
   /** Some workflows should show the process only after a request is started. */
   showProcessBannerOnList?: boolean
   module: EndpointConfig
@@ -1332,6 +1335,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   lines={lines}
                   payload={payload}
                   approvalSteps={selected.approvalSteps}
+                  afterApproval={config.progressAfterApproval?.(selected)}
                 />}
                 {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
                 {(() => {
