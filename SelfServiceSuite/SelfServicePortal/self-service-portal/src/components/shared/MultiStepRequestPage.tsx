@@ -109,11 +109,20 @@ export interface MultiStepLineConfig {
   requiredMessage?: string
 }
 
+/** The config's process banner; a stage-tracking banner gets the open document (null when none). */
+function renderProcessBanner(config: Pick<MultiStepRequestConfig, 'processBanner'>, request: PortalRequest | null): ReactNode {
+  return typeof config.processBanner === 'function' ? config.processBanner(request) : config.processBanner
+}
+
 export interface MultiStepRequestConfig {
   title: string
   description?: string
-  /** Optional process-flow banner shown on list, create, and detail views. */
-  processBanner?: ReactNode
+  /**
+   * Optional process-flow banner shown on list, create, and detail views. As a function it gets the
+   * open document (null on the list and a new request) and tracks its stage; it then stands in for
+   * the Workflow Progress tracker and shows on a BC card too.
+   */
+  processBanner?: ReactNode | ((request: PortalRequest | null) => ReactNode)
   /** Some workflows should show the process only after a request is started. */
   showProcessBannerOnList?: boolean
   module: EndpointConfig
@@ -524,7 +533,7 @@ function HeaderForm({
       >
         <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
           {config.description ? <p className="text-sm text-slate-600">{config.description}</p> : null}
-          {config.processBanner}
+          {renderProcessBanner(config, request ?? null)}
           <div
             className={cn(
               'grid gap-3 sm:gap-4',
@@ -957,6 +966,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
 
   const selected = detailQuery.data
   const bcCard = selected ? config.bcCard?.(selected) === true : false
+  // A stage-tracking process banner is the document's tracker (in place of Workflow Progress).
+  const stageBanner = typeof config.processBanner === 'function'
   const sentBack = bcCard ? null : sentBackInfo(selected)
   const editable = selected && !bcCard
     ? isEditableRequestStatus(editingStatus(selected), config.module.module)
@@ -1082,11 +1093,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
         <PortalFormCard title={`${config.title} Details`}>
           <div
             className={cn(
-              'space-y-6',
+              'portal-rise-children space-y-6',
               config.detailActionsPlacement === 'bottom' && 'flex flex-col gap-6 space-y-0',
             )}
           >
-            {bcCard ? null : config.processBanner}
+            {bcCard && !stageBanner ? null : renderProcessBanner(config, selected ?? null)}
             <div
               className={cn(
                 'flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4',
@@ -1313,7 +1324,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                {bcCard ? null : <RequestProgress
+                {bcCard || stageBanner ? null : <RequestProgress
                   status={selected.status}
                   hasLines={lines.length > 0}
                   requiresLines={Boolean(config.line && config.line.required !== false)}
@@ -1650,7 +1661,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   return (
     <PageWrapper title={config.title} actions={<PortalNewButton label={config.newButtonLabel ?? 'New Request'} onClick={() => setMode('create')} />}>
       {config.processBanner && config.showProcessBannerOnList !== false ? (
-        <div className="mb-4">{config.processBanner}</div>
+        <div className="mb-4">{renderProcessBanner(config, null)}</div>
       ) : null}
       {requestsQuery.isLoading ? (
         <Skeleton className="h-48 w-full" />

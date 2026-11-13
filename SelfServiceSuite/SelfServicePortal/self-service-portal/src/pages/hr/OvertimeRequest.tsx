@@ -3,7 +3,6 @@ import { format, isValid, parseISO } from 'date-fns'
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowRight,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -12,7 +11,6 @@ import {
   History,
   Info,
   Landmark,
-  MinusCircle,
   Network,
   Pencil,
   Printer,
@@ -27,8 +25,10 @@ import {
   Users,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { ProcessTracker } from '@/components/shared/ProcessTracker'
+import { stageFromSteps } from '@/data/processStages'
 import {
   estimateOvertimeAmount,
   fetchOvertimeContext,
@@ -407,45 +407,32 @@ function workflowSteps(request: OvertimeRequestRow | null, context: WorkflowPrev
   ]
 }
 
-const TONE_STYLES: Record<StepView['tone'], { circle: string; pill: string; Icon: typeof CheckCircle2 }> = {
-  done: { circle: 'bg-emerald-600 text-white', pill: 'bg-emerald-50 text-emerald-700 ring-emerald-200', Icon: CheckCircle2 },
-  pending: { circle: 'bg-amber-500 text-white', pill: 'bg-amber-50 text-amber-800 ring-amber-200', Icon: Clock },
-  rejected: { circle: 'bg-red-600 text-white', pill: 'bg-red-50 text-red-700 ring-red-200', Icon: XCircle },
-  info: { circle: 'bg-[var(--portal-navy)] text-white', pill: 'bg-blue-50 text-blue-800 ring-blue-200', Icon: CheckCircle2 },
-  skipped: { circle: 'bg-slate-300 text-white', pill: 'bg-slate-50 text-slate-500 ring-slate-200', Icon: MinusCircle },
-  idle: { circle: 'bg-slate-200 text-slate-600', pill: 'bg-slate-50 text-slate-600 ring-slate-200', Icon: Clock },
-}
-
+/** The overtime payment chain on the live Workflow Progress tracker; View details keeps each step's status, date and note. */
 function WorkflowTracker({ steps }: { steps: StepView[] }) {
+  const stage = stageFromSteps(
+    steps.map((step) => ({
+      state: step.tone === 'done' || step.tone === 'skipped' ? 'done' : step.tone === 'rejected' ? 'rejected' : 'open',
+      caption: step.status,
+    })),
+  )
   return (
-    <ol className="grid gap-3 sm:grid-cols-3 lg:flex lg:items-start lg:gap-1">
-      {steps.map((step, index) => {
-        const style = TONE_STYLES[step.tone]
-        return (
-          <li key={step.key} className="flex min-w-0 items-start gap-1 lg:flex-1">
-            <div className="flex min-w-0 flex-1 flex-col items-center text-center">
-              <span className={cn('relative flex h-11 w-11 items-center justify-center rounded-full shadow-sm', style.circle)}>
-                {step.icon}
-                <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[var(--portal-navy)] ring-1 ring-slate-200">
-                  {index + 1}
-                </span>
-              </span>
-              <p className="mt-2 text-sm font-semibold text-slate-900">{step.label}</p>
-              <p className="max-w-full truncate text-xs text-slate-500" title={step.person}>{step.person || '—'}</p>
-              <span className={cn('mt-1.5 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1', style.pill)}>
-                <style.Icon className="h-3.5 w-3.5" />
-                {step.status}
-              </span>
-              {step.at ? <p className="mt-1 text-[11px] text-slate-500">{formatDateTime(step.at)}</p> : null}
-              {step.note ? <p className="mt-1 line-clamp-3 text-[11px] italic text-slate-500" title={step.note}>{step.note}</p> : null}
-            </div>
-            {index < steps.length - 1 ? (
-              <ArrowRight className="mt-3 hidden h-5 w-5 shrink-0 text-slate-400 lg:block" aria-hidden />
-            ) : null}
-          </li>
-        )
-      })}
-    </ol>
+    <ProcessTracker
+      title="Workflow Progress"
+      stage={stage}
+      steps={steps.map((step) => ({ key: step.key, heading: step.label, owner: step.person || '—', icon: step.icon as ReactElement }))}
+      details={
+        <ol className="space-y-1.5 pl-6 marker:font-semibold marker:text-slate-800">
+          {steps.map((step) => (
+            <li key={step.key} className="list-decimal pl-1 leading-relaxed">
+              <span className="font-semibold text-slate-900">{step.label}</span>
+              {step.person ? ` (${step.person})` : ''} — {step.status}
+              {step.at ? ` · ${formatDateTime(step.at)}` : ''}
+              {step.note ? <span className="block text-xs italic text-slate-600">{step.note}</span> : null}
+            </li>
+          ))}
+        </ol>
+      }
+    />
   )
 }
 

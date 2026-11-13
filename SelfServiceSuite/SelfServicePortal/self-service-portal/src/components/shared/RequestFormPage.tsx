@@ -657,7 +657,7 @@ export function RequestFormPage({
     return (
       <PageWrapper title={`${title} Details`} showPageHeading={false}>
         <PortalFormCard title={`${title} Details`}>
-          <div className="space-y-6">
+          <div className="portal-rise-children space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
               <Button type="button" variant="outline" onClick={() => setSelectedId(null)}>
                 <ArrowLeft className="h-4 w-4" />
@@ -742,7 +742,7 @@ export function RequestFormPage({
                     />
                   ) : null
                 })()}
-                <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} />
+                <RequestProgress status={selected.status} hasLines={lines.length > 0} requiresLines={false} approvalSteps={selected.approvalSteps} />
                 <section>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {detailFields ? detailFields.map((field) => (

@@ -6,7 +6,7 @@ import { LprCardDetails } from '@/components/facility/LprCardDetails'
 import { LocalPurchasePanel } from '@/components/facility/LocalPurchasePanel'
 import { LprApprovalHistorySection } from '@/components/facility/LprApprovalHistory'
 import { LprLinesSubform } from '@/components/facility/LprLinesSubform'
-import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
+import { LocalPurchaseProcessBanner } from '@/components/facility/ProcessStageBanners'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { useAuth } from '@/hooks/useAuth'
 import { useQuery } from '@tanstack/react-query'
@@ -24,12 +24,6 @@ import { purchaseHeaderSchema, purchaseLineSchema } from '@/schemas/requestSchem
 import { formatCurrency } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { isEmployeeIdentifier, requesterDisplayName } from '@/utils/requesterDisplayName'
-import {
-  ABH_PURCHASE_REQUEST_PROCESS_FLOWS,
-  ABH_PURCHASE_REQUEST_PROCESS_NOTE,
-  ABH_PURCHASE_REQUEST_PROCESS_TITLE,
-  purchaseRequisitionProcess,
-} from '@/data/procurementProcessFlows'
 
 const today = todayIsoDate()
 const module = { module: 'purchaseRequisition', entity: 'selfServicePurchaseRequisitions' } as const
@@ -72,15 +66,6 @@ function syncLinePricing(
   }
 }
 
-const purchaseProcessBanner = (
-  <ProcurementProcessBanner
-    title={ABH_PURCHASE_REQUEST_PROCESS_TITLE}
-    steps={purchaseRequisitionProcess}
-    note={ABH_PURCHASE_REQUEST_PROCESS_NOTE}
-    flows={[...ABH_PURCHASE_REQUEST_PROCESS_FLOWS]}
-  />
-)
-
 export function PurchaseRequisition() {
   const [searchParams] = useSearchParams()
   const { employee } = useAuth()
@@ -102,7 +87,7 @@ export function PurchaseRequisition() {
     <MultiStepRequestPage
       title={title}
       headerLabel={`New ${title}`}
-      processBanner={purchaseProcessBanner}
+      processBanner={(request) => <LocalPurchaseProcessBanner request={request} />}
       showProcessBannerOnList
       module={module}
       queryKey={['facility', 'purchase-requisition']}

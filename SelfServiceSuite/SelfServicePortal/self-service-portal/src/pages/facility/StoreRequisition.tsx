@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { StoreOperationsPanel } from '@/components/facility/StoreOperationsPanel'
-import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
+import { StoreRequisitionProcessBanner } from '@/components/facility/ProcessStageBanners'
 import {
   getStoreRequisitionOptions,
   listModuleRequests,
@@ -22,11 +22,6 @@ import { storeHeaderSchema, storeLineSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { isEmployeeIdentifier, requesterDisplayName } from '@/utils/requesterDisplayName'
-import {
-  ABH_STORE_REQUISITION_PROCESS_FLOWS,
-  ABH_STORE_REQUISITION_PROCESS_TITLE,
-  storeRequisitionProcess,
-} from '@/data/procurementProcessFlows'
 
 const today = todayIsoDate()
 const module = { module: 'storeRequisition', entity: 'selfServiceStoreRequisitions' } as const
@@ -63,14 +58,6 @@ function isAssetRequestPayload(payload: Record<string, unknown> | undefined) {
     .toLowerCase()
   return ['1', 'asset', 'minor asset', 'minor_asset', 'fixed asset', 'fixed_asset'].includes(value)
 }
-
-const storeProcessBanner = (
-  <ProcurementProcessBanner
-    title={ABH_STORE_REQUISITION_PROCESS_TITLE}
-    steps={storeRequisitionProcess}
-    flows={[...ABH_STORE_REQUISITION_PROCESS_FLOWS]}
-  />
-)
 
 export function StoreRequisition() {
   const [searchParams] = useSearchParams()
@@ -121,7 +108,7 @@ export function StoreRequisition() {
       title="Store Requisition"
       description="Choose the issuing store, describe what you need with the unit of measure and quantity, then send it for approval. The store offers the real item; you check the Item Borrowing Form and accept it, then confirm receipt."
       headerLabel="New Store Requisition"
-      processBanner={storeProcessBanner}
+      processBanner={(request) => <StoreRequisitionProcessBanner request={request} />}
       showProcessBannerOnList={false}
       detailActionsPlacement="bottom"
       cancelStatuses={['Pending Approval']}

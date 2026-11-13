@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  BadgeCheck,
   CalendarDays,
   ClipboardList,
   MapPin,
@@ -12,6 +13,8 @@ import {
   Trash2,
   Undo2,
   User,
+  UserCheck,
+  UserRound,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
@@ -28,6 +31,8 @@ import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { ProcessTracker } from '@/components/shared/ProcessTracker'
+import { stageFromSteps } from '@/data/processStages'
 import { ClockTimePicker } from '@/components/shared/ClockTimePicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -148,6 +153,38 @@ function printWorkRequest(work: OvertimeWorkRow) {
 <script>window.onload=function(){window.print()}</script></body></html>`)
   popup.document.close()
   return true
+}
+
+/** Stage 1 on the live Workflow Progress tracker: the employee, each BC approver (Superior, FAD), then work authorized. */
+function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
+  const submitted = request.status !== 'Draft'
+  const rows = [
+    { key: 'employee', heading: 'Employee', owner: request.employeeName || 'You', icon: UserRound, state: submitted ? 'done' : 'open', caption: 'Draft' },
+    ...request.steps.map((step) => ({
+      key: `stage-${step.stage}`,
+      heading: step.label || `Approver ${step.stage}`,
+      owner: step.approverName || step.approverUserId || 'Set by BC',
+      icon: UserCheck,
+      state: step.status === 'Approved' || step.status === 'Skipped' ? 'done' : step.status === 'Rejected' ? 'rejected' : 'open',
+      caption: step.status === 'Pending' ? 'Pending approval' : step.status,
+    })),
+    {
+      key: 'authorized',
+      heading: 'Work authorized',
+      owner: 'Then request payment',
+      icon: BadgeCheck,
+      state: request.status === 'Approved' ? 'done' : request.status === 'Cancelled' ? 'rejected' : 'open',
+      caption: request.status === 'Cancelled' ? 'Cancelled' : 'Waiting for approval',
+    },
+  ] as const
+  const steps = rows.map((row) => ({ state: row.state, caption: row.caption }))
+  return (
+    <ProcessTracker
+      title="Workflow Progress"
+      steps={rows.map(({ key, heading, owner, icon }) => ({ key, heading, owner, icon }))}
+      stage={stageFromSteps(steps as Array<{ state: 'done' | 'rejected' | 'open'; caption?: string }>)}
+    />
+  )
 }
 
 export function OvertimeWorkRequest() {
@@ -525,7 +562,8 @@ export function OvertimeWorkRequest() {
       ) : null}
 
       {mode === 'detail' && shown ? (
-        <div className="space-y-4">
+        <div className="portal-rise-children space-y-4">
+          <OvertimeWorkProgress request={shown} />
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <span className="text-sm font-semibold text-slate-900">{shown.requestNo}</span>
             <StatusBadge status={shown.status} />

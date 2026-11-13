@@ -6,6 +6,7 @@ import { HistorySection } from '@/components/shared/HistorySection'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { RequestProgress } from '@/components/shared/RequestProgress'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -512,7 +513,8 @@ export function ApprovalDetail() {
                 <StatusBadge status={displayStatus ?? request.status} />
               </div>
             </CardHeader>
-            <CardContent className="space-y-6 p-5 sm:p-6">
+            <CardContent className="portal-rise-children space-y-6 p-5 sm:p-6">
+              <RequestProgress status={request.status} approvalSteps={approvalHistorySteps(request)} />
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Maker</p>

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, ClipboardList, FileText, PackageCheck, Receipt, ShoppingCart, Truck } from 'lucide-react'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
@@ -211,8 +211,8 @@ function RelatedDocuments({ docs }: { docs: RelatedDoc[] }) {
             doc.onOpen && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
           )
           return (
-            <div key={doc.key} className="flex items-center gap-1.5">
-              {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-white/45" aria-hidden="true" /> : null}
+            <div key={doc.key} className="portal-band-chip-slot flex items-center gap-1.5" style={{ '--i': index } as CSSProperties}>
+              {index > 0 ? <ChevronRight className="portal-band-chip-arrow h-4 w-4 shrink-0 text-white" aria-hidden="true" /> : null}
               {doc.onOpen ? (
                 <button type="button" className={chip} onClick={doc.onOpen} title={`Open ${doc.label} ${doc.no}`}>
                   {body}

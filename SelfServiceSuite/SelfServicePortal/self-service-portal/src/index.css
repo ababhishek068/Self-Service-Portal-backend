@@ -2927,6 +2927,8 @@ a.portal-hero-stat:hover,
   overflow: hidden;
   color: #fff;
   background: linear-gradient(118deg, #1b1847 0%, #26225b 34%, #1b4d78 68%, #04727a 100%);
+  background-size: 160% 160%;
+  animation: portal-band-sweep 18s var(--ease-in-out-soft) infinite alternate;
   box-shadow:
     0 18px 36px -26px rgba(38, 34, 91, 0.65),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -2942,30 +2944,445 @@ a.portal-hero-stat:hover,
   opacity: 0.8;
 }
 
-/* Phase icon: a tinted glass circle, one hero colour per step. */
+/* The gradient drifts slowly, like the hero's aurora. */
+@keyframes portal-band-sweep {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 100% 50%;
+  }
+}
+
+.portal-band-title-icon svg {
+  animation: portal-band-spin 9s linear infinite;
+}
+
+@keyframes portal-band-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Steps: pop in one after another. --- */
+.portal-band-li {
+  animation: portal-band-pop 620ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--i, 0) * 110ms + 120ms);
+}
+
+@keyframes portal-band-pop {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Phase icon: a glass circle in one hero colour per step (`--tone` as r, g, b). */
 .portal-band-step {
+  --tone: 43, 196, 204;
+  --tone-ink: #d4fbff;
   position: relative;
+  z-index: 1;
   display: flex;
   height: 2.75rem;
   width: 2.75rem;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
+  color: var(--tone-ink);
+  background: rgba(var(--tone), 0.44);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.22),
     0 10px 22px -14px rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  transition:
+    transform var(--dur-slow) var(--ease-spring),
+    background var(--dur-base) var(--ease-standard),
+    box-shadow var(--dur-base) var(--ease-standard);
 }
 
-.portal-band-step--teal { background: rgba(43, 196, 204, 0.44); color: #d4fbff; }
-.portal-band-step--blue { background: rgba(122, 164, 227, 0.46); color: #e8f0fc; }
-.portal-band-step--lime { background: rgba(210, 215, 65, 0.42); color: #f6fbd6; }
-.portal-band-step--orange { background: rgba(236, 126, 47, 0.46); color: #ffe2cc; }
-.portal-band-step--indigo { background: rgba(174, 180, 237, 0.42); color: #eef0fd; }
+.portal-band-step--teal { --tone: 43, 196, 204; --tone-ink: #d4fbff; }
+.portal-band-step--blue { --tone: 122, 164, 227; --tone-ink: #e8f0fc; }
+.portal-band-step--lime { --tone: 210, 215, 65; --tone-ink: #f6fbd6; }
+.portal-band-step--orange { --tone: 236, 126, 47; --tone-ink: #ffe2cc; }
+.portal-band-step--indigo { --tone: 174, 180, 237; --tone-ink: #eef0fd; }
+
+.portal-band-li:hover .portal-band-step {
+  transform: translateY(-3px) rotate(-6deg);
+}
+
+/* Number (or check) badge: lime, like the hero's Sign in button. */
+.portal-band-badge {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  display: flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #d2d741;
+  color: #26225b;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px -2px rgba(0, 0, 0, 0.35);
+}
+
+.portal-band-heading {
+  color: #fff;
+  transition: color var(--dur-base) var(--ease-standard);
+}
+
+.portal-band-owner {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Done: the circle fills with its colour, the badge turns into a check. */
+.portal-band-step.is-done {
+  color: #1b1847;
+  background: rgb(var(--tone));
+  box-shadow:
+    0 0 0 3px rgba(var(--tone), 0.28),
+    0 10px 22px -12px rgba(0, 0, 0, 0.7);
+}
+
+.portal-band-step.is-done .portal-band-badge {
+  animation: portal-band-check 520ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--i, 0) * 110ms + 520ms);
+}
+
+@keyframes portal-band-check {
+  from {
+    transform: scale(0) rotate(-90deg);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Current: larger, ringed in white, breathing, with ripples going out. */
+.portal-band-step.is-current {
+  color: #fff;
+  background: rgba(var(--tone), 0.62);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 26px 6px rgba(var(--tone), 0.6);
+  animation: portal-band-breathe 2.4s var(--ease-in-out-soft) infinite;
+}
+
+.portal-band-step.is-current::before,
+.portal-band-step.is-current::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgba(var(--tone), 0.9);
+  animation: portal-band-ripple 2.2s var(--ease-out-soft) infinite;
+  pointer-events: none;
+}
+
+.portal-band-step.is-current::after {
+  animation-delay: 1.1s;
+}
+
+.portal-band-step.is-current > svg {
+  animation: portal-band-bob 1.6s var(--ease-in-out-soft) infinite;
+}
+
+.portal-band-step.is-current .portal-band-badge {
+  animation: portal-band-badge-pulse 1.6s var(--ease-in-out-soft) infinite;
+}
+
+.portal-band-li[data-state='current'] .portal-band-heading {
+  color: #e9f07a;
+}
+
+@keyframes portal-band-breathe {
+  0%,
+  100% {
+    transform: scale(1.12);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+@keyframes portal-band-ripple {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.75);
+  }
+}
+
+@keyframes portal-band-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-2px) rotate(-8deg);
+  }
+  75% {
+    transform: translateY(1px) rotate(8deg);
+  }
+}
+
+@keyframes portal-band-badge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(210, 215, 65, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(210, 215, 65, 0);
+  }
+}
+
+/* Rejected / cancelled: rose, with one shake. */
+.portal-band-step.is-rejected {
+  color: #fff;
+  background: rgba(244, 63, 94, 0.9);
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 24px 4px rgba(244, 63, 94, 0.55);
+  animation: portal-band-shake 600ms var(--ease-standard) 900ms backwards;
+}
+
+.portal-band-step.is-rejected .portal-band-badge {
+  background: #fff;
+  color: #be123c;
+}
+
+.portal-band-li[data-state='rejected'] .portal-band-heading {
+  color: #fecdd3;
+}
+
+@keyframes portal-band-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-5px);
+  }
+  40%,
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+/* Not started: dimmed glass with a dashed ring. */
+.portal-band-step.is-todo {
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.2);
+  outline: 1.5px dashed rgba(255, 255, 255, 0.28);
+  outline-offset: 3px;
+}
+
+.portal-band-step.is-todo .portal-band-badge {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  box-shadow: none;
+}
+
+.portal-band-li[data-state='todo'] .portal-band-heading {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.portal-band-li[data-state='todo'] .portal-band-owner {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* "Now · <BC stage>" under the current step, with a light sweep across it. */
+.portal-band-now {
+  position: relative;
+  overflow: hidden;
+  margin-top: 0.5rem;
+  max-width: 100%;
+  border-radius: 999px;
+  background: #d2d741;
+  color: #26225b;
+  padding: 0.125rem 0.625rem;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  box-shadow: 0 6px 16px -6px rgba(210, 215, 65, 0.7);
+  animation: portal-band-pop 520ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--i, 0) * 110ms + 520ms);
+}
+
+.portal-band-now::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.7) 50%, transparent 70%);
+  transform: translateX(-120%);
+  animation: portal-band-glint 3.2s var(--ease-in-out-soft) 1.4s infinite;
+}
+
+.portal-band-now--stopped {
+  background: #f43f5e;
+  color: #fff;
+  box-shadow: 0 6px 16px -6px rgba(244, 63, 94, 0.7);
+}
+
+@keyframes portal-band-glint {
+  0% {
+    transform: translateX(-120%);
+  }
+  45%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+/* --- Connectors between steps (wide screens): drawn when done, marching
+       toward the current step, dashed ahead, flowing on the process view. --- */
+.portal-band-link {
+  position: absolute;
+  top: 1.375rem;
+  left: calc(50% + 1.875rem);
+  display: none;
+  height: 3px;
+  width: calc(100% - 3.75rem);
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-50%);
+}
+
+@media (min-width: 1024px) {
+  .portal-band-link {
+    display: block;
+  }
+}
+
+.portal-band-link > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transform-origin: left center;
+}
+
+.portal-band-link--done > span {
+  background: linear-gradient(90deg, #9df2fc, #d2d741);
+  box-shadow: 0 0 10px rgba(210, 215, 65, 0.6);
+  animation: portal-band-draw 620ms var(--ease-out-soft) backwards;
+  animation-delay: calc(var(--i, 0) * 110ms + 380ms);
+}
+
+.portal-band-link--next > span {
+  background: repeating-linear-gradient(90deg, #d2d741 0 10px, transparent 10px 18px);
+  background-size: 18px 100%;
+  animation: portal-band-march 700ms linear infinite;
+}
+
+.portal-band-link--flow > span {
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.55) 0 6px, transparent 6px 14px);
+  background-size: 14px 100%;
+  animation: portal-band-march 1.4s linear infinite;
+}
+
+.portal-band-link--todo > span {
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.28) 0 5px, transparent 5px 11px);
+}
+
+@keyframes portal-band-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes portal-band-march {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 18px 0;
+  }
+}
+
+/* Narrow screens: a progress meter under the header instead of connectors. */
+.portal-band-meter {
+  position: relative;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.portal-band-meter > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--p, 0) * 100%);
+  min-width: 6%;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(90deg, #9df2fc, #d2d741);
+  box-shadow: 0 0 12px rgba(210, 215, 65, 0.6);
+  transform-origin: left center;
+  animation: portal-band-draw 900ms var(--ease-out-soft) 300ms backwards;
+}
+
+/* Header: a live dot on "Step N of M". */
+.portal-band-live-dot {
+  position: relative;
+  height: 0.5rem;
+  width: 0.5rem;
+  border-radius: 999px;
+  background: #d2d741;
+}
+
+.portal-band-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #d2d741;
+  animation: portal-band-ripple 1.6s var(--ease-out-soft) infinite;
+}
+
+.portal-band-progress-chip {
+  animation: portal-band-pop 520ms var(--ease-spring) 200ms backwards;
+}
+
+/* Every step done: a glow runs along the steps again and again. */
+.portal-band--complete .portal-band-step.is-done {
+  animation: portal-band-wave 3.2s var(--ease-in-out-soft) infinite;
+  animation-delay: calc(var(--i, 0) * 180ms + 900ms);
+}
+
+@keyframes portal-band-wave {
+  0%,
+  30%,
+  100% {
+    transform: none;
+    box-shadow:
+      0 0 0 3px rgba(var(--tone), 0.28),
+      0 10px 22px -12px rgba(0, 0, 0, 0.7);
+  }
+  12% {
+    transform: translateY(-5px) scale(1.1);
+    box-shadow:
+      0 0 0 5px rgba(var(--tone), 0.4),
+      0 0 26px 6px rgba(var(--tone), 0.7);
+  }
+}
 
 /* Related document: a glass chip like the hero stat cards; the open document
-   is the white chip, like the hero's first call to action. */
+   is the white chip, like the hero's first call to action. Chips slide in one
+   after another. */
 .portal-band-chip {
   border-radius: 0.75rem;
   color: #fff;
@@ -2979,6 +3396,39 @@ a.portal-hero-stat:hover,
     transform var(--dur-base) var(--ease-out-soft),
     background var(--dur-base) var(--ease-standard),
     box-shadow var(--dur-base) var(--ease-standard);
+}
+
+.portal-band-chip-slot {
+  animation: portal-band-slide 560ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--i, 0) * 110ms + 150ms);
+}
+
+@keyframes portal-band-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-18px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.portal-band-chip-arrow {
+  animation: portal-band-nudge 1.8s var(--ease-in-out-soft) infinite;
+  animation-delay: calc(var(--i, 0) * 150ms);
+}
+
+@keyframes portal-band-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateX(3px);
+    opacity: 0.9;
+  }
 }
 
 button.portal-band-chip:hover {
@@ -2998,7 +3448,72 @@ button.portal-band-chip--current:hover {
   box-shadow: 0 12px 26px -14px rgba(0, 0, 0, 0.5);
 }
 
+.portal-band-chip--current {
+  animation: portal-band-chip-glow 2.6s var(--ease-in-out-soft) 900ms infinite;
+}
+
+@keyframes portal-band-chip-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 12px 26px -14px rgba(0, 0, 0, 0.5),
+      0 0 0 0 rgba(210, 215, 65, 0.65);
+  }
+  50% {
+    box-shadow:
+      0 12px 26px -14px rgba(0, 0, 0, 0.5),
+      0 0 0 5px rgba(210, 215, 65, 0);
+  }
+}
+
+/* --- Request pages (Store Requisition, Local Purchase): the sections of the
+       open document rise in one after another. `backwards` fill, so no
+       transform stays behind to trap a fixed-position dialog inside. --- */
+.portal-rise-children > * {
+  animation: portal-card-rise var(--dur-slower) var(--ease-out-soft) backwards;
+}
+
+.portal-rise-children > *:nth-child(2) { animation-delay: 70ms; }
+.portal-rise-children > *:nth-child(3) { animation-delay: 140ms; }
+.portal-rise-children > *:nth-child(4) { animation-delay: 210ms; }
+.portal-rise-children > *:nth-child(5) { animation-delay: 280ms; }
+.portal-rise-children > *:nth-child(6) { animation-delay: 350ms; }
+.portal-rise-children > *:nth-child(7) { animation-delay: 420ms; }
+.portal-rise-children > *:nth-child(n + 8) { animation-delay: 490ms; }
+
 @media (prefers-reduced-motion: reduce) {
+  .portal-band,
+  .portal-band-title-icon svg,
+  .portal-band-li,
+  .portal-band-step,
+  .portal-band-step::before,
+  .portal-band-step::after,
+  .portal-band-step > svg,
+  .portal-band-badge,
+  .portal-band-now,
+  .portal-band-now::after,
+  .portal-band-link > span,
+  .portal-band-meter > span,
+  .portal-band-live-dot::after,
+  .portal-band-progress-chip,
+  .portal-band-chip,
+  .portal-band-chip-slot,
+  .portal-band-chip-arrow,
+  .portal-rise-children > * {
+    animation: none !important;
+  }
+
+  .portal-band-step.is-current::before,
+  .portal-band-step.is-current::after,
+  .portal-band-now::after {
+    display: none;
+  }
+
+  .portal-band-step.is-current {
+    transform: scale(1.12);
+  }
+
+  .portal-band-li:hover .portal-band-step,
   button.portal-band-chip:hover {
     transform: none;
   }

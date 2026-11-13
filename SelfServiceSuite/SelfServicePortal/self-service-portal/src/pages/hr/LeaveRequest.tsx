@@ -1522,7 +1522,7 @@ export function LeaveRequest() {
               Close
             </Button>
           </div>
-          <div className="space-y-5 p-4 sm:p-6">
+          <div className="portal-rise-children space-y-5 p-4 sm:p-6">
             {success ? (
               <div className="rounded border-l-4 border-emerald-500 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                 {success}
@@ -1536,7 +1536,7 @@ export function LeaveRequest() {
               </p>
             ) : (
               <>
-                <RequestProgress status={selectedEffectiveStatus} />
+                <RequestProgress status={selectedEffectiveStatus} approvalSteps={selected.approvalSteps} />
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-xs text-slate-500">Application No.</p>
