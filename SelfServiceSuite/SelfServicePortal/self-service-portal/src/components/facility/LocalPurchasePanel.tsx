@@ -168,46 +168,65 @@ type RelatedDoc = {
   onOpen?: () => void
 }
 
+/** Icon colours of the other documents in the chain, in turn (the dashboard hero's palette). */
+const RELATED_DOC_TONES = ['text-[#9df2fc]', 'text-[#c9d9f4]', 'text-[#e9f3a6]', 'text-[#fdb88b]', 'text-[#dde0fa]']
+
+/** The chain on the dashboard hero's brand gradient: glass chips, the open document in white. */
 function RelatedDocuments({ docs }: { docs: RelatedDoc[] }) {
   return (
-    <nav aria-label="Related documents" className="flex flex-wrap items-stretch gap-1.5">
-      {docs.map((doc, index) => {
-        const Icon = doc.icon
-        const body = (
-          <>
-            <Icon className={cn('h-4 w-4 shrink-0', doc.current ? 'text-white' : 'text-teal-600')} aria-hidden="true" />
-            <span className="min-w-0 text-left leading-tight">
-              <span className={cn('block text-[11px]', doc.current ? 'text-white/85' : 'text-slate-500')}>{doc.label}</span>
-              <span className="block text-sm font-semibold">{doc.no}</span>
-              {doc.state ? (
-                <span className={cn('block text-[11px]', doc.current ? 'text-white/85' : 'text-slate-500')}>{doc.state}</span>
-              ) : null}
-            </span>
-          </>
-        )
-        const chip = cn(
-          'flex items-center gap-2 rounded-lg border px-3 py-1.5 transition',
-          doc.current
-            ? 'border-[var(--portal-navy)] bg-[var(--portal-navy)] text-white shadow-sm'
-            : 'border-slate-200 bg-white text-slate-800',
-          doc.onOpen && 'hover:border-teal-400 hover:bg-teal-50',
-        )
-        return (
-          <div key={doc.key} className="flex items-center gap-1.5">
-            {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" /> : null}
-            {doc.onOpen ? (
-              <button type="button" className={chip} onClick={doc.onOpen} title={`Open ${doc.label} ${doc.no}`}>
-                {body}
-              </button>
-            ) : (
-              <div className={chip} aria-current={doc.current ? 'page' : undefined}>
-                {body}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </nav>
+    <div className="portal-band rounded-xl px-3 py-2.5">
+      <div className="portal-hero-aurora" aria-hidden>
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="portal-hero-grid" aria-hidden />
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-white/75">Related documents</p>
+      <nav aria-label="Related documents" className="flex flex-wrap items-stretch gap-1.5">
+        {docs.map((doc, index) => {
+          const Icon = doc.icon
+          const body = (
+            <>
+              <Icon
+                className={cn(
+                  'h-4 w-4 shrink-0',
+                  doc.current ? 'text-[#03949b]' : RELATED_DOC_TONES[index % RELATED_DOC_TONES.length],
+                )}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 text-left leading-tight">
+                <span className={cn('block text-[11px]', doc.current ? 'text-[#5b5d6b]' : 'text-white/75')}>{doc.label}</span>
+                <span className="block text-sm font-semibold">{doc.no}</span>
+                {doc.state ? (
+                  <span className={cn('block text-[11px]', doc.current ? 'text-[#047a80]' : 'text-white/75')}>
+                    {doc.state}
+                  </span>
+                ) : null}
+              </span>
+            </>
+          )
+          const chip = cn(
+            'portal-band-chip flex items-center gap-2 px-3 py-1.5',
+            doc.current && 'portal-band-chip--current',
+            doc.onOpen && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white',
+          )
+          return (
+            <div key={doc.key} className="flex items-center gap-1.5">
+              {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-white/45" aria-hidden="true" /> : null}
+              {doc.onOpen ? (
+                <button type="button" className={chip} onClick={doc.onOpen} title={`Open ${doc.label} ${doc.no}`}>
+                  {body}
+                </button>
+              ) : (
+                <div className={chip} aria-current={doc.current ? 'page' : undefined}>
+                  {body}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </nav>
+    </div>
   )
 }
 
@@ -1050,8 +1069,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
           ) : null}
 
           {relatedDocs.length > 1 ? (
-            <div className="space-y-1.5 pt-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Related documents</p>
+            <div className="pt-1">
               <RelatedDocuments docs={relatedDocs} />
             </div>
           ) : null}
