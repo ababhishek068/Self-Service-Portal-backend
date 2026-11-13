@@ -52,6 +52,7 @@ import {
   normalizeLeaveStartDate,
   parseLeaveDatesReturn,
   computeLeaveDatesFallback,
+  leaveStartIsNonWorkingDay,
   leaveTypeIsAnnual,
   halfDayRequiresAnnualLeave,
   bcLeaveDaysApplied,
@@ -1104,11 +1105,16 @@ describe('halfDayRequiresAnnualLeave', () => {
 })
 
 describe('bcLeaveDaysApplied', () => {
-  it('sends an integer day count and carries half-day through the Boolean flag', () => {
+  it('sends the day count in half days and carries the half-day option through the Boolean flag', () => {
     assert.equal(bcLeaveDaysApplied(1, '0'), 1)
     assert.equal(bcLeaveDaysApplied(2.2, '0'), 2)
     assert.equal(bcLeaveDaysApplied(0.5, '1'), 1)
     assert.equal(bcLeaveDaysApplied(0.5, '2'), 1)
+    // Saturday is half a working day: Mon–Sat is 5.5 days and a Saturday alone is 0.5.
+    assert.equal(bcLeaveDaysApplied(5.5, '0'), 5.5)
+    assert.equal(bcLeaveDaysApplied(0.5, '0'), 0.5)
+    assert.equal(bcLeaveDaysApplied(2.5, '0'), 2.5)
+    assert.equal(bcLeaveDaysApplied(0.1, '0'), 0.5)
   })
 })
 
@@ -1650,10 +1656,12 @@ describe('parseLeaveDatesReturn', () => {
 })
 
 describe('computeLeaveDatesFallback', () => {
-  it('returns after lunch for morning half-day leave', () => {
+  // ABH Operations feedback, Nov 2026: Saturday is half a working day.
+  it('returns after lunch for morning half-day leave, the next working morning for evening', () => {
+    // Friday evening half-day: back on Saturday morning (a working half day).
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '2'), {
       endDate: '2026-07-17',
-      returnDate: '2026-07-20',
+      returnDate: '2026-07-18',
     })
     assert.deepEqual(computeLeaveDatesFallback('2026-07-17', 0.5, '1'), {
       endDate: '2026-07-17',
@@ -1661,33 +1669,64 @@ describe('computeLeaveDatesFallback', () => {
     })
   })
 
-  it('skips weekend for Fri + 2 Normal days (End Mon, Return Tue)', () => {
+  it('counts Saturday as half a day: Fri + 2 days ends at midday on Monday', () => {
+    // Friday 1 + Saturday 0.5 + Monday morning 0.5.
     assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 2, '0'), {
       endDate: '2026-09-07',
-      returnDate: '2026-09-08',
+      returnDate: '2026-09-07',
     })
     assert.deepEqual(computeLeaveDatesFallback('2026-09-25', 2, '0'), {
       endDate: '2026-09-28',
-      returnDate: '2026-09-29',
+      returnDate: '2026-09-28',
     })
-  })
-
-  it('returns next Monday when Friday is the only leave day', () => {
-    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 1, '0'), {
-      endDate: '2026-09-04',
+    // Friday 1 + Saturday 0.5: back on Monday morning.
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 1.5, '0'), {
+      endDate: '2026-09-05',
       returnDate: '2026-09-07',
     })
   })
 
-  it('rejects Saturday or Sunday start dates', () => {
+  it('counts a full week Monday to Saturday as 5.5 days', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-07', 5.5, '0'), {
+      endDate: '2026-09-12',
+      returnDate: '2026-09-14',
+    })
+    // Monday to Friday: back on Saturday morning.
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-07', 5, '0'), {
+      endDate: '2026-09-11',
+      returnDate: '2026-09-12',
+    })
+  })
+
+  it('returns on Saturday when Friday is the only leave day', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-04', 1, '0'), {
+      endDate: '2026-09-04',
+      returnDate: '2026-09-05',
+    })
+  })
+
+  it('lets leave start on a Saturday (half a day) but not on a Sunday', () => {
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-05', 0.5, '0'), {
+      endDate: '2026-09-05',
+      returnDate: '2026-09-07',
+    })
+    // Saturday 0.5 + Monday 1 + Tuesday morning 0.5.
     assert.deepEqual(computeLeaveDatesFallback('2026-09-05', 2, '0'), {
-      endDate: '',
-      returnDate: '',
+      endDate: '2026-09-08',
+      returnDate: '2026-09-08',
+    })
+    // A Saturday has no afternoon: the morning half-day option returns on Monday.
+    assert.deepEqual(computeLeaveDatesFallback('2026-09-05', 0.5, '1'), {
+      endDate: '2026-09-05',
+      returnDate: '2026-09-07',
     })
     assert.deepEqual(computeLeaveDatesFallback('2026-09-06', 2, '0'), {
       endDate: '',
       returnDate: '',
     })
+    assert.equal(leaveStartIsNonWorkingDay('2026-09-05'), false)
+    assert.equal(leaveStartIsNonWorkingDay('2026-09-06'), true)
+    assert.equal(leaveStartIsNonWorkingDay('2026-09-07'), false)
   })
 })
 

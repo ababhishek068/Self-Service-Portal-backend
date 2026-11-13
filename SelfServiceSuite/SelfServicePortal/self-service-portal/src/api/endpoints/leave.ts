@@ -192,7 +192,9 @@ export async function fetchRelievers(): Promise<Array<{ value: string; label: st
 export interface LeaveDates {
   endDate: string
   returnDate: string
+  /** True when the start date is not a working day (a Sunday; Saturday is half a working day). */
   isWeekend: boolean
+  message?: string
 }
 
 export async function getLeaveDates(

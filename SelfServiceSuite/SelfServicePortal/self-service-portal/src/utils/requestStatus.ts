@@ -85,6 +85,18 @@ export function compareApprovalSteps(left: ApprovalStep, right: ApprovalStep) {
   return (left.round ?? 0) - (right.round ?? 0) || leftSequence - rightSequence
 }
 
+/** One line for the closed history section: who the request waits for, otherwise the latest decision. */
+export function approvalStepsSummary(steps: ApprovalStep[]) {
+  if (!steps.length) return ''
+  const ordered = [...steps].sort(compareApprovalSteps)
+  const waiting = ordered.find((step) => step.status === 'Pending Approval')
+  if (waiting) return `Waiting for ${waiting.actorName || waiting.actorEmployeeNo || 'the approver'}`
+  const decided = ordered.filter((step) => step.status !== 'Waiting')
+  const latest = decided[decided.length - 1] ?? ordered[ordered.length - 1]
+  const who = latest.actorName || latest.actorEmployeeNo
+  return who ? `Latest: ${latest.status} · ${who}` : `Latest: ${latest.status}`
+}
+
 /** Lines and attachments can be deleted only before approval submission. */
 export function canDeleteRequestItems(status: string | undefined, module?: string) {
   return isEditableRequestStatus(status, module)

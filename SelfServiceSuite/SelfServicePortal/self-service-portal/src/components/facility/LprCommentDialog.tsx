@@ -9,15 +9,19 @@ import { Textarea } from '@/components/ui/textarea'
 export const LPR_COMMENT_MAX = 250
 
 /**
- * The comment box BC opens before a Local Purchase approve, send back or reject: the action runs
- * only with a comment, which goes to the Approval History (and to Rejection Reason / Send Back
- * Comment). The button stays disabled until there is text.
+ * The comment box BC opens before a Local Purchase approve, send back or reject; the comment goes
+ * to the Approval History (and to Rejection Reason / Send Back Comment).
+ *
+ * `required` (send back, reject, technical recommendation, changed winner): the button stays
+ * disabled until there is text. A routine approval is not `required` — the box is its confirmation
+ * and the comment may stay empty (ABH Operations feedback, Nov 2026).
  */
 export function LprCommentDialog({
   open,
   title,
   documentNo,
   label,
+  required = true,
   value,
   busy,
   danger,
@@ -29,6 +33,8 @@ export function LprCommentDialog({
   title: string
   documentNo: string
   label: string
+  /** Defaults to true: only a routine approval passes false. */
+  required?: boolean
   value: string
   busy: boolean
   danger: boolean
@@ -41,7 +47,7 @@ export function LprCommentDialog({
     if (open) fieldRef.current?.focus()
   }, [open])
   if (!open) return null
-  const ready = value.trim().length > 0
+  const ready = !required || value.trim().length > 0
 
   // On the page body, so it is centred on the screen whatever section opens it.
   return createPortal(
@@ -78,7 +84,11 @@ export function LprCommentDialog({
             onChange={(event) => onChange(event.target.value)}
           />
           <p className="flex justify-between gap-2 text-xs text-slate-500">
-            <span>Recorded with your name in the Approval History.</span>
+            <span>
+              {required
+                ? 'Required. Recorded with your name in the Approval History.'
+                : 'You can approve without a comment. A comment is recorded with your name in the Approval History.'}
+            </span>
             <span className="tabular-nums">
               {value.length}/{LPR_COMMENT_MAX}
             </span>

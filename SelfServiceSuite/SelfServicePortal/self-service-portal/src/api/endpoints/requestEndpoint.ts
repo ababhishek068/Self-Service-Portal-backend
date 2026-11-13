@@ -353,7 +353,10 @@ export interface LocalPurchaseNextAction {
   documentNo: string
   allowed: boolean
   ownerRoles: string[]
+  /** Send back / reject / technical recommendation / changed winner: the comment must be written. */
   commentRequired?: boolean
+  /** Routine approval: the comment box is offered and may stay empty. */
+  commentOptional?: boolean
 }
 
 /** A vendor's price for one RFQ line (BC 1.0.3.594 ABH Vendor Quote Line; 0 until entered). */

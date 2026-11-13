@@ -54,6 +54,7 @@ import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
+import { HistorySection } from '@/components/shared/HistorySection'
 import { PortalNewButton } from '@/components/shared/PortalNewButton'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { Button } from '@/components/ui/button'
@@ -1389,29 +1390,6 @@ export function OvertimeRequest() {
             </Section>
           </div>
 
-          {shown?.log.length ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
-              <p className="mb-3 text-sm font-semibold text-slate-900">Approval and Comment History</p>
-              <ol className="space-y-2">
-                {shown.log
-                  .slice()
-                  .reverse()
-                  .map((entry, index) => (
-                    <li key={`${entry.at}-${index}`} className="rounded-md bg-white/80 px-3 py-2 text-sm shadow-sm">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <span className="font-medium text-slate-900">
-                          {entry.stageLabel} · {entry.action}
-                          {entry.userName ? <span className="font-normal text-slate-600"> — {entry.userName}</span> : null}
-                        </span>
-                        <span className="text-xs text-slate-500">{formatDateTime(entry.at)}</span>
-                      </div>
-                      {entry.comment ? <p className="mt-1 whitespace-pre-wrap text-slate-700">{entry.comment}</p> : null}
-                    </li>
-                  ))}
-              </ol>
-            </div>
-          ) : null}
-
           {formError && mode === 'form' ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
           ) : null}
@@ -1445,6 +1423,35 @@ export function OvertimeRequest() {
               </div>
             ) : null}
           </div>
+
+          {/* History is the last section of the page, closed until View more. */}
+          {shown?.log.length ? (
+            <HistorySection
+              count={shown.log.length}
+              summary={(() => {
+                const latest = shown.log[shown.log.length - 1]
+                return `Latest: ${latest.stageLabel} · ${latest.action}${latest.userName ? ` — ${latest.userName}` : ''}`
+              })()}
+            >
+              <ol className="space-y-2">
+                {shown.log
+                  .slice()
+                  .reverse()
+                  .map((entry, index) => (
+                    <li key={`${entry.at}-${index}`} className="rounded-md bg-white/80 px-3 py-2 text-sm shadow-sm">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-slate-900">
+                          {entry.stageLabel} · {entry.action}
+                          {entry.userName ? <span className="font-normal text-slate-600"> — {entry.userName}</span> : null}
+                        </span>
+                        <span className="text-xs text-slate-500">{formatDateTime(entry.at)}</span>
+                      </div>
+                      {entry.comment ? <p className="mt-1 whitespace-pre-wrap text-slate-700">{entry.comment}</p> : null}
+                    </li>
+                  ))}
+              </ol>
+            </HistorySection>
+          ) : null}
         </div>
       ) : null}
     </PageWrapper>

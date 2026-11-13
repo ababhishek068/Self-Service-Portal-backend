@@ -19,7 +19,6 @@ import {
   type LocalPurchaseVendorQuote,
 } from '@/api/endpoints/requestEndpoint'
 import { useLocalPurchaseAccess } from '@/hooks/useLocalPurchaseAccess'
-import { LprApprovalHistory } from '@/components/facility/LprApprovalHistory'
 import { LprCommentDialog } from '@/components/facility/LprCommentDialog'
 import { LprDraftLineEditor } from '@/components/facility/LprDraftLineEditor'
 import type { PortalRequest } from '@/types/erp.types'
@@ -322,8 +321,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
   )
   const issueAfterLpr = nextActions.find((action) => action.actionCode === 'ISSUE_AFTER_LPR')
   const updateLprLine = nextActions.find((action) => action.actionCode === 'UPDATE_LPR_LINE' && action.allowed)
-  const asksComment = (action: LocalPurchaseNextAction) =>
+  // A comment is a must only to send back, reject, recommend (Technical) or change the winner;
+  // a routine approval still opens the box, as its confirmation, and the comment may stay empty.
+  const needsComment = (action: LocalPurchaseNextAction) =>
     Boolean(action.commentRequired) || action.actionCode === 'SUBMIT_TECHNICAL_REVIEW'
+  const asksComment = (action: LocalPurchaseNextAction) => needsComment(action) || Boolean(action.commentOptional)
   const needsVendorInvoiceNo = ribbon.some((action) => action.actionCode === 'CREATE_LOCAL_INVOICE')
   const needsBank = ribbon.some((action) => action.actionCode === 'CLOSE_LPR_AFTER_PAYMENT')
   const bankOptions = (bankQuery.data?.bankAccounts ?? []).map((bank) => ({
@@ -351,7 +353,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
       return
     }
     const comment = extra.commented ? actionComment.trim() : ''
-    if (asksComment(action) && !comment) return
+    if (needsComment(action) && !comment) return
     // BC refuses Submit while a line misses a required field (BC 1.0.3.583 sends Request Type and
     // Purpose with the lines; on older BC the check is left to BC).
     if (action.actionCode === 'SUBMIT_LPR_OPS' && text(lpr?.no).toUpperCase() === request.requestNo.trim().toUpperCase()) {
@@ -921,8 +923,11 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               ? 'Reason for changing the winner (your recommendation after the technical evaluation)'
             : commentAction && RETURN_ACTIONS.has(commentAction.actionCode)
               ? 'Reason (the Procurement Officer sees it)'
-              : 'Comment'
+              : commentAction && !needsComment(commentAction)
+                ? 'Comment (optional)'
+                : 'Comment'
         }
+        required={Boolean(commentAction && needsComment(commentAction))}
         value={actionComment}
         busy={busy}
         danger={Boolean(commentAction && RETURN_ACTIONS.has(commentAction.actionCode))}
@@ -1050,7 +1055,7 @@ export function LocalPurchasePanel({ request, fallback }: { request: PortalReque
               <RelatedDocuments docs={relatedDocs} />
             </div>
           ) : null}
-          <LprApprovalHistory entries={state.chain.approvalHistory} />
+          {/* The chain's Approval History is at the bottom of the page (LprApprovalHistorySection). */}
         </div>
       </div>
 

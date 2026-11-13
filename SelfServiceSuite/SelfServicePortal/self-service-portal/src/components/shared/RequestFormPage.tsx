@@ -26,7 +26,7 @@ import { FileUpload } from './FileUpload'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
-import { ApprovalHistory } from './ApprovalHistory'
+import { ApprovalHistorySection } from './ApprovalHistory'
 import { SentBackNotice } from './SentBackNotice'
 import {
   cancelModuleRequest,
@@ -816,10 +816,7 @@ export function RequestFormPage({
                 ) : null}
 
                 {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
-                  <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval and Comment History</h3>
-                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
-                  </section>
+                  <ApprovalHistorySection steps={approvalHistorySteps(selected)} />
                 ) : null}
               </>
             ) : null}

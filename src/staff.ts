@@ -304,11 +304,15 @@ export function halfDayRequiresAnnualLeave(value: string) {
   return halfDayOptionValue(value) !== 0
 }
 
-/** BC LeaveApplication declares daysApplied as Integer; half-day is carried by its Boolean flag. */
+/**
+ * Days Applied for BC LeaveApplication (a Decimal in BC). Saturday is half a working day at ABH,
+ * so a period that covers one is applied in half days (Mon–Sat = 5.5) and must reach BC unrounded.
+ * The Morning / Evening half-day option is carried by its Boolean flag: BC then stores 0.5 itself.
+ */
 export function bcLeaveDaysApplied(appliedDays: number, halfDayLeave: string) {
   if (halfDayRequiresAnnualLeave(halfDayLeave)) return 1
-  const rounded = Math.round(appliedDays)
-  return rounded > 0 ? rounded : 1
+  const halves = Math.round(appliedDays * 2) / 2
+  return halves > 0 ? halves : 0.5
 }
 
 function fieldText(row: ODataRecord | null | undefined, keys: string[], fallback = '') {
@@ -1531,15 +1535,25 @@ export function sickLeaveStartDateAllowed(startDate: string, now = new Date()) {
   return start >= today && start <= tomorrow
 }
 
+/**
+ * How much of a working day a date is at ABH: Monday–Friday 1, Saturday 0.5 (half working day),
+ * Sunday 0. Leave types that count weekends or holidays differently are resolved by Business
+ * Central GetPortalLeaveDates; this is only the portal's fallback.
+ */
 function workingDayCapacityIso(iso: string) {
   const parts = parseIsoDateParts(iso)
   if (!parts) return 0
   const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
   const dow = date.getUTCDay()
-  // Normal leave skips Saturday and Sunday. Leave types that include weekends
-  // are resolved by Business Central GetPortalLeaveDates.
-  if (dow === 0 || dow === 6) return 0
+  if (dow === 0) return 0
+  if (dow === 6) return 0.5
   return 1
+}
+
+/** Leave may start on any working day, Saturday (half day) included — not on a Sunday. */
+export function leaveStartIsNonWorkingDay(startDate: string) {
+  const start = formatBcSoapDate(startDate)
+  return Boolean(start) && workingDayCapacityIso(start) === 0
 }
 
 function nextWorkingDayIso(iso: string) {
@@ -1554,8 +1568,10 @@ function nextWorkingDayIso(iso: string) {
 
 /**
  * Safe local fallback when BC GetPortalLeaveDates is temporarily unavailable.
- * Normal leave skips weekends: Mon-Fri = 1 day each. Example: Fri 25 + 2 days
- * → leave Fri 25 and Mon 28 → End 28, Return 29 (next working day).
+ * Mon-Fri use 1 leave day each, a Saturday uses 0.5 (half working day), Sunday none.
+ * Examples: Mon + 5.5 days → End Saturday, Return Monday. Fri + 2 days → Friday (1),
+ * Saturday (0.5) and Monday morning (0.5) → End Monday, Return Monday (that afternoon).
+ * Fri + 1 day → End Friday, Return Saturday (a working morning).
  * Morning half-day returns the same afternoon; otherwise return is next working day.
  */
 export function computeLeaveDatesFallback(startDate: string, noOfDays: number, halfDay: string) {
@@ -1567,7 +1583,8 @@ export function computeLeaveDatesFallback(startDate: string, noOfDays: number, h
   if (startCapacity === 0) return { endDate: '', returnDate: '' }
 
   if (half === 1 || half === 2) {
-    const returnsAfterLunch = half === 1
+    // A Saturday has no afternoon to come back to.
+    const returnsAfterLunch = half === 1 && startCapacity === 1
     return {
       endDate: start,
       returnDate: returnsAfterLunch ? start : nextWorkingDayIso(start),
@@ -1644,29 +1661,15 @@ async function resolveLeaveDatesFromBc(
           formatBcSoapDate(parsed.returnDate) ||
           parsed.returnDate ||
           addCalendarDays(end, 1)
-        // Old BC builds counted Saturday as 0.5 leave day and returned
-        // End==Return (Afternoon) for whole Normal leave that crossed a weekend.
-        // Prefer the Mon-Fri fallback until BC 1.0.3.284+ is published.
-        const wholeNormalDays =
-          half === 0 && Number.isFinite(noOfDays) && Math.abs(noOfDays - Math.round(noOfDays)) < 1e-9
-        if (
-          wholeNormalDays &&
-          end &&
-          ret === end &&
-          productionDates.endDate &&
-          productionDates.returnDate &&
-          productionDates.returnDate !== productionDates.endDate
-        ) {
-          return { ...productionDates, source: 'fallback' as const }
-        }
-        // BC owns leave-type weekend/holiday policy. Do not replace its working-
-        // day result with a portal calendar-day calculation.
+        // BC owns the leave-type weekend/holiday policy, Saturday as half a working day
+        // included (BC 1.0.3.647). Do not replace its result with a portal calculation:
+        // a whole number of days that crosses a Saturday correctly ends at midday
+        // (End == Return, back that afternoon).
         return { endDate: end, returnDate: ret, source: 'bc' as const }
       }
     } catch {
-      // Older BC builds may lack GetPortalLeaveDates or still use Saturday
-      // half-day leave dating. Prefer the Mon-Fri working-day fallback so
-      // End/Return stay correct until BC 1.0.3.284+ is published.
+      // BC unavailable, or an older build without GetPortalLeaveDates: use the
+      // portal's own working-day fallback (Saturday = half a day).
       if (attempt.method === 'GetPortalLeaveDates' && productionDates.endDate) {
         return { ...productionDates, source: 'fallback' as const }
       }
@@ -2423,11 +2426,10 @@ export function buildStaffRouter() {
       const halfDay = String(req.params.halfDay ?? '0')
       const start = normalizeLeaveStartDate(startDate)
 
-      const startAsDate = new Date(`${formatBcSoapDate(startDate)}T12:00:00`)
-      const day = startAsDate.getDay()
-      // Leave start must be a weekday. Sat/Sun are blocked here; BC also rejects
-      // non-working starts and configured calendar holidays.
-      const isWeekend = !Number.isNaN(startAsDate.getTime()) && (day === 0 || day === 6)
+      // Leave starts on a working day: Monday–Saturday (Saturday is half a working day at
+      // ABH). Sunday is blocked here; BC also rejects configured calendar holidays.
+      // The response keeps the field name isWeekend for the existing clients.
+      const isWeekend = leaveStartIsNonWorkingDay(startDate)
 
       if (!type || !start || !Number.isFinite(days) || days <= 0) {
         res.status(422).json({
@@ -2444,7 +2446,7 @@ export function buildStaffRouter() {
           endDate: '',
           returnDate: '',
           isWeekend: true,
-          message: 'Leave start date cannot be on a weekend.',
+          message: 'Leave cannot start on a Sunday.',
         })
         return
       }
@@ -2839,16 +2841,13 @@ export function buildStaffRouter() {
 
       const deliveryDate = formatBcSoapDate(body.deliveryDate)
       const formattedStartDate = formatBcSoapDate(deliveryDate || body.startDate)
-      if (!deliveryDate && formattedStartDate) {
-        const startDow = new Date(`${formattedStartDate}T12:00:00`).getDay()
-        if (startDow === 0 || startDow === 6) {
-          res.status(422).json({
-            ok: false,
-            code: 'LEAVE_WEEKEND_START',
-            message: 'Leave start date cannot be on a weekend.',
-          })
-          return
-        }
+      if (!deliveryDate && formattedStartDate && leaveStartIsNonWorkingDay(formattedStartDate)) {
+        res.status(422).json({
+          ok: false,
+          code: 'LEAVE_WEEKEND_START',
+          message: 'Leave cannot start on a Sunday.',
+        })
+        return
       }
       // Resolve dates the same way Laravel does — call BC GetLeaveDates first.
       // Maternity/prenatal leave uses Delivery Date in BC; skip date math when provided.

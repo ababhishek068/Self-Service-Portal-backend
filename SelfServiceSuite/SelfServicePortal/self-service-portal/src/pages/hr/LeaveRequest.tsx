@@ -12,6 +12,7 @@ import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useProgress } from '@/components/feedback/ProgressProvider'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
+import { HistorySection } from '@/components/shared/HistorySection'
 import { RequestProgress } from '@/components/shared/RequestProgress'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,7 +46,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import type { ApprovalStep, PortalRequest } from '@/types/erp.types'
 import { env } from '@/config/env'
-import { canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
+import { approvalStepsSummary, canDeleteRequestItems, canUploadRequestAttachments } from '@/utils/requestStatus'
 
 const DASH = '—'
 
@@ -63,6 +64,39 @@ function formatPretty(iso: string): string {
     return format(parseISO(iso), 'd MMM yyyy')
   } catch {
     return iso
+  }
+}
+
+/**
+ * Saturday is half a working day at ABH. True when the dates Business Central calculated used a
+ * Saturday as half a leave day: the working days from start to end (Monday–Friday 1, Saturday 0.5,
+ * a midday end 0.5 less) add up to the applied days. It stays false when a Saturday was skipped or
+ * counted in full (leave types with their own weekend rule, or BC before 1.0.3.647).
+ */
+function saturdayCountedAsHalfDay(startIso: string, endIso: string, returnIso: string, appliedDays: number) {
+  if (!startIso || !endIso || !Number.isFinite(appliedDays) || appliedDays <= 0) return false
+  try {
+    const start = parseISO(startIso.slice(0, 10))
+    const end = parseISO(endIso.slice(0, 10))
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return false
+    let total = 0
+    let saturdays = 0
+    for (let day = start, guard = 0; day <= end && guard < 400; day = addDays(day, 1), guard += 1) {
+      const weekday = day.getDay()
+      if (weekday === 6) {
+        saturdays += 1
+        total += 0.5
+      } else if (weekday !== 0) {
+        total += 1
+      }
+    }
+    // Return on the End Date itself means the leave ends at midday of a full working day.
+    if (returnIso && returnIso.slice(0, 10) === endIso.slice(0, 10) && end.getDay() !== 6 && end.getDay() !== 0) {
+      total -= 0.5
+    }
+    return saturdays > 0 && Math.abs(total - appliedDays) < 1e-9
+  } catch {
+    return false
   }
 }
 
@@ -503,7 +537,8 @@ export function LeaveRequest() {
       .then((res) => {
         if (requestId !== leaveDatesRequestId.current) return
         if (res.isWeekend) {
-          setError('Leave start date cannot be on a weekend')
+          // Saturday is half a working day at ABH, so leave may start on it; Sunday is not a working day.
+          setError(res.message || 'Leave cannot start on a Sunday.')
           if (isHourly) setStartDateTime('')
           else setStartDate('')
           return
@@ -1370,6 +1405,17 @@ export function LeaveRequest() {
                         ) : DASH}
                       </p>
                     </div>
+                    {!isHourly &&
+                    halfDay === '0' &&
+                    !datesLoading &&
+                    saturdayCountedAsHalfDay(startDate, endDate, returnDate, Number(appliedDays)) ? (
+                      <p className="rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900 sm:col-span-3">
+                        Saturday is half a working day at ABH, so each Saturday in this period uses 0.5 leave day
+                        {returnDate === endDate
+                          ? ' — the leave ends at midday on the End Date and you return that afternoon. Add 0.5 day to be off the whole End Date.'
+                          : '.'}
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <div className="sm:col-span-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3 text-sm text-sky-900">
@@ -1617,13 +1663,6 @@ export function LeaveRequest() {
                   </div>
                 </dl>
 
-                {detailApprovalSteps.length > 0 ? (
-                  <section>
-                    <h3 className="mb-3 text-sm font-semibold text-slate-900">Approval workflow</h3>
-                    <ApprovalTimeline steps={detailApprovalSteps} />
-                  </section>
-                ) : null}
-
                 {(() => {
                   const leaveTypeText = [
                     payloadValue(selectedPayload, [
@@ -1708,6 +1747,16 @@ export function LeaveRequest() {
                       </Button>
                     ) : null}
                   </div>
+                ) : null}
+
+                {/* History is the last section of the page, closed until View more. */}
+                {detailApprovalSteps.length > 0 ? (
+                  <HistorySection
+                    count={detailApprovalSteps.length}
+                    summary={approvalStepsSummary(detailApprovalSteps)}
+                  >
+                    <ApprovalTimeline steps={detailApprovalSteps} />
+                  </HistorySection>
                 ) : null}
               </>
             )}

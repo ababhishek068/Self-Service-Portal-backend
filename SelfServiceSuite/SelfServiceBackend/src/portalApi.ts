@@ -703,7 +703,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v367 — 1.0.3.528 (Medical: Receipt Amount label)'
+export const PORTAL_API_BUILD = 'v368 — 1.0.3.529 (Operations feedback: collapsible history, process flow, optional LPR approval comment, Saturday half-day leave; for BC 1.0.3.647)'
 
 interface LookupSpec {
   service: string
@@ -6534,6 +6534,15 @@ export function buildPortalApiRouter() {
         if (error instanceof Error && /Unsupported Local Purchase action/i.test(error.message)) {
           throw portalError(
             'This change from the portal needs Business Central 1.0.3.569. Until it is published, make it on the card in Business Central.',
+            409,
+            'BC_UPDATE_REQUIRED',
+          )
+        }
+        // The comment on a routine approval is optional from BC 1.0.3.647; older BC still refuses
+        // an approval without one.
+        if (!actionComment && error instanceof Error && /Write a comment for this approval/i.test(error.message)) {
+          throw portalError(
+            'Business Central still asks for a comment on this approval (the comment becomes optional with BC 1.0.3.647). Add a comment and approve again.',
             409,
             'BC_UPDATE_REQUIRED',
           )

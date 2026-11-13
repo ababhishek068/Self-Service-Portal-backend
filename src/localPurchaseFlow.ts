@@ -32,7 +32,17 @@ const PROCUREMENT: LocalPurchaseRole[] = ['procurement', 'projectProcurement']
 /** Actions that call PortalLocalPurchaseAction in Business Central. */
 export const LOCAL_PURCHASE_ACTIONS: Record<
   string,
-  { roles: LocalPurchaseRole[]; needsPayload?: boolean; commentRequired?: boolean }
+  {
+    roles: LocalPurchaseRole[]
+    needsPayload?: boolean
+    /** Send back, reject, the technical recommendation and a changed winner: the action needs its reason. */
+    commentRequired?: boolean
+    /**
+     * Routine approvals (ABH Operations feedback, Nov 2026; BC 1.0.3.647): the approver may add a
+     * comment, but the approval goes through without one.
+     */
+    commentOptional?: boolean
+  }
 > = {
   // Owners mirror ABH Local Procurement's TestIs* checks (ABH Local Proc Setup user IDs).
   // Workflow per "ERP & BC – Staff Item-Asset Request to Payment Workflow" (meeting 18 Oct).
@@ -54,29 +64,29 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   ADD_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
   DELETE_PO_LINE: { roles: PROCUREMENT, needsPayload: true },
   UPDATE_PO_RECEIVE: { roles: ['operations'], needsPayload: true },
-  APPROVE_LPR_OPS: { roles: ['operationsManager'], commentRequired: true },
-  APPROVE_LPR_FAD: { roles: ['fad'], commentRequired: true },
+  APPROVE_LPR_OPS: { roles: ['operationsManager'], commentOptional: true },
+  APPROVE_LPR_FAD: { roles: ['fad'], commentOptional: true },
   REJECT_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
   CONVERT_TO_RFQ: { roles: PROCUREMENT },
   /** BC 1.0.3.588: the RFQ starts as a draft; Procurement prepares it, then submits it. */
   SUBMIT_RFQ_OPS: { roles: PROCUREMENT },
-  APPROVE_RFQ_OPS: { roles: ['operationsManager'], commentRequired: true },
+  APPROVE_RFQ_OPS: { roles: ['operationsManager'], commentOptional: true },
   UPSERT_VENDOR_QUOTE: { roles: PROCUREMENT, needsPayload: true },
   AUTO_SELECT_WINNER: { roles: PROCUREMENT },
   SEND_FOR_OPS_REVIEW: { roles: PROCUREMENT },
-  SEND_TO_TECHNICAL: { roles: ['operationsManager'], commentRequired: true },
-  SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'], commentRequired: true },
+  SEND_TO_TECHNICAL: { roles: ['operationsManager'], commentOptional: true },
+  SEND_FOR_FAD_APPROVAL: { roles: ['operationsManager'], commentOptional: true },
   SUBMIT_TECHNICAL_REVIEW: { roles: ['technical'], commentRequired: true },
   /** UAT-2 (BC 1.0.3.596): changing the winner needs FAD's reason, recorded as the Vendor Selection Reason. */
   SELECT_WINNER_FAD: { roles: ['fad'], commentRequired: true },
-  APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentRequired: true },
+  APPROVE_WINNER_FAD_FINAL: { roles: ['fad'], commentOptional: true },
   CREATE_PO: { roles: PROCUREMENT },
   /** BC 1.0.3.597 (UAT-2): the PO starts as a draft; Procurement completes it, then submits it. */
   SUBMIT_PO_OPS: { roles: PROCUREMENT },
-  APPROVE_PO_OPS: { roles: ['operationsManager'], commentRequired: true },
+  APPROVE_PO_OPS: { roles: ['operationsManager'], commentOptional: true },
   /** BC 1.0.3.592 (UAT-2): Finance reviews the PO between the Operations Manager and FAD. */
-  APPROVE_PO_FINANCE: { roles: ['financeChecker'], commentRequired: true },
-  APPROVE_PO_FAD: { roles: ['fad'], commentRequired: true },
+  APPROVE_PO_FINANCE: { roles: ['financeChecker'], commentOptional: true },
+  APPROVE_PO_FAD: { roles: ['fad'], commentOptional: true },
   /** BC 1.0.3.590: G/L account of a Service line, before the Operations Manager approves the PO. */
   SET_SERVICE_GL: { roles: [...PROCUREMENT, 'financeChecker'], needsPayload: true },
   /**
@@ -94,15 +104,15 @@ export const LOCAL_PURCHASE_ACTIONS: Record<
   SET_RECEIVE_ITEM: { roles: ['storeManager', 'operations'], needsPayload: true },
   POST_LOCAL_RECEIVE: { roles: ['operations'] },
   CREATE_LOCAL_INVOICE: { roles: PROCUREMENT },
-  APPROVE_INVOICE_OPS: { roles: ['operationsManager'], commentRequired: true },
-  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'], commentRequired: true },
-  APPROVE_PAYMENT_FAD: { roles: ['fad'], commentRequired: true },
+  APPROVE_INVOICE_OPS: { roles: ['operationsManager'], commentOptional: true },
+  VERIFY_PO_GRN_INVOICE: { roles: ['financeChecker'], commentOptional: true },
+  APPROVE_PAYMENT_FAD: { roles: ['fad'], commentOptional: true },
   CLOSE_LPR_AFTER_PAYMENT: { roles: ['financeChecker'], needsPayload: true },
   FIX_LOCAL_CURRENCY: { roles: [...PROCUREMENT, 'financeChecker'] },
   SEND_BACK_RFQ: { roles: ['operationsManager', 'technical', 'fad'], commentRequired: true },
   SEND_BACK_PO: { roles: ['operationsManager', 'financeChecker', 'fad'], commentRequired: true },
   RESUBMIT_PO: { roles: PROCUREMENT },
-  /** BC 1.0.3.576: Send Back / Reject at every approval step, with the approver's comment. */
+  /** BC 1.0.3.576: Send Back / Reject at every approval step, always with the approver's comment. */
   SEND_BACK_LPR: { roles: ['operationsManager', 'fad'], commentRequired: true },
   REJECT_RFQ: { roles: ['operationsManager', 'fad'], commentRequired: true },
   RESUBMIT_RFQ: { roles: PROCUREMENT },
@@ -194,7 +204,10 @@ export type LocalPurchaseNextAction = {
   /** True when the signed-in user owns this step. */
   allowed: boolean
   ownerRoles: LocalPurchaseRole[]
+  /** Send back / reject / technical recommendation / changed winner: the comment box must be filled. */
   commentRequired?: boolean
+  /** Routine approval: the comment box is offered, the comment may stay empty. */
+  commentOptional?: boolean
 }
 
 type StageAction = string | { code: string; roles: LocalPurchaseRole[] }
@@ -476,6 +489,7 @@ export function localPurchaseNextActions(
       ownerRoles,
       allowed: ownerRoles.some((role) => roles.includes(role)),
       commentRequired: Boolean((rule as { commentRequired?: boolean } | undefined)?.commentRequired),
+      commentOptional: Boolean((rule as { commentOptional?: boolean } | undefined)?.commentOptional),
     }
   })
 }

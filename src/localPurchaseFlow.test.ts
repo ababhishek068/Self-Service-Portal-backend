@@ -141,10 +141,49 @@ describe('assertLocalPurchaseActionAllowed', () => {
     assert.throws(() => assertLocalPurchaseActionAllowed(['operationsManager'], 'SUBMIT_LPR_OPS'), /not authorized/i)
     assert.throws(() => assertLocalPurchaseActionAllowed(['procurement'], 'UPSERT_VENDOR_QUOTE', '', false), /payload/i)
     assert.throws(() => assertLocalPurchaseActionAllowed(['financeChecker'], 'CLOSE_LPR_AFTER_PAYMENT', '', false), /payload/i)
-    // BC 1.0.3.576: every approval needs the approver's comment.
-    assert.throws(() => assertLocalPurchaseActionAllowed(['operationsManager'], 'APPROVE_LPR_OPS'), /comment is required/i)
-    assert.throws(() => assertLocalPurchaseActionAllowed(['fad'], 'APPROVE_PAYMENT_FAD', '  '), /comment is required/i)
     assert.throws(() => assertLocalPurchaseActionAllowed(['technical'], 'SUBMIT_TECHNICAL_REVIEW', ''), /comment/i)
+  })
+
+  it('needs a comment only to send back, reject, recommend or change the winner (BC 1.0.3.647)', () => {
+    // ABH Operations feedback, Nov 2026: a routine approval goes through without a comment.
+    const approvals: Array<[Parameters<typeof assertLocalPurchaseActionAllowed>[0], string]> = [
+      [['operationsManager'], 'APPROVE_LPR_OPS'],
+      [['fad'], 'APPROVE_LPR_FAD'],
+      [['operationsManager'], 'APPROVE_RFQ_OPS'],
+      [['operationsManager'], 'SEND_TO_TECHNICAL'],
+      [['operationsManager'], 'SEND_FOR_FAD_APPROVAL'],
+      [['fad'], 'APPROVE_WINNER_FAD_FINAL'],
+      [['operationsManager'], 'APPROVE_PO_OPS'],
+      [['financeChecker'], 'APPROVE_PO_FINANCE'],
+      [['fad'], 'APPROVE_PO_FAD'],
+      [['operationsManager'], 'APPROVE_INVOICE_OPS'],
+      [['financeChecker'], 'VERIFY_PO_GRN_INVOICE'],
+      [['fad'], 'APPROVE_PAYMENT_FAD'],
+    ]
+    for (const [roles, action] of approvals) {
+      assert.equal(assertLocalPurchaseActionAllowed(roles, action), action)
+      assert.equal(assertLocalPurchaseActionAllowed(roles, action, '  '), action)
+      assert.equal(LOCAL_PURCHASE_ACTIONS[action].commentOptional, true, action)
+      assert.notEqual(LOCAL_PURCHASE_ACTIONS[action].commentRequired, true, action)
+    }
+
+    // Sending back, rejecting, the technical recommendation and a changed winner keep their reason.
+    const withReason: Array<[Parameters<typeof assertLocalPurchaseActionAllowed>[0], string]> = [
+      [['operationsManager'], 'SEND_BACK_LPR'],
+      [['fad'], 'REJECT_LPR'],
+      [['operationsManager'], 'SEND_BACK_RFQ'],
+      [['fad'], 'REJECT_RFQ'],
+      [['financeChecker'], 'SEND_BACK_PO'],
+      [['fad'], 'REJECT_PO'],
+      [['operationsManager'], 'SEND_BACK_INVOICE'],
+      [['technical'], 'SUBMIT_TECHNICAL_REVIEW'],
+      [['fad'], 'SELECT_WINNER_FAD'],
+    ]
+    for (const [roles, action] of withReason) {
+      assert.throws(() => assertLocalPurchaseActionAllowed(roles, action), /comment is required/i, action)
+      assert.throws(() => assertLocalPurchaseActionAllowed(roles, action, '  '), /comment is required/i, action)
+      assert.equal(assertLocalPurchaseActionAllowed(roles, action, 'Add the brand on line 2'), action)
+    }
   })
 
   it('covers every documented Local Purchase SOAP action', () => {

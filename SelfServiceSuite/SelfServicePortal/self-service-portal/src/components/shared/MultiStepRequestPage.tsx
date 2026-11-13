@@ -25,7 +25,7 @@ import { DataTable, type DataTableColumn } from './DataTable'
 import { RequestAttachments } from './RequestAttachments'
 import { StatusBadge } from './StatusBadge'
 import { RequestProgress } from './RequestProgress'
-import { ApprovalHistory } from './ApprovalHistory'
+import { ApprovalHistorySection } from './ApprovalHistory'
 import { SentBackNotice } from './SentBackNotice'
 import {
   normalizeAndValidateSelectValues,
@@ -177,6 +177,11 @@ export interface MultiStepRequestConfig {
   detailSupplement?: (ctx: { request: PortalRequest }) => ReactNode
   /** Replace the detail field grid for some requests (e.g. the BC-style LPR card); `details` is the default grid. */
   detailOverride?: (ctx: { request: PortalRequest; details: ReactNode }) => ReactNode
+  /**
+   * A module's own approval history (e.g. the Local Purchase chain log), shown at the very bottom of
+   * the detail page next to the standard Approval and Comment History.
+   */
+  detailFooter?: (ctx: { request: PortalRequest }) => ReactNode
   /**
    * Documents driven by their BC card actions (e.g. a store LPR): no process banner, approval
    * stepper, Edit / Request Approval / Cancel / Delete or line edits; `detailSupplement` holds the ribbon.
@@ -1526,11 +1531,11 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   />
                 ) : null}
 
-                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) ? (
-                  <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Approval and Comment History</h3>
-                    <ApprovalHistory steps={approvalHistorySteps(selected)} />
-                  </section>
+                {/* History is always the last thing on the page, closed until View more. */}
+                {config.detailFooter ? config.detailFooter({ request: selected }) : null}
+                {shouldShowApprovalHistory(selected.status, selected.approvalSteps) &&
+                (approvalHistorySteps(selected).length > 0 || !config.detailFooter) ? (
+                  <ApprovalHistorySection steps={approvalHistorySteps(selected)} />
                 ) : null}
               </>
             ) : null}

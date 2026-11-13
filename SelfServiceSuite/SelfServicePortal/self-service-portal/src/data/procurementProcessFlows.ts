@@ -1,6 +1,21 @@
+/** Category picture of a phase in the process flow (ProcurementProcessBanner maps it to an icon). */
+export type ProcurementProcessIcon =
+  | 'request'
+  | 'approval'
+  | 'quotation'
+  | 'evaluation'
+  | 'order'
+  | 'store'
+  | 'storeManager'
+  | 'receiving'
+  | 'accept'
+  | 'payment'
+  | 'done'
+
 export type ProcurementProcessStep = {
   phase: string
   heading?: string
+  icon?: ProcurementProcessIcon
   owner: string
   action: string
   portal?: boolean
@@ -18,6 +33,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '1',
     heading: 'LPR & Approval',
+    icon: 'request',
     owner: 'Procurement Officer → Operations Manager → FAD',
     action:
       'The assigned Procurement Officer (Project Procurement Officer for a project) prepares the LPR — need, quantity, specification, justification — and submits it to the Operations Manager. The Operations Manager approves, then FAD approves.',
@@ -27,6 +43,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '2',
     heading: 'RFQ & Quotations',
+    icon: 'quotation',
     owner: 'Procurement → Operations Manager → Procurement',
     action:
       'Procurement converts the LPR to an RFQ. The Operations Manager approves the RFQ. Procurement then enters each vendor quotation with its attachment.',
@@ -36,6 +53,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '3',
     heading: 'Evaluation & Supplier Selection',
+    icon: 'evaluation',
     owner: 'Procurement → Operations Manager → Technical (if required) → FAD',
     action:
       'Procurement selects the winner and sends it for Operations Manager review. The Operations Manager sends it to Technical if required, or to FAD. FAD approves the final supplier (or sends it back).',
@@ -45,6 +63,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '4',
     heading: 'Purchase Order',
+    icon: 'order',
     owner: 'Procurement → Operations Manager → FAD',
     action:
       'Procurement creates the PO from the winning quote (the PO totals the quoted amount). The Operations Manager approves the PO, then FAD approves it.',
@@ -54,6 +73,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '5',
     heading: 'Goods Receiving (GRN) & Issue',
+    icon: 'receiving',
     owner: 'Store Keeper → Requester',
     action:
       'The Store Keeper prepares the local receive and posts the GRN into the store, then uses Issue after LPR receive (GIV). The requester confirms receipt.',
@@ -63,6 +83,7 @@ export const purchaseRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '6',
     heading: 'Invoice & Payment',
+    icon: 'payment',
     owner: 'Procurement → Operations Manager → Finance → FAD → Finance',
     action:
       'Procurement records the vendor invoice. The Operations Manager approves it, Finance verifies PO + GRN + invoice, F&A (FAD) approves the payment, and Finance pays the vendor from the chosen bank and closes the LPR.',
@@ -83,6 +104,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '1',
     heading: 'Requisition',
+    icon: 'request',
     owner: 'Staff',
     action:
       'Choose the issuing store (and the project, when it is for a project), then add what you need with the unit of measure and quantity. Send it for approval.',
@@ -92,6 +114,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '2',
     heading: 'Review & Approval',
+    icon: 'approval',
     owner: 'Supervisor → Dept Head → Division Head → Finance & Administration',
     action:
       'The request goes through the Business Central approvals. It can be approved, rejected, or returned for correction.',
@@ -101,6 +124,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '3',
     heading: 'Store Keeper',
+    icon: 'store',
     owner: 'Store Keeper',
     action:
       'Item in store: add the item to issue and submit to the Store Manager. No item or similar item in store: Request for LPR — the request goes to the Store Manager with the employee details.',
@@ -110,6 +134,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '4',
     heading: 'Store Manager',
+    icon: 'storeManager',
     owner: 'Store Manager',
     action:
       'Item in store: Accept Item (Store Manager) — no voucher yet. Not in store: Start Local Purchase (LPR) — Local or Foreign, project, then the procurement officer.',
@@ -119,6 +144,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '5',
     heading: 'Accept the Item',
+    icon: 'accept',
     owner: 'Requester',
     action:
       'Open the Item Borrowing Form, check it, then Accept Item (the goods issue voucher is created and the request goes In Transit) or Decline Item (the store can offer another item or close the request).',
@@ -128,6 +154,7 @@ export const storeRequisitionProcess: ProcurementProcessStep[] = [
   {
     phase: '6',
     heading: 'Confirm Receipt',
+    icon: 'done',
     owner: 'Requester',
     action:
       'When you have the item, Confirm Receipt. The Item Borrowing Form and the Store Issuance Voucher (GIV) stay available.',

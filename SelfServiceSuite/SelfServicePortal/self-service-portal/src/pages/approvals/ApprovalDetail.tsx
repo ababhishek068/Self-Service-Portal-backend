@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Check, CornerUpLeft, RefreshCw, X } from 'lucide-react'
 import { ApprovalTimeline } from '@/components/shared/ApprovalTimeline'
+import { HistorySection } from '@/components/shared/HistorySection'
 import { RequestAttachments } from '@/components/shared/RequestAttachments'
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 import { StatusBadge } from '@/components/shared/StatusBadge'
@@ -15,7 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePermissions } from '@/hooks/usePermissions'
 import { extractApplicationReason } from '@/utils/applicationReason'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
-import { approvalHistorySteps } from '@/utils/requestStatus'
+import { approvalHistorySteps, approvalStepsSummary } from '@/utils/requestStatus'
 import { isMakerAllowedToApprove } from '@/utils/validators'
 import { useToast } from '@/components/feedback/ToastProvider'
 import type { ApprovalDecision } from '@/types/erp.types'
@@ -500,7 +501,7 @@ export function ApprovalDetail() {
       {detail.isLoading || !request ? (
         <Skeleton className="h-96" />
       ) : (
-        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid items-start gap-5">
           <Card className="min-w-0 overflow-hidden">
             <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -781,15 +782,15 @@ export function ApprovalDetail() {
             </CardContent>
           </Card>
 
-          <Card className="min-w-0 overflow-hidden xl:sticky xl:top-5">
-            <CardHeader className="border-b border-slate-200/80 bg-gradient-to-r from-slate-50 to-white">
-              <CardTitle>Maker/checker timeline</CardTitle>
-              <CardDescription>Audit trail with timestamps.</CardDescription>
-            </CardHeader>
-            <CardContent className="p-5">
+          {/* History is the last section of the page, closed until View more. */}
+          {approvalHistorySteps(request).length > 0 ? (
+            <HistorySection
+              count={approvalHistorySteps(request).length}
+              summary={approvalStepsSummary(approvalHistorySteps(request))}
+            >
               <ApprovalTimeline steps={approvalHistorySteps(request)} />
-            </CardContent>
-          </Card>
+            </HistorySection>
+          ) : null}
         </div>
       )}
 

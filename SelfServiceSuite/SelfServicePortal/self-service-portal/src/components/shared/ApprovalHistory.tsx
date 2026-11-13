@@ -1,6 +1,7 @@
+import { HistorySection } from './HistorySection'
 import { StatusBadge } from './StatusBadge'
 import { formatDateTime } from '@/utils/formatters'
-import { compareApprovalSteps } from '@/utils/requestStatus'
+import { approvalStepsSummary, compareApprovalSteps } from '@/utils/requestStatus'
 import type { ApprovalStep } from '@/types/erp.types'
 
 export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
@@ -43,5 +44,14 @@ export function ApprovalHistory({ steps }: { steps: ApprovalStep[] }) {
         </div>
       ))}
     </div>
+  )
+}
+
+/** The standard closed-by-default history section for a request's approval steps. */
+export function ApprovalHistorySection({ steps }: { steps: ApprovalStep[] }) {
+  return (
+    <HistorySection count={steps.length} summary={approvalStepsSummary(steps)}>
+      <ApprovalHistory steps={steps} />
+    </HistorySection>
   )
 }

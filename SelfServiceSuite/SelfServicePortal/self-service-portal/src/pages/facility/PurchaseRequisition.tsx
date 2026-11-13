@@ -4,6 +4,7 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { PurchaseOperationsPanel } from '@/components/facility/PurchaseOperationsPanel'
 import { LprCardDetails } from '@/components/facility/LprCardDetails'
 import { LocalPurchasePanel } from '@/components/facility/LocalPurchasePanel'
+import { LprApprovalHistorySection } from '@/components/facility/LprApprovalHistory'
 import { LprLinesSubform } from '@/components/facility/LprLinesSubform'
 import { ProcurementProcessBanner } from '@/components/facility/ProcurementProcessBanner'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -119,6 +120,8 @@ export function PurchaseRequisition() {
       )}
       // An LPR shows its details like the BC Purchase Requisition Card (Store Request, General).
       detailOverride={({ request, details }) => <LprCardDetails request={request} fallback={details} />}
+      // The Local Purchase chain's approvals and comments: last on the page, closed until View more.
+      detailFooter={({ request }) => <LprApprovalHistorySection request={request} />}
       // A store LPR runs on its BC card actions (the Local Purchase panel), not the draft buttons.
       bcCard={(request) => request.payload?.LocalPurchaseFromStore === true}
       bcCardLines={({ request }) => <LprLinesSubform request={request} />}
