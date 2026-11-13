@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { addDays, differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
+import { differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
 import { useMemo } from 'react'
+import { Landmark, UserCheck } from 'lucide-react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
@@ -12,18 +13,36 @@ import {
   purposeRequiresOtherDetails,
 } from '@/data/advanceRequestPurpose'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
-import { imprestTypeOptions } from '@/data/essOptions'
+import { advanceAttachmentCategories, imprestTypeOptions } from '@/data/essOptions'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
 import { imprestHeaderSchema, imprestLineHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency } from '@/utils/formatters'
 import { useAuth } from '@/hooks/useAuth'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
+import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import type { LookupOption } from '@/api/endpoints/lookups'
 
 const today = formatISO(new Date(), { representation: 'date' })
-const tomorrow = formatISO(addDays(new Date(), 1), { representation: 'date' })
 const module = { module: 'imprest', entity: 'selfServiceImprestRequests' } as const
+
+/** BC 1.0.3.646 Advance Request route (ABH spec section 4), shown until BC has the approval entries. */
+const ADVANCE_APPROVERS: TrackerStep[] = [
+  { key: 'line-manager', heading: 'Line Manager', owner: 'Workflow User Group', icon: UserCheck },
+  { key: 'final-approver', heading: 'FAD | COO | CEO', owner: 'By amount: <50k · 50–100k · >100k ETB', icon: Landmark },
+]
+
+function paymentStatus(request: PortalRequest) {
+  const payload = request.payload ?? {}
+  const posted = payload.Posted === true || String(payload.Posted ?? '').toLowerCase() === 'true'
+  const datePosted = firstPayloadDate(payload, ['DatePosted', 'Date_Posted'])
+  const voucher = String(
+    payload.PVNo ?? payload.PV_No ?? payload.PaymentVoucherNo ?? payload.Payment_Voucher_No ?? '',
+  ).trim()
+  if (posted) return datePosted ? `Paid (posted ${datePosted})` : 'Paid (posted)'
+  if (voucher) return 'Payment voucher raised'
+  return undefined
+}
 
 function documentNoFromRequestId(requestId: string) {
   const separator = requestId.indexOf('-')
@@ -187,7 +206,9 @@ function destinationFromRequest(
 ) {
   const payload = request.payload ?? {}
   const raw = String(
-    payload.TravelDestination ??
+    payload.ActivityLocation ??
+      payload.Activity_Location ??
+      payload.TravelDestination ??
       payload.Travel_Destination ??
       payload.Destination ??
       payload.DestinationCode ??
@@ -254,7 +275,7 @@ export function ImprestRequest() {
     <MultiStepRequestPage
       title="Advance Request"
       headerLabel="New Advance Request"
-      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Create the header, add budget lines, then submit for approval. Approval (BC 1.0.3.646): Superior first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Purpose options come from Business Central for your division (1.0.3.643). Settle unused or spent funds later via Advance Settlement (within two working days of return)."
+      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Settlement is not part of this form: settle later via Advance Settlement (within two working days of return)."
       module={module}
       queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
@@ -264,6 +285,7 @@ export function ImprestRequest() {
       newButtonLabel="New Advance Request"
       headerSchema={imprestHeaderSchema}
       headerDefaults={{
+        requestDate: today,
         dateRequired: today,
         requestPurpose: purposeOptions[0]?.value ?? 'GN-OTH',
         otherPurposeDetails: '',
@@ -272,41 +294,35 @@ export function ImprestRequest() {
         activityStartDate: '',
         activityEndDate: '',
         purpose: '',
-        travelDestination: '',
-        travelDate: today,
-        returnDate: tomorrow,
       }}
+      progressApprovers={ADVANCE_APPROVERS}
+      attachmentCategoryOptions={advanceAttachmentCategories}
+      attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."
       headerSupplement={() => (
         <div className="space-y-3">
-          <FinanceEmployeeOrgBanner />
+          <FinanceEmployeeOrgBanner showEmployeeNoAndStatus />
           <div className="rounded-xl border border-teal-200 bg-teal-50/80 px-3 py-2.5 text-sm text-teal-950">
             <p className="font-semibold">Finance approval (Business Central 1.0.3.646)</p>
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
-              History: Superior → FAD | COO | CEO. Superior is the Workflow User Group on the Advance
-              Request workflow (same idea as Store). Then by amount (ETB): below 50,000 → FAD;
-              50,000–100,000 → COO; above 100,000 → CEO. Request Purpose comes from BC for your
+              ESSP submission → Business Central → Line Manager approval → final approver by amount (ETB):
+              below 50,000 → FAD; 50,000–100,000 → COO; above 100,000 → CEO. The Line Manager is the
+              Workflow User Group on the Advance Request workflow. Request Purpose comes from BC for your
               division — choose Other (Specify) when needed. Settlement is only via Advance Settlement.
             </p>
           </div>
         </div>
       )}
       buildHeaderPayload={(values) => {
-        const travelDate = String(values.travelDate ?? '')
-        let returnDate = String(values.returnDate ?? '')
-        if (travelDate && (!returnDate || returnDate <= travelDate)) {
-          const next = new Date(`${travelDate}T12:00:00`)
-          next.setDate(next.getDate() + 1)
-          returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
-        }
         const justification = String(values.justification ?? '').trim()
         const purposeCode = String(values.requestPurpose ?? '').trim()
         const purposeLabel =
           purposeOptions.find((option) => option.value === purposeCode)?.label ?? purposeCode
+        const activityStartDate = String(values.activityStartDate ?? '')
+        // No travel fields on the form: the backend fills BC's Travel Start / Expected Return from these.
         return {
           ...values,
-          travelDate,
-          returnDate,
-          startDate: travelDate,
+          activityStartDate,
+          activityEndDate: String(values.activityEndDate ?? '') || activityStartDate,
           purposeCode,
           requestPurpose: purposeCode,
           purpose: justification || purposeLabel,
@@ -314,34 +330,35 @@ export function ImprestRequest() {
         }
       }}
       headerOnValuesChange={(values, form) => {
-        const travelDate = String(values.travelDate ?? '')
-        const returnDate = String(values.returnDate ?? '')
-        if (!travelDate) return
-        if (returnDate && returnDate > travelDate) return
-        const next = new Date(`${travelDate}T12:00:00`)
-        next.setDate(next.getDate() + 1)
-        const bumped = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
-        if (returnDate !== bumped) {
-          form.setValue('returnDate', bumped, { shouldValidate: true, shouldDirty: true })
-        }
+        // One-day activity by default: the end date follows the start date until set later.
+        const start = String(values.activityStartDate ?? '')
+        const end = String(values.activityEndDate ?? '')
+        if (start && !end) form.setValue('activityEndDate', start, { shouldValidate: true, shouldDirty: true })
       }}
       headerFields={[
         {
+          name: 'requestDate',
+          label: 'Request Date',
+          type: 'date',
+          readOnly: true,
+          valuePaths: ['Date', 'RequestDate', 'Request_Date'],
+          hint: 'System generated',
+        },
+        {
           name: 'dateRequired',
-          label: 'Required Advance Date',
+          label: 'Required Advance Date *',
           type: 'date',
           valuePaths: [
             'DateRequired',
             'Date_Required',
             'PaymentReleaseDate',
             'Payment_Release_Date',
-            'Date',
           ],
-          hint: 'Date you need the funds',
+          hint: 'Date you need the funds (today or later, on or before the activity start)',
         },
         {
           name: 'requestPurpose',
-          label: 'Request Purpose',
+          label: 'Request Purpose *',
           type: 'select',
           options: purposeOptions,
           valuePaths: ['RequestPurposeCode', 'Request_Purpose_Code'],
@@ -360,7 +377,7 @@ export function ImprestRequest() {
         },
         {
           name: 'justification',
-          label: 'Request Justification',
+          label: 'Request Justification *',
           type: 'textarea',
           fullWidth: true,
           maxLength: 250,
@@ -369,7 +386,7 @@ export function ImprestRequest() {
         },
         {
           name: 'activityStartDate',
-          label: 'Activity Start Date',
+          label: 'Activity Start Date *',
           type: 'date',
           valuePaths: ['ActivityStartDate', 'Activity_Start_Date'],
         },
@@ -378,35 +395,20 @@ export function ImprestRequest() {
           label: 'Activity End Date',
           type: 'date',
           valuePaths: ['ActivityEndDate', 'Activity_End_Date'],
+          hint: 'On or after the start date (same date for a one-day activity)',
         },
         {
           name: 'activityLocation',
           label: 'Activity Location',
           type: 'text',
-          placeholder: 'Where the activity will take place',
+          fullWidth: true,
+          placeholder: 'Where the activity will take place (where relevant)',
           valuePaths: ['ActivityLocation', 'Activity_Location'],
-        },
-        {
-          name: 'travelDestination',
-          label: 'Travel Destination (free text)',
-          type: 'text',
-          valuePaths: ['TravelDestination', 'Travel_Destination'],
-        },
-        {
-          name: 'travelDate',
-          label: 'Travel Start Date',
-          type: 'date',
-          valuePaths: ['TravelStartDate', 'Travel_Start_Date', 'TravelDate', 'Travel_Date'],
-        },
-        {
-          name: 'returnDate',
-          label: 'Expected Return Date',
-          type: 'date',
-          valuePaths: ['ExpectedReturnDate', 'Expected_Return_Date', 'ReturnDate', 'Return_Date'],
         },
       ]}
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
+        { label: 'Request Date', paths: ['payload.Date', 'request.createdAt'], format: 'date' },
         {
           label: 'Required Advance Date',
           paths: [
@@ -414,8 +416,6 @@ export function ImprestRequest() {
             'payload.Date_Required',
             'payload.PaymentReleaseDate',
             'payload.Payment_Release_Date',
-            'payload.Date',
-            'request.createdAt',
           ],
           format: 'date',
         },
@@ -445,23 +445,6 @@ export function ImprestRequest() {
           label: 'Activity Location',
           paths: ['payload.ActivityLocation', 'payload.Activity_Location'],
         },
-        { label: 'Travel Destination', paths: ['payload.TravelDestination', 'payload.Travel_Destination'] },
-        {
-          label: 'Travel Start Date',
-          paths: [
-            'payload.TravelStartDate',
-            'payload.Travel_Start_Date',
-            'payload.TravelDate',
-            'payload.Travel_Date',
-          ],
-          format: 'date',
-        },
-        {
-          label: 'Expected Return Date',
-          paths: ['payload.ExpectedReturnDate', 'payload.Expected_Return_Date', 'payload.ReturnDate', 'payload.Return_Date'],
-          format: 'date',
-        },
-        { label: 'Duration Date', paths: ['payload.DurationDate'] },
         ...financeOrgDetailFields,
         {
           label: 'Job Title',
@@ -473,7 +456,7 @@ export function ImprestRequest() {
         },
         { label: 'Responsibility Center', paths: ['request.responsibleCenter', 'payload.ResponsibilityCenter'] },
         { label: 'Place of Duty', paths: ['payload.PlaceofDuty', 'payload.PlaceOfDuty', 'payload.DutyArea'] },
-        { label: 'Total Net Amount', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
+        { label: 'Requested Amount (ETB)', paths: ['payload.TotalNetAmount', 'request.amount'], format: 'currency' },
         {
         label: 'Remaining Not Settled',
           paths: [
@@ -486,6 +469,12 @@ export function ImprestRequest() {
         },
         { label: 'Settlement Status (BC)', paths: ['payload.SurrenderStatus', 'payload.Surrender_Status'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
+        // Shown only once BC has a payment for the advance (spec section 5).
+        { label: 'Payment Status', paths: [], resolve: paymentStatus },
+        {
+          label: 'Payment Reference',
+          paths: ['payload.PVNo', 'payload.PV_No', 'payload.PaymentVoucherNo', 'payload.Payment_Voucher_No'],
+        },
         {
           label: 'Rejection Reason',
           paths: [
@@ -510,19 +499,18 @@ export function ImprestRequest() {
         },
         defaultValuesFromRequest: (request) => {
           const payload = request.payload ?? {}
-          const travelDate = firstPayloadDate(payload, [
+          // Days of the activity (inclusive); older requests fall back to their travel dates.
+          const startDate = firstPayloadDate(payload, [
+            'ActivityStartDate',
+            'Activity_Start_Date',
             'TravelStartDate',
             'Travel_Start_Date',
-            'TravelDate',
-            'Travel_Date',
           ])
-          const returnDate = firstPayloadDate(payload, [
-            'ExpectedReturnDate',
-            'Expected_Return_Date',
-            'ReturnDate',
-            'Return_Date',
-          ])
-          const days = travelDate && returnDate ? inclusiveTravelDays(travelDate, returnDate) : 0
+          const endDate =
+            firstPayloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']) ||
+            firstPayloadDate(payload, ['ExpectedReturnDate', 'Expected_Return_Date']) ||
+            startDate
+          const days = startDate && endDate ? inclusiveTravelDays(startDate, endDate) : 0
           return {
             destination: destinationFromRequest(request, destinations.options),
             ...(days > 0 ? { noOfDays: days } : {}),
@@ -572,6 +560,7 @@ export function ImprestRequest() {
           { key: 'noOfDays', header: 'No of Days' },
         ],
         emptyText: '*** No Advance Lines Found ***',
+        requiredMessage: 'Add at least one advance line with an amount above 0 (ETB) before Request Approval.',
         canEdit: false,
       }}
     />

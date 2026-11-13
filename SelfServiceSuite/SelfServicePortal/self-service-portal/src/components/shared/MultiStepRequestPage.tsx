@@ -126,6 +126,8 @@ export interface MultiStepRequestConfig {
   processBanner?: ReactNode | ((request: PortalRequest | null) => ReactNode)
   /** Stages after the approvals on the Workflow Progress tracker (Medical Claim: payment voucher, then Paid). */
   progressAfterApproval?: (request: PortalRequest) => { steps: TrackerStep[]; caption: string } | undefined
+  /** The approvers to show on Workflow Progress before BC has approval entries (new form, draft). */
+  progressApprovers?: TrackerStep[]
   /** Some workflows should show the process only after a request is started. */
   showProcessBannerOnList?: boolean
   module: EndpointConfig
@@ -535,6 +537,17 @@ function HeaderForm({
         allowOverflow
       >
         <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
+          {config.processBanner === undefined ? (
+            // The same live Workflow Progress tracker as the saved document, at step 1 while the form is open.
+            <RequestProgress
+              status={request?.status ?? 'Draft'}
+              creating={request ? 'edit' : 'new'}
+              requiresLines={Boolean(config.line && config.line.required !== false)}
+              module={config.module.module}
+              approvalSteps={request?.approvalSteps}
+              expectedApprovers={config.progressApprovers}
+            />
+          ) : null}
           {config.description ? <p className="text-sm text-slate-600">{config.description}</p> : null}
           {renderProcessBanner(config, request ?? null)}
           <div
@@ -1336,6 +1349,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                   payload={payload}
                   approvalSteps={selected.approvalSteps}
                   afterApproval={config.progressAfterApproval?.(selected)}
+                  expectedApprovers={config.progressApprovers}
                 />}
                 {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
                 {(() => {

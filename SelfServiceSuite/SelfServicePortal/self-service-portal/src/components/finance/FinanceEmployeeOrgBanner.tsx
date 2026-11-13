@@ -23,12 +23,15 @@ function medicalBalanceValue(value: number | undefined) {
 interface FinanceEmployeeOrgBannerProps {
   showMedicalBalances?: boolean
   showJobGradeAndDistrict?: boolean
+  /** Advance Request spec: Employee Number and Employment Status in the auto-filled employee block. */
+  showEmployeeNoAndStatus?: boolean
 }
 
 /** Read-only organisation context sourced from the ABH employee profile. */
 export function FinanceEmployeeOrgBanner({
   showMedicalBalances = false,
   showJobGradeAndDistrict = false,
+  showEmployeeNoAndStatus = false,
 }: FinanceEmployeeOrgBannerProps) {
   const { employee } = useAuth()
   const profileQuery = useQuery({
@@ -52,6 +55,9 @@ export function FinanceEmployeeOrgBanner({
       <p className="mb-2 font-medium text-slate-900">Organisation (from your employee profile)</p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <div><span className="text-slate-500">Employee</span><p className="font-medium">{orgValue(employee?.displayName)}</p></div>
+        {showEmployeeNoAndStatus ? (
+          <div><span className="text-slate-500">Employee No.</span><p className="font-medium">{orgValue(profile?.employeeNo, employee?.employeeNo)}</p></div>
+        ) : null}
         <div><span className="text-slate-500">Job Title</span><p className="font-medium">{orgValue(profile?.jobTitle, employee?.jobTitle)}</p></div>
         {showJobGradeAndDistrict ? (
           <div><span className="text-slate-500">Job Grade</span><p className="font-medium">{orgValue(profile?.jobGrade, employee?.jobGrade)}</p></div>
@@ -62,6 +68,9 @@ export function FinanceEmployeeOrgBanner({
           <div><span className="text-slate-500">District</span><p className="font-medium">{orgValue(profile?.district)}</p></div>
         ) : null}
         <div><span className="text-slate-500">Branch</span><p className="font-medium">{orgValue(profile?.branch, employee?.branchName, employee?.branchCode)}</p></div>
+        {showEmployeeNoAndStatus ? (
+          <div><span className="text-slate-500">Employment Status</span><p className="font-medium">{orgValue(profile?.status, profile?.employmentType)}</p></div>
+        ) : null}
       </div>
       {showMedicalBalances ? (
         <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">

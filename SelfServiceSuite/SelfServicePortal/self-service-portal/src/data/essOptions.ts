@@ -180,6 +180,14 @@ export const storeAttachmentCategories = [
   { label: 'Other Supporting Documents', value: 'Other Supporting Documents' },
 ]
 
+/** ESSP Advance Request supporting documents (ABH spec section 3). */
+export const advanceAttachmentCategories = [
+  { label: 'Activity Plan', value: 'Activity Plan' },
+  { label: 'Assignment Approval', value: 'Assignment Approval' },
+  { label: 'Budget Support', value: 'Budget Support' },
+  { label: 'Other Evidence', value: 'Other Evidence' },
+]
+
 export const purchaseLineTypeOptions = [
   { label: 'Service', value: '1' },
   { label: 'Item', value: '2' },

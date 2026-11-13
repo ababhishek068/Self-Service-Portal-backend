@@ -18,6 +18,13 @@ interface RequestProgressProps {
    * voucher, then Paid). Reached when the document is approved, done when it is posted.
    */
   afterApproval?: { steps: TrackerStep[]; caption: string }
+  /**
+   * The approvers this document goes to (e.g. Advance: Line Manager → FAD | COO | CEO), shown until BC
+   * has approval entries in place of the generic Approval workflow step.
+   */
+  expectedApprovers?: TrackerStep[]
+  /** The new / edit form, before the header is saved: step 1 is current. */
+  creating?: 'new' | 'edit'
   className?: string
 }
 
@@ -109,12 +116,19 @@ function workflow({
   requiresLines = false,
   approvalSteps = [],
   afterApproval,
+  expectedApprovers,
+  creating,
 }: RequestProgressProps): { steps: TrackerStep[]; stage: ProcessStage; groups: ApproverGroup[] } {
   const normalized = status.trim().toLowerCase()
   const detailReady = !requiresLines || hasLines
   const groups = approverGroups(approvalSteps)
   const steps: TrackerStep[] = [
-    { key: 'draft', heading: 'Draft created', owner: 'Saved in Business Central', icon: FileCheck2 },
+    {
+      key: 'draft',
+      heading: creating === 'new' ? 'Create draft' : 'Draft created',
+      owner: creating === 'new' ? 'Fill in and Save' : 'Saved in Business Central',
+      icon: FileCheck2,
+    },
     {
       key: 'details',
       heading: requiresLines ? 'Lines & attachments' : 'Review details',
@@ -134,6 +148,8 @@ function workflow({
         icon: ROLE_ICON[heading.toLowerCase()] ?? (group.names.length > 1 ? Users : UserCheck),
       })
     }
+  } else if (expectedApprovers?.length) {
+    steps.push(...expectedApprovers)
   } else {
     steps.push({ key: 'approval', heading: 'Approval workflow', owner: 'Business Central approvers', icon: Send })
   }
@@ -145,6 +161,10 @@ function workflow({
   const groupIndex = (wanted: (group: ApproverGroup) => boolean) => {
     const found = groups.findIndex(wanted)
     return found >= 0 ? firstApproval + found : -1
+  }
+  if (creating) {
+    const caption = creating === 'new' ? 'Fill in the details, then Save' : 'Editing · Save the changes'
+    return { steps, stage: { index: 0, state: 'active', caption }, groups }
   }
   let stage: ProcessStage
   const approvalsDone =

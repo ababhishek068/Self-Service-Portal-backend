@@ -190,21 +190,25 @@ export const staffClaimLineSchema = z
     }
   })
 
+/**
+ * ESSP Advance Request (ABH spec "ESSP – Advance Request"): Required Advance Date, Request Purpose,
+ * Request Justification and Activity Start Date are mandatory; Activity End Date ≥ Start Date.
+ * There are no travel fields: BC's Travel Start / Expected Return are taken from the activity dates.
+ */
 export const imprestHeaderSchema = z
   .object({
-    dateRequired: workingDateField,
+    /** System generated (BC Imprest Header Date), shown read-only. */
+    requestDate: optionalText,
+    dateRequired: needByDateField,
     /** BC purpose code from PortalAdvancePaymentContext (e.g. AC-RES, GN-OTH). */
     requestPurpose: z.string().min(1, 'Request purpose is required'),
     otherPurposeDetails: z.string().optional().default(''),
     justification: z.string().min(10, 'Request justification is required'),
     activityLocation: optionalText,
-    activityStartDate: z.string().optional().default(''),
+    activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
     activityEndDate: z.string().optional().default(''),
     /** Legacy SOAP Purpose — filled from justification before create/edit. */
     purpose: z.string().optional().default(''),
-    travelDestination: optionalText,
-    travelDate: dateField,
-    returnDate: dateField,
   })
   .superRefine((data, ctx) => {
     const purposeCode = String(data.requestPurpose ?? '').trim()
@@ -233,8 +237,13 @@ export const imprestHeaderSchema = z
         message: 'Activity end date cannot be earlier than the start date',
       })
     }
-    if (isBefore(parseISO(data.returnDate), parseISO(data.travelDate))) {
-      ctx.addIssue({ code: 'custom', path: ['returnDate'], message: 'Return date must be on or after the start date' })
+    // The advance is paid before the activity: the funds cannot be needed after it starts.
+    if (data.dateRequired && data.activityStartDate && data.dateRequired.slice(0, 10) > data.activityStartDate.slice(0, 10)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dateRequired'],
+        message: 'Required advance date must be on or before the activity start date',
+      })
     }
   })
 

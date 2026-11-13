@@ -11,6 +11,7 @@ import {
   resolveApprovalModuleFromTableId,
 } from './approvalTableIds.js'
 import {
+  advanceTravelParams,
   findFrontendModuleSpec,
   findModuleSpec,
   gatePassListFilterParts,
@@ -3755,5 +3756,34 @@ describe('password reset email', () => {
     const { passwordResetEmail } = await import('./auth.js')
     assert.match(passwordResetEmail('<b>x</b>', '1').message, /&lt;b&gt;x&lt;\/b&gt;/)
     assert.match(passwordResetEmail('  ', '1').message, /Dear Colleague,/)
+  })
+})
+
+describe('Advance Request without travel fields (ABH ESSP spec)', () => {
+  it('sends the activity location and end date and a blank travel date so BC keeps its own Request Date', () => {
+    const params = advanceTravelParams({
+      activityStartDate: '2026-11-16',
+      activityEndDate: '2026-11-19',
+      activityLocation: 'Addis',
+      travelDestination: 'ignored',
+      travelDate: '2026-11-13',
+      returnDate: '2026-11-14',
+    })
+    assert.deepEqual(params, {
+      activityStartDate: '2026-11-16',
+      activityEndDate: '2026-11-19',
+      travelDestination: 'Addis',
+      travelDate: '0001-01-01',
+      returnDate: '2026-11-19',
+    })
+  })
+
+  it('treats a missing end date as a one-day activity and refuses a missing start or an end before the start', () => {
+    assert.equal(advanceTravelParams({ activityStartDate: '2026-11-16' }).returnDate, '2026-11-16')
+    assert.throws(() => advanceTravelParams({ travelDate: '2026-11-13' }), /Activity Start Date is required/)
+    assert.throws(
+      () => advanceTravelParams({ activityStartDate: '2026-11-16', activityEndDate: '2026-11-15' }),
+      /must not be earlier/,
+    )
   })
 })

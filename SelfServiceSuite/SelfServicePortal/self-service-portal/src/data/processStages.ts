@@ -1,4 +1,4 @@
-import { BadgeCheck, Banknote } from 'lucide-react'
+import { BadgeCheck, Banknote, UserCog } from 'lucide-react'
 import type { LocalPurchaseState } from '@/api/endpoints/requestEndpoint'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import type { PortalRequest } from '@/types/erp.types'
@@ -149,6 +149,12 @@ export function stageFromSteps(steps: Array<{ state: 'done' | 'rejected' | 'open
  * Finance Manager approve it, and the Finance Manager posts and pays it. Posting closes the claim
  * (Posted) and the Self / Dependants medical balance drops.
  */
+/** BC 1.0.3.648: a Medical Claim goes to HR, then Finance (PR Medical Setup), shown before BC has the entries. */
+export const MEDICAL_CLAIM_APPROVERS: TrackerStep[] = [
+  { key: 'hr', heading: 'HR', owner: 'Verifies the claim', icon: UserCog },
+  { key: 'finance', heading: 'Finance', owner: 'Approves the claim', icon: Banknote },
+]
+
 export const MEDICAL_CLAIM_AFTER_APPROVAL: { steps: TrackerStep[]; caption: string } = {
   caption: 'Payment voucher with Finance',
   steps: [

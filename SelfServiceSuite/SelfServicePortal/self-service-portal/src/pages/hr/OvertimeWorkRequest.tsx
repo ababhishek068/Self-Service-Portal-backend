@@ -338,6 +338,40 @@ function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
   )
 }
 
+/**
+ * The same Workflow Progress tracker on the new / edit form: the employee is at step 1 until the
+ * request is submitted; Superior and FAD (Stage 1 in BC) follow, named from the BC routing.
+ */
+function OvertimeWorkFormProgress({
+  approvers,
+  employeeName,
+  lineCount,
+  hasReason,
+}: {
+  approvers: Array<{ label?: string; approverName?: string; approverUserId?: string }>
+  employeeName?: string
+  lineCount: number
+  hasReason: boolean
+}) {
+  const named = (pattern: RegExp, index: number) =>
+    approvers.find((step) => pattern.test(step.label ?? '')) ?? approvers[index]
+  const superior = named(/superior|line manager/i, 0)
+  const fad = named(/fad|fd|finance|director|authori[sz]ed/i, 1)
+  const caption = !lineCount ? 'Add the overtime lines' : !hasReason ? 'Add the justification' : 'Ready · Submit for approval'
+  return (
+    <ProcessTracker
+      title="Workflow Progress"
+      steps={[
+        { key: 'employee', heading: 'Employee', owner: employeeName || 'You', icon: UserRound },
+        { key: 'superior', heading: 'Superior', owner: superior?.approverName || superior?.approverUserId || 'Set by BC', icon: UserCheck },
+        { key: 'fad', heading: 'FAD', owner: fad?.approverName || fad?.approverUserId || 'Set by BC', icon: UserCheck },
+        { key: 'authorized', heading: 'Work authorized', owner: 'Then request payment', icon: BadgeCheck },
+      ]}
+      stage={{ index: 0, state: 'active', caption }}
+    />
+  )
+}
+
 export function OvertimeWorkRequest() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -829,6 +863,12 @@ export function OvertimeWorkRequest() {
 
       {mode === 'form' ? (
         <div className="space-y-4">
+          <OvertimeWorkFormProgress
+            approvers={contextQuery.data?.approvers ?? []}
+            employeeName={employee?.employeeName}
+            lineCount={lines.length}
+            hasReason={reason.trim().length >= 5 && expectedDeliverables.trim().length >= 3}
+          />
           {formError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
           ) : null}
@@ -1092,6 +1132,18 @@ export function OvertimeWorkRequest() {
                           }))
                         }
                       />
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-xs font-medium text-slate-600">Calculated Days</p>
+                      <p className="mt-1 text-xl font-bold tabular-nums text-slate-900">
+                        {entryDays.length} {entryDays.length === 1 ? 'Day' : 'Days'}
+                      </p>
+                      {entryDays.length > 1 ? (
+                        <p className="text-xs tabular-nums text-slate-600">
+                          {shortDate(entryDays[0]!)} → {shortDate(entryDays[entryDays.length - 1]!)}
+                          {entryDays.length < entrySpan ? ` · ${entrySpan - entryDays.length} day(s) not worked` : ''}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <p className="text-xs font-medium text-slate-600">Calculated Hours</p>

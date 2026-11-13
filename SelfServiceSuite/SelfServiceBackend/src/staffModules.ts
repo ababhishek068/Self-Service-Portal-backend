@@ -527,6 +527,37 @@ export function isMedicalClaimType(value: unknown) {
  * SOAP: ImprestRequisitionHeader / ImprestRequisitionLine /
  *       DeleteImprestLine / RequestImprestApproval / CancelImprestRequisition
  */
+const BC_BLANK_DATE = '0001-01-01'
+
+/**
+ * ESSP Advance Request (ABH spec) has no travel fields. BC's ImprestRequisitionHeader still takes
+ * travelDestination / travelDate / returnDate and copies them into Activity Location, Activity
+ * Start / End Date, Expected Return Date and, for travelDate, the request Date. So send the
+ * activity location and end date, and a blank travel date: the Request Date stays BC's system
+ * date (Today) and PortalAdvancePaymentDetails then sets the activity dates. Activity Start Date
+ * is mandatory and the End Date defaults to it.
+ */
+export function advanceTravelParams(body: Record<string, unknown>) {
+  const activityStartDate = formatBcSoapDate(String(body.activityStartDate ?? ''))
+  if (!activityStartDate) {
+    throw Object.assign(new Error('Activity Start Date is required.'), { status: 422 })
+  }
+  const activityEndDate = formatBcSoapDate(String(body.activityEndDate ?? '')) || activityStartDate
+  if (activityEndDate < activityStartDate) {
+    throw Object.assign(new Error('Activity End Date must not be earlier than Activity Start Date.'), {
+      status: 422,
+    })
+  }
+  const location = String(body.activityLocation ?? '').trim() || String(body.travelDestination ?? '').trim()
+  return {
+    activityStartDate,
+    activityEndDate,
+    travelDestination: location.slice(0, 250),
+    travelDate: BC_BLANK_DATE,
+    returnDate: activityEndDate,
+  }
+}
+
 const imprest: ModuleSpec = {
   module: 'imprest',
   headerService: 'QyImprestHeader',
@@ -547,15 +578,7 @@ const imprest: ModuleSpec = {
   params: {
     deleteDocument: draftDeleteParams('imprest'),
     saveHeader: ({ req, user, no }) => {
-      const travelDate = formatBcSoapDate(
-        String(req.body?.travelDate ?? req.body?.startDate ?? ''),
-      )
-      let returnDate = formatBcSoapDate(String(req.body?.returnDate ?? ''))
-      if (travelDate && (!returnDate || returnDate <= travelDate)) {
-        const next = new Date(`${travelDate}T12:00:00`)
-        next.setDate(next.getDate() + 1)
-        returnDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
-      }
+      const travel = advanceTravelParams(req.body ?? {})
       const purposeCode = String(
         req.body?.purposeCode ?? req.body?.requestPurpose ?? '',
       ).trim()
@@ -594,6 +617,12 @@ const imprest: ModuleSpec = {
       if (!dateRequired) {
         throw Object.assign(new Error('Required Advance Date is required.'), { status: 422 })
       }
+      if (travel.activityStartDate && dateRequired > travel.activityStartDate) {
+        throw Object.assign(
+          new Error('Required Advance Date must be on or before the Activity Start Date.'),
+          { status: 422 },
+        )
+      }
       return {
         action: no ? 'edit' : 'create',
         docNo: no,
@@ -601,9 +630,9 @@ const imprest: ModuleSpec = {
         dateRequired,
         purpose,
         myUserId: user.userID,
-        travelDestination: req.body?.travelDestination ?? req.body?.placeOfDuty ?? '',
-        travelDate,
-        returnDate,
+        travelDestination: travel.travelDestination,
+        travelDate: travel.travelDate,
+        returnDate: travel.returnDate,
       }
     },
     saveLine: async ({ req, user, no }) => {
@@ -689,7 +718,8 @@ const imprest: ModuleSpec = {
         .slice(0, 250),
       activityLocation: String(req.body?.activityLocation ?? '').trim().slice(0, 250),
       activityStartDate: soapDate(req.body?.activityStartDate),
-      activityEndDate: soapDate(req.body?.activityEndDate),
+      // A one-day activity: the end date defaults to the start date (as on the header).
+      activityEndDate: soapDate(req.body?.activityEndDate || req.body?.activityStartDate),
       dateRequired: soapDate(req.body?.dateRequired),
     })
   },

@@ -21,7 +21,7 @@ import { formatCurrency, formatDate } from '@/utils/formatters'
 import { todayIsoDate } from '@/utils/validators'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
-import { MEDICAL_CLAIM_AFTER_APPROVAL } from '@/data/processStages'
+import { MEDICAL_CLAIM_AFTER_APPROVAL, MEDICAL_CLAIM_APPROVERS } from '@/data/processStages'
 
 const module = { module: 'staffClaim', entity: 'selfServiceStaffClaims' } as const
 
@@ -436,6 +436,7 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
       submitSuccessMessage={medicalOnly ? 'Medical claim submitted to HR' : undefined}
       // BC 1.0.3.648: after HR → Finance, the payment voucher (FAD → Finance Manager), then Paid.
       progressAfterApproval={medicalOnly ? () => MEDICAL_CLAIM_AFTER_APPROVAL : undefined}
+      progressApprovers={medicalOnly ? MEDICAL_CLAIM_APPROVERS : undefined}
       cancelStatuses={FINANCE_CANCEL_STATUSES}
       newButtonLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       headerSchema={staffClaimHeaderSchema}
