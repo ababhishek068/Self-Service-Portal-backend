@@ -78,7 +78,7 @@ export type OvertimeWorkRequest = {
   linkedAt: string
   /**
    * BC 1.0.3.636: this row mirrors BC Stage 1 Overtime Request `requestNo` (PortalOvertime*).
-   * BC owns its status, Superior → FAD steps and Stage 2 link; the portal keeps only the extras
+   * BC owns its status, Workflow User Group steps (1.0.3.649) and Stage 2 link; the portal keeps only the extras
    * BC has no field for (expected deliverables, work location).
    */
   bcStage1?: boolean
@@ -102,7 +102,7 @@ function bcStepStatus(status: OvertimeStep['status']): OvertimeWorkStepStatus {
   return 'Waiting'
 }
 
-/** BC Stage 1 steps (Superior → FAD) in the work-request step shape. */
+/** BC Stage 1 steps (Workflow User Group since 1.0.3.649) in the work-request step shape. */
 export function bcStage1Steps(steps: OvertimeStep[]): OvertimeWorkStep[] {
   return steps.map((step, index) => ({
     stage: step.stage || index + 1,
@@ -173,6 +173,8 @@ export type OvertimeWorkDetails = {
   hrName?: string
   managerUserId?: string
   managerName?: string
+  /** BC 1.0.3.649: the Stage 1 Workflow User Group preview (PortalOvertimeContext approvers) for a portal-only draft. */
+  previewApprovers?: Array<{ label: string; approverUserId: string; approverName: string }>
 }
 
 type StoreFile = { sequence: number; rows: OvertimeWorkRequest[] }
@@ -410,6 +412,13 @@ export function validateOvertimeWorkDetails(input: unknown, submit: boolean): Ov
     hrName: str(body.hrName),
     managerUserId: str(body.managerUserId),
     managerName: str(body.managerName),
+    previewApprovers: (Array.isArray(body.previewApprovers) ? body.previewApprovers : [])
+      .slice(0, 10)
+      .map((raw) => {
+        const step = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+        return { label: str(step.label), approverUserId: str(step.approverUserId), approverName: str(step.approverName) }
+      })
+      .filter((step) => step.approverUserId || step.approverName),
   }
 
   if (submit && details.reason.length < 5) throw invalid('Enter the reason / justification for overtime.')
@@ -423,27 +432,20 @@ function nextNo(sequence: number) {
   return `OTW-${String(sequence).padStart(5, '0')}`
 }
 
-/** Local draft preview only — BC Stage 1 is Superior → FAD (Portal-Handoff-1.0.3.636). */
-function buildSteps(details: OvertimeWorkDetails, submit: boolean): OvertimeWorkStep[] {
-  const chain = [
-    {
-      stage: 1,
-      label: 'Superior',
-      approverUserId: details.lineManagerUserId || '',
-      approverName: details.lineManagerName || details.lineManagerUserId || 'Superior',
-    },
-    {
-      stage: 2,
-      label: 'FAD',
-      approverUserId: details.managerUserId || details.hrUserId || '',
-      approverName:
-        details.managerName ||
-        details.managerUserId ||
-        details.hrName ||
-        details.hrUserId ||
-        'FAD',
-    },
-  ]
+/**
+ * Local draft preview only. Since BC 1.0.3.649 Stage 1 goes to the Workflow User Group on the BC
+ * overtime workflow (Portal-Handoff-1.0.3.649): show BC's workflow preview, else one group step.
+ */
+export function buildSteps(details: OvertimeWorkDetails, submit: boolean): OvertimeWorkStep[] {
+  const preview = details.previewApprovers ?? []
+  const chain = preview.length
+    ? preview.map((step, index) => ({
+        stage: index + 1,
+        label: step.label || (preview.length > 1 ? `Approver ${index + 1}` : 'Workflow User Group'),
+        approverUserId: step.approverUserId,
+        approverName: step.approverName || step.approverUserId,
+      }))
+    : [{ stage: 1, label: 'Workflow User Group', approverUserId: '', approverName: 'Set by the BC overtime workflow' }]
   return chain.map((step, index) => ({
     ...step,
     status: !submit ? 'Waiting' : index === 0 ? 'Pending' : 'Waiting',
@@ -677,7 +679,7 @@ export async function listOvertimeWorkApprovals(actingUserIds: string[], scope: 
   const store = await readStore()
   const ids = actingUserIds.map((id) => id.trim()).filter(Boolean)
   return store.rows.filter((row) => {
-    // BC Stage 1 (Superior → FAD) is listed and decided through PortalOvertimeApprovals / Decide.
+    // BC Stage 1 (Workflow User Group) is listed and decided through PortalOvertimeApprovals / Decide.
     if (row.bcStage1) return false
     if (scope === 'pending') {
       return row.steps.some(
@@ -844,7 +846,7 @@ export async function decideOvertimeWorkApproval(input: {
   if (row.bcStage1) {
     throw Object.assign(
       new Error(
-        `Overtime Request ${row.requestNo} is approved in Business Central (Superior → FAD). Open it from Approvals as Overtime Request (Stage 1).`,
+        `Overtime Request ${row.requestNo} is approved in Business Central (Workflow User Group). Open it from Approvals as Overtime Request (Stage 1).`,
       ),
       { status: 409 },
     )

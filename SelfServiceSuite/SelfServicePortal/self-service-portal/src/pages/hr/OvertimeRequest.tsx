@@ -703,7 +703,7 @@ export function OvertimeRequest() {
     [stage1PayableQuery.data, editingNo, priorWorkRequestNo],
   )
   const approvedWorkQuery = { data: payableStage1, isLoading: stage1PayableQuery.isLoading }
-  // Stage 2 routing (Superior + Stage 2 workflow) for a new payment request.
+  // Stage 2 routing (Workflow User Group on the Stage 2 BC workflow, 1.0.3.649) for a new payment request.
   const paymentContextQuery = useQuery({
     queryKey: ['hr', 'overtime-payment-context', priorWorkRequestNo],
     queryFn: () => fetchOtPaymentContext(priorWorkRequestNo),
@@ -798,7 +798,7 @@ export function OvertimeRequest() {
       if (input.submit) {
         toast.success(
           'Overtime payment submitted',
-          `${payment.paymentNo} was sent to Superior for justification and approval. Hours are added to the overtime sheet only after Stage 2 approval.`,
+          `${payment.paymentNo} was sent to the Workflow User Group for approval. Hours are added to the overtime sheet only after Stage 2 approval.`,
         )
       } else {
         toast.success('Draft saved', `${payment.paymentNo} is saved. Submit it for approval when it is ready.`)
@@ -922,7 +922,7 @@ export function OvertimeRequest() {
     paymentContext ? { approvers: paymentContext.approvers, approvalWorkflow: paymentContext.approvalWorkflow } : undefined,
     employeeName,
   )
-  // Stage 2 routing only (Superior + Stage 2 workflow); Stage 1 FAD setup does not block payment.
+  // Stage 2 routing only (the Stage 2 workflow's Workflow User Group).
   const routingProblem =
     mode === 'form' && !editingNo
       ? paymentContextQuery.error instanceof Error
@@ -1071,7 +1071,7 @@ export function OvertimeRequest() {
   return (
     <PageWrapper
       title="Overtime Payment Request"
-      description="Stage 2 — after the overtime authorized by an approved Overtime Request (Stage 1) is worked, request payment for it. Your Superior approves with a justification; only then are the hours added to the overtime sheet, which HR sends to payroll."
+      description="Stage 2 — after the overtime authorized by an approved Overtime Request (Stage 1) is worked, request payment for it. The Workflow User Group in Business Central approves it; only then are the hours added to the overtime sheet, which HR sends to payroll."
       actions={headerActions}
     >
       {contextError ? (
@@ -1084,8 +1084,8 @@ export function OvertimeRequest() {
             <div>
               <h2 className="text-sm font-semibold text-slate-900">My Overtime Payment Requests</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                Stage 2 payment for authorized overtime already worked. Approver: Superior (justification required) →
-                overtime sheet → payroll.
+                Stage 2 payment for authorized overtime already worked. Approver: Workflow User Group → overtime sheet →
+                payroll.
               </p>
             </div>
             {rows.length ? (
@@ -1136,7 +1136,7 @@ export function OvertimeRequest() {
             </div>
           ) : editingNo ? (
             <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm text-blue-900">
-              Editing draft {editingNo}. Save keeps it as a draft; Submit for Approval sends it to your Superior.
+              Editing draft {editingNo}. Save keeps it as a draft; Submit for Approval sends it to the Workflow User Group.
             </div>
           ) : null}
 
@@ -1147,8 +1147,8 @@ export function OvertimeRequest() {
               <Link className="font-semibold underline-offset-2 hover:underline" to="/hr/overtime-work-request">
                 Overtime Request
               </Link>{' '}
-              form and approved by Superior → FAD. After the work is done, select it below, enter when the work was
-              completed, and submit. Your Superior approves with a justification; then the hours go to the overtime sheet.
+              form and approved by the Workflow User Group. After the work is done, select it below, enter when the work
+              was completed, and submit. The Workflow User Group approves it again; then the hours go to the overtime sheet.
             </p>
           </div>
 
@@ -1211,7 +1211,7 @@ export function OvertimeRequest() {
                           }}
                         />
                         <p className="text-xs text-slate-500">
-                          Only Overtime Requests approved by Superior and FAD with no payment request yet are listed.
+                          Only approved Overtime Requests (Stage 1) with no payment request yet are listed.
                         </p>
                         {priorWorkRequestNo ? (
                           <div className="flex flex-wrap gap-2">
@@ -1314,7 +1314,7 @@ export function OvertimeRequest() {
               </div>
               {shown?.superiorJustification ? (
                 <div className="md:col-span-2">
-                  <Field label="Superior justification">
+                  <Field label="Approval remarks">
                     <ReadValue value={shown.superiorJustification} />
                   </Field>
                 </div>

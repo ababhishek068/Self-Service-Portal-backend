@@ -705,7 +705,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v373 — 1.0.3.534 (Advance Request per ESSP spec: no travel fields, Activity Start Date required, Request Date shown, date rules, payment status; Workflow Progress on new forms; Overtime Calculated Days; for BC 1.0.3.648)'
+export const PORTAL_API_BUILD = 'v374 — 1.0.3.535 (Overtime Stage 1 and Stage 2 approved by the BC Workflow User Group: no Superior then FAD, Stage 2 approve remarks optional, division shown; for BC 1.0.3.649)'
 
 interface LookupSpec {
   service: string
@@ -2200,7 +2200,7 @@ async function decidedApprovalQueues(authUser: AuthUser) {
     if (outcome === 'Approved') approved.push(item)
     else rejected.push(item)
   }
-  // Stage 2 Overtime Payment Requests the Superior decided (BC 1.0.3.636).
+  // Stage 2 Overtime Payment Requests this approver decided (Workflow User Group since BC 1.0.3.649).
   const otPaymentDecided = await listOtPaymentApprovals(ids.join('|'), 'decided').catch(() => [])
   for (const request of otPaymentDecided) {
     const outcome = otPaymentApproverOutcome(request, ids)
@@ -7796,7 +7796,7 @@ export function buildPortalApiRouter() {
     }),
   )
 
-  // Stage 1 — Overtime Request / work authorization (BC 1.0.3.636): Superior → FAD; period + daily lines.
+  // Stage 1 — Overtime Request / work authorization: Workflow User Group (BC 1.0.3.649); period + daily lines.
   router.get(
     '/hr/overtime/context',
     safe(async (req, res) => {
@@ -7958,7 +7958,7 @@ export function buildPortalApiRouter() {
   )
 
   // Overtime Work Request (prior permission). Payment requests require an approved work request.
-  /** BC owns Stage 1 status, Superior → FAD steps and the Stage 2 link of BC-backed rows. */
+  /** BC owns Stage 1 status, Workflow User Group steps and the Stage 2 link of BC-backed rows. */
   async function withBcStage1State(rows: OvertimeWorkRequest[], employeeNo: string) {
     if (!rows.some((row) => row.bcStage1)) return rows.map((row) => applyBcStage1(row, null))
     const bcRows = await listOvertimeRequests(employeeNo).catch(() => [])
@@ -8009,17 +8009,8 @@ export function buildPortalApiRouter() {
       const submit = req.body?.submit === true || String(req.body?.submit).toLowerCase() === 'true'
       const requestNo = String(req.body?.requestNo ?? '').trim().toUpperCase().slice(0, 20)
       const context = await getOvertimeContext(authUser.employeeNo, authUser.userID).catch(() => null)
-      // BC 1.0.3.636 Stage 1 routing: Superior → FAD (not LM → HR → FD).
-      const superior =
-        context?.approvers?.find((step) => /superior/i.test(step.label)) ??
-        context?.approvers?.find((step) => /line\s*manager|supervisor/i.test(step.label)) ??
-        context?.approvers?.[0]
-      const fad =
-        context?.approvers?.find((step) => /\bfad\b/i.test(step.label)) ??
-        context?.approvers?.find(
-          (step) => /fd|finance|director|authorized/i.test(step.label) && step !== superior,
-        ) ??
-        context?.approvers?.[1]
+      // BC 1.0.3.649 Stage 1 routing: the Workflow User Group on the BC overtime workflow (no forced Superior → FAD).
+      const preview = context?.approvers ?? []
       const workDetails = validateOvertimeWorkDetails(
         {
           ...(req.body?.details ?? {}),
@@ -8027,12 +8018,17 @@ export function buildPortalApiRouter() {
           designation: context?.employee.designation ?? '',
           departmentCode: context?.employee.departmentCode ?? '',
           departmentName: context?.employee.departmentName ?? '',
-          lineManagerUserId: superior?.approverUserId ?? '',
-          lineManagerName: superior?.approverName ?? '',
+          lineManagerUserId: '',
+          lineManagerName: '',
           hrUserId: '',
           hrName: '',
-          managerUserId: fad?.approverUserId ?? '',
-          managerName: fad?.approverName ?? '',
+          managerUserId: '',
+          managerName: '',
+          previewApprovers: preview.map((step) => ({
+            label: step.label,
+            approverUserId: step.approverUserId,
+            approverName: step.approverName,
+          })),
         },
         submit,
       )
@@ -8041,7 +8037,7 @@ export function buildPortalApiRouter() {
       if (existing && !existing.bcStage1 && existing.status !== 'Draft' && existing.status !== 'Rejected') {
         throw portalError(`Overtime request ${existing.requestNo} can no longer be changed.`, 409)
       }
-      // BC 1.0.3.636 Stage 1 lives in BC (PortalOvertime*, Superior → FAD). Send period + daily lines.
+      // Stage 1 lives in BC (PortalOvertime*, Workflow User Group since 1.0.3.649). Send period + daily lines.
       const stage1Lines = workDetails.lines
         .map((line) => ({
           overtimeDate: line.overtimeDate,

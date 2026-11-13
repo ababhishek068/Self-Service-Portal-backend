@@ -15,6 +15,7 @@ import {
   User,
   UserCheck,
   UserRound,
+  Users,
 } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
@@ -306,14 +307,14 @@ function printWorkRequest(work: OvertimeWorkRow) {
   return true
 }
 
-/** Stage 1 on the live Workflow Progress tracker: the employee, each BC approver (Superior, FAD), then work authorized. */
+/** Stage 1 on the live Workflow Progress tracker: the employee, each BC approver (Workflow User Group, BC 1.0.3.649), then work authorized. */
 function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
   const submitted = request.status !== 'Draft'
   const rows = [
     { key: 'employee', heading: 'Employee', owner: request.employeeName || 'You', icon: UserRound, state: submitted ? 'done' : 'open', caption: 'Draft' },
     ...request.steps.map((step) => ({
       key: `stage-${step.stage}`,
-      heading: step.label || `Approver ${step.stage}`,
+      heading: step.label || (request.steps.length > 1 ? `Approver ${step.stage}` : 'Workflow User Group'),
       owner: step.approverName || step.approverUserId || 'Set by BC',
       icon: UserCheck,
       state: step.status === 'Approved' || step.status === 'Skipped' ? 'done' : step.status === 'Rejected' ? 'rejected' : 'open',
@@ -340,7 +341,8 @@ function OvertimeWorkProgress({ request }: { request: OvertimeWorkRow }) {
 
 /**
  * The same Workflow Progress tracker on the new / edit form: the employee is at step 1 until the
- * request is submitted; Superior and FAD (Stage 1 in BC) follow, named from the BC routing.
+ * request is submitted. Since BC 1.0.3.649 the Workflow User Group on the Stage 1 overtime workflow
+ * approves: one step per approver in BC's workflow preview, or one group step when BC sends none.
  */
 function OvertimeWorkFormProgress({
   approvers,
@@ -353,18 +355,21 @@ function OvertimeWorkFormProgress({
   lineCount: number
   hasReason: boolean
 }) {
-  const named = (pattern: RegExp, index: number) =>
-    approvers.find((step) => pattern.test(step.label ?? '')) ?? approvers[index]
-  const superior = named(/superior|line manager/i, 0)
-  const fad = named(/fad|fd|finance|director|authori[sz]ed/i, 1)
   const caption = !lineCount ? 'Add the overtime lines' : !hasReason ? 'Add the justification' : 'Ready · Submit for approval'
+  const approverSteps = approvers.length
+    ? approvers.map((step, index) => ({
+        key: `approver-${index + 1}`,
+        heading: approvers.length > 1 ? step.label || `Approver ${index + 1}` : 'Workflow User Group',
+        owner: step.approverName || step.approverUserId || 'Set by BC',
+        icon: Users,
+      }))
+    : [{ key: 'group', heading: 'Workflow User Group', owner: 'Set by the BC overtime workflow', icon: Users }]
   return (
     <ProcessTracker
       title="Workflow Progress"
       steps={[
         { key: 'employee', heading: 'Employee', owner: employeeName || 'You', icon: UserRound },
-        { key: 'superior', heading: 'Superior', owner: superior?.approverName || superior?.approverUserId || 'Set by BC', icon: UserCheck },
-        { key: 'fad', heading: 'FAD', owner: fad?.approverName || fad?.approverUserId || 'Set by BC', icon: UserCheck },
+        ...approverSteps,
         { key: 'authorized', heading: 'Work authorized', owner: 'Then request payment', icon: BadgeCheck },
       ]}
       stage={{ index: 0, state: 'active', caption }}
@@ -493,7 +498,7 @@ export function OvertimeWorkRequest() {
       toast.success(
         input.submit ? 'Overtime work request submitted' : 'Draft saved',
         input.submit
-          ? `${request.requestNo} was sent for Superior → FAD approval (Stage 1 work authorization).`
+          ? `${request.requestNo} was sent to the Workflow User Group for approval (Stage 1 work authorization).`
           : `${request.requestNo} is saved as a draft.`,
       )
       setEditingNo(null)
@@ -720,19 +725,19 @@ export function OvertimeWorkRequest() {
   return (
     <PageWrapper
       title="Overtime Request"
-      description="Stage 1 — work authorization. Approvers: Superior → FAD. Approved means you may work the overtime; hours are not on the overtime sheet yet. After the work is done, raise Stage 2 Overtime Payment Request."
+      description="Stage 1 — work authorization. Approver: the Workflow User Group in Business Central (set per division and department). Approved means you may work the overtime; hours are not on the overtime sheet yet. After the work is done, raise Stage 2 Overtime Payment Request."
       actions={headerActions}
     >
       <div className="mb-4 rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
         <p className="font-semibold">Stage 1 (work authorization) → Stage 2 (payment)</p>
         <p className="mt-1 text-teal-900/90">
           Enter the overtime lines: a start and end date (one day, or a period worked at the same time every
-          day) and the start/end time. Superior then FAD approve the work.
+          day) and the start/end time. The Workflow User Group approves the work.
           After completion, use{' '}
           <Link className="font-semibold underline-offset-2 hover:underline" to="/hr/overtime-request">
             Overtime Payment Request
           </Link>{' '}
-          — Superior justification is required on Stage 2; only then are hours added to the overtime sheet.
+          — the Workflow User Group approves it again; only then are hours added to the overtime sheet.
         </p>
       </div>
 
@@ -740,7 +745,7 @@ export function OvertimeWorkRequest() {
         <div className="portal-surface-card overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">My Overtime Requests</h2>
-            <p className="mt-0.5 text-xs text-slate-500">Stage 1 work authorization — Superior, then FAD (Business Central).</p>
+            <p className="mt-0.5 text-xs text-slate-500">Stage 1 work authorization — Workflow User Group (Business Central).</p>
           </div>
           {listQuery.isLoading ? (
             <div className="space-y-2 p-4">
@@ -882,6 +887,7 @@ export function OvertimeWorkRequest() {
               <ReadField label="Employee No." value={employee?.employeeNo} />
               <ReadField label="Designation" value={employee?.designation} />
               <ReadField label="Department" value={employee?.departmentName || employee?.departmentCode} />
+              <ReadField label="Division" value={employee?.divisionName || employee?.divisionCode} />
             </div>
           </section>
 

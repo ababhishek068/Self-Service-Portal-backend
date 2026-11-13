@@ -54,7 +54,7 @@ export interface OvertimeWorkRequest {
   /** Set once this work request is linked to an Overtime Payment Request. */
   linkedPaymentRequestNo?: string
   linkedAt?: string
-  /** BC 1.0.3.636: the row mirrors BC Stage 1 (Superior → FAD); requestNo is the BC number. */
+  /** The row mirrors BC Stage 1 (Workflow User Group since 1.0.3.649); requestNo is the BC number. */
   bcStage1?: boolean
   /** From BC: Stage 1 approved and no Stage 2 payment yet → show "Request overtime payment". */
   canRequestPayment?: boolean

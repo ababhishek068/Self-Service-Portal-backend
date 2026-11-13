@@ -30,7 +30,7 @@ export type OtPaymentRequest = {
   createdAt: string
   submittedAt: string
   approvedAt: string
-  /** Stage 2 BC workflow steps (Superior). */
+  /** Stage 2 BC workflow steps (Workflow User Group since 1.0.3.649). */
   steps: OvertimeStep[]
   /** The linked, approved Stage 1 Overtime Request. */
   otRequest?: OvertimeRequest
@@ -41,7 +41,7 @@ export type OtPaymentContext = {
   stageCaption: string
   otRequestNo: string
   otRequest?: OvertimeRequest
-  /** Stage 2 approver preview: the Superior only. */
+  /** Stage 2 approver preview from the BC workflow (Workflow User Group since 1.0.3.649). */
   approvers: OvertimeStep[]
   routingProblem: string
   usesWorkflow: boolean

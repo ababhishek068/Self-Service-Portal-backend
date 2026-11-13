@@ -5,6 +5,7 @@ import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import {
   OT_PAYMENT_MODULE,
+  decideOtPaymentApproval,
   otPaymentActingUserMayView,
   otPaymentApprovalQueueItem,
   otPaymentApproverOutcome,
@@ -16,6 +17,7 @@ import {
 import {
   applyBcStage1,
   bcStage1Snapshot,
+  buildSteps,
   decideOvertimeWorkApproval,
   listOvertimeWorkApprovals,
   listOvertimeWorkRequests,
@@ -439,7 +441,8 @@ describe('overtime Stage 2 payment approvals (BC 1.0.3.636)', () => {
     const detail = otPaymentToPortalRequest(request!, 'SUP1')
     assert.equal(detail.requestType, 'overtimePayment')
     assert.equal(detail.payload.lines.length, 2)
-    assert.equal(detail.payload.commentRequiredOnApprove, true)
+    // BC 1.0.3.649: the Workflow User Group may approve without remarks.
+    assert.equal(detail.payload.commentRequiredOnApprove, false)
     const pending = detail.approvalSteps.find((step) => step.status === 'Pending Approval')
     assert.equal(pending?.actorEmployeeNo, 'SUP1')
     const facts = Object.fromEntries(detail.payload.detailFacts.map((fact) => [fact.label, fact.value]))
@@ -474,5 +477,49 @@ describe('overtime Stage 2 payment approvals (BC 1.0.3.636)', () => {
     assert.equal(context.otRequest?.lines.length, 2)
     assert.equal(otPaymentServiceMissing(new Error("Method 'PortalOTPaymentList' is invalid")), true)
     assert.equal(otPaymentServiceMissing(new Error('Overtime request OTR-1 was not found.')), false)
+  })
+})
+
+describe('overtime with the Workflow User Group (BC 1.0.3.649)', () => {
+  it('approves Stage 2 without remarks but still needs a reason to reject', async () => {
+    const approve = decideOtPaymentApproval({ approverUserIds: 'GRP1', paymentNo: 'OTP-00012', approve: true, remarks: '' })
+    // Not refused by the portal: the call goes on to BC (unreachable in tests).
+    await assert.rejects(approve, (error: Error) => !/justification/i.test(error.message))
+    await assert.rejects(
+      decideOtPaymentApproval({ approverUserIds: 'GRP1', paymentNo: 'OTP-00012', approve: false, remarks: 'no' }),
+      /reason for rejecting/,
+    )
+  })
+
+  it('previews a portal-only draft with the BC workflow group, not a forced Superior then FAD', () => {
+    const details = validateOvertimeWorkDetails(
+      {
+        reason: 'Month-end closing',
+        expectedDeliverables: 'Closed books',
+        lines: [{ overtimeDate: '2026-11-10', startTime: '18:00', endTime: '21:00', dayType: 'working', workLocation: 'office' }],
+        previewApprovers: [
+          { label: 'Approver 1', approverUserId: 'GRP-A', approverName: 'Group member A' },
+          { label: '', approverUserId: 'GRP-B', approverName: '' },
+        ],
+      },
+      true,
+    )
+    const steps = buildSteps(details, true)
+    assert.deepEqual(steps.map((step) => [step.label, step.approverName, step.status]), [
+      ['Approver 1', 'Group member A', 'Pending'],
+      ['Approver 2', 'GRP-B', 'Waiting'],
+    ])
+    const fallback = buildSteps({ ...details, previewApprovers: [] }, false)
+    assert.deepEqual(fallback.map((step) => step.label), ['Workflow User Group'])
+  })
+
+  it('reads the division BC now stamps for the workflow Event Conditions', () => {
+    const request = parseOvertimeRequest(bcStage1Json({ divisionCode: 'FA', divisionName: 'Finance and Admin' }))
+    assert.equal(request.divisionCode, 'FA')
+    assert.equal(request.divisionName, 'Finance and Admin')
+    const context = parseOvertimeContext(
+      JSON.stringify({ employee: { employeeNo: 'E001', divisionCode: 'FA', divisionName: 'Finance and Admin' }, approvers: [] }),
+    )
+    assert.equal(context.employee.divisionName, 'Finance and Admin')
   })
 })

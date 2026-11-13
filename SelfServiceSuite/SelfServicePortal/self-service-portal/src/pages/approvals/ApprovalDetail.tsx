@@ -537,7 +537,7 @@ export function ApprovalDetail() {
 
               {request.requestType === 'overtime' || request.requestType === 'overtimeWork' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
-                  {`Stage 1 — Overtime Request (work authorization): Superior → FAD. Approved means work is authorized; hours are not on the overtime sheet yet.${
+                  {`Stage 1 — Overtime Request (work authorization): approved by the Workflow User Group in Business Central (BC 1.0.3.649). Approved means work is authorized; hours are not on the overtime sheet yet.${
                     payload.pendingStageLabel && request.status === 'Pending Approval'
                       ? ` This request is waiting on ${String(payload.pendingStageLabel)}.`
                       : ''
@@ -547,8 +547,8 @@ export function ApprovalDetail() {
 
               {request.requestType === 'overtimePayment' ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-sm text-emerald-900">
-                  Stage 2 — Overtime Payment Request: Superior must enter a justification (at least 3 characters) when
-                  approving. Hours are added to the overtime sheet only after this approval.
+                  Stage 2 — Overtime Payment Request: approved by the Workflow User Group (BC 1.0.3.649). Remarks are
+                  optional when approving. Hours are added to the overtime sheet only after this approval.
                 </div>
               ) : null}
 
@@ -698,9 +698,8 @@ export function ApprovalDetail() {
                       placeholder={
                         request.requestType === 'hrServiceLetter'
                           ? 'Enter HR remarks (shown to the employee)'
-                          : request.requestType === 'overtimePayment'
-                            ? 'Enter Superior justification (required to approve). A reason is also required to reject.'
-                            : request.requestType === 'employeeExit' ||
+                          : request.requestType === 'employeeExit' ||
+                                request.requestType === 'overtimePayment' ||
                                 request.requestType === 'overtime' ||
                                 request.requestType === 'overtimeWork' ||
                                 request.requestType === 'profileChange'
@@ -730,12 +729,12 @@ export function ApprovalDetail() {
                       </p>
                     ) : request.requestType === 'overtimePayment' ? (
                       <p className="mt-2 text-xs text-slate-500">
-                        Superior justification is required to approve (at least 3 characters). Hours go to the overtime sheet
-                        only after Stage 2 approval. A rejection reason is required and is shown to the employee.
+                        Approval remarks are optional. Hours go to the overtime sheet only after Stage 2 approval. A
+                        rejection reason (at least 3 characters) is required and is shown to the employee.
                       </p>
                     ) : request.requestType === 'overtime' || request.requestType === 'overtimeWork' ? (
                       <p className="mt-2 text-xs text-slate-500">
-                        Stage 1 work authorization (Superior → FAD). Approved means the employee may work; they still need
+                        Stage 1 work authorization (Workflow User Group). Approved means the employee may work; they still need
                         Stage 2 Overtime Payment Request before hours hit the sheet. A rejection reason is required.
                       </p>
                     ) : canSendBack ? (
@@ -830,11 +829,6 @@ export function ApprovalDetail() {
           const note = comment.trim()
           if (request?.requestType === 'hrServiceLetter' && note.length < 3) {
             toast.error('Enter HR remarks of at least 3 characters before recording the decision.')
-            setDecision(null)
-            return
-          }
-          if (request?.requestType === 'overtimePayment' && chosen === 'Approved' && note.length < 3) {
-            toast.error('Enter Superior justification of at least 3 characters before approving overtime payment.')
             setDecision(null)
             return
           }

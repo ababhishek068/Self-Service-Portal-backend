@@ -121,6 +121,9 @@ export interface OvertimeContext {
     designation: string
     departmentCode: string
     departmentName: string
+    /** BC 1.0.3.649: Global Dimension 1, a workflow Event Condition with the department. */
+    divisionCode?: string
+    divisionName?: string
     costCentre: string
     active: boolean
     allowOvertime: boolean

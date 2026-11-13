@@ -16,7 +16,7 @@ export const OT_PAYMENT_MODULE = 'overtimePayment' as const
 
 /**
  * BC table "ABH OT Payment Request". Its Approval Entries are listed and decided through
- * PortalOTPayment* (which enforces the Superior justification), never through the OData queues.
+ * PortalOTPayment* (BC 1.0.3.649: Workflow User Group; a reject needs a reason), never through the OData queues.
  */
 export const OT_PAYMENT_TABLE_ID = 53655
 
@@ -34,6 +34,9 @@ export type OtPaymentRequest = {
   designation: string
   departmentCode: string
   departmentName: string
+  /** BC 1.0.3.649: employee division (Global Dimension 1), the Stage 2 workflow Event Condition with the department. */
+  divisionCode: string
+  divisionName: string
   costCentre: string
   otRequestNo: string
   /** Copied by BC from the Stage 1 request when the payment request is created. */
@@ -51,7 +54,7 @@ export type OtPaymentRequest = {
   createdAt: string
   submittedAt: string
   approvedAt: string
-  /** The Superior step(s) of the Stage 2 BC workflow. */
+  /** The Workflow User Group step(s) of the Stage 2 BC workflow (BC 1.0.3.649). */
   steps: OvertimeStep[]
   /** The linked Stage 1 Overtime Request (BC embeds it in every payment answer). */
   otRequest?: OvertimeRequest
@@ -114,6 +117,8 @@ export function parseOtPaymentRequest(value: unknown): OtPaymentRequest {
     designation: str(row.designation),
     departmentCode: str(row.departmentCode),
     departmentName: str(row.departmentName),
+    divisionCode: str(row.divisionCode) || (otRequest?.divisionCode ?? ''),
+    divisionName: str(row.divisionName) || (otRequest?.divisionName ?? ''),
     costCentre: str(row.costCentre),
     otRequestNo: str(row.otRequestNo) || (otRequest?.requestNo ?? ''),
     totalHours: num(row.totalHours) || (otRequest?.totalHours ?? 0),
@@ -147,9 +152,9 @@ export type OtPaymentContext = {
   otRequestNo: string
   /** The approved Stage 1 request the payment is for. */
   otRequest?: OvertimeRequest
-  /** Stage 2 approver preview: the Superior only. */
+  /** Stage 2 approver preview from the BC workflow (Workflow User Group since 1.0.3.649). */
   approvers: OvertimeStep[]
-  /** Why Stage 2 cannot be routed yet (no workflow, no superior); empty when it can. */
+  /** Why Stage 2 cannot be routed yet (no workflow enabled); empty when it can. */
   routingProblem: string
   usesWorkflow: boolean
   approvalWorkflow: string
@@ -293,12 +298,7 @@ export async function decideOtPaymentApproval(input: {
   remarks: string
 }) {
   const remarks = input.remarks.trim().slice(0, 250)
-  if (input.approve && remarks.length < 3) {
-    throw Object.assign(
-      new Error('Enter the Superior justification (at least 3 characters) when approving overtime payment.'),
-      { status: 422 },
-    )
-  }
+  // BC 1.0.3.649: the Workflow User Group approves Stage 2; approval remarks are optional.
   if (!input.approve && remarks.length < 3) {
     throw Object.assign(new Error('Enter the reason for rejecting (at least 3 characters).'), {
       status: 422,
@@ -317,7 +317,7 @@ function sameId(left: string, right: string) {
   return Boolean(left) && left.trim().toUpperCase() === right.trim().toUpperCase()
 }
 
-/** The acting user is the employee, the Superior, or one of the request's approvers. */
+/** The acting user is the employee, the line manager BC stamped, or one of the request's approvers. */
 export function otPaymentActingUserMayView(request: OtPaymentRequest, actingIds: string[], employeeNo = '') {
   if (employeeNo && sameId(request.employeeNo, employeeNo)) return true
   return actingIds.some(
@@ -367,7 +367,7 @@ export function otPaymentApprovalQueueItem(request: OtPaymentRequest) {
   }
 }
 
-/** The Approvals detail facts: what the Superior needs to justify the payment. */
+/** The Approvals detail facts: what the Workflow User Group approver needs to decide the payment. */
 export function otPaymentDetailFacts(request: OtPaymentRequest) {
   const stage1 = request.otRequest
   const facts: Array<{ label: string; value: string }> = [
@@ -381,7 +381,8 @@ export function otPaymentDetailFacts(request: OtPaymentRequest) {
     { label: 'Designation', value: request.designation },
     { label: 'Department', value: request.departmentName || request.departmentCode },
     { label: 'Cost centre', value: request.costCentre },
-    { label: 'Superior justification', value: request.superiorJustification },
+    { label: 'Approval remarks', value: request.superiorJustification },
+    { label: 'Division', value: request.divisionName || request.divisionCode },
     { label: 'On overtime sheet', value: request.addedToSheet ? 'Yes' : '' },
   ]
   return facts.filter((fact) => fact.value)
@@ -395,7 +396,7 @@ function portalStepStatus(status: OvertimeStep['status']): PortalStepStatus {
   return 'Waiting'
 }
 
-/** Approvals detail: the Stage 2 payment request, its Superior step and the Stage 1 lines, as a PortalRequest. */
+/** Approvals detail: the Stage 2 payment request, its Workflow User Group steps and the Stage 1 lines, as a PortalRequest. */
 export function otPaymentToPortalRequest(request: OtPaymentRequest, actingUserId = '') {
   const queue = otPaymentApprovalQueueItem(request)
   const pendingStep = request.steps.find((step) => step.status === 'Pending')
@@ -414,7 +415,7 @@ export function otPaymentToPortalRequest(request: OtPaymentRequest, actingUserId
     ...request.steps.map((step, index) => ({
       id: `stage-${step.stage || index + 1}`,
       actorEmployeeNo: step.approverUserId,
-      actorName: `${step.label || 'Superior'}: ${step.approverName || step.approverUserId || 'not set'}`,
+      actorName: `${step.label || 'Approver'}: ${step.approverName || step.approverUserId || 'not set'}`,
       role: 'Checker' as const,
       status: portalStepStatus(step.status),
       timestamp: step.decidedAt || '',
@@ -446,8 +447,8 @@ export function otPaymentToPortalRequest(request: OtPaymentRequest, actingUserId
       sourceDocumentAvailable: true,
       hideDocumentLines: lines.length === 0,
       commentRequiredOnReject: true,
-      /** BC rejects a Stage 2 approval without the Superior justification (at least 3 characters). */
-      commentRequiredOnApprove: true,
+      /** BC 1.0.3.649: approval remarks are optional (BC before 649 still asks for a Superior justification). */
+      commentRequiredOnApprove: false,
       pendingStage: pendingStep?.stage ?? request.stage,
       pendingStageLabel: pendingStep?.label ?? request.stageLabel,
       bcStatus: request.status,

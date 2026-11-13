@@ -74,6 +74,9 @@ export type OvertimeRequest = {
   designation: string
   departmentCode: string
   departmentName: string
+  /** BC 1.0.3.649: employee division (Global Dimension 1), a workflow Event Condition with the department. */
+  divisionCode: string
+  divisionName: string
   costCentre: string
   projectNo: string
   projectName: string
@@ -127,6 +130,8 @@ export type OvertimeContext = {
     designation: string
     departmentCode: string
     departmentName: string
+    divisionCode: string
+    divisionName: string
     costCentre: string
     active: boolean
     allowOvertime: boolean
@@ -273,6 +278,8 @@ export function parseOvertimeRequest(value: unknown): OvertimeRequest {
     designation: str(row.designation),
     departmentCode: str(row.departmentCode),
     departmentName: str(row.departmentName),
+    divisionCode: str(row.divisionCode),
+    divisionName: str(row.divisionName),
     costCentre: str(row.costCentre),
     projectNo: str(row.projectNo),
     projectName: str(row.projectName),
@@ -344,6 +351,8 @@ export function parseOvertimeContext(value: unknown): OvertimeContext {
       designation: str(employee.designation),
       departmentCode: str(employee.departmentCode),
       departmentName: str(employee.departmentName),
+      divisionCode: str(employee.divisionCode),
+      divisionName: str(employee.divisionName),
       costCentre: str(employee.costCentre),
       active: employee.active === undefined ? true : bool(employee.active),
       allowOvertime: employee.allowOvertime === undefined ? true : bool(employee.allowOvertime),
@@ -689,6 +698,7 @@ export function overtimeDetailFacts(request: OvertimeRequest) {
     { label: 'Estimated amount', value: request.estimatedAmount ? formatEtb(request.estimatedAmount) : '' },
     { label: 'Designation', value: request.designation },
     { label: 'Department', value: request.departmentName || request.departmentCode },
+    { label: 'Division', value: request.divisionName || request.divisionCode },
     { label: 'Cost centre', value: request.costCentre },
     {
       label: 'Project',
