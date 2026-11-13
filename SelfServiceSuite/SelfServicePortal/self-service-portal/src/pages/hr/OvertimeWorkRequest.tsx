@@ -69,8 +69,18 @@ type WorkLineInput = {
   reason: string
 }
 
+/**
+ * One entry on the form covers a period: Start Date → End Date on the chosen days of the week
+ * (for example a driver's daily pick-up at the same time). BC keeps one line per overtime day
+ * (ABH Overtime Request Line, at most 31), so the entry is split into daily lines when saved.
+ */
 type EntryDraft = {
-  overtimeDate: string
+  startDate: string
+  endDate: string
+  /** Days of the week the period applies to (0 = Sunday … 6 = Saturday). */
+  weekdays: number[]
+  /** Single dates taken out of the period (for example a public holiday). */
+  excluded: string[]
   startTime: string
   endTime: string
   dayType: OvertimeDayType | ''
@@ -78,12 +88,153 @@ type EntryDraft = {
   reason: string
 }
 
+/** BC 1.0.3.636 MaxLines: one overtime request holds at most 31 daily lines. */
+const MAX_OVERTIME_DAYS = 31
+const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6]
+const WEEKDAY_CHIPS: Array<{ value: number; short: string }> = [
+  { value: 1, short: 'Mon' },
+  { value: 2, short: 'Tue' },
+  { value: 3, short: 'Wed' },
+  { value: 4, short: 'Thu' },
+  { value: 5, short: 'Fri' },
+  { value: 6, short: 'Sat' },
+  { value: 0, short: 'Sun' },
+]
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const DAY_MS = 86_400_000
+
 function emptyEntry(): EntryDraft {
-  return { overtimeDate: '', startTime: '', endTime: '', dayType: '', workLocation: '', reason: '' }
+  return {
+    startDate: '',
+    endDate: '',
+    weekdays: [...ALL_WEEKDAYS],
+    excluded: [],
+    startTime: '',
+    endTime: '',
+    dayType: '',
+    workLocation: '',
+    reason: '',
+  }
 }
 
 function sortLines(lines: WorkLineInput[]) {
   return [...lines].sort((a, b) => (a.overtimeDate + a.startTime).localeCompare(b.overtimeDate + b.startTime))
+}
+
+function dayIndex(date: string) {
+  return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / DAY_MS
+}
+
+function weekdayOf(date: string) {
+  return new Date(dayIndex(date) * DAY_MS).getUTCDay()
+}
+
+function weekdayShort(date: string) {
+  return WEEKDAY_CHIPS.find((chip) => chip.value === weekdayOf(date))?.short ?? ''
+}
+
+/** Calendar days from start to end inclusive (0 when either date is missing or end is before start). */
+function periodSpan(start: string, end: string) {
+  if (!ISO_DATE.test(start) || !ISO_DATE.test(end)) return 0
+  const span = dayIndex(end) - dayIndex(start) + 1
+  return span > 0 ? span : 0
+}
+
+/** Every date from start to end (inclusive) that falls on one of the weekdays. */
+function periodDates(start: string, end: string, weekdays: number[]) {
+  const span = periodSpan(start, end)
+  if (!span || span > 366) return []
+  const first = dayIndex(start)
+  const dates: string[] = []
+  for (let day = first; day < first + span; day += 1) {
+    const date = new Date(day * DAY_MS)
+    if (weekdays.includes(date.getUTCDay())) dates.push(date.toISOString().slice(0, 10))
+  }
+  return dates
+}
+
+function entryEnd(entry: Pick<EntryDraft, 'startDate' | 'endDate'>) {
+  return entry.endDate || entry.startDate
+}
+
+function entryDates(entry: EntryDraft) {
+  return periodDates(entry.startDate, entryEnd(entry), entry.weekdays).filter((date) => !entry.excluded.includes(date))
+}
+
+function lineKey(line: Pick<WorkLineInput, 'startTime' | 'endTime' | 'dayType' | 'workLocation'>) {
+  return [line.startTime, line.endTime, line.dayType, line.workLocation].join('|')
+}
+
+/** Saved daily lines with the same time, category and location, shown (and edited) as one period. */
+type LineGroup = { key: string; line: WorkLineInput; dates: string[] }
+
+function groupLines(lines: WorkLineInput[]): LineGroup[] {
+  const groups = new Map<string, LineGroup>()
+  for (const line of lines) {
+    const key = lineKey(line)
+    const group = groups.get(key)
+    if (group) group.dates.push(line.overtimeDate)
+    else groups.set(key, { key, line, dates: [line.overtimeDate] })
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, dates: [...group.dates].sort() }))
+    .sort((a, b) => (a.dates[0]! + a.line.startTime).localeCompare(b.dates[0]! + b.line.startTime))
+}
+
+/**
+ * The weekdays a saved period runs on: every weekday except those that fall inside the
+ * period but were never worked (a 3-day period keeps all seven, so it can still be extended).
+ */
+function groupWeekdays(dates: string[]) {
+  if (dates.length < 2) return [...ALL_WEEKDAYS]
+  const span = periodDates(dates[0]!, dates[dates.length - 1]!, ALL_WEEKDAYS)
+  const worked = new Set(dates.map(weekdayOf))
+  const skipped = new Set(span.map(weekdayOf).filter((day) => !worked.has(day)))
+  return ALL_WEEKDAYS.filter((day) => !skipped.has(day))
+}
+
+function entryFromGroup(group: LineGroup): EntryDraft {
+  const startDate = group.dates[0]!
+  const endDate = group.dates[group.dates.length - 1]!
+  const weekdays = groupWeekdays(group.dates)
+  return {
+    startDate,
+    endDate,
+    weekdays,
+    excluded: periodDates(startDate, endDate, weekdays).filter((date) => !group.dates.includes(date)),
+    startTime: group.line.startTime,
+    endTime: group.line.endTime,
+    dayType: group.line.dayType,
+    workLocation: group.line.workLocation,
+    reason: group.line.reason,
+  }
+}
+
+/** "Mon–Fri", "Sat, Sun" or "Mon, Wed, Fri" for the weekdays a period was worked on. */
+function weekdaySummary(dates: string[]) {
+  const worked = new Set(dates.map(weekdayOf))
+  const runs: string[][] = []
+  for (const chip of WEEKDAY_CHIPS) {
+    if (!worked.has(chip.value)) runs.push([])
+    else (runs[runs.length - 1] ?? runs[runs.push([]) - 1]!).push(chip.short)
+  }
+  return runs
+    .filter((run) => run.length)
+    .map((run) => (run.length > 2 ? `${run[0]}–${run[run.length - 1]}` : run.join(', ')))
+    .join(', ')
+}
+
+/** Minutes covered by a line counted from 1 Jan 1970; an end before the start runs into the next morning. */
+function lineSlot(date: string, startTime: string, endTime: string) {
+  const minutes = (value: string) => {
+    const [hours, mins] = value.split(':').map(Number)
+    return (hours || 0) * 60 + (mins || 0)
+  }
+  const start = minutes(startTime)
+  let end = minutes(endTime)
+  if (end <= start) end += 1440
+  const base = dayIndex(date) * 1440
+  return { start: base + start, end: base + end }
 }
 
 function locationLabel(value: OvertimeWorkLocation | string | undefined) {
@@ -199,7 +350,8 @@ export function OvertimeWorkRequest() {
   const [lines, setLines] = useState<WorkLineInput[]>([])
   const [entry, setEntry] = useState<EntryDraft>(emptyEntry)
   const [entryOpen, setEntryOpen] = useState(false)
-  const [editingLine, setEditingLine] = useState<number | null>(null)
+  /** lineKey of the saved period being edited (null for a new one). */
+  const [editingLine, setEditingLine] = useState<string | null>(null)
   const [entryError, setEntryError] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [expectedDeliverables, setExpectedDeliverables] = useState('')
@@ -214,6 +366,10 @@ export function OvertimeWorkRequest() {
   )
   const employee = contextQuery.data?.employee
   const entryHours = splitOvertimeHours(entry.startTime, entry.endTime, entry.dayType || 'working')
+  const entryDays = entryDates(entry)
+  const entryPeriodDates = periodDates(entry.startDate, entryEnd(entry), entry.weekdays)
+  const entrySpan = periodSpan(entry.startDate, entryEnd(entry))
+  const lineGroups = groupLines(lines)
   const totalHours = lines.reduce(
     (sum, line) => sum + splitOvertimeHours(line.startTime, line.endTime, line.dayType).totalHours,
     0,
@@ -336,78 +492,85 @@ export function OvertimeWorkRequest() {
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Delete failed'),
   })
 
-  const lineProblem = (draft: EntryDraft, others: WorkLineInput[]) => {
-    if (!draft.overtimeDate) return 'Choose the overtime date.'
-    if (!draft.startTime) return 'Enter the start time.'
-    if (!draft.endTime) return 'Enter the end time.'
+  /** The saved lines plus the open entry split into one line per day, or the reason it cannot be saved. */
+  const mergeEntry = (draft: EntryDraft): { lines: WorkLineInput[] } | { problem: string } => {
+    const end = entryEnd(draft)
+    if (!draft.startDate) return { problem: 'Choose the start date.' }
+    if (end < draft.startDate) return { problem: 'The end date must be on or after the start date.' }
+    if (periodSpan(draft.startDate, end) > MAX_OVERTIME_DAYS) {
+      return { problem: `A period can cover at most ${MAX_OVERTIME_DAYS} days. Make a second request for the other days.` }
+    }
+    if (!draft.startTime) return { problem: 'Enter the start time.' }
+    if (!draft.endTime) return { problem: 'Enter the end time.' }
     if (splitOvertimeHours(draft.startTime, draft.endTime, 'working').totalHours <= 0) {
-      return 'The end time must be different from the start time.'
+      return { problem: 'The end time must be different from the start time.' }
     }
-    if (!draft.dayType) return 'Choose the overtime category.'
-    if (!draft.workLocation) return 'Choose the work location.'
-    const clash = others.find(
-      (other) =>
-        other.overtimeDate === draft.overtimeDate &&
-        other.startTime < draft.endTime &&
-        draft.startTime < other.endTime,
-    )
-    if (clash) {
-      return `It overlaps ${shortDate(clash.overtimeDate)} ${clockText(clash.startTime)} – ${clockText(clash.endTime)}.`
+    if (!draft.dayType) return { problem: 'Choose the overtime category.' }
+    if (!draft.workLocation) return { problem: 'Choose the work location.' }
+    const dates = entryDates(draft)
+    if (!dates.length) return { problem: 'No days are left in this period. Tick at least one day of the week.' }
+    const others = editingLine === null ? lines : lines.filter((line) => lineKey(line) !== editingLine)
+    if (others.length + dates.length > MAX_OVERTIME_DAYS) {
+      return {
+        problem: `One overtime request holds at most ${MAX_OVERTIME_DAYS} daily lines; this would make ${others.length + dates.length}. Shorten the period or make a second request for the other days.`,
+      }
     }
-    return null
-  }
-
-  const saveLine = () => {
-    const others = lines.filter((_, index) => index !== editingLine)
-    const problem = lineProblem(entry, others)
-    if (problem || !entry.dayType || !entry.workLocation) {
-      setEntryError(problem ?? 'Choose the overtime category and work location.')
-      return
+    for (const date of dates) {
+      const slot = lineSlot(date, draft.startTime, draft.endTime)
+      const clash = others.find((other) => {
+        const taken = lineSlot(other.overtimeDate, other.startTime, other.endTime)
+        return taken.start < slot.end && slot.start < taken.end
+      })
+      if (clash) {
+        return {
+          problem: `${shortDate(date)} overlaps the saved line ${shortDate(clash.overtimeDate)} ${clockText(clash.startTime)} – ${clockText(clash.endTime)}.`,
+        }
+      }
     }
     // Line reason is not collected here — the single Justification section below covers it.
-    const line: WorkLineInput = {
-      overtimeDate: entry.overtimeDate,
-      startTime: entry.startTime,
-      endTime: entry.endTime,
-      dayType: entry.dayType,
-      workLocation: entry.workLocation,
-      reason: reason.trim() || entry.reason.trim(),
-    }
-    setLines(sortLines(editingLine === null ? [...lines, line] : lines.map((item, i) => (i === editingLine ? line : item))))
+    const added = dates.map<WorkLineInput>((overtimeDate) => ({
+      overtimeDate,
+      startTime: draft.startTime,
+      endTime: draft.endTime,
+      dayType: draft.dayType as OvertimeDayType,
+      workLocation: draft.workLocation as OvertimeWorkLocation,
+      reason: reason.trim() || draft.reason.trim(),
+    }))
+    return { lines: sortLines([...others, ...added]) }
+  }
+
+  const closeEntry = () => {
     setEntry(emptyEntry())
     setEditingLine(null)
     setEntryOpen(false)
     setEntryError(null)
+  }
+
+  const saveLine = () => {
+    const merged = mergeEntry(entry)
+    if ('problem' in merged) {
+      setEntryError(merged.problem)
+      return
+    }
+    setLines(merged.lines)
+    closeEntry()
     setFormError(null)
   }
 
   const submit = (forApproval: boolean) => {
     setFormError(null)
     let all = lines
-    if (entryOpen && (entry.overtimeDate || entry.startTime || entry.endTime || entry.dayType || entry.workLocation)) {
-      const others = lines.filter((_, index) => index !== editingLine)
-      const problem = lineProblem(entry, others)
-      if (problem || !entry.dayType || !entry.workLocation) {
-        setEntryError(problem ?? 'Choose the overtime category and work location.')
+    if (entryOpen && (entry.startDate || entry.startTime || entry.endTime || entry.dayType || entry.workLocation)) {
+      const merged = mergeEntry(entry)
+      if ('problem' in merged) {
+        setEntryError(merged.problem)
         setFormError('Save or cancel the overtime line you are entering first.')
         return
       }
-      const savedLine: WorkLineInput = {
-        overtimeDate: entry.overtimeDate,
-        startTime: entry.startTime,
-        endTime: entry.endTime,
-        dayType: entry.dayType,
-        workLocation: entry.workLocation,
-        reason: reason.trim(),
-      }
-      all = sortLines(
-        editingLine === null
-          ? [...lines, savedLine]
-          : lines.map((item, i) => (i === editingLine ? savedLine : item)),
-      )
+      all = merged.lines
     }
     if (!all.length) {
-      setFormError('Click Add Line to enter overtime: date, times, category, and work location, then Save.')
+      setFormError('Click Add Line to enter overtime: start and end date, times, category, and work location, then Save.')
       return
     }
     if (forApproval && reason.trim().length < 5) {
@@ -529,7 +692,8 @@ export function OvertimeWorkRequest() {
       <div className="mb-4 rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
         <p className="font-semibold">Stage 1 (work authorization) → Stage 2 (payment)</p>
         <p className="mt-1 text-teal-900/90">
-          Enter the overtime period and daily lines (date, start/end time). Superior then FAD approve the work.
+          Enter the overtime lines: a start and end date (one day, or a period worked at the same time every
+          day) and the start/end time. Superior then FAD approve the work.
           After completion, use{' '}
           <Link className="font-semibold underline-offset-2 hover:underline" to="/hr/overtime-request">
             Overtime Payment Request
@@ -692,102 +856,194 @@ export function OvertimeWorkRequest() {
             </header>
             <div className="p-4">
               <p className="mb-3 text-sm text-slate-600">
-                Add <span className="font-medium text-slate-800">one line per overtime day</span>. Use{' '}
-                <span className="font-medium text-slate-800">Edit</span> on any saved line to change its{' '}
-                <span className="font-medium text-slate-800">Overtime Date</span>, start/end time, category, or
-                location. The request period is from the earliest to the latest line date
+                Each line has a <span className="font-medium text-slate-800">Start Date</span> and{' '}
+                <span className="font-medium text-slate-800">End Date</span>: pick the same date for one day, or a
+                period when the overtime repeats at the same time (for example a driver&apos;s daily pick-up). For a
+                period, untick the days of the week not worked or remove single dates such as a holiday. The portal
+                saves one line per day in Business Central (at most {MAX_OVERTIME_DAYS} days per request). The
+                request period is from the earliest to the latest date
                 {lines.length
                   ? ` (${shortDate(sortLines(lines)[0]!.overtimeDate)} → ${shortDate(sortLines(lines)[lines.length - 1]!.overtimeDate)})`
                   : ''}
                 .
               </p>
-              {lines.length ? (
+              {lineGroups.length ? (
                 <ul className="mb-4 space-y-2">
-                  {lines.map((line, index) => (
-                    <li
-                      key={`${line.overtimeDate}-${line.startTime}-${index}`}
-                      className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-sm"
-                    >
-                      <span className="font-medium text-slate-900">{shortDate(line.overtimeDate)}</span>
-                      <span className="text-slate-600">
-                        {clockText(line.startTime)} – {clockText(line.endTime)}
-                      </span>
-                      <span className="text-slate-600">
-                        {DAY_TYPES.find((d) => d.value === line.dayType)?.label.split(' (')[0]}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-slate-600">
-                        <MapPin className="h-3.5 w-3.5" />
-                        {locationLabel(line.workLocation)}
-                      </span>
-                      <span className="tabular-nums text-slate-700">
-                        {splitOvertimeHours(line.startTime, line.endTime, line.dayType).totalHours.toFixed(2)}h
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEntry({
-                            overtimeDate: line.overtimeDate,
-                            startTime: line.startTime,
-                            endTime: line.endTime,
-                            dayType: line.dayType,
-                            workLocation: line.workLocation,
-                            reason: line.reason,
-                          })
-                          setEditingLine(index)
-                          setEntryOpen(true)
-                          setEntryError(null)
-                        }}
+                  {lineGroups.map((group, index) => {
+                    const first = group.dates[0]!
+                    const last = group.dates[group.dates.length - 1]!
+                    const perDay = splitOvertimeHours(group.line.startTime, group.line.endTime, group.line.dayType).totalHours
+                    const consecutive = periodSpan(first, last) === group.dates.length
+                    return (
+                      <li
+                        key={group.key}
+                        className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                          editingLine === group.key ? 'border-teal-300 bg-teal-50/60' : 'border-slate-100 bg-slate-50/80'
+                        }`}
                       >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setLines(lines.filter((_, i) => i !== index))
-                          if (editingLine === index) {
-                            setEntryOpen(false)
-                            setEditingLine(null)
-                          }
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </li>
-                  ))}
+                        <span className="text-xs font-semibold text-slate-400 tabular-nums">{index + 1}.</span>
+                        <span className="font-medium text-slate-900">
+                          {first === last ? shortDate(first) : `${shortDate(first)} → ${shortDate(last)}`}
+                        </span>
+                        {group.dates.length > 1 ? (
+                          <span
+                            className="rounded-full bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-800"
+                            title={group.dates.map(shortDate).join(', ')}
+                          >
+                            {group.dates.length} days{consecutive ? '' : ` · ${weekdaySummary(group.dates)}`}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500">{weekdayShort(first)}</span>
+                        )}
+                        <span className="text-slate-600">
+                          {clockText(group.line.startTime)} – {clockText(group.line.endTime)}
+                        </span>
+                        <span className="text-slate-600">
+                          {DAY_TYPES.find((d) => d.value === group.line.dayType)?.label.split(' (')[0]}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-slate-600">
+                          <MapPin className="h-3.5 w-3.5" />
+                          {locationLabel(group.line.workLocation)}
+                        </span>
+                        <span className="tabular-nums text-slate-700">
+                          {group.dates.length > 1
+                            ? `${perDay.toFixed(2)}h × ${group.dates.length} = ${(perDay * group.dates.length).toFixed(2)}h`
+                            : `${perDay.toFixed(2)}h`}
+                        </span>
+                        <span className="ml-auto flex gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEntry(entryFromGroup(group))
+                              setEditingLine(group.key)
+                              setEntryOpen(true)
+                              setEntryError(null)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setLines(lines.filter((line) => lineKey(line) !== group.key))
+                              if (editingLine === group.key) closeEntry()
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </span>
+                      </li>
+                    )
+                  })}
                 </ul>
               ) : null}
 
               {entryOpen ? (
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <p className="text-sm font-semibold text-slate-900">
-                    {editingLine === null ? 'New Line' : `Edit Line ${editingLine + 1}`}
+                    {editingLine === null
+                      ? 'New Line'
+                      : `Edit Line ${lineGroups.findIndex((group) => group.key === editingLine) + 1}`}
                   </p>
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="space-y-1.5">
-                      <Label htmlFor="otw-date">Overtime Date *</Label>
+                      <Label htmlFor="otw-start-date">Start Date *</Label>
                       <Input
-                        id="otw-date"
+                        id="otw-start-date"
                         type="date"
-                        value={entry.overtimeDate}
-                        onChange={(event) => setEntry((current) => ({ ...current, overtimeDate: event.target.value }))}
+                        value={entry.startDate}
+                        onChange={(event) => {
+                          const startDate = event.target.value
+                          // One day by default: the end date follows until it is set to a later date.
+                          setEntry((current) => ({
+                            ...current,
+                            startDate,
+                            endDate: !current.endDate || current.endDate < startDate ? startDate : current.endDate,
+                          }))
+                        }}
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="otw-category">Overtime Category *</Label>
-                      <Select
-                        id="otw-category"
-                        value={entry.dayType}
-                        options={DAY_TYPES}
-                        placeholder="Select category"
-                        onChange={(event) =>
-                          setEntry((current) => ({ ...current, dayType: event.target.value as OvertimeDayType }))
-                        }
+                      <Label htmlFor="otw-end-date">End Date *</Label>
+                      <Input
+                        id="otw-end-date"
+                        type="date"
+                        value={entry.endDate}
+                        min={entry.startDate || undefined}
+                        onChange={(event) => setEntry((current) => ({ ...current, endDate: event.target.value }))}
                       />
                     </div>
+                    {entrySpan > 1 ? (
+                      <div className="space-y-2 rounded-lg border border-teal-100 bg-teal-50/50 p-3 md:col-span-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-slate-700">Days worked</span>
+                          {WEEKDAY_CHIPS.map((chip) => {
+                            const on = entry.weekdays.includes(chip.value)
+                            return (
+                              <button
+                                key={chip.value}
+                                type="button"
+                                aria-pressed={on}
+                                className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold transition ${
+                                  on
+                                    ? 'border-teal-600 bg-teal-600 text-white hover:bg-teal-700'
+                                    : 'border-slate-300 bg-white text-slate-500 line-through hover:border-slate-400'
+                                }`}
+                                onClick={() =>
+                                  setEntry((current) => ({
+                                    ...current,
+                                    weekdays: on
+                                      ? current.weekdays.filter((day) => day !== chip.value)
+                                      : [...current.weekdays, chip.value],
+                                  }))
+                                }
+                              >
+                                {chip.short}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {entryPeriodDates.length ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {entryPeriodDates.map((date) => {
+                              const removed = entry.excluded.includes(date)
+                              return (
+                                <button
+                                  key={date}
+                                  type="button"
+                                  title={removed ? 'Add this day back' : 'Remove this day (for example a holiday)'}
+                                  className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] tabular-nums transition ${
+                                    removed
+                                      ? 'border-dashed border-slate-300 bg-white text-slate-400 line-through'
+                                      : 'border-teal-200 bg-white text-teal-900 hover:border-rose-300 hover:text-rose-700'
+                                  }`}
+                                  onClick={() =>
+                                    setEntry((current) => ({
+                                      ...current,
+                                      excluded: removed
+                                        ? current.excluded.filter((item) => item !== date)
+                                        : [...current.excluded, date],
+                                    }))
+                                  }
+                                >
+                                  {weekdayShort(date)} {shortDate(date).slice(0, 5)}
+                                  <span aria-hidden="true">{removed ? '+' : '×'}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        <p className="text-xs text-slate-600">
+                          {entryDays.length} overtime day{entryDays.length === 1 ? '' : 's'} in this period
+                          {entrySpan > MAX_OVERTIME_DAYS ? ` — a period can cover at most ${MAX_OVERTIME_DAYS} days` : ''}
+                          . Click a date to remove it, click it again to add it back.
+                        </p>
+                      </div>
+                    ) : null}
                     <div className="space-y-1.5">
                       <Label htmlFor="otw-start">Start Time *</Label>
                       <ClockTimePicker
@@ -808,7 +1064,19 @@ export function OvertimeWorkRequest() {
                         onChange={(value) => setEntry((current) => ({ ...current, endTime: value }))}
                       />
                     </div>
-                    <div className="space-y-1.5 md:col-span-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="otw-category">Overtime Category *</Label>
+                      <Select
+                        id="otw-category"
+                        value={entry.dayType}
+                        options={DAY_TYPES}
+                        placeholder="Select category"
+                        onChange={(event) =>
+                          setEntry((current) => ({ ...current, dayType: event.target.value as OvertimeDayType }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="otw-line-location" className="inline-flex items-center gap-1">
                         <MapPin className="h-3.5 w-3.5" /> Work location *
                       </Label>
@@ -828,8 +1096,15 @@ export function OvertimeWorkRequest() {
                     <div className="md:col-span-2">
                       <p className="text-xs font-medium text-slate-600">Calculated Hours</p>
                       <p className="mt-1 text-xl font-bold tabular-nums text-slate-900">
-                        {entryHours.totalHours.toFixed(2)} Hours
+                        {entryDays.length > 1
+                          ? `${(entryHours.totalHours * entryDays.length).toFixed(2)} Hours`
+                          : `${entryHours.totalHours.toFixed(2)} Hours`}
                       </p>
+                      {entryDays.length > 1 ? (
+                        <p className="text-xs tabular-nums text-slate-600">
+                          {entryHours.totalHours.toFixed(2)} h per day × {entryDays.length} days
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-xs text-slate-500">
                         Reason / justification is entered once below under Justification.
                       </p>
@@ -837,16 +1112,7 @@ export function OvertimeWorkRequest() {
                   </div>
                   {entryError ? <p className="mt-3 text-sm text-red-700">{entryError}</p> : null}
                   <div className="mt-4 flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setEntry(emptyEntry())
-                        setEntryOpen(false)
-                        setEditingLine(null)
-                        setEntryError(null)
-                      }}
-                    >
+                    <Button type="button" variant="outline" onClick={closeEntry}>
                       Cancel
                     </Button>
                     <Button type="button" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={saveLine}>

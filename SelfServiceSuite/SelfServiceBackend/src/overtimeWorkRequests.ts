@@ -179,7 +179,8 @@ type StoreFile = { sequence: number; rows: OvertimeWorkRequest[] }
 
 const DAY_TYPES: OvertimeWorkDayType[] = ['working', 'night', 'restDay', 'holiday']
 const LOCATIONS: OvertimeWorkLocation[] = ['office', 'field', 'projectSite']
-const OVERTIME_WORK_MAX_LINES = 20
+/** Same as BC Stage 1 (ABH Overtime Request Mgt MaxLines): a full month of daily lines from a Start → End Date period. */
+const OVERTIME_WORK_MAX_LINES = 31
 
 function storePath() {
   return path.resolve(process.cwd(), 'data', 'overtime-work-requests.json')
@@ -355,7 +356,9 @@ export function validateOvertimeWorkDetails(input: unknown, submit: boolean): Ov
 
   if (!legacyLine.length) throw invalid('Add at least one overtime line (date, times, category and work location).')
   if (legacyLine.length > OVERTIME_WORK_MAX_LINES) {
-    throw invalid(`One overtime work request can have at most ${OVERTIME_WORK_MAX_LINES} lines.`)
+    throw invalid(
+      `One overtime request can have at most ${OVERTIME_WORK_MAX_LINES} daily lines. Make a second request for the other days.`,
+    )
   }
 
   const overallReason = str(body.reason).slice(0, 1000)

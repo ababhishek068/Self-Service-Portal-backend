@@ -705,7 +705,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v371 — 1.0.3.532 (Medical Claim separate from Staff Claim: HR then Finance, payment voucher FAD then Finance Manager, Medical Claim labels; for BC 1.0.3.648)'
+export const PORTAL_API_BUILD = 'v372 — 1.0.3.533 (Overtime Request lines take a Start Date and End Date period with days of the week, split into daily BC lines up to 31; for BC 1.0.3.648)'
 
 interface LookupSpec {
   service: string

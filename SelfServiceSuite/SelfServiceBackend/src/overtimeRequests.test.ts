@@ -339,6 +339,25 @@ describe('overtime Stage 1 mirrors Business Central (BC 1.0.3.636)', () => {
       true,
     )
 
+  it('accepts a full Start → End Date period of 31 daily lines, as BC Stage 1 does, and refuses 32', () => {
+    const period = (days: number) =>
+      Array.from({ length: days }, (_, index) => ({
+        overtimeDate: new Date(Date.UTC(2026, 11, 1) + index * 86_400_000).toISOString().slice(0, 10),
+        startTime: '06:00',
+        endTime: '08:00',
+        dayType: 'working',
+        workLocation: 'field',
+      }))
+    const body = { reason: 'Daily staff pick-up', expectedDeliverables: 'Staff at office by 8', lines: period(31) }
+    const month = validateOvertimeWorkDetails(body, true)
+    assert.equal(month.lines.length, 31)
+    assert.equal(month.lines[30]?.overtimeDate, '2026-12-31')
+    const stage1 = validateOvertimeDetails({ reason: body.reason, lines: month.lines }, true)
+    assert.equal(stage1.periodStartDate, '2026-12-01')
+    assert.equal(stage1.periodEndDate, '2026-12-31')
+    assert.throws(() => validateOvertimeWorkDetails({ ...body, lines: period(32) }, true), /at most 31 daily lines/)
+  })
+
   it('keeps the BC Stage 1 number and Superior → FAD steps, replacing a portal-only draft', async () => {
     const draft = await saveOvertimeWorkRequest({
       employeeNo: 'E001',
