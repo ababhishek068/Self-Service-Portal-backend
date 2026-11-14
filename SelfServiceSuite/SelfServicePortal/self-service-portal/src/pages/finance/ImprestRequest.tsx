@@ -5,6 +5,7 @@ import { Landmark, UserCheck } from 'lucide-react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
+import { AdvanceRequestCreate } from '@/components/finance/AdvanceRequestCreate'
 import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -298,6 +299,19 @@ export function ImprestRequest() {
         projectAssignment: '',
         purpose: '',
       }}
+      // Developer handover: one page — employee & purpose, details with Requested Amount (ETB),
+      // supporting documents, and Save as Draft / Submit for Approval / Cancel / View History.
+      customCreate={({ onCreated, onCancel }) => (
+        <AdvanceRequestCreate
+          module={module}
+          purposeOptions={purposeOptions}
+          purposeHint={purposeHint}
+          advanceTypes={imprestTypes.options}
+          supportsProject={supportsProject}
+          onCreated={onCreated}
+          onCancel={onCancel}
+        />
+      )}
       progressApprovers={ADVANCE_APPROVERS}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}

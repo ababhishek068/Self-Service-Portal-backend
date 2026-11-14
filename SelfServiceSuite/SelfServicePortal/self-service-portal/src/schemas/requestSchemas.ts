@@ -195,59 +195,77 @@ export const staffClaimLineSchema = z
  * Request Justification and Activity Start Date are mandatory; Activity End Date ≥ Start Date.
  * There are no travel fields: BC's Travel Start / Expected Return are taken from the activity dates.
  */
-export const imprestHeaderSchema = z
+const advanceHeaderShape = {
+  /** System generated (BC Imprest Header Date), shown read-only. */
+  requestDate: optionalText,
+  dateRequired: needByDateField,
+  /** BC purpose code from PortalAdvancePaymentContext (e.g. AC-RES, GN-OTH). */
+  requestPurpose: z.string().min(1, 'Request purpose is required'),
+  otherPurposeDetails: z.string().optional().default(''),
+  justification: z.string().trim().min(10, 'Explain why the advance is needed (at least 10 characters)'),
+  activityLocation: optionalText,
+  /** Optional (BC 1.0.3.651). */
+  projectAssignment: z.string().max(100, 'Keep Project / Assignment to 100 characters').optional().default(''),
+  activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
+  activityEndDate: z.string().optional().default(''),
+  /** Legacy SOAP Purpose — filled from justification before create/edit. */
+  purpose: z.string().optional().default(''),
+}
+
+type AdvanceHeaderValues = z.infer<z.ZodObject<typeof advanceHeaderShape>>
+
+function refineAdvanceHeader(data: AdvanceHeaderValues, ctx: z.RefinementCtx) {
+  const purposeCode = String(data.requestPurpose ?? '').trim()
+  const purposeUpper = purposeCode.toUpperCase()
+  // BC flags Other via requiresOtherDetails; portal fallback matches GN-OTH / *OTH codes.
+  const needsOther =
+    purposeUpper === 'GN-OTH' ||
+    purposeUpper.endsWith('-OTH') ||
+    purposeUpper === 'OTHER' ||
+    purposeCode.toLowerCase() === 'other'
+  if (needsOther && !String(data.otherPurposeDetails ?? '').trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['otherPurposeDetails'],
+      message: 'Enter details when Other (Specify) is selected',
+    })
+  }
+  if (
+    data.activityStartDate &&
+    data.activityEndDate &&
+    data.activityEndDate < data.activityStartDate
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['activityEndDate'],
+      message: 'Activity end date cannot be earlier than the start date',
+    })
+  }
+  // The advance is paid before the activity: the funds cannot be needed after it starts.
+  if (data.dateRequired && data.activityStartDate && data.dateRequired.slice(0, 10) > data.activityStartDate.slice(0, 10)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['dateRequired'],
+      message: 'Required advance date must be on or before the activity start date',
+    })
+  }
+}
+
+export const imprestHeaderSchema = z.object(advanceHeaderShape).superRefine(refineAdvanceHeader)
+
+/**
+ * The one-page Advance Request form (ESSP developer handover §3.3): the header plus the Requested
+ * Amount (ETB, > 0) and the Advance Type BC posts it to, saved as the first advance line.
+ */
+export const advanceRequestCreateSchema = z
   .object({
-    /** System generated (BC Imprest Header Date), shown read-only. */
-    requestDate: optionalText,
-    dateRequired: needByDateField,
-    /** BC purpose code from PortalAdvancePaymentContext (e.g. AC-RES, GN-OTH). */
-    requestPurpose: z.string().min(1, 'Request purpose is required'),
-    otherPurposeDetails: z.string().optional().default(''),
-    justification: z.string().min(10, 'Request justification is required'),
-    activityLocation: optionalText,
-    /** Optional (BC 1.0.3.651). */
-    projectAssignment: z.string().max(100, 'Keep Project / Assignment to 100 characters').optional().default(''),
-    activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
-    activityEndDate: z.string().optional().default(''),
-    /** Legacy SOAP Purpose — filled from justification before create/edit. */
-    purpose: z.string().optional().default(''),
+    ...advanceHeaderShape,
+    requestedAmount: z.coerce
+      .number({ message: 'Enter the requested amount' })
+      .positive('Requested amount must be greater than zero'),
+    advanceType: z.string().min(1, 'Choose the advance type'),
   })
-  .superRefine((data, ctx) => {
-    const purposeCode = String(data.requestPurpose ?? '').trim()
-    const purposeUpper = purposeCode.toUpperCase()
-    // BC flags Other via requiresOtherDetails; portal fallback matches GN-OTH / *OTH codes.
-    const needsOther =
-      purposeUpper === 'GN-OTH' ||
-      purposeUpper.endsWith('-OTH') ||
-      purposeUpper === 'OTHER' ||
-      purposeCode.toLowerCase() === 'other'
-    if (needsOther && !String(data.otherPurposeDetails ?? '').trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['otherPurposeDetails'],
-        message: 'Enter details when Other (Specify) is selected',
-      })
-    }
-    if (
-      data.activityStartDate &&
-      data.activityEndDate &&
-      data.activityEndDate < data.activityStartDate
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['activityEndDate'],
-        message: 'Activity end date cannot be earlier than the start date',
-      })
-    }
-    // The advance is paid before the activity: the funds cannot be needed after it starts.
-    if (data.dateRequired && data.activityStartDate && data.dateRequired.slice(0, 10) > data.activityStartDate.slice(0, 10)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['dateRequired'],
-        message: 'Required advance date must be on or before the activity start date',
-      })
-    }
-  })
+  .superRefine(refineAdvanceHeader)
 
 export const imprestLineHeaderSchema = z.object({
   advanceType: z.string().min(1, 'Advance type is required'),

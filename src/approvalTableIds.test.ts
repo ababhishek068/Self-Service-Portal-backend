@@ -3807,3 +3807,34 @@ describe('Advance Request Project / Assignment (BC 1.0.3.651)', () => {
     assert.equal(soapMethodMissing(new Error('Advance payment ADV-1 is no longer editable'), 'PortalAdvanceProjectAssignment'), false)
   })
 })
+
+describe('integration-safe create (ESSP spec: no duplicate submissions)', () => {
+  it('gives a repeated clientRequestId the same document instead of a second one', async () => {
+    const { createOnce, createOnceKey } = await import('./createOnce.js')
+    let calls = 0
+    const run = async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return 'ADV-00100'
+    }
+    const key = createOnceKey('ABH-010', 'imprest', 'form-1')
+    const [first, second] = await Promise.all([createOnce(key, run), createOnce(key, run)])
+    assert.equal(first, 'ADV-00100')
+    assert.equal(second, 'ADV-00100')
+    assert.equal(calls, 1)
+    assert.equal(createOnceKey('ABH-010', 'imprest', ''), '')
+  })
+
+  it('returns the saved draft to a retry after a failed submit, and allows a retry when nothing was created', async () => {
+    const { createOnce } = await import('./createOnce.js')
+    const failedSubmit = createOnce('k-partial', async () => {
+      throw Object.assign(new Error('Approval workflow not found'), { documentNo: 'ADV-00101' })
+    })
+    await assert.rejects(failedSubmit, /Approval workflow not found/)
+    assert.equal(await createOnce('k-partial', async () => 'ADV-99999'), 'ADV-00101')
+
+    await assert.rejects(createOnce('k-none', async () => { throw new Error('BC down') }), /BC down/)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(await createOnce('k-none', async () => 'ADV-00102'), 'ADV-00102')
+  })
+})

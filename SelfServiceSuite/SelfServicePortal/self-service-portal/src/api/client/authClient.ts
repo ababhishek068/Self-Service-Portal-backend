@@ -114,20 +114,26 @@ export interface NormalizedAuthError {
   message: string
   status?: number
   code?: string
+  /** A create that failed after Business Central saved the draft: that draft's number. */
+  documentNo?: string
 }
 
 export class AuthApiError extends Error implements NormalizedAuthError {
   status?: number
   code?: string
-  constructor({ message, status, code }: NormalizedAuthError) {
+  documentNo?: string
+  constructor({ message, status, code, documentNo }: NormalizedAuthError) {
     super(message)
     this.name = 'AuthApiError'
     this.status = status
     this.code = code
+    this.documentNo = documentNo
   }
 }
 
-async function readApiErrorPayload(data: unknown): Promise<{ message?: string; code?: string } | undefined> {
+async function readApiErrorPayload(
+  data: unknown,
+): Promise<{ message?: string; code?: string; documentNo?: string } | undefined> {
   if (data == null) return undefined
   if (typeof data === 'string') {
     const text = data.trim()
@@ -148,9 +154,9 @@ async function readApiErrorPayload(data: unknown): Promise<{ message?: string; c
     }
   }
   if (typeof data === 'object') {
-    const row = data as { message?: string; code?: string; error?: string }
+    const row = data as { message?: string; code?: string; error?: string; documentNo?: string }
     const message = row.message || row.error
-    if (message || row.code) return { message, code: row.code }
+    if (message || row.code) return { message, code: row.code, documentNo: row.documentNo }
   }
   return undefined
 }
@@ -176,6 +182,7 @@ authHttp.interceptors.response.use(
           message: friendlyHttpMessage(status, payload?.message ?? error.message),
           status,
           code: payload?.code,
+          documentNo: payload?.documentNo,
         }),
       )
     }),

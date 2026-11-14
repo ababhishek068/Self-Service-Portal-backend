@@ -347,6 +347,11 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
     typeof error === 'object' && error !== null && 'code' in error
       ? String(error.code)
       : undefined
+  // A create that failed after BC saved the draft (lines, attachments or submit): the draft's number.
+  const documentNo =
+    typeof error === 'object' && error !== null && 'documentNo' in error
+      ? String((error as { documentNo?: unknown }).documentNo ?? '').trim()
+      : ''
   if (
     status === 500 &&
     /(Could not resolve host|Failed to connect|Connection timed out|Could not connect)/i.test(message)
@@ -362,7 +367,12 @@ app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   )
   res
     .status(status)
-    .json({ error: responseMessage, message: responseMessage, ...(code ? { code } : {}) })
+    .json({
+      error: responseMessage,
+      message: responseMessage,
+      ...(code ? { code } : {}),
+      ...(documentNo ? { documentNo } : {}),
+    })
 })
 
 app.listen(config.PORT, config.HOST, () => {

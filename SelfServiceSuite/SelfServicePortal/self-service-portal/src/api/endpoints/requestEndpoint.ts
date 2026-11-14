@@ -17,12 +17,16 @@ export async function getModuleRequest(_config: EndpointConfig, id: string) {
   return authGet<PortalRequest>(`/api/requests/${encodeURIComponent(id)}`)
 }
 
-export async function createModuleRequest(config: EndpointConfig, payload: Record<string, unknown>) {
+export async function createModuleRequest(
+  config: EndpointConfig,
+  payload: Record<string, unknown>,
+  options: { timeout?: number } = {},
+) {
   requireAuthApiUrl()
   return authPost<PortalRequest>(
     '/api/requests',
     { ...payload, module: config.module },
-    { timeout: 45000 } as Parameters<typeof authPost>[2],
+    { timeout: options.timeout ?? 45000 } as Parameters<typeof authPost>[2],
   )
 }
 

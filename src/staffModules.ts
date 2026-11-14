@@ -3124,78 +3124,83 @@ export async function createPortalModuleRequest(
     }
   }
 
-  if (spec.soap.saveLine && spec.params?.saveLine) {
-    const lines = portalLineBodies(spec, body)
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = {
-        ...body,
-        ...lines[index],
-        action: 'create',
-        lineNo: Number(lines[index]?.lineNo ?? (index + 1) * 10000),
+  try {
+    if (spec.soap.saveLine && spec.params?.saveLine) {
+      const lines = portalLineBodies(spec, body)
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = {
+          ...body,
+          ...lines[index],
+          action: 'create',
+          lineNo: Number(lines[index]?.lineNo ?? (index + 1) * 10000),
+        }
+        const lineParams = await spec.params.saveLine({
+          req: requestWithBody(line),
+          user,
+          no,
+        })
+        const lineResult = await callSoapMethod(spec.soap.saveLine, lineParams)
+        if (!ok(lineResult)) {
+          throw Object.assign(
+            new Error(`Business Central created ${no}, but line ${index + 1} failed`),
+            { status: 502, documentNo: no },
+          )
+        }
       }
-      const lineParams = await spec.params.saveLine({
-        req: requestWithBody(line),
-        user,
-        no,
+    }
+
+    for (const attachment of attachmentBodies(body)) {
+      const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
+      if (!contentBase64) continue
+      const fileName = String(attachment.fileName ?? '')
+      const description = String(attachment.description ?? '').trim()
+      if (!description) {
+        throw Object.assign(new Error('Attachment description is required'), { status: 422 })
+      }
+      const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
+      if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
+        throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
+          status: 422,
+        })
+      }
+      if (Buffer.from(contentBase64, 'base64').byteLength > MAX_ATTACHMENT_BYTES) {
+        throw Object.assign(new Error(`${fileName || 'Attachment'} exceeds the 10 MB limit`), {
+          status: 422,
+        })
+      }
+      const uploadResult = await callSoapMethod('UploadDocumentAttachment', {
+        docNo: no,
+        docNo2: no,
+        description,
+        tableID: spec.headerTableId,
+        file: contentBase64,
+        fileName: attachmentFileName(attachment),
       })
-      const lineResult = await callSoapMethod(spec.soap.saveLine, lineParams)
-      if (!ok(lineResult)) {
+      if (!attachmentOk(uploadResult)) {
         throw Object.assign(
-          new Error(`Business Central created ${no}, but line ${index + 1} failed`),
+          new Error(`Business Central created ${no}, but an attachment upload failed`),
           { status: 502, documentNo: no },
         )
       }
     }
-  }
 
-  for (const attachment of attachmentBodies(body)) {
-    const contentBase64 = String(attachment.contentBase64 ?? '').replace(/^data:[^,]+,/, '')
-    if (!contentBase64) continue
-    const fileName = String(attachment.fileName ?? '')
-    const description = String(attachment.description ?? '').trim()
-    if (!description) {
-      throw Object.assign(new Error('Attachment description is required'), { status: 422 })
-    }
-    const extension = fileName.split('.').pop()?.toLowerCase() ?? ''
-    if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(extension)) {
-      throw Object.assign(new Error(`${fileName || 'Attachment'} is not an allowed file type`), {
-        status: 422,
+    if (body.submit === true && spec.soap.submit && spec.params?.submit) {
+      const submitParams = await spec.params.submit({
+        req: requestWithBody(body),
+        user,
+        no,
       })
+      const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
+      if (!ok(submitResult)) {
+        throw Object.assign(
+          new Error(`Business Central created ${no}, but approval submission failed`),
+          { status: 502, documentNo: no },
+        )
+      }
     }
-    if (Buffer.from(contentBase64, 'base64').byteLength > MAX_ATTACHMENT_BYTES) {
-      throw Object.assign(new Error(`${fileName || 'Attachment'} exceeds the 10 MB limit`), {
-        status: 422,
-      })
-    }
-    const uploadResult = await callSoapMethod('UploadDocumentAttachment', {
-      docNo: no,
-      docNo2: no,
-      description,
-      tableID: spec.headerTableId,
-      file: contentBase64,
-      fileName: attachmentFileName(attachment),
-    })
-    if (!attachmentOk(uploadResult)) {
-      throw Object.assign(
-        new Error(`Business Central created ${no}, but an attachment upload failed`),
-        { status: 502, documentNo: no },
-      )
-    }
-  }
-
-  if (body.submit === true && spec.soap.submit && spec.params?.submit) {
-    const submitParams = await spec.params.submit({
-      req: requestWithBody(body),
-      user,
-      no,
-    })
-    const submitResult = await callSoapMethod(spec.soap.submit, submitParams)
-    if (!ok(submitResult)) {
-      throw Object.assign(
-        new Error(`Business Central created ${no}, but approval submission failed`),
-        { status: 502, documentNo: no },
-      )
-    }
+  } catch (error) {
+    // The header exists in BC: it stays a draft. Tell the portal which one so it can open it.
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { documentNo: no })
   }
 
   return no

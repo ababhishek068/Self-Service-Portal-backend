@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowLeft, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { AlertCircle, ArrowLeft, History, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import {
@@ -1306,6 +1306,22 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                         {action.label}
                       </Button>
                     ))}
+                  {shouldShowApprovalHistory(selected.status, selected.approvalSteps) &&
+                  approvalHistorySteps(selected).length > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        // Spec action "View History": jump to the approval and comment history and open it.
+                        const box = document.getElementById('request-history')
+                        box?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        box?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click()
+                      }}
+                    >
+                      <History className="h-4 w-4" />
+                      View History
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1567,7 +1583,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 {config.detailFooter ? config.detailFooter({ request: selected }) : null}
                 {shouldShowApprovalHistory(selected.status, selected.approvalSteps) &&
                 (approvalHistorySteps(selected).length > 0 || !config.detailFooter) ? (
-                  <ApprovalHistorySection steps={approvalHistorySteps(selected)} />
+                  <div id="request-history" className="scroll-mt-24">
+                    <ApprovalHistorySection steps={approvalHistorySteps(selected)} />
+                  </div>
                 ) : null}
               </>
             ) : null}

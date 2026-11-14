@@ -184,6 +184,7 @@ import {
   getAdvanceSettlementContext,
   saveAdvanceSettlementDetails,
 } from './advanceSettlement.js'
+import { createOnce, createOnceKey } from './createOnce.js'
 import {
   decideOtPaymentApproval,
   deleteOtPaymentRequest,
@@ -705,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v377 — 1.0.3.538 (Advance Settlement per ESSP spec: process flow, prerequisite, reconciliation, scenarios, add expense entries, submit checks; Advance Request Project or Assignment for BC 651; new ESSP menu order; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v378 — 1.0.3.539 (Advance Request one-page form per the ESSP developer handover: Requested Amount in ETB, documents, Save as Draft or Submit, approval limits; no duplicate submissions; draft kept and opened on BC error; View History; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string
@@ -5303,8 +5304,12 @@ export function buildPortalApiRouter() {
           'DEDICATED_MODULE_ENDPOINT',
         )
       }
-      const no = await createPortalModuleRequest(spec, user(req), req.body ?? {})
-      res.status(201).json(await requestDetail(`${module}-${no}`, user(req), { fast: true }))
+      const authUser = user(req)
+      // One BC document per form even on double clicks or network retries (clientRequestId).
+      const no = await createOnce(createOnceKey(authUser.employeeNo, module, req.body?.clientRequestId), () =>
+        createPortalModuleRequest(spec, authUser, req.body ?? {}),
+      )
+      res.status(201).json(await requestDetail(`${module}-${no}`, authUser, { fast: true }))
     }),
   )
 
