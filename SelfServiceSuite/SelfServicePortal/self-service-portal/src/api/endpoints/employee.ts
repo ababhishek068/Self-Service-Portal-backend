@@ -44,6 +44,8 @@ interface DashboardSummary {
   openRequests: number
   unresolved: number
   recentActivity: PortalRequest[]
+  /** Sources Business Central could not return (e.g. overtime), so a count of 0 is not mistaken for none. */
+  warnings?: string[]
   documentsByModule?: DashboardModuleCount[]
   workflowStatus?: DashboardStatusCount[]
   stockAvailability?: DashboardStockAvailability

@@ -172,6 +172,28 @@ function clockText(value: string) {
   return `${String(hour % 12 || 12).padStart(2, '0')}:${match[2]} ${hour < 12 ? 'AM' : 'PM'}`
 }
 
+/** Why one of the employee's own Stage 1 requests cannot be paid yet ('' = not worth listing). */
+function notPayableReason(row: {
+  status: string
+  steps: Array<{ status: string; approverName: string; approverUserId: string }>
+  paymentRequestNo?: string
+  paymentApproved?: boolean
+  addedToSheet?: boolean
+}) {
+  if (row.status === 'Pending Approval') {
+    const waiting = row.steps
+      .filter((step) => step.status === 'Pending')
+      .map((step) => step.approverName || step.approverUserId)
+      .filter(Boolean)
+    return waiting.length ? `waiting for approval by ${waiting.join(', ')}` : 'waiting for approval'
+  }
+  if (row.status === 'Draft') return 'draft, not submitted yet'
+  if (row.status === 'Approved' && row.paymentRequestNo && !row.paymentApproved && !row.addedToSheet) {
+    return `payment request ${row.paymentRequestNo} already raised`
+  }
+  return ''
+}
+
 function dateRange(lines: Array<{ overtimeDate: string }>, fallback: string) {
   const dates = lines.map((line) => line.overtimeDate).filter(Boolean).sort()
   if (!dates.length) return prettyDate(fallback)
@@ -1057,6 +1079,18 @@ export function OvertimeRequest() {
     [approvedWorkQuery.data, priorWorkRequestNo],
   )
 
+  // The employee's own Stage 1 requests that cannot be paid yet stay visible, greyed out with the
+  // reason, so nobody wonders where an overtime request went.
+  const notPayableStage1 = useMemo(
+    () =>
+      editingNo
+        ? []
+        : (stage1PayableQuery.data ?? [])
+            .filter((row) => !row.canRequestPayment)
+            .map((row) => ({ row, reason: notPayableReason(row) }))
+            .filter((item): item is { row: (typeof item)['row']; reason: string } => Boolean(item.reason)),
+    [stage1PayableQuery.data, editingNo],
+  )
   const priorWorkOptions = useMemo(
     () => [
       { value: '', label: 'Select approved Overtime Request (Stage 1)…' },
@@ -1064,8 +1098,13 @@ export function OvertimeRequest() {
         value: row.requestNo,
         label: `${row.requestNo} · ${dateRange(row.lines, row.overtimeDate)} · ${row.totalHours}h`,
       })),
+      ...notPayableStage1.map(({ row, reason }) => ({
+        value: `blocked:${row.requestNo}`,
+        label: `${row.requestNo} · ${dateRange(row.lines, row.overtimeDate)} · ${reason}`,
+        disabled: true,
+      })),
     ],
-    [payableStage1],
+    [payableStage1, notPayableStage1],
   )
 
   return (
@@ -1219,7 +1258,9 @@ export function OvertimeRequest() {
                           placeholder={
                             approvedWorkQuery.isLoading
                               ? 'Loading approved overtime requests…'
-                              : priorWorkOptions.length <= 1
+                              : stage1PayableQuery.isError
+                                ? 'Your overtime requests could not be loaded'
+                                : payableStage1.length === 0
                                 ? 'No approved overtime request waiting for payment'
                                 : 'Select approved overtime request'
                           }
@@ -1228,8 +1269,17 @@ export function OvertimeRequest() {
                             setWorkCompletedOn('')
                           }}
                         />
+                        {stage1PayableQuery.isError ? (
+                          <p className="text-xs font-medium text-red-700" role="alert">
+                            Your Overtime Requests could not be loaded from Business Central:{' '}
+                            {stage1PayableQuery.error instanceof Error ? stage1PayableQuery.error.message : 'unknown error'}.
+                            Refresh the page to try again.
+                          </p>
+                        ) : null}
                         <p className="text-xs text-slate-500">
-                          Only approved Overtime Requests (Stage 1) with no payment request yet are listed.
+                          You can pay your own Overtime Requests (Stage 1) once Business Central has fully approved them
+                          and no payment request exists yet. Every member of the Workflow User Group approves before a
+                          request counts as approved. Requests still waiting are listed greyed out with the reason.
                         </p>
                         {priorWorkRequestNo ? (
                           <div className="flex flex-wrap gap-2">

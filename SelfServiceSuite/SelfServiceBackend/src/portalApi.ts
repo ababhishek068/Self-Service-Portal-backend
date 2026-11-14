@@ -706,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v380 — 1.0.3.541 (Overtime Request line: Overtime Category and Work location before Start and End Time; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v381 — 1.0.3.542 (Overtime Payment picker lists the employee own Stage 1 requests not payable yet with the reason; dashboard and picker show BC load errors instead of empty lists; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string
@@ -7166,6 +7166,8 @@ export function buildPortalApiRouter() {
         )
         return liveRows.length
       }
+      // Sources that failed: shown on the dashboard instead of silently counting 0.
+      const warnings: string[] = []
       const listModules: SupportedFrontendModule[] = [
         'imprest',
         'imprestSurrender',
@@ -7195,7 +7197,12 @@ export function buildPortalApiRouter() {
           $top: 50,
         }).catch(() => [] as ODataRecord[]),
         Promise.all(listModules.map((module) => mappedModuleRows(module, authUser))),
-        listOvertimeRequests(authUser.employeeNo).catch(() => []),
+        listOvertimeRequests(authUser.employeeNo).catch((error: unknown) => {
+          warnings.push(
+            `Overtime requests could not be loaded from Business Central: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return []
+        }),
         listOvertimeWorkRequests(authUser.employeeNo).catch(() => []),
         soapApprovalQueues(authUser),
       ])
@@ -7267,6 +7274,7 @@ export function buildPortalApiRouter() {
         documentsByModule,
         workflowStatus,
         ...(stockAvailability ? { stockAvailability } : {}),
+        ...(warnings.length ? { warnings } : {}),
       })
     }),
   )

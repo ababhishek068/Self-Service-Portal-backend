@@ -726,6 +726,13 @@ export function Dashboard() {
 
               <section className="portal-panel animate-page-in-subtle p-3 sm:p-4" style={{ animationDelay: '120ms' }}>
                 <SectionHeader title="Recent activity" subtitle="Your latest requests and where they are" />
+                {summary.data?.warnings?.length ? (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
+                    {summary.data.warnings.map((warning) => (
+                      <p key={warning}>{warning} Refresh to try again.</p>
+                    ))}
+                  </div>
+                ) : null}
                 <DataTable
                   rows={summary.data?.recentActivity ?? []}
                   columns={activityColumns}
