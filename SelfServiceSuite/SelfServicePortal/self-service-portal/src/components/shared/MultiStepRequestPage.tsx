@@ -548,8 +548,8 @@ function HeaderForm({
               expectedApprovers={config.progressApprovers}
             />
           ) : null}
-          {config.description ? <p className="text-sm text-slate-600">{config.description}</p> : null}
           {renderProcessBanner(config, request ?? null)}
+          {config.description ? <p className="text-sm text-slate-600">{config.description}</p> : null}
           <div
             className={cn(
               'grid gap-3 sm:gap-4',

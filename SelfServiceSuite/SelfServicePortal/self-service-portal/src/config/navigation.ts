@@ -52,7 +52,9 @@ export interface NavItem {
 }
 
 /**
- * ESSP menu from the ABH menu organisation sheet.
+ * ESSP menu in the order ABH set on 14 Nov 2026: Dashboard, HR Services (with Resignation, Exit &
+ * Transfer and Letter Request — both are HR services), Finance Services, Operation Services,
+ * Procurement, Orders and Tickets, Gate Pass, HR Resources, ICT Helpdesk, My Approval, My Profile.
  * Pages stay on their existing routes; only grouping and labels change.
  */
 export const navigationMenu: NavItem[] = [
@@ -72,20 +74,29 @@ export const navigationMenu: NavItem[] = [
       { label: 'Overtime Request', path: '/hr/overtime-work-request', icon: ClipboardList },
       { label: 'Overtime Payment Request', path: '/hr/overtime-request', icon: ClipboardCopy },
       { label: 'Travel Request', path: '/hr/travel-request', icon: Plane },
+      {
+        label: 'Resignation, Exit & Transfer',
+        icon: DoorOpen,
+        children: [
+          { label: 'Resignation', path: '/hr/employee-exit/resignation', icon: ClipboardList },
+          { label: 'Exit', path: '/hr/employee-exit/exit-interview', icon: DoorOpen },
+          { label: 'Transfer', path: '/hr/employee-exit/transfer', icon: ArrowRightLeft },
+        ],
+      },
+      {
+        label: 'Letter Request',
+        icon: FileBadge,
+        children: [
+          { label: 'Guarantee Letter', path: '/hr/request-letters/guarantee', icon: ShieldCheck },
+          { label: 'Experience Letter', path: '/hr/request-letters/experience', icon: FileBadge },
+          { label: 'Mortgage Letter', path: '/hr/request-letters/mortgage', icon: Home },
+          { label: 'Embassy Letter', path: '/hr/request-letters/embassy', icon: Flag },
+        ],
+      },
     ],
   },
   {
-    label: 'My Requests - Letters',
-    icon: FileText,
-    children: [
-      { label: 'Guarantee Letter', path: '/hr/request-letters/guarantee', icon: ShieldCheck },
-      { label: 'Experience Letter', path: '/hr/request-letters/experience', icon: FileBadge },
-      { label: 'Mortgage Letter', path: '/hr/request-letters/mortgage', icon: Home },
-      { label: 'Embassy Letter', path: '/hr/request-letters/embassy', icon: Flag },
-    ],
-  },
-  {
-    label: 'My Requests - Finance',
+    label: 'Finance Services',
     icon: Landmark,
     children: [
       { label: 'Advance Request', path: '/finance/advance-request', icon: Banknote },
@@ -97,7 +108,7 @@ export const navigationMenu: NavItem[] = [
     ],
   },
   {
-    label: 'My Requests - Operations',
+    label: 'Operation Services',
     icon: Building2,
     children: [
       { label: 'Store Requisition', path: '/facility/store-requisition', icon: Store },
@@ -107,7 +118,7 @@ export const navigationMenu: NavItem[] = [
     ],
   },
   {
-    label: 'My Requests - Procurement',
+    label: 'Procurement',
     icon: ShoppingCart,
     children: [
       { label: 'Local Purchase', path: '/facility/local-purchase-request', icon: ShoppingCart },
@@ -120,7 +131,7 @@ export const navigationMenu: NavItem[] = [
     ],
   },
   {
-    label: 'Orders & Tickets',
+    label: 'Orders and Tickets',
     icon: Ticket,
     children: [
       { label: 'Work Tickets', path: '/facility/work-tickets', icon: Ticket },
@@ -129,7 +140,7 @@ export const navigationMenu: NavItem[] = [
     ],
   },
   {
-    label: 'Gate Passes',
+    label: 'Gate Pass',
     icon: DoorOpen,
     children: [
       { label: 'Store Issue Gate Pass', path: '/facility/gate-pass/storeIssue', icon: Store },
@@ -150,29 +161,20 @@ export const navigationMenu: NavItem[] = [
     ],
   },
   {
-    label: 'My Approvals',
+    label: 'HR Resources',
+    icon: CloudDownload,
+    children: [
+      { label: 'HR Policies & Forms', path: '/downloads/documents', icon: FileText },
+    ],
+  },
+  { label: 'ICT Helpdesk', path: '/ict/helpdesk', icon: Headphones },
+  {
+    label: 'My Approval',
     icon: ClipboardCheck,
     children: [
       { label: 'Pending Approval', path: '/approvals', icon: ClipboardCopy },
       { label: 'Approved Documents', path: '/approvals/approved', icon: ClipboardCheck },
       { label: 'Rejected Documents', path: '/approvals/rejected', icon: CircleX },
-    ],
-  },
-  {
-    label: 'Exit, Resignation and Transfer',
-    icon: DoorOpen,
-    children: [
-      { label: 'Exit', path: '/hr/employee-exit/resignation', icon: DoorOpen },
-      { label: 'Transfer', path: '/hr/employee-exit/exit-interview', icon: ArrowRightLeft },
-      { label: 'Resignation', path: '/hr/employee-exit/resignation', icon: ClipboardList },
-    ],
-  },
-  { label: 'ICT Helpdesk', path: '/ict/helpdesk', icon: Headphones },
-  {
-    label: 'HR Resources',
-    icon: CloudDownload,
-    children: [
-      { label: 'HR Policies & Forms', path: '/downloads/documents', icon: FileText },
     ],
   },
   {

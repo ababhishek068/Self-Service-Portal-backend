@@ -527,6 +527,12 @@ export function isMedicalClaimType(value: unknown) {
  * SOAP: ImprestRequisitionHeader / ImprestRequisitionLine /
  *       DeleteImprestLine / RequestImprestApproval / CancelImprestRequisition
  */
+/** BC without a portal SOAP method answers "Method 'X' is invalid" (or not found / not published). */
+export function soapMethodMissing(error: unknown, method: string) {
+  const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
+  return new RegExp(`Method '?${method}'? is invalid|${method}.*(not found|not published)`, 'i').test(message)
+}
+
 const BC_BLANK_DATE = '0001-01-01'
 
 /**
@@ -722,6 +728,19 @@ const imprest: ModuleSpec = {
       activityEndDate: soapDate(req.body?.activityEndDate || req.body?.activityStartDate),
       dateRequired: soapDate(req.body?.dateRequired),
     })
+    // BC 1.0.3.651: optional Project / Assignment. The portal sends it only when BC's context says
+    // it is supported; older BC without the method keeps working without it.
+    if (typeof req.body?.projectAssignment === 'string') {
+      try {
+        await callSoapMethod('PortalAdvanceProjectAssignment', {
+          employeeNo: user.employeeNo,
+          docNo: no,
+          projectAssignment: req.body.projectAssignment.trim().slice(0, 100),
+        })
+      } catch (error) {
+        if (!soapMethodMissing(error, 'PortalAdvanceProjectAssignment')) throw error
+      }
+    }
   },
 }
 

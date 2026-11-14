@@ -265,6 +265,8 @@ export function ImprestRequest() {
   })
   const purposeOptions =
     purposeContext.data?.purposes?.length ? purposeContext.data.purposes : fallbackPurposes
+  // ESSP spec: Project / Assignment (Optional) — on BC 1.0.3.651+, which reports the field.
+  const supportsProject = purposeContext.data?.supportsProjectAssignment === true
   const purposeHint = purposeContext.data?.purposeGroupCaption
     ? `Purposes for ${purposeContext.data.purposeGroupCaption}${
         purposeContext.data.divisionCode ? ` (${purposeContext.data.divisionCode})` : ''
@@ -293,9 +295,11 @@ export function ImprestRequest() {
         activityLocation: '',
         activityStartDate: '',
         activityEndDate: '',
+        projectAssignment: '',
         purpose: '',
       }}
       progressApprovers={ADVANCE_APPROVERS}
+      submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}
       attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."
       headerSupplement={() => (
@@ -318,9 +322,11 @@ export function ImprestRequest() {
         const purposeLabel =
           purposeOptions.find((option) => option.value === purposeCode)?.label ?? purposeCode
         const activityStartDate = String(values.activityStartDate ?? '')
+        const { projectAssignment, ...rest } = values
         // No travel fields on the form: the backend fills BC's Travel Start / Expected Return from these.
         return {
-          ...values,
+          ...rest,
+          ...(supportsProject ? { projectAssignment: String(projectAssignment ?? '').trim() } : {}),
           activityStartDate,
           activityEndDate: String(values.activityEndDate ?? '') || activityStartDate,
           purposeCode,
@@ -405,6 +411,16 @@ export function ImprestRequest() {
           placeholder: 'Where the activity will take place (where relevant)',
           valuePaths: ['ActivityLocation', 'Activity_Location'],
         },
+        {
+          name: 'projectAssignment',
+          label: 'Project / Assignment (optional)',
+          type: 'text',
+          fullWidth: true,
+          maxLength: 100,
+          placeholder: 'Project or assignment this advance is for',
+          valuePaths: ['ProjectAssignment', 'Project_Assignment'],
+          visibleWhen: () => supportsProject,
+        },
       ]}
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
@@ -445,6 +461,7 @@ export function ImprestRequest() {
           label: 'Activity Location',
           paths: ['payload.ActivityLocation', 'payload.Activity_Location'],
         },
+        { label: 'Project / Assignment', paths: ['payload.ProjectAssignment', 'payload.Project_Assignment'] },
         ...financeOrgDetailFields,
         {
           label: 'Job Title',

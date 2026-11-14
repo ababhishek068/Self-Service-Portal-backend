@@ -205,6 +205,8 @@ export const imprestHeaderSchema = z
     otherPurposeDetails: z.string().optional().default(''),
     justification: z.string().min(10, 'Request justification is required'),
     activityLocation: optionalText,
+    /** Optional (BC 1.0.3.651). */
+    projectAssignment: z.string().max(100, 'Keep Project / Assignment to 100 characters').optional().default(''),
     activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
     activityEndDate: z.string().optional().default(''),
     /** Legacy SOAP Purpose — filled from justification before create/edit. */

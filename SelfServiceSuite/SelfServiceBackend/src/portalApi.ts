@@ -705,7 +705,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v376 — 1.0.3.537 (Overtime Payment: when BC creates no Stage 2 approval entries the error names the Division and Department the workflow must match; for BC 1.0.3.649)'
+export const PORTAL_API_BUILD = 'v377 — 1.0.3.538 (Advance Settlement per ESSP spec: process flow, prerequisite, reconciliation, scenarios, add expense entries, submit checks; Advance Request Project or Assignment for BC 651; new ESSP menu order; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string

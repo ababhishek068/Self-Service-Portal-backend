@@ -13,6 +13,8 @@ export type AdvancePaymentContext = {
   purposeGroup: string
   purposeGroupCaption: string
   purposes: LookupOption[]
+  /** BC 1.0.3.651: Imprest Header has the optional Project / Assignment field. */
+  supportsProjectAssignment: boolean
 }
 
 export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<AdvancePaymentContext> {
@@ -25,6 +27,7 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroup?: string
     purposeGroupCaption?: string
     purposes?: AdvancePaymentPurposeRow[]
+    supportsProjectAssignment?: boolean
   }>(`/api/advance-payment/context${query}`)
 
   return {
@@ -34,5 +37,6 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroup: String(raw.purposeGroup ?? '').trim(),
     purposeGroupCaption: String(raw.purposeGroupCaption ?? '').trim(),
     purposes: mapAdvancePaymentPurposes(raw.purposes),
+    supportsProjectAssignment: raw.supportsProjectAssignment === true,
   }
 }

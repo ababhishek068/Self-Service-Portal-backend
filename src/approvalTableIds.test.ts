@@ -12,6 +12,7 @@ import {
 } from './approvalTableIds.js'
 import {
   advanceTravelParams,
+  soapMethodMissing,
   findFrontendModuleSpec,
   findModuleSpec,
   gatePassListFilterParts,
@@ -3797,5 +3798,12 @@ describe('Business Central unreachable', () => {
     assert.equal(error.status, 502)
     const other = new Error('Overtime request OTR-1 was not found.')
     assert.equal(bcConnectionError(other), other)
+  })
+})
+
+describe('Advance Request Project / Assignment (BC 1.0.3.651)', () => {
+  it('treats only a missing PortalAdvanceProjectAssignment method as older BC', () => {
+    assert.equal(soapMethodMissing(new Error("Method 'PortalAdvanceProjectAssignment' is invalid"), 'PortalAdvanceProjectAssignment'), true)
+    assert.equal(soapMethodMissing(new Error('Advance payment ADV-1 is no longer editable'), 'PortalAdvanceProjectAssignment'), false)
   })
 })

@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { CheckCircle2, Info } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
+import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
 import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
+import { settlementSubmitProblem } from '@/hooks/useAdvanceSettlementContext'
 import { fetchAdvanceSettlementContext } from '@/api/endpoints/advanceSettlement'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
@@ -53,6 +56,43 @@ function isSurrenderableImprest(row: PortalRequest) {
   return isPosted(row) || row.status === 'Approved'
 }
 
+/** ESSP spec section 3 supporting documents for a settlement. */
+const SETTLEMENT_ATTACHMENT_CATEGORIES = [
+  { label: 'Expense receipt / invoice', value: 'Expense receipt / invoice' },
+  { label: 'Refund payment receipt', value: 'Refund payment receipt' },
+  { label: 'Justification for exceeding', value: 'Justification for exceeding' },
+  { label: 'Other supporting document', value: 'Other supporting document' },
+]
+
+/** ESSP spec section 2: settlement can start only after the advance is approved and paid. */
+function Prerequisite({ available, loading }: { available: number; loading: boolean }) {
+  return (
+    <div className="rounded-xl border border-teal-200 bg-teal-50/80 px-4 py-3 text-sm text-teal-950">
+      <p className="flex items-center gap-2 font-semibold">
+        <Info className="h-4 w-4 text-teal-700" />
+        Prerequisite — you can start an Advance Settlement only after:
+      </p>
+      <ul className="mt-1.5 space-y-1 pl-6">
+        <li className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          an approved Advance Payment Request, and
+        </li>
+        <li className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          the advance has been paid.
+        </li>
+      </ul>
+      <p className="mt-1.5 text-xs text-teal-900/80">
+        {loading
+          ? 'Checking Business Central for advances you can settle…'
+          : available > 0
+            ? `${available} approved and paid advance${available === 1 ? '' : 's'} can be settled. An advance with an open settlement is not listed again (no duplicate settlement).`
+            : 'No approved and paid advance is waiting for settlement. Finance must pay (Fully Paid) the advance in Business Central first.'}
+      </p>
+    </div>
+  )
+}
+
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1.5">
@@ -98,7 +138,18 @@ export function ImprestSurrender() {
     <MultiStepRequestPage
       title="Advance Settlement"
       headerLabel="New Advance Settlement"
-      description="Settle only an approved and paid Advance Request (BC PortalAdvanceSettlementContext → settleableAdvances). Enter actual expenses and attachments. Business Central reconciles advance vs spend: fullySettled, refundDue (refund date + payment reference + proof), or additionalClaim (justification)."
+      description="Settle an advance received through an approved and paid Advance Payment Request: enter the actual expenses incurred, attach the supporting documents, and reconcile the advance against the actual expenses. The outcome is Fully Settled, Advance Surrender (return the unused balance) or Additional Reimbursement (claim the extra amount)."
+      processBanner={(request) => <AdvanceSettlementProcessBanner request={request} />}
+      showProcessBannerOnList={false}
+      submitButtonLabel="Submit for Processing"
+      submitConfirmTitle="Submit the settlement for processing?"
+      submitConfirmMessage="The settlement goes to Business Central for approval. The advance is closed only after Finance finalizes the reconciliation."
+      submitSuccessMessage="Settlement submitted for processing in Business Central"
+      validateBeforeSubmit={(request) => settlementSubmitProblem(String(request.requestNo ?? ''))}
+      requiresAttachmentBeforeSubmit
+      requiredAttachmentMessage="Attach the expense receipts / supporting documents before submitting the settlement."
+      attachmentCategoryOptions={SETTLEMENT_ATTACHMENT_CATEGORIES}
+      attachmentCategoryHint="Attach every expense receipt; for Advance Surrender the refund payment receipt, for Additional Reimbursement the documents for the extra expenses. Several files can be attached."
       module={module}
       queryKey={['finance', 'advance-settlement']}
       listRequests={() => listModuleRequests(module)}
@@ -112,7 +163,7 @@ export function ImprestSurrender() {
       headerFields={[
         {
           name: 'imprest',
-          label: 'Advance Request to Settle',
+          label: 'Original Advance Payment Request No. *',
           type: 'select',
           valuePaths: ['ImprestIssueDocNo', 'Imprest_Issue_Doc_No', 'ImprestNo'],
           options: imprestOptions,
@@ -142,10 +193,15 @@ export function ImprestSurrender() {
           ])
 
         return (
-          <div className="grid gap-x-8 gap-y-5 border-y border-slate-200 py-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-3">
+          <Prerequisite available={settleable.length} loading={settleableQuery.isLoading} />
+          {advanceNo ? (
+          <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Advance details (retrieved from Business Central)</p>
+          <div className="mt-2 grid gap-x-8 gap-y-5 border-y border-slate-200 py-4 sm:grid-cols-2 lg:grid-cols-3">
             <Detail label="Advance Purpose" value={purpose} />
             <Detail
-              label="Advance Amount"
+              label="Total Advance Received"
               value={amount === undefined || amount === '' ? '—' : formatCurrency(Number(amount))}
             />
             <Detail
@@ -169,6 +225,9 @@ export function ImprestSurrender() {
               label="Payment / Advance Date"
               value={dateRequired === undefined || dateRequired === '' ? '—' : formatDate(String(dateRequired))}
             />
+          </div>
+          </div>
+          ) : null}
           </div>
         )
       }}
@@ -221,9 +280,24 @@ export function ImprestSurrender() {
           format: 'currency',
         },
         { label: 'Status', paths: ['request.status'], format: 'status' },
+        {
+          // Spec rule 8: complete only once Finance has finalized (posted) the reconciliation.
+          label: 'Settlement Status',
+          paths: [],
+          resolve: (request) => {
+            const status = request.status.trim().toLowerCase()
+            if (status === 'posted' || status === 'completed' || status === 'closed') return 'Reconciled and closed (posted in Business Central)'
+            if (status === 'approved') return 'Approved — Finance finalizes the reconciliation'
+            if (status.includes('pending')) return 'Submitted — pending approval in Business Central'
+            if (status === 'draft') return 'Draft — complete the expenses and submit'
+            return undefined
+          },
+        },
       ]}
       line={{
-        label: 'Advance Settlement Lines',
+        label: 'Actual Expenses',
+        lineHint:
+          'Enter the actual amount spent on each line; add other expenses with Add Expense Entry above. Business Central recalculates the balance and the outcome.',
         schema: imprestSurrenderHeaderSchema,
         defaultValues: {},
         canAdd: false,
@@ -246,15 +320,14 @@ export function ImprestSurrender() {
           { name: 'cashReceiptAmount', label: 'Cash Receipt Amount', type: 'number' },
         ],
         columns: [
+          { key: 'accountName', header: 'Expense' },
           { key: 'accountNo', header: 'Account No.' },
-          { key: 'surrenderDocNo', header: 'Settlement Doc No' },
-          { key: 'accountName', header: 'Account Name' },
-          { key: 'amount', header: 'Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
-          { key: 'actualSpent', header: 'Actual Spent' },
+          { key: 'amount', header: 'Advance Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
+          { key: 'actualSpent', header: 'Actual Expense', format: (value) => formatCurrency(Number(value ?? 0)) },
           { key: 'cashReceiptNo', header: 'Cash Receipt No.' },
           { key: 'cashReceiptAmount', header: 'Cash Receipt Amount' },
         ],
-        emptyText: '*** No settlement lines ***',
+        emptyText: '*** No expense entries yet ***',
       }}
     />
   )
