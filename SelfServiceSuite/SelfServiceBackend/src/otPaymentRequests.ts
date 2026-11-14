@@ -230,13 +230,26 @@ export async function getOtPaymentByNo(paymentNo: string) {
   }
 }
 
-export async function saveOtPaymentRequest(input: {
-  employeeNo: string
-  requesterUserId: string
-  paymentNo?: string
-  details: { otRequestNo: string; workCompletedOn: string; employeeRemarks: string }
-  submit: boolean
-}) {
+/**
+ * The employee's withdrawn (Draft) payment request for this Stage 1 request, if any. Withdraw clears
+ * the Stage 1 link in BC, so the Stage 1 request looks payable again while the draft still exists,
+ * and BC refuses a second payment ("already has payment request"): a new save goes into that draft.
+ */
+export function draftPaymentFor(rows: OtPaymentRequest[], otRequestNo: string) {
+  const wanted = otRequestNo.trim().toUpperCase()
+  return rows.find((row) => row.status === 'Draft' && row.otRequestNo.trim().toUpperCase() === wanted)?.paymentNo ?? ''
+}
+
+export async function saveOtPaymentRequest(
+  input: {
+    employeeNo: string
+    requesterUserId: string
+    paymentNo?: string
+    details: { otRequestNo: string; workCompletedOn: string; employeeRemarks: string }
+    submit: boolean
+  },
+  listOwn: (employeeNo: string) => Promise<OtPaymentRequest[]> = listOtPaymentRequests,
+) {
   const otRequestNo = str(input.details.otRequestNo).toUpperCase()
   const workCompletedOn = str(input.details.workCompletedOn)
   const employeeRemarks = str(input.details.employeeRemarks).slice(0, 250)
@@ -248,12 +261,15 @@ export async function saveOtPaymentRequest(input: {
   if (input.submit && !/^\d{4}-\d{2}-\d{2}$/.test(workCompletedOn)) {
     throw Object.assign(new Error('Enter the work completed date.'), { status: 422 })
   }
+  const paymentNo =
+    str(input.paymentNo).toUpperCase() ||
+    draftPaymentFor(await listOwn(input.employeeNo).catch(() => []), otRequestNo)
   let result: Awaited<ReturnType<typeof callOtPayment>>
   try {
     result = await callOtPayment('PortalOTPaymentSave', {
       employeeNo: input.employeeNo,
       requesterUserId: input.requesterUserId,
-      paymentNo: input.paymentNo ?? '',
+      paymentNo,
       detailsJson: JSON.stringify({
         otRequestNo,
         workCompletedOn,

@@ -10,9 +10,21 @@ export const REQUEST_PAGES: Partial<Record<string, string>> = {
   storeRequisition: '/facility/store-requisition',
   leave: '/hr/leave-request',
   leaveApplication: '/hr/leave-request',
-  overtime: '/hr/overtime-request',
+  // BC Stage 1 Overtime Requests (OTR-…) since BC 1.0.3.636.
+  overtime: '/hr/overtime-work-request',
   overtimeWork: '/hr/overtime-work-request',
   overtimePayment: '/hr/overtime-request',
+}
+
+/**
+ * The overtime document a link names: `?request=OTR-…` (the pages' own links) or `?open=<module>-<no>`
+ * (Recent activity and the bell, which send the portal id).
+ */
+export function overtimeRequestParam(params: URLSearchParams) {
+  const direct = params.get('request')?.trim()
+  if (direct) return direct
+  const open = params.get('open')?.trim() ?? ''
+  return open.replace(/^(overtimeWork|overtimePayment|overtime)-/i, '') || null
 }
 
 /** The module page, opened on one request when `requestId` is given. */

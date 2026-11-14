@@ -706,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v382 — 1.0.3.543 (Overtime Payment View opens the Stage 1 Overtime Request in a viewer on the same page instead of a new tab; Overtime Request link to a missing request shows a message; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v383 — 1.0.3.544 (Overtime Payment resubmit after Withdraw updates the withdrawn draft instead of failing with already has payment request; dashboard lists each Overtime Request once with the BC status; Recent activity and bell links open the overtime document; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string
@@ -7222,7 +7222,13 @@ export function buildPortalApiRouter() {
           createdAt: portal.createdAt || portal.submittedAt || new Date().toISOString(),
         }
       })
-      const overtimeWorkRecent = overtimeWorkRows.map((row) => overtimeWorkToPortalRequest(row))
+      // The portal keeps a local copy of each BC Stage 1 request (same OTR number). BC's row carries the
+      // live status and amount, so the copy is listed only when BC has no such request.
+      const bcOvertimeNos = new Set(overtimeRows.map((row) => row.requestNo.trim().toUpperCase()))
+      const portalOnlyWorkRows = overtimeWorkRows.filter(
+        (row) => !bcOvertimeNos.has(row.requestNo.trim().toUpperCase()),
+      )
+      const overtimeWorkRecent = portalOnlyWorkRows.map((row) => overtimeWorkToPortalRequest(row))
       const allMine = [...moduleRows.flat(), ...leaveRecent, ...overtimeRecent, ...overtimeWorkRecent].toSorted(
         (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
       )
@@ -7230,7 +7236,7 @@ export function buildPortalApiRouter() {
       const openRequests = allMine.filter((row) =>
         ['Draft', 'Pending Approval', 'Returned'].includes(row.status),
       ).length
-      const overtimeRequests = overtimeRows.length + overtimeWorkRows.length
+      const overtimeRequests = overtimeRows.length + portalOnlyWorkRows.length
       const documentsByModule = [
         { key: 'leave', label: 'Leave', count: leaveApplications },
         { key: 'overtime', label: 'Overtime', count: overtimeRequests },

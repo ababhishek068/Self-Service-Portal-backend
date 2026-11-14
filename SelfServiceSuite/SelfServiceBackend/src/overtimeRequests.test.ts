@@ -6,6 +6,7 @@ import { after, before, describe, it } from 'node:test'
 import {
   OT_PAYMENT_MODULE,
   decideOtPaymentApproval,
+  draftPaymentFor,
   stage2RoutingError,
   otPaymentActingUserMayView,
   otPaymentApprovalQueueItem,
@@ -545,5 +546,19 @@ describe('Stage 2 routing failure (BC 1.0.3.649)', () => {
     assert.match(error.message, /saved before BC 1\.0\.3\.649/)
     const other = new Error('Overtime request OTR-1 was not found.')
     assert.equal(await stage2RoutingError(other, 'OTR-1', async () => null), other)
+  })
+})
+
+describe('Resubmit after Withdraw (Overtime Payment Request)', () => {
+  it('finds the withdrawn draft for the same Stage 1 request, never a pending or other one', () => {
+    const rows = parseOtPaymentRequests(
+      JSON.stringify([
+        { paymentNo: 'OTP-00001', status: 'Pending Approval', otRequestNo: 'OTR-00001' },
+        { paymentNo: 'OTP-00002', status: 'Draft', otRequestNo: 'OTR-00002' },
+      ]),
+    )
+    assert.equal(draftPaymentFor(rows, 'otr-00002 '), 'OTP-00002')
+    assert.equal(draftPaymentFor(rows, 'OTR-00001'), '')
+    assert.equal(draftPaymentFor(rows, 'OTR-00003'), '')
   })
 })

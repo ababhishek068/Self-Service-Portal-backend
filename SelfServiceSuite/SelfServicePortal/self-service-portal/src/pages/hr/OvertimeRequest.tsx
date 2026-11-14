@@ -65,6 +65,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
+import { overtimeRequestParam } from '@/utils/requestLinks'
 
 const LIST_KEY = ['hr', 'overtime-payments'] as const
 
@@ -746,9 +747,9 @@ export function OvertimeRequest() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [mode, setMode] = useState<Mode>(
-    searchParams.get('request') ? 'detail' : searchParams.get('otRequestNo') ? 'form' : 'list',
+    overtimeRequestParam(searchParams) ? 'detail' : searchParams.get('otRequestNo') ? 'form' : 'list',
   )
-  const [selectedNo, setSelectedNo] = useState<string | null>(searchParams.get('request'))
+  const [selectedNo, setSelectedNo] = useState<string | null>(() => overtimeRequestParam(searchParams))
   const [editingNo, setEditingNo] = useState<string | null>(null)
   const [lines, setLines] = useState<OvertimeLineInput[]>([])
   const [projectNo, setProjectNo] = useState('')
@@ -828,7 +829,7 @@ export function OvertimeRequest() {
   const selected = useMemo(() => rows.find((row) => row.requestNo === selectedNo) ?? null, [rows, selectedNo])
 
   // A link to another request (e.g. from the bell) while the page is open shows that request.
-  const requestedNo = searchParams.get('request')
+  const requestedNo = overtimeRequestParam(searchParams)
   const [linkedNo, setLinkedNo] = useState(requestedNo)
   if (requestedNo !== linkedNo) {
     setLinkedNo(requestedNo)
@@ -861,7 +862,7 @@ export function OvertimeRequest() {
     setSelectedNo(requestNo)
     setFormError(null)
     if (requestNo) setSearchParams({ request: requestNo }, { replace: true })
-    else if (searchParams.get('request')) setSearchParams({}, { replace: true })
+    else if (overtimeRequestParam(searchParams)) setSearchParams({}, { replace: true })
   }
 
   const startNew = () => {
@@ -942,6 +943,14 @@ export function OvertimeRequest() {
 
   const busy = saveMutation.isPending
 
+  // Withdraw clears the Stage 1 link in BC, so the Stage 1 request is selectable again while its
+  // withdrawn draft still exists; saving then updates that draft (BC allows one payment per request).
+  const draftForStage1 = useMemo(() => {
+    const wanted = priorWorkRequestNo.trim().toUpperCase()
+    if (mode !== 'form' || editingNo || !wanted) return null
+    return rows.find((row) => row.status === 'Draft' && (row.otRequestNo ?? '').toUpperCase() === wanted) ?? null
+  }, [mode, editingNo, priorWorkRequestNo, rows])
+
   const send = (submit: boolean) => {
     if (!priorWorkRequestNo.trim()) {
       setFormError(
@@ -964,7 +973,7 @@ export function OvertimeRequest() {
     }
     setFormError(null)
     saveMutation.mutate({
-      paymentNo: editingNo ?? undefined,
+      paymentNo: editingNo ?? draftForStage1?.requestNo ?? undefined,
       otRequestNo: priorWorkRequestNo.trim().toUpperCase(),
       workCompletedOn,
       employeeRemarks: employeeRemarks.trim().slice(0, 250) || 'Work completed as approved',
@@ -1259,6 +1268,11 @@ export function OvertimeRequest() {
           ) : editingNo ? (
             <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm text-blue-900">
               Editing draft {editingNo}. Save keeps it as a draft; Submit for Approval sends it to the Workflow User Group.
+            </div>
+          ) : draftForStage1 ? (
+            <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-sm text-blue-900">
+              {priorWorkRequestNo} already has the draft payment request {draftForStage1.requestNo} (withdrawn). Save
+              or Submit for Approval updates {draftForStage1.requestNo}; no second payment request is created.
             </div>
           ) : null}
 

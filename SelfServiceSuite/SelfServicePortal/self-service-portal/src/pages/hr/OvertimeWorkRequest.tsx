@@ -44,6 +44,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { formatDateTime } from '@/utils/formatters'
+import { overtimeRequestParam } from '@/utils/requestLinks'
 
 const LIST_KEY = ['hr', 'overtime-work-requests'] as const
 const CONTEXT_KEY = ['hr', 'overtime-context'] as const
@@ -386,7 +387,7 @@ export function OvertimeWorkRequest() {
   const confirm = useConfirm()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requestedNo = searchParams.get('request')
+  const requestedNo = overtimeRequestParam(searchParams)
   const [mode, setMode] = useState<'list' | 'form' | 'detail'>(requestedNo ? 'detail' : 'list')
   const [selectedNo, setSelectedNo] = useState<string | null>(requestedNo)
   const [editingNo, setEditingNo] = useState<string | null>(null)
@@ -432,7 +433,7 @@ export function OvertimeWorkRequest() {
     setSelectedNo(no ?? null)
     setFormError(null)
     if (no) setSearchParams({ request: no }, { replace: true })
-    else if (searchParams.get('request')) setSearchParams({}, { replace: true })
+    else if (overtimeRequestParam(searchParams)) setSearchParams({}, { replace: true })
   }
 
   const resetForm = () => {
