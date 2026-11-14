@@ -65,6 +65,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDateTime } from '@/utils/formatters'
+import { printHtml } from '@/utils/printHtml'
 import { overtimeRequestParam } from '@/utils/requestLinks'
 
 const LIST_KEY = ['hr', 'overtime-payments'] as const
@@ -632,15 +633,9 @@ function printApprovedWorkRequest(work: OvertimeWorkRow) {
     <tbody>${rows}</tbody>
   </table>
   <p class="footer">For verification, approval, record-keeping or audit. One approved work request may be linked to only one overtime payment claim.</p>
-  <script>window.onload = function () { window.print(); }</script>
 </body>
 </html>`
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
-  if (!popup) return false
-  popup.document.open()
-  popup.document.write(html)
-  popup.document.close()
-  return true
+  return printHtml(html)
 }
 
 /** A BC Stage 1 Overtime Request in the shape the payment form and the print use. */
@@ -821,7 +816,7 @@ export function OvertimeRequest() {
       toast.error(`Overtime Request ${requestNo} could not be loaded for printing.`)
       return
     }
-    if (!printApprovedWorkRequest(work)) toast.error('Allow pop-ups to print the overtime request.')
+    if (!printApprovedWorkRequest(work)) toast.error('The print preview could not be prepared. Refresh the page and try again.')
   }
 
   const context = contextQuery.data

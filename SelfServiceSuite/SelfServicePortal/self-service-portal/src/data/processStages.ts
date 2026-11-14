@@ -1,4 +1,4 @@
-import { BadgeCheck, Banknote, UserCog } from 'lucide-react'
+import { BadgeCheck, Banknote, Landmark, UserCheck, UserCog } from 'lucide-react'
 import type { LocalPurchaseState } from '@/api/endpoints/requestEndpoint'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import type { PortalRequest } from '@/types/erp.types'
@@ -161,6 +161,23 @@ export const MEDICAL_CLAIM_AFTER_APPROVAL: { steps: TrackerStep[]; caption: stri
     { key: 'payment-voucher', heading: 'Payment Voucher', owner: 'FAD → Finance Manager', icon: Banknote },
     { key: 'paid', heading: 'Paid', owner: 'Medical balance updated', icon: BadgeCheck },
   ],
+}
+
+/**
+ * ESSP Staff Salary Advance (ABH form section 5 and the infographic's process flow): the Line Manager
+ * recommends, the HR Manager verifies eligibility, the Chief Financial Officer approves. Shown until BC has
+ * the approval entries of the Staff Advance workflow.
+ */
+export const SALARY_ADVANCE_APPROVERS: TrackerStep[] = [
+  { key: 'line-manager', heading: 'Line Manager', owner: 'Recommends', icon: UserCheck },
+  { key: 'hr-manager', heading: 'HR Manager', owner: 'Verifies eligibility', icon: UserCog },
+  { key: 'cfo', heading: 'Chief Financial Officer', owner: 'Approves / rejects', icon: Landmark },
+]
+
+/** After approval: Finance pays the advance and sets up the monthly payroll deduction. */
+export const SALARY_ADVANCE_AFTER_APPROVAL: { steps: TrackerStep[]; caption: string } = {
+  caption: 'Payment and payroll deduction with Finance',
+  steps: [{ key: 'finance', heading: 'Finance', owner: 'Payment & payroll deduction', icon: Banknote }],
 }
 
 /** A Staff Claim document that is a Medical Claim (BC Is Medical Claim, or its medical purpose / type). */

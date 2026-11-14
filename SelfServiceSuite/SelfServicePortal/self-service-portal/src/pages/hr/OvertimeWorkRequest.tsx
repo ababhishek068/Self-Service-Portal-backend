@@ -44,6 +44,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { formatDateTime } from '@/utils/formatters'
+import { printHtml } from '@/utils/printHtml'
 import { overtimeRequestParam } from '@/utils/requestLinks'
 
 const LIST_KEY = ['hr', 'overtime-work-requests'] as const
@@ -287,10 +288,7 @@ function printWorkRequest(work: OvertimeWorkRow) {
         `<tr><td>${esc(line.overtimeDate)}</td><td>${esc(line.startTime)} – ${esc(line.endTime)}</td><td>${esc(String(line.dayType))}</td><td>${esc(locationLabel(line.workLocation))}</td><td>${Number(line.totalHours || 0).toFixed(2)}</td><td>${esc(line.reason || work.reason || '')}</td></tr>`,
     )
     .join('')
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
-  if (!popup) return false
-  popup.document.open()
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${esc(work.requestNo)}</title>
+  return printHtml(`<!doctype html><html><head><meta charset="utf-8"/><title>${esc(work.requestNo)}</title>
 <style>body{font-family:Georgia,serif;margin:2rem;color:#0f172a}table{width:100%;border-collapse:collapse;margin-top:.75rem}th,td{border:1px solid #cbd5e1;padding:.45rem .6rem;text-align:left}th{background:#f8fafc}dl{display:grid;grid-template-columns:11rem 1fr;gap:.35rem 1rem}dt{color:#64748b}dd{margin:0;font-weight:600}</style></head>
 <body><h1>Overtime Work Request ${esc(work.requestNo)}</h1>
 <p>Status: ${esc(work.status)} · Printed ${esc(new Date().toLocaleString())}</p>
@@ -303,9 +301,7 @@ function printWorkRequest(work: OvertimeWorkRow) {
 <dt>Expected deliverables</dt><dd>${esc(work.expectedDeliverables || '—')}</dd>
 </dl>
 <table><thead><tr><th>Date</th><th>Time</th><th>Category</th><th>Location</th><th>Hours</th><th>Reason</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-<script>window.onload=function(){window.print()}</script></body></html>`)
-  popup.document.close()
-  return true
+</body></html>`)
 }
 
 /** Stage 1 on the live Workflow Progress tracker: the employee, each BC approver (Workflow User Group, BC 1.0.3.649), then work authorized. */
@@ -712,7 +708,7 @@ export function OvertimeWorkRequest() {
             type="button"
             variant="outline"
             onClick={() => {
-              if (!printWorkRequest(shown)) toast.error('Allow pop-ups to print this overtime work request.')
+              if (!printWorkRequest(shown)) toast.error('The print preview could not be prepared. Refresh the page and try again.')
             }}
           >
             <Printer className="mr-2 h-4 w-4" />

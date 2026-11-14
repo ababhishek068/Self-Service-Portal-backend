@@ -1,3 +1,4 @@
+import { getSalaryAdvanceContext } from './salaryAdvance.js'
 import { fetchPortalProfileDetails } from './profileDetails.js'
 import { Router, type Request, type Response } from 'express'
 import {
@@ -706,7 +707,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v383 — 1.0.3.544 (Overtime Payment resubmit after Withdraw updates the withdrawn draft instead of failing with already has payment request; dashboard lists each Overtime Request once with the BC status; Recent activity and bell links open the overtime document; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v384 — 1.0.3.545 (ESSP Staff Salary Advance form per the ABH form and infographic: amount in ETB, repayment over 1 to 3 months, live eligibility checks, declaration, Line Manager then HR Manager then CFO, document view with HR verification and Finance records; overtime Print without pop-ups; for BC 1.0.3.652)'
 
 interface LookupSpec {
   service: string
@@ -7446,6 +7447,18 @@ export function buildPortalApiRouter() {
       }
       const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
       res.json(parseSoapJson(result.returnValue))
+    }),
+  )
+
+  /** BC 1.0.3.652 — ESSP Staff Salary Advance: employee facts and policy limits for the form and its checks. */
+  router.get(
+    '/salary-advance/context',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const docNo = String(req.query.docNo ?? '').trim().toUpperCase()
+      if (docNo) await requireOwnedPortalRequest(`salaryAdvance-${docNo}`, authUser)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json(await getSalaryAdvanceContext(authUser, docNo))
     }),
   )
 

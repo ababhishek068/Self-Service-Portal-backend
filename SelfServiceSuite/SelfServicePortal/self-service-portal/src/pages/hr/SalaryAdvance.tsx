@@ -1,56 +1,68 @@
-import { createSalaryAdvanceRequest, listSalaryAdvanceRequests } from '@/api/endpoints/salaryAdvance'
-import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
-import { RequestFormPage } from '@/components/shared/RequestFormPage'
-import { useEmployeeDefaults } from '@/hooks/useEmployeeDefaults'
-import { salaryAdvanceSchema, type SalaryAdvanceForm } from '@/schemas/requestSchemas'
+import { useQuery } from '@tanstack/react-query'
+import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
+import { fetchSalaryAdvanceContext, salaryAdvanceModule } from '@/api/endpoints/salaryAdvance'
+import { SalaryAdvanceDocument } from '@/components/hr/SalaryAdvanceDocument'
+import { SalaryAdvanceForm } from '@/components/hr/SalaryAdvanceForm'
+import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
+import { SALARY_ADVANCE_AFTER_APPROVAL, SALARY_ADVANCE_APPROVERS } from '@/data/processStages'
+import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
+import { salaryAdvanceSchema } from '@/schemas/requestSchemas'
+import { isEsspSalaryAdvance } from '@/utils/salaryAdvanceText'
 
+/**
+ * ESSP Staff Salary Advance Request (ABH Partners PLC Staff Salary Advance Request Form and the ESSP
+ * infographic; BC 1.0.3.652): request, verify, approve, and recover through payroll.
+ */
 export function SalaryAdvance() {
-  const { employeeAccountNumber } = useEmployeeDefaults()
+  // BC 1.0.3.652 keeps the form on the document; then a draft from the old form must be completed first.
+  const contextQuery = useQuery({
+    queryKey: ['salary-advance', 'context', ''],
+    queryFn: () => fetchSalaryAdvanceContext(),
+    staleTime: 60_000,
+  })
+  const supportsForm = contextQuery.data?.supportsDetails === true
 
   return (
-    <RequestFormPage
+    <MultiStepRequestPage
       title="Salary Advance Request"
-      description="Request an advance against salary with repayment schedule and approval workflow."
-      schema={salaryAdvanceSchema}
+      headerLabel="New Salary Advance Request"
+      description="Request a salary advance for a genuine personal or emergency need. It is interest-free, at most one month's net salary, and repaid through equal monthly payroll deductions within three months. Approval: Line Manager (recommends), HR Manager (verifies eligibility), Chief Financial Officer (approves). Finance then pays it and sets up the payroll deduction."
+      module={salaryAdvanceModule}
       queryKey={['hr', 'salary-advance']}
-      listRequests={listSalaryAdvanceRequests}
-      createRequest={(values) =>
-        createSalaryAdvanceRequest(values as SalaryAdvanceForm, employeeAccountNumber)
-      }
-      moduleConfig={{ module: 'salaryAdvance', entity: 'selfServiceSalaryAdvanceRequests' }}
-      listContent={<FinanceEmployeeOrgBanner showJobGradeAndDistrict />}
-      formHeader={<FinanceEmployeeOrgBanner showJobGradeAndDistrict />}
-      defaultValues={{ purpose: '', percentageSalary: 0 }}
-      fields={[
-        {
-          name: 'purpose',
-          label: 'Purpose',
-          type: 'textarea',
-          placeholder: 'State the purpose of the advance',
-          valuePaths: ['Purpose'],
-        },
-        {
-          name: 'percentageSalary',
-          label: 'Percentage of salary',
-          type: 'number',
-          valuePaths: ['PercentageofSalary', 'lines.0.PercentageofSalary', 'lines.0.PercentageOfSalary'],
-          hint: 'Currency is ETB. Business Central calculates the advance amount as this percentage of your basic salary.',
-        },
-      ]}
+      listRequests={() => listModuleRequests(salaryAdvanceModule)}
+      listStatusFilter
+      cancelStatuses={FINANCE_CANCEL_STATUSES}
+      newButtonLabel="New Salary Advance"
+      headerSchema={salaryAdvanceSchema}
+      headerDefaults={{ purpose: '', percentageSalary: 0 }}
+      headerFields={[]}
+      customCreate={({ onCreated, onCancel }) => <SalaryAdvanceForm onSaved={onCreated} onCancel={onCancel} />}
+      customEdit={({ request, onSaved, onCancel }) => (
+        <SalaryAdvanceForm request={request} onSaved={() => onSaved()} onCancel={onCancel} />
+      )}
+      progressApprovers={SALARY_ADVANCE_APPROVERS}
+      progressAfterApproval={() => SALARY_ADVANCE_AFTER_APPROVAL}
+      submitButtonLabel="Submit for Approval"
+      submitConfirmTitle="Submit the salary advance for approval?"
+      submitConfirmMessage="It goes to your Line Manager, then the HR Manager, then the Chief Financial Officer."
+      validateBeforeSubmit={(request) => {
+        const payload = request.payload ?? {}
+        if (isEsspSalaryAdvance(request)) {
+          const accepted = payload.DeclarationAccepted === true || String(payload.DeclarationAccepted ?? '').toLowerCase() === 'true'
+          return accepted ? null : 'Click Edit and accept the employee declaration and deduction authorization before submitting.'
+        }
+        return supportsForm
+          ? 'Click Edit and complete the Salary Advance form (amount, repayment period, declaration) before submitting.'
+          : null
+      }}
+      detailOverride={({ request, details }) => (isEsspSalaryAdvance(request) ? <SalaryAdvanceDocument request={request} /> : details)}
+      // Requests made before the ESSP form (percentage of salary).
       detailFields={[
         { label: 'Request No.', paths: ['request.requestNo'] },
         { label: 'Requested Date', paths: ['payload.Date', 'payload.RequestedDate', 'request.createdAt'], format: 'date' },
         { label: 'Purpose', paths: ['payload.Purpose', 'payload.purpose'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
         { label: 'Amount (ETB)', paths: ['request.amount', 'payload.TotalNetAmount', 'lines.0.Amount'], format: 'currency' },
-      ]}
-      detailLineLabel="Salary Advance Line"
-      detailLineColumns={[
-        { label: 'Date Taken', paths: ['DateTaken', 'Date_Taken'], format: 'date' },
-        { label: 'Type', paths: ['AdvanceType', 'Advance_Type'] },
-        { label: 'Purpose', paths: ['Purpose', 'purpose'] },
-        { label: 'Percentage of Salary', paths: ['PercentageofSalary', 'PercentageOfSalary', 'Percentage_of_Salary'], format: 'percentage' },
-        { label: 'Amount (ETB)', paths: ['Amount', 'resolvedAmount', 'amount'], format: 'currency' },
       ]}
     />
   )

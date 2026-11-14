@@ -76,8 +76,11 @@ export async function openPayslipPdf(year: string, month: string): Promise<void>
     responseType: 'blob',
   })
   const url = URL.createObjectURL(response.data)
-  const opened = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!opened) {
+  // No 'noopener' feature: with it Chrome returns null even when the tab opens, and the payslip
+  // was then downloaded as well.
+  const opened = window.open(url, '_blank')
+  if (opened) opened.opener = null
+  else {
     const link = document.createElement('a')
     link.href = url
     link.download = `payslip-${month}-${year}.pdf`

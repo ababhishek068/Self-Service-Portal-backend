@@ -1,3 +1,14 @@
+import {
+  assertEligible,
+  assertSalaryAdvanceForm,
+  getSalaryAdvanceContext,
+  salaryAdvanceDetailsJson,
+  salaryAdvanceFormBody,
+  salaryAdvanceLegacyPercentage,
+  salaryAdvanceLegacyPurpose,
+  salaryAdvancePlanFromHeader,
+  soapMethodMissing as salaryAdvanceSoapMissing,
+} from './salaryAdvance.js'
 import { runStoreApprovalOnce, storeApprovalSubmissionComplete } from './storeApprovalSubmission.js'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
@@ -1966,6 +1977,23 @@ const salaryAdvance: ModuleSpec = {
           { status: 422 },
         )
       }
+      // ESSP Staff Salary Advance form (amount in ETB, repayment plan, declaration).
+      const form = salaryAdvanceFormBody(req.body)
+      if (form) {
+        const context = await getSalaryAdvanceContext(user, no)
+        assertSalaryAdvanceForm(form, context, { forSubmit: form.submit })
+        return {
+          myAction: no ? 'edit' : 'create',
+          recId: no ? String(req.body?.recId ?? '') : '',
+          staffNo: user.employeeNo,
+          // BC 1.0.3.652 takes the amount and plan from PortalSalaryAdvanceDetails (afterSaveHeader);
+          // older BC only keeps Purpose and a percentage of basic pay.
+          purpose: context.supportsDetails ? form.reason.slice(0, 250) : salaryAdvanceLegacyPurpose(form),
+          percentageSalary: context.supportsDetails
+            ? 0
+            : salaryAdvanceLegacyPercentage(form.plan.requestedAmount, context.basicSalary),
+        }
+      }
       const percentageSalary = Number(req.body?.percentageSalary ?? 0)
       const purpose = String(req.body?.purpose ?? req.body?.reason ?? '').trim()
       if (!purpose) {
@@ -1994,6 +2022,20 @@ const salaryAdvance: ModuleSpec = {
     },
     submit: ({ no }) => ({ docNo: no, action: 'request' }),
     cancel: ({ no }) => ({ docNo: no, action: 'cancel' }),
+  },
+  // BC 1.0.3.652: the ESSP form fields on the Staff Advance Header; the line gets the amount in ETB.
+  afterSaveHeader: async ({ req, user, no }) => {
+    const form = salaryAdvanceFormBody(req.body)
+    if (!no || !form) return
+    try {
+      await callSoapMethod('PortalSalaryAdvanceDetails', {
+        employeeNo: user.employeeNo,
+        docNo: no,
+        detailsJson: salaryAdvanceDetailsJson(form),
+      })
+    } catch (error) {
+      if (!salaryAdvanceSoapMissing(error, 'PortalSalaryAdvanceDetails')) throw error
+    }
   },
 }
 
@@ -3385,7 +3427,17 @@ async function submitPortalModuleRequestOnce(spec: ModuleSpec, user: AuthUser, n
       )
     }
   }
-  if (spec.module === 'salary-advance') {
+  const essSalaryAdvance = spec.module === 'salary-advance' ? salaryAdvancePlanFromHeader(header) : null
+  if (essSalaryAdvance) {
+    // ESSP form (BC 1.0.3.652): declaration, then the eligibility checks with BC's current facts.
+    if (!essSalaryAdvance.declarationAccepted) {
+      throw Object.assign(
+        new Error('Edit the salary advance and accept the employee declaration and deduction authorization before submitting.'),
+        { status: 422 },
+      )
+    }
+    assertEligible(await getSalaryAdvanceContext(user, no), essSalaryAdvance.plan)
+  } else if (spec.module === 'salary-advance') {
     const lines = await listPortalModuleLines(spec, header, no)
     const percentage = Number(
       header.PercentageofSalary ??

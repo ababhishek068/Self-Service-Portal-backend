@@ -155,6 +155,12 @@ export interface MultiStepRequestConfig {
     onCreated: (request: PortalRequest) => void
     onCancel: () => void
   }) => ReactNode
+  /** Replace the header Edit form on a draft (e.g. the Staff Salary Advance form). */
+  customEdit?: (ctx: {
+    request: PortalRequest
+    onSaved: () => void
+    onCancel: () => void
+  }) => ReactNode
 
   /** Curated fields shown on the detail screen. Undefined values are hidden. */
   detailFields?: MultiStepDetailFieldConfig[]
@@ -1089,6 +1095,21 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
         value: initialFieldValue(payload, field, undefined),
       }))
       .filter(({ value }) => value !== null && value !== undefined && value !== '')
+
+    if (selected && editingHeader && config.customEdit) {
+      return (
+        <PageWrapper title={config.title}>
+          {config.customEdit({
+            request: selected,
+            onSaved: () => {
+              setEditingHeader(false)
+              void refresh()
+            },
+            onCancel: () => setEditingHeader(false),
+          })}
+        </PageWrapper>
+      )
+    }
 
     if (selected && editingHeader) {
       return (
