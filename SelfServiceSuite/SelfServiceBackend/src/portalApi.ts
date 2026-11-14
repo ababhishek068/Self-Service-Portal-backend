@@ -706,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v379 — 1.0.3.540 (Advance Request form polished: live approval meter and route, section completion checks, document drop zone, success moment, unsaved-changes guard, phone layout, dark mode; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v380 — 1.0.3.541 (Overtime Request line: Overtime Category and Work location before Start and End Time; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string

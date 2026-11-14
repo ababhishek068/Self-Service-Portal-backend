@@ -543,13 +543,13 @@ export function OvertimeWorkRequest() {
     if (periodSpan(draft.startDate, end) > MAX_OVERTIME_DAYS) {
       return { problem: `A period can cover at most ${MAX_OVERTIME_DAYS} days. Make a second request for the other days.` }
     }
+    if (!draft.dayType) return { problem: 'Choose the overtime category.' }
+    if (!draft.workLocation) return { problem: 'Choose the work location.' }
     if (!draft.startTime) return { problem: 'Enter the start time.' }
     if (!draft.endTime) return { problem: 'Enter the end time.' }
     if (splitOvertimeHours(draft.startTime, draft.endTime, 'working').totalHours <= 0) {
       return { problem: 'The end time must be different from the start time.' }
     }
-    if (!draft.dayType) return { problem: 'Choose the overtime category.' }
-    if (!draft.workLocation) return { problem: 'Choose the work location.' }
     const dates = entryDates(draft)
     if (!dates.length) return { problem: 'No days are left in this period. Tick at least one day of the week.' }
     const others = editingLine === null ? lines : lines.filter((line) => lineKey(line) !== editingLine)
@@ -1096,26 +1096,6 @@ export function OvertimeWorkRequest() {
                       </div>
                     ) : null}
                     <div className="space-y-1.5">
-                      <Label htmlFor="otw-start">Start Time *</Label>
-                      <ClockTimePicker
-                        id="otw-start"
-                        value={entry.startTime}
-                        title="Select start time"
-                        defaultMeridiem="AM"
-                        onChange={(value) => setEntry((current) => ({ ...current, startTime: value }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="otw-end">End Time *</Label>
-                      <ClockTimePicker
-                        id="otw-end"
-                        value={entry.endTime}
-                        title="Select end time"
-                        defaultMeridiem="PM"
-                        onChange={(value) => setEntry((current) => ({ ...current, endTime: value }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
                       <Label htmlFor="otw-category">Overtime Category *</Label>
                       <Select
                         id="otw-category"
@@ -1142,6 +1122,26 @@ export function OvertimeWorkRequest() {
                             workLocation: event.target.value as OvertimeWorkLocation,
                           }))
                         }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="otw-start">Start Time *</Label>
+                      <ClockTimePicker
+                        id="otw-start"
+                        value={entry.startTime}
+                        title="Select start time"
+                        defaultMeridiem="AM"
+                        onChange={(value) => setEntry((current) => ({ ...current, startTime: value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="otw-end">End Time *</Label>
+                      <ClockTimePicker
+                        id="otw-end"
+                        value={entry.endTime}
+                        title="Select end time"
+                        defaultMeridiem="PM"
+                        onChange={(value) => setEntry((current) => ({ ...current, endTime: value }))}
                       />
                     </div>
                     <div className="md:col-span-2">
