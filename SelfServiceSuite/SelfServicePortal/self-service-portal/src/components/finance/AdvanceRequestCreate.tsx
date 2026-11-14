@@ -1,34 +1,35 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldValues, type Resolver } from 'react-hook-form'
 import { differenceInCalendarDays, parseISO } from 'date-fns'
 import {
-  ArrowRight,
+  BadgeCheck,
   Building2,
-  CheckCircle2,
-  Coins,
-  FileStack,
+  CalendarClock,
+  Check,
+  CircleAlert,
   History,
-  Info,
   Landmark,
   Loader2,
   Monitor,
-  Paperclip,
   Save,
   Send,
   Trash2,
+  UploadCloud,
   UserCheck,
-  UserRound,
   X,
 } from 'lucide-react'
 import { AuthApiError } from '@/api/client/authClient'
 import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
 import { createModuleRequest, getModuleRequest, type EndpointConfig } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
+import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { RequestProgress } from '@/components/shared/RequestProgress'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
+import { attachmentVisual, formatFileSize } from '@/components/shared/attachmentUi'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,20 +40,31 @@ import { advanceAttachmentCategories } from '@/data/essOptions'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { advanceRequestCreateSchema } from '@/schemas/requestSchemas'
-import { formatAmount, formatDateTime } from '@/utils/formatters'
+import { formatDateTime } from '@/utils/formatters'
 import type { PortalRequest } from '@/types/erp.types'
 
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpg', 'png'])
 const MAX_FILE_BYTES = 10_000_000
+const TEXT_LIMIT = 250
+/** The meter's scale: thresholds at ETB 50,000 and 100,000 sit at one and two thirds. */
+const METER_MAX = 150_000
 
 /** Developer handover §4.1: Line Manager first, then the final approver by amount. */
 const APPROVAL_LIMITS = [
-  { key: 'fad', range: '< ETB 50,000', approver: 'FAD', matches: (amount: number) => amount > 0 && amount < 50_000 },
-  { key: 'coo', range: 'ETB 50,000 – 100,000', approver: 'COO', matches: (amount: number) => amount >= 50_000 && amount <= 100_000 },
-  { key: 'ceo', range: '> ETB 100,000', approver: 'CEO', matches: (amount: number) => amount > 100_000 },
-]
+  { key: 'fad', range: 'Below ETB 50,000', phrase: 'below ETB 50,000', approver: 'FAD', matches: (amount: number) => amount > 0 && amount < 50_000 },
+  { key: 'coo', range: 'ETB 50,000 – 100,000', phrase: 'ETB 50,000 – 100,000', approver: 'COO', matches: (amount: number) => amount >= 50_000 && amount <= 100_000 },
+  { key: 'ceo', range: 'Above ETB 100,000', phrase: 'above ETB 100,000', approver: 'CEO', matches: (amount: number) => amount > 100_000 },
+] as const
+
+const SECTION_OF_FIELD: Record<string, string> = {
+  requestPurpose: 'adv-s1',
+  otherPurposeDetails: 'adv-s1',
+  justification: 'adv-s1',
+}
 
 type PendingFile = { id: string; file: File; category: string; description: string }
+
+const etb = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function newRequestId() {
   // crypto.randomUUID needs a secure context; the portal also runs on plain http inside the LAN.
@@ -85,37 +97,113 @@ function readFileBase64(file: File): Promise<string> {
   })
 }
 
-function Section({ number, title, children, className }: { number: number; title: string; children: ReactNode; className?: string }) {
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+}
+
+/** The amount figure eases to each new value (or jumps, with reduced motion). */
+function useCountUp(target: number) {
+  const [reduce] = useState(prefersReducedMotion)
+  const [value, setValue] = useState(target)
+  const current = useRef(target)
+  useEffect(() => {
+    if (reduce) return
+    const from = current.current
+    const started = performance.now()
+    let frame = 0
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / 520)
+      const next = from + (target - from) * (1 - Math.pow(1 - t, 3))
+      current.current = next
+      setValue(next)
+      if (t < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [target, reduce])
+  return reduce ? target : value
+}
+
+function initials(name: string) {
   return (
-    <section className={cn('overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm', className)}>
-      <header className="flex items-center gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20 text-xs font-bold">{number}</span>
-        {title}
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || '—'
+  )
+}
+
+function Section({
+  id,
+  number,
+  title,
+  hint,
+  done,
+  shake,
+  children,
+}: {
+  id: string
+  number: number
+  title: string
+  hint: string
+  done: boolean
+  shake: boolean
+  children: ReactNode
+}) {
+  return (
+    <section id={id} className={cn('adv-section scroll-mt-24', done && 'is-done', shake && 'adv-shake')} aria-labelledby={`${id}-title`}>
+      <header className="adv-section-head">
+        <span className={cn('adv-step', done && 'is-done')} aria-hidden="true">
+          {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : number}
+        </span>
+        <div className="min-w-0">
+          <h3 id={`${id}-title`} className="text-[0.95rem] font-semibold leading-tight">
+            {title}
+          </h3>
+          <p className="text-xs text-white/70">{hint}</p>
+        </div>
+        <span className="sr-only">{done ? 'Complete' : 'Not complete yet'}</span>
       </header>
-      <div className="p-4">{children}</div>
+      <div className="p-4 sm:p-5">{children}</div>
     </section>
   )
 }
 
-function ReadOnly({ label, value }: { label: string; value?: string }) {
+function Required() {
   return (
-    <div>
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-0.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900">{value?.trim() || '—'}</p>
-    </div>
+    <span className="text-rose-600" aria-hidden="true">
+      {' '}
+      *
+    </span>
   )
 }
 
 function FieldError({ message }: { message?: unknown }) {
-  return message ? <p className="text-xs text-red-600">{String(message)}</p> : null
+  return message ? (
+    <p className="flex items-center gap-1 text-xs font-medium text-rose-600" role="alert">
+      <CircleAlert className="h-3.5 w-3.5 shrink-0" />
+      {String(message)}
+    </p>
+  ) : null
+}
+
+function Counter({ value }: { value: string }) {
+  return (
+    <span className={cn('text-[11px] tabular-nums', value.length >= TEXT_LIMIT ? 'text-rose-600' : 'text-[var(--portal-muted)]')}>
+      {value.length}/{TEXT_LIMIT}
+    </span>
+  )
 }
 
 /**
  * New Advance Request on one page, laid out as the ABH "ESSP – Advance Request" developer handover:
  * 1 Employee Information & Request Purpose · 2 Advance Request Details (Requested Amount in ETB)
  * · 3 Supporting Documents & Submission (Save as Draft / Submit for Approval / Cancel / View History)
- * · 4 Approval Workflow & Limits. Business Central creates the advance, its first line (the requested
- * amount on the chosen Advance Type), the attachments and — on Submit — starts its approval workflow.
+ * · 4 Approval Workflow & Limits, a live route that follows the amount. Business Central creates the
+ * advance, its first line (the amount on the chosen Advance Type), the attachments and — on
+ * Submit — starts its approval workflow.
  */
 export function AdvanceRequestCreate({
   module,
@@ -135,6 +223,7 @@ export function AdvanceRequestCreate({
   onCancel: () => void
 }) {
   const toast = useToast()
+  const confirm = useConfirm()
   const { employee } = useAuth()
   const profileQuery = useQuery({
     queryKey: ['profile', 'details'],
@@ -145,9 +234,12 @@ export function AdvanceRequestCreate({
   const requestDate = useMemo(() => new Date().toISOString(), [])
   const today = requestDate.slice(0, 10)
   const clientRequestId = useRef(newRequestId())
-  const [files, setFiles] = useState<PendingFile[]>([])
-  const [formError, setFormError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const [files, setFiles] = useState<PendingFile[]>([])
+  const [dragOver, setDragOver] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [shakeSection, setShakeSection] = useState<string | null>(null)
+  const [success, setSuccess] = useState<{ request: PortalRequest; submit: boolean } | null>(null)
 
   const form = useForm<FieldValues>({
     // The schema coerces Requested Amount to a number; the form keeps plain field values.
@@ -168,20 +260,58 @@ export function AdvanceRequestCreate({
     },
   })
   const errors = form.formState.errors
-  const purposeCode = String(useWatch({ control: form.control, name: 'requestPurpose' }) ?? '')
-  const activityStart = String(useWatch({ control: form.control, name: 'activityStartDate' }) ?? '')
-  const amount = Number(useWatch({ control: form.control, name: 'requestedAmount' }) ?? 0) || 0
+  const watched = useWatch({ control: form.control }) as Record<string, unknown>
+  const text = (name: string) => String(watched[name] ?? '')
+  const purposeCode = text('requestPurpose')
+  const activityStart = text('activityStartDate')
+  const activityEnd = text('activityEndDate') || activityStart
+  const amount = Number(watched.requestedAmount ?? 0) > 0 ? Number(watched.requestedAmount) : 0
   const needsOther = purposeRequiresOtherDetails(purposeCode, purposeOptions)
   const finalLimit = APPROVAL_LIMITS.find((limit) => limit.matches(amount))
+  const days = activityStart ? activityDays(activityStart, activityEnd) : 0
+  const shownAmount = useCountUp(amount)
+  const purposeLabel = purposeOptions.find((option) => option.value === purposeCode)?.label ?? ''
+  const advanceTypeLabel = advanceTypes.find((option) => option.value === text('advanceType'))?.label ?? ''
+
+  const section1Done =
+    Boolean(purposeCode) && (!needsOther || text('otherPurposeDetails').trim().length > 0) && text('justification').trim().length >= 10
+  const section2Done =
+    Boolean(text('dateRequired')) &&
+    text('dateRequired') >= today &&
+    Boolean(activityStart) &&
+    activityEnd >= activityStart &&
+    text('dateRequired') <= activityStart &&
+    amount > 0 &&
+    Boolean(text('advanceType'))
+  const dirty = form.formState.isDirty || files.length > 0
+
   const expectedApprovers: TrackerStep[] = [
     { key: 'line-manager', heading: 'Line Manager', owner: 'Approves every request first', icon: UserCheck },
     {
       key: 'final-approver',
       heading: finalLimit ? finalLimit.approver : 'FAD | COO | CEO',
-      owner: finalLimit ? `Final approver · ${finalLimit.range}` : 'Final approver by amount',
+      owner: finalLimit ? `Final approver, ${finalLimit.phrase}` : 'Final approver by amount',
       icon: Landmark,
     },
   ]
+
+  // Leaving the page with unsaved entries asks first.
+  useEffect(() => {
+    if (!dirty || success) return
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [dirty, success])
+
+  // After the success moment, open the saved request.
+  useEffect(() => {
+    if (!success) return
+    const timer = window.setTimeout(() => onCreated(success.request), prefersReducedMotion() ? 400 : 1600)
+    return () => window.clearTimeout(timer)
+  }, [success, onCreated])
 
   const create = useMutation({
     mutationFn: async ({ values, submit }: { values: FieldValues; submit: boolean }) => {
@@ -191,12 +321,12 @@ export function AdvanceRequestCreate({
           fileType: item.file.type || 'application/octet-stream',
           size: item.file.size,
           contentBase64: await readFileBase64(item.file),
-          description: `${item.category}: ${item.description.trim()}`,
+          description: `${item.category}: ${item.description.trim() || item.file.name}`,
         })),
       )
       const start = String(values.activityStartDate ?? '')
       const end = String(values.activityEndDate ?? '') || start
-      const days = activityDays(start, end)
+      const lineDays = activityDays(start, end)
       const requested = round2(Number(values.requestedAmount))
       const code = String(values.requestPurpose ?? '').trim()
       const label = purposeOptions.find((option) => option.value === code)?.label ?? code
@@ -220,8 +350,8 @@ export function AdvanceRequestCreate({
             {
               advanceType: values.advanceType,
               amount: requested,
-              noOfDays: days,
-              dailyRate: round2(requested / days),
+              noOfDays: lineDays,
+              dailyRate: round2(requested / lineDays),
               destination: '',
               dutyArea: '',
             },
@@ -237,22 +367,22 @@ export function AdvanceRequestCreate({
     onSuccess: (request, { submit }) => {
       toast.success(
         submit
-          ? `${request.requestNo} was sent to Business Central for approval (Line Manager, then ${finalLimit?.approver ?? 'the final approver'}).`
-          : `${request.requestNo} is saved as a draft. Nothing was sent for approval yet.`,
+          ? `${request.requestNo} is with Business Central for approval: the Line Manager first, then ${finalLimit?.approver ?? 'the final approver'}.`
+          : `${request.requestNo} is saved as a draft. It is not sent for approval until you submit it.`,
         submit ? 'Submitted for approval' : 'Saved as draft',
       )
-      onCreated(request)
+      setSuccess({ request, submit })
     },
     onError: async (error) => {
-      const message = error instanceof Error ? error.message : 'Could not save the advance request.'
+      const message = error instanceof Error ? error.message : 'The advance request could not be saved.'
       const documentNo = error instanceof AuthApiError ? error.documentNo : undefined
       if (documentNo) {
         // BC saved the draft but a later step failed: keep it, open it, and say it was not submitted.
-        toast.error(`${message} Open draft ${documentNo}, correct it and submit again.`, `Saved as draft ${documentNo} — not submitted`)
+        toast.error(`${message} Open draft ${documentNo}, correct it and submit it again.`, `Saved as draft ${documentNo}, not submitted`)
         try {
           onCreated(await getModuleRequest(module, `${module.module}-${documentNo}`))
         } catch {
-          setFormError(`Draft ${documentNo} was saved, but could not be opened. Find it in My Advance Requests.`)
+          setFormError(`Draft ${documentNo} was saved but could not be opened. Find it in My Advance Requests.`)
         }
         return
       }
@@ -260,18 +390,45 @@ export function AdvanceRequestCreate({
     },
   })
 
+  const busy = create.isPending || Boolean(success)
+
+  const flagSection = (sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+    setShakeSection(null)
+    window.requestAnimationFrame(() => setShakeSection(sectionId))
+    window.setTimeout(() => setShakeSection(null), 650)
+  }
+
   const run = (submit: boolean) => {
     setFormError(null)
     void form.handleSubmit(
       (values) => {
         if (needsOther && !String(values.otherPurposeDetails ?? '').trim()) {
-          form.setError('otherPurposeDetails', { type: 'manual', message: 'Enter details when Other (Specify) is selected' })
+          form.setError('otherPurposeDetails', { type: 'manual', message: 'Describe the purpose when Other (Specify) is selected' })
+          flagSection('adv-s1')
           return
         }
         create.mutate({ values, submit })
       },
-      () => setFormError('Complete the fields marked in red. All mandatory fields must be completed and validated.'),
+      (invalid) => {
+        const first = Object.keys(invalid)[0] ?? ''
+        setFormError('Some required details are missing or invalid. They are marked in red.')
+        flagSection(SECTION_OF_FIELD[first] ?? 'adv-s2')
+      },
     )()
+  }
+
+  const cancel = async () => {
+    if (dirty) {
+      const discard = await confirm({
+        title: 'Discard this advance request?',
+        message: 'Nothing has been saved yet. Your entries and documents will be lost.',
+        confirmLabel: 'Discard',
+        tone: 'danger',
+      })
+      if (!discard) return
+    }
+    onCancel()
   }
 
   const addFiles = (list: FileList | null) => {
@@ -280,13 +437,14 @@ export function AdvanceRequestCreate({
     for (const file of Array.from(list)) {
       const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
       if (!ALLOWED_EXTENSIONS.has(extension)) {
-        toast.error(`${file.name} is not an allowed file type (PDF, DOC, DOCX, JPG, PNG).`, 'Invalid file')
+        toast.error(`${file.name} is a .${extension} file. Attach PDF, DOC, DOCX, JPG or PNG.`, 'File type not accepted')
         continue
       }
       if (file.size > MAX_FILE_BYTES) {
-        toast.error(`${file.name} exceeds 10 MB.`, 'File too large')
+        toast.error(`${file.name} is ${formatFileSize(file.size)}. Each document can be up to 10 MB.`, 'File too large')
         continue
       }
+      if (files.some((item) => item.file.name === file.name && item.file.size === file.size)) continue
       next.push({
         id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 6)}`,
         file,
@@ -294,284 +452,502 @@ export function AdvanceRequestCreate({
         description: file.name.replace(/\.[^.]+$/, ''),
       })
     }
-    setFiles((current) => [...current, ...next])
+    if (next.length) setFiles((current) => [...current, ...next])
     if (fileInput.current) fileInput.current.value = ''
   }
 
-  const busy = create.isPending
-  const busyLabel = create.variables?.submit ? 'Submitting…' : 'Saving…'
+  const onDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    setDragOver(false)
+    if (!busy) addFiles(event.dataTransfer.files)
+  }
+
+  const employeeName = profile?.fullName || employee?.displayName || ''
+  const meterPosition = Math.min(amount, METER_MAX) / METER_MAX
+  const scrollTo = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
 
   return (
-    <div className="space-y-4">
+    <div className="adv-form space-y-4">
       {/* Standard: Workflow Progress first. */}
       <RequestProgress status="Draft" creating="new" requiresLines={false} expectedApprovers={expectedApprovers} />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-slate-900">New Advance Request</h2>
-        <p className="text-xs text-slate-500">
-          Fields marked <span className="font-semibold text-red-600">*</span> are mandatory. Settlement is not part of this form.
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-[var(--portal-text)]">New Advance Request</h2>
+          <p className="mt-0.5 text-sm text-[var(--portal-muted)]">
+            Funds for an approved business activity. You settle them later in Advance Settlement.
+          </p>
+        </div>
+        <p className="text-xs text-[var(--portal-muted)]">
+          Fields marked <span className="font-semibold text-rose-600">*</span> are required
         </p>
       </div>
 
       {formError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
+        <div className="adv-reveal flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          {formError}
+        </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Section number={1} title="Employee Information & Request Purpose">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Employee information (auto-filled)</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ReadOnly label="Employee Name" value={profile?.fullName || employee?.displayName} />
-            <ReadOnly label="Employee Number" value={profile?.employeeNo || employee?.employeeNo} />
-            <ReadOnly label="Designation / Job Title" value={profile?.jobTitle || employee?.jobTitle} />
-            <ReadOnly label="Department" value={profile?.department || employee?.departmentName || employee?.departmentCode} />
-            <ReadOnly label="Division" value={profile?.division} />
-            <ReadOnly label="Employment Status" value={profile?.status || profile?.employmentType} />
-          </div>
-          {profileQuery.isError ? (
-            <p className="mt-2 text-xs text-red-600">Employee details could not be loaded from Business Central.</p>
-          ) : null}
-
-          <div className="mt-4 grid gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-purpose">
-                Request Purpose <span className="text-red-600">*</span>
-              </Label>
-              <Select id="adv-purpose" options={purposeOptions} placeholder="Select purpose (based on your division)" {...form.register('requestPurpose')} />
-              <p className="text-xs text-slate-500">{purposeHint}</p>
-              <FieldError message={errors.requestPurpose?.message} />
-            </div>
-            {needsOther ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="adv-other">
-                  Other Purpose Details <span className="text-red-600">*</span>
-                </Label>
-                <Textarea id="adv-other" rows={2} maxLength={250} placeholder="Describe the purpose" {...form.register('otherPurposeDetails')} />
-                <FieldError message={errors.otherPurposeDetails?.message} />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+        <div className="portal-rise-children space-y-4">
+          <Section
+            id="adv-s1"
+            number={1}
+            title="Employee Information & Request Purpose"
+            hint="Your details come from your employee record"
+            done={section1Done}
+            shake={shakeSection === 'adv-s1'}
+          >
+            <div className="flex items-center gap-3">
+              <span className="adv-avatar" aria-hidden="true">
+                {initials(employeeName)}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-[var(--portal-text)]">{employeeName || '—'}</p>
+                <p className="truncate text-sm text-[var(--portal-muted)]">
+                  {profile?.jobTitle || employee?.jobTitle || 'Job title not on record'}
+                </p>
               </div>
-            ) : (
-              <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Info className="h-3.5 w-3.5" /> If “Other (Specify)” is selected, Other Purpose Details is mandatory.
-              </p>
-            )}
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-justification">
-                Request Justification <span className="text-red-600">*</span>
-              </Label>
-              <Textarea id="adv-justification" rows={3} maxLength={250} placeholder="Explain why the advance is needed" {...form.register('justification')} />
-              <FieldError message={errors.justification?.message} />
             </div>
-          </div>
-        </Section>
-
-        <Section number={2} title="Advance Request Details">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Request Date</Label>
-              <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900">{formatDateTime(requestDate)}</p>
-              <p className="text-xs text-slate-500">System generated (read-only)</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-required">
-                Required Advance Date <span className="text-red-600">*</span>
-              </Label>
-              <Input id="adv-required" type="date" min={today} {...form.register('dateRequired')} />
-              <p className="text-xs text-slate-500">When you need the funds: today or later, on or before the activity start.</p>
-              <FieldError message={errors.dateRequired?.message} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-start">
-                Activity Start Date <span className="text-red-600">*</span>
-              </Label>
-              <Input
-                id="adv-start"
-                type="date"
-                min={today}
-                {...form.register('activityStartDate', {
-                  onChange: (event) => {
-                    const start = String(event.target.value ?? '')
-                    const end = String(form.getValues('activityEndDate') ?? '')
-                    if (start && (!end || end < start)) form.setValue('activityEndDate', start)
-                  },
-                })}
-              />
-              <FieldError message={errors.activityStartDate?.message} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-end">Activity End Date</Label>
-              <Input id="adv-end" type="date" min={activityStart || today} {...form.register('activityEndDate')} />
-              <p className="text-xs text-slate-500">End Date ≥ Start Date</p>
-              <FieldError message={errors.activityEndDate?.message} />
-            </div>
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="adv-location">Activity Location</Label>
-              <Input id="adv-location" maxLength={250} placeholder="Where the activity will take place (where relevant)" {...form.register('activityLocation')} />
-            </div>
-            {supportsProject ? (
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="adv-project">Project / Assignment (optional)</Label>
-                <Input id="adv-project" maxLength={100} placeholder="Related project or assignment, if applicable" {...form.register('projectAssignment')} />
-                <FieldError message={errors.projectAssignment?.message} />
+            <dl className="adv-facts mt-4">
+              <div>
+                <dt>Employee number</dt>
+                <dd className="tabular-nums">{profile?.employeeNo || employee?.employeeNo || '—'}</dd>
               </div>
+              <div>
+                <dt>Department</dt>
+                <dd>{profile?.department || employee?.departmentName || employee?.departmentCode || '—'}</dd>
+              </div>
+              <div>
+                <dt>Division</dt>
+                <dd>{profile?.division || '—'}</dd>
+              </div>
+              <div>
+                <dt>Employment status</dt>
+                <dd className="flex items-center gap-1.5">
+                  {profile?.status ? (
+                    <span
+                      className={cn('h-2 w-2 rounded-full', /active/i.test(profile.status) ? 'bg-emerald-500' : 'bg-amber-500')}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  {profile?.status || profile?.employmentType || '—'}
+                </dd>
+              </div>
+            </dl>
+            {profileQuery.isError ? (
+              <p className="mt-2 text-xs text-rose-600">Your employee record could not be loaded from Business Central. Refresh the page.</p>
             ) : null}
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-amount">
-                Requested Amount <span className="text-red-600">*</span>
-              </Label>
-              <div className="flex">
-                <Input id="adv-amount" type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" className="rounded-r-none" {...form.register('requestedAmount')} />
-                <span className="inline-flex items-center rounded-r-md border border-l-0 border-slate-200 bg-slate-100 px-3 text-sm font-semibold text-slate-700">
-                  ETB
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">Greater than 0. Currency: ETB (default).</p>
-              <FieldError message={errors.requestedAmount?.message} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="adv-type">
-                Advance Type <span className="text-red-600">*</span>
-              </Label>
-              <Select id="adv-type" options={advanceTypes} placeholder="Select advance type" {...form.register('advanceType')} />
-              <p className="text-xs text-slate-500">The Business Central account the advance is paid from.</p>
-              <FieldError message={errors.advanceType?.message} />
-            </div>
-          </div>
-          <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            <Info className="h-3.5 w-3.5 shrink-0" /> All mandatory fields must be completed and validated. You can add more advance
-            lines (for example per diem and transport) after saving.
-          </p>
-        </Section>
 
-        <Section number={3} title="Supporting Documents & Submission">
-          <div className="grid gap-4 md:grid-cols-[1fr_13rem]">
-            <div>
-              <p className="text-sm font-medium text-slate-800">Supporting documents</p>
-              <p className="text-xs text-slate-500">
-                Activity plan, assignment approval, budget support or other evidence. Multiple attachments allowed (PDF, DOC,
-                DOCX, JPG, PNG; up to 10 MB each).
-              </p>
-              <input
-                ref={fileInput}
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.jpg,.png"
-                className="hidden"
-                onChange={(event) => addFiles(event.target.files)}
-              />
-              <Button type="button" variant="outline" className="mt-2" disabled={busy} onClick={() => fileInput.current?.click()}>
-                <Paperclip className="mr-2 h-4 w-4" />
-                Add documents
-              </Button>
-              {files.length ? (
-                <ul className="mt-3 space-y-2">
-                  {files.map((item) => (
-                    <li key={item.id} className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50/80 p-2 sm:grid-cols-[10rem_1fr_auto] sm:items-center">
-                      <Select
-                        aria-label="Document category"
-                        value={item.category}
-                        options={advanceAttachmentCategories}
-                        onChange={(event) =>
-                          setFiles((current) => current.map((row) => (row.id === item.id ? { ...row, category: event.target.value } : row)))
-                        }
-                      />
-                      <Input
-                        aria-label="Document description"
-                        value={item.description}
-                        maxLength={200}
-                        onChange={(event) =>
-                          setFiles((current) => current.map((row) => (row.id === item.id ? { ...row, description: event.target.value } : row)))
-                        }
-                      />
+            <div className="mt-5 grid gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-purpose">
+                  Request purpose
+                  <Required />
+                </Label>
+                <Select id="adv-purpose" options={purposeOptions} placeholder="Choose a purpose" {...form.register('requestPurpose')} />
+                <p className="text-xs text-[var(--portal-muted)]">{purposeHint}</p>
+                <FieldError message={errors.requestPurpose?.message} />
+              </div>
+              {needsOther ? (
+                <div className="adv-reveal space-y-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <Label htmlFor="adv-other">
+                      Other purpose details
+                      <Required />
+                    </Label>
+                    <Counter value={text('otherPurposeDetails')} />
+                  </div>
+                  <Textarea id="adv-other" rows={2} maxLength={TEXT_LIMIT} placeholder="Describe the purpose" {...form.register('otherPurposeDetails')} />
+                  <FieldError message={errors.otherPurposeDetails?.message} />
+                </div>
+              ) : null}
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor="adv-justification">
+                    Request justification
+                    <Required />
+                  </Label>
+                  <Counter value={text('justification')} />
+                </div>
+                <Textarea
+                  id="adv-justification"
+                  rows={3}
+                  maxLength={TEXT_LIMIT}
+                  placeholder="Explain why the advance is needed"
+                  {...form.register('justification')}
+                />
+                <FieldError message={errors.justification?.message} />
+              </div>
+            </div>
+          </Section>
+
+          <Section
+            id="adv-s2"
+            number={2}
+            title="Advance Request Details"
+            hint="When, where and how much"
+            done={section2Done}
+            shake={shakeSection === 'adv-s2'}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium text-[var(--portal-text)]">Request date</p>
+                <p className="flex h-10 items-center gap-2 rounded-md bg-[var(--portal-surface-sunken)] px-3 text-sm text-[var(--portal-text-soft)]">
+                  <CalendarClock className="h-4 w-4 shrink-0 text-[var(--portal-navy)]" aria-hidden="true" />
+                  <span className="tabular-nums">{formatDateTime(requestDate)}</span>
+                </p>
+                <p className="text-xs text-[var(--portal-muted)]">Set by the system</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-required">
+                  Required advance date
+                  <Required />
+                </Label>
+                <Input id="adv-required" type="date" min={today} {...form.register('dateRequired')} />
+                <p className="text-xs text-[var(--portal-muted)]">The day you need the funds, on or before the activity starts</p>
+                <FieldError message={errors.dateRequired?.message} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-start">
+                  Activity start date
+                  <Required />
+                </Label>
+                <Input
+                  id="adv-start"
+                  type="date"
+                  min={today}
+                  {...form.register('activityStartDate', {
+                    onChange: (event) => {
+                      const start = String(event.target.value ?? '')
+                      const end = String(form.getValues('activityEndDate') ?? '')
+                      if (start && (!end || end < start)) form.setValue('activityEndDate', start)
+                    },
+                  })}
+                />
+                <FieldError message={errors.activityStartDate?.message} />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor="adv-end">Activity end date</Label>
+                  {days > 0 ? (
+                    <span key={days} className="adv-pill">
+                      {days} {days === 1 ? 'day' : 'days'}
+                    </span>
+                  ) : null}
+                </div>
+                <Input id="adv-end" type="date" min={activityStart || today} {...form.register('activityEndDate')} />
+                <FieldError message={errors.activityEndDate?.message} />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="adv-location">Activity location</Label>
+                <Input id="adv-location" maxLength={TEXT_LIMIT} placeholder="Where the activity takes place, if relevant" {...form.register('activityLocation')} />
+              </div>
+              {supportsProject ? (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="adv-project">Project or assignment</Label>
+                  <Input id="adv-project" maxLength={100} placeholder="Optional" {...form.register('projectAssignment')} />
+                  <FieldError message={errors.projectAssignment?.message} />
+                </div>
+              ) : null}
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-amount">
+                  Requested amount
+                  <Required />
+                </Label>
+                <div className={cn('adv-amount', Boolean(errors.requestedAmount) && 'is-invalid')}>
+                  <span className="adv-amount-currency">ETB</span>
+                  <input
+                    id="adv-amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    aria-describedby="adv-amount-help"
+                    aria-invalid={Boolean(errors.requestedAmount)}
+                    {...form.register('requestedAmount')}
+                  />
+                </div>
+                <p id="adv-amount-help" className="text-xs text-[var(--portal-muted)]">
+                  More than zero. Currency is ETB.
+                </p>
+                <FieldError message={errors.requestedAmount?.message} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-type">
+                  Advance type
+                  <Required />
+                </Label>
+                <Select id="adv-type" options={advanceTypes} placeholder="Choose an advance type" {...form.register('advanceType')} />
+                <p className="text-xs text-[var(--portal-muted)]">Decides the Business Central account the advance is paid from</p>
+                <FieldError message={errors.advanceType?.message} />
+              </div>
+            </div>
+            <p className="mt-4 text-xs text-[var(--portal-muted)]">
+              Need several cost items, such as per diem and transport? Save first, then add advance lines to the request.
+            </p>
+          </Section>
+
+          <Section
+            id="adv-s3"
+            number={3}
+            title="Supporting Documents & Submission"
+            hint={files.length ? `${files.length} ${files.length === 1 ? 'document' : 'documents'} attached` : 'Documents are optional'}
+            done={section1Done && section2Done}
+            shake={false}
+          >
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.jpg,.png"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => addFiles(event.target.files)}
+            />
+            <button
+              type="button"
+              className={cn('adv-drop', dragOver && 'is-over')}
+              disabled={busy}
+              onClick={() => fileInput.current?.click()}
+              onDragOver={(event) => {
+                event.preventDefault()
+                if (!dragOver) setDragOver(true)
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+            >
+              <UploadCloud className="adv-drop-icon h-7 w-7" aria-hidden="true" />
+              <span className="font-medium text-[var(--portal-text)]">Drop documents here, or browse</span>
+              <span className="text-xs text-[var(--portal-muted)]">
+                Activity plan, assignment approval, budget support or other evidence. PDF, DOC, DOCX, JPG or PNG, up to 10 MB each.
+              </span>
+            </button>
+
+            {files.length ? (
+              <ul className="mt-3 space-y-2">
+                {files.map((item, index) => {
+                  const { Icon, tone } = attachmentVisual(item.file.name)
+                  return (
+                    <li key={item.id} className="adv-file" style={{ animationDelay: `${Math.min(index, 4) * 40}ms` }}>
+                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1', tone)} aria-hidden="true">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[11rem_minmax(0,1fr)]">
+                        <Select
+                          aria-label={`Category for ${item.file.name}`}
+                          value={item.category}
+                          options={advanceAttachmentCategories}
+                          onChange={(event) =>
+                            setFiles((current) => current.map((row) => (row.id === item.id ? { ...row, category: event.target.value } : row)))
+                          }
+                        />
+                        <Input
+                          aria-label={`Description for ${item.file.name}`}
+                          value={item.description}
+                          maxLength={200}
+                          onChange={(event) =>
+                            setFiles((current) => current.map((row) => (row.id === item.id ? { ...row, description: event.target.value } : row)))
+                          }
+                        />
+                        <p className="truncate text-[11px] text-[var(--portal-muted)] sm:col-span-2">
+                          {item.file.name}, {formatFileSize(item.file.size)}
+                        </p>
+                      </div>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
+                        disabled={busy}
                         aria-label={`Remove ${item.file.name}`}
                         onClick={() => setFiles((current) => current.filter((row) => row.id !== item.id))}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                      <p className="truncate text-[11px] text-slate-500 sm:col-span-3">
-                        <FileStack className="mr-1 inline h-3 w-3" />
-                        {item.file.name} · {(item.file.size / 1024).toFixed(0)} KB
-                      </p>
                     </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-xs text-slate-500">No documents added yet (optional).</p>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium text-slate-800">Actions</p>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => run(false)}>
-                {busy && !create.variables?.submit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                {busy && !create.variables?.submit ? busyLabel : 'Save as Draft'}
-              </Button>
-              <Button type="button" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={busy} onClick={() => run(true)}>
-                {busy && create.variables?.submit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                {busy && create.variables?.submit ? busyLabel : 'Submit for Approval'}
-              </Button>
-              <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
-                <X className="mr-2 h-4 w-4" />
-                Cancel
-              </Button>
-              <Button type="button" variant="outline" disabled title="History is available once the request is saved.">
-                <History className="mr-2 h-4 w-4" />
-                View History
-              </Button>
-              <p className="text-[11px] leading-snug text-slate-500">
-                Save as Draft keeps your entries without starting approval. If Business Central rejects a submission, the
-                draft is kept and opened so you can correct it.
-              </p>
-            </div>
-          </div>
-        </Section>
+                  )
+                })}
+              </ul>
+            ) : null}
 
-        <Section number={4} title="Approval Workflow & Approval Limits">
-          <ol className="flex flex-wrap items-center gap-2 text-center text-xs font-semibold text-slate-700">
-            {[
-              { icon: <Monitor className="h-5 w-5" />, label: 'ESSP Submission' },
-              { icon: <Building2 className="h-5 w-5" />, label: 'Microsoft Dynamics 365 Business Central' },
-              { icon: <UserRound className="h-5 w-5" />, label: 'Line Manager Approval' },
-            ].map((step, index) => (
-              <li key={step.label} className="flex items-center gap-2">
-                <span className="flex w-28 flex-col items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-[var(--portal-navy)]">
-                  {step.icon}
-                  <span className="text-slate-700">{step.label}</span>
-                </span>
-                {index < 2 ? <ArrowRight className="h-4 w-4 text-slate-400" /> : null}
-              </li>
-            ))}
-          </ol>
-          <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
-            <p className="flex items-center gap-2 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-              <Coins className="h-4 w-4" /> Final approver (by amount)
+            <div className="adv-actions">
+              <div className="flex gap-2">
+                <Button type="button" variant="ghost" disabled={create.isPending} onClick={() => void cancel()}>
+                  <X className="mr-1.5 h-4 w-4" />
+                  Cancel
+                </Button>
+                <Button type="button" variant="ghost" disabled title="History appears once the request is saved">
+                  <History className="mr-1.5 h-4 w-4" />
+                  View History
+                </Button>
+              </div>
+              <div className="adv-actions-main">
+                <Button type="button" variant="outline" disabled={busy} onClick={() => run(false)}>
+                  {create.isPending && !create.variables?.submit ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-1.5 h-4 w-4" />
+                  )}
+                  {create.isPending && !create.variables?.submit ? 'Saving…' : 'Save as Draft'}
+                </Button>
+                <Button type="button" className="adv-submit" disabled={busy} onClick={() => run(true)}>
+                  {create.isPending && create.variables?.submit ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-1.5 h-4 w-4" />
+                  )}
+                  {create.isPending && create.variables?.submit ? 'Submitting…' : 'Submit for Approval'}
+                </Button>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-[var(--portal-muted)] sm:text-right" aria-live="polite">
+              {create.isPending
+                ? 'Saving to Business Central. This can take a few seconds.'
+                : 'A draft is saved without starting approval. If Business Central refuses a submission, the draft stays and opens for correction.'}
             </p>
-            <table className="w-full text-sm">
-              <tbody>
+          </Section>
+        </div>
+
+        <aside className="space-y-4 lg:sticky lg:top-20">
+          <section className="adv-section" aria-labelledby="adv-s4-title">
+            <header className="adv-section-head">
+              <span className={cn('adv-step', amount > 0 && 'is-done')} aria-hidden="true">
+                4
+              </span>
+              <div>
+                <h3 id="adv-s4-title" className="text-[0.95rem] font-semibold leading-tight">
+                  Approval Workflow & Approval Limits
+                </h3>
+                <p className="text-xs text-white/70">The amount decides the final approver</p>
+              </div>
+            </header>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-[var(--portal-muted)]">Requested amount</p>
+              <p className={cn('adv-figure', amount > 0 ? 'text-[var(--portal-text)]' : 'text-[var(--portal-muted)]')}>
+                <span className="adv-figure-currency">ETB</span>
+                {etb.format(shownAmount)}
+              </p>
+
+              <div
+                className="mt-4"
+                role="img"
+                aria-label={finalLimit ? `${finalLimit.range}: the final approver is ${finalLimit.approver}` : 'No amount entered yet'}
+              >
+                <div className="adv-meter">
+                  {APPROVAL_LIMITS.map((limit) => (
+                    <span key={limit.key} className={cn('adv-zone', `adv-zone--${limit.key}`, finalLimit?.key === limit.key && 'is-active')} />
+                  ))}
+                  <span className={cn('adv-marker', amount > 0 && 'is-set')} style={{ left: `${meterPosition * 100}%` }} />
+                </div>
+                <div className="adv-scale" aria-hidden="true">
+                  <span>0</span>
+                  <span>50k</span>
+                  <span>100k</span>
+                  <span>150k+</span>
+                </div>
+              </div>
+
+              <ol className="adv-route mt-5" aria-label="Approval route">
+                {[
+                  { key: 'essp', label: 'ESSP', icon: <Monitor className="h-4 w-4" /> },
+                  { key: 'bc', label: 'Business Central', icon: <Building2 className="h-4 w-4" /> },
+                  { key: 'lm', label: 'Line Manager', icon: <UserCheck className="h-4 w-4" /> },
+                  { key: 'final', label: finalLimit?.approver ?? 'Final approver', icon: <Landmark className="h-4 w-4" /> },
+                ].map((node, index, all) => (
+                  <li key={node.key} className="contents">
+                    <span
+                      className={cn('adv-node', amount > 0 && 'is-lit', node.key === 'final' && 'is-final')}
+                      style={{ ['--d' as string]: `${index * 110}ms` }}
+                    >
+                      <span className="adv-node-dot">{node.icon}</span>
+                      <span key={node.label} className="adv-node-label">
+                        {node.label}
+                      </span>
+                    </span>
+                    {index < all.length - 1 ? (
+                      <span className={cn('adv-link', amount > 0 && 'is-lit')} style={{ ['--d' as string]: `${index * 110}ms` }} aria-hidden="true" />
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+
+              <ul className="mt-4 overflow-hidden rounded-xl border border-[var(--portal-card-border)] text-sm">
                 {APPROVAL_LIMITS.map((limit) => {
                   const active = finalLimit?.key === limit.key
                   return (
-                    <tr key={limit.key} className={cn('border-t border-slate-100', active && 'bg-teal-50 font-semibold text-teal-900')}>
-                      <td className="px-3 py-2">{limit.range}</td>
-                      <td className="px-3 py-2 text-right">
-                        → {limit.approver}
-                        {active ? <CheckCircle2 className="ml-1.5 inline h-4 w-4 text-teal-600" /> : null}
-                      </td>
-                    </tr>
+                    <li key={limit.key} className={cn('adv-limit', active && 'is-active')}>
+                      <span>{limit.range}</span>
+                      <span className="flex items-center gap-1.5 font-semibold">
+                        {limit.approver}
+                        {active ? <BadgeCheck className="h-4 w-4" aria-label="applies to this request" /> : null}
+                      </span>
+                    </li>
                   )
                 })}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            {amount > 0
-              ? `For ${formatAmount(amount)} the Line Manager approves first, then ${finalLimit?.approver}. Business Central runs the workflow; ESSP shows its status.`
-              : 'The Line Manager approves every request first, then the final approver by amount. Business Central runs the workflow; ESSP shows its status.'}
-          </p>
-        </Section>
+              </ul>
+              <p className="mt-3 text-xs text-[var(--portal-muted)]">
+                Business Central runs the approval. You follow its status, comments and payment reference here.
+              </p>
+            </div>
+          </section>
+
+          <section className="adv-section p-4" aria-label="Request checklist">
+            <p className="text-sm font-semibold text-[var(--portal-text)]">Before you submit</p>
+            <ul className="mt-2 space-y-1">
+              {[
+                { id: 'adv-s1', label: 'Purpose and justification', done: section1Done, detail: purposeLabel },
+                {
+                  id: 'adv-s2',
+                  label: 'Dates, amount and advance type',
+                  done: section2Done,
+                  detail: section2Done ? `${days} ${days === 1 ? 'day' : 'days'}, ${advanceTypeLabel}` : '',
+                },
+                { id: 'adv-s3', label: 'Supporting documents', done: true, detail: files.length ? `${files.length} attached` : 'Optional' },
+              ].map((item) => (
+                <li key={item.id}>
+                  <button type="button" className="adv-check" onClick={() => scrollTo(item.id)}>
+                    <span className={cn('adv-check-dot', item.done && 'is-done')} aria-hidden="true">
+                      {item.done ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="block text-sm text-[var(--portal-text)]">{item.label}</span>
+                      {item.detail ? <span className="block truncate text-xs text-[var(--portal-muted)]">{item.detail}</span> : null}
+                    </span>
+                    <span className="sr-only">{item.done ? 'complete' : 'not complete'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </aside>
       </div>
+
+      {success
+        ? createPortal(
+            <div className="adv-success" role="status" aria-live="assertive">
+              <div className="adv-success-card">
+                <svg className="adv-success-mark" viewBox="0 0 52 52" aria-hidden="true">
+                  <circle cx="26" cy="26" r="24" />
+                  <path d="M15 27 l7 7 l15 -16" />
+                </svg>
+                <p className="mt-4 text-lg font-semibold text-[var(--portal-text)]">
+                  {success.submit ? 'Submitted for approval' : 'Saved as draft'}
+                </p>
+                <p className="mt-1 text-sm tabular-nums text-[var(--portal-muted)]">
+                  {success.request.requestNo}
+                  {success.submit && finalLimit ? `, to the Line Manager and then ${finalLimit.approver}` : ''}
+                </p>
+                <p className="mt-3 text-xs text-[var(--portal-muted)]">Opening the request…</p>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

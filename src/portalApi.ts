@@ -706,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v378 — 1.0.3.539 (Advance Request one-page form per the ESSP developer handover: Requested Amount in ETB, documents, Save as Draft or Submit, approval limits; no duplicate submissions; draft kept and opened on BC error; View History; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v379 — 1.0.3.540 (Advance Request form polished: live approval meter and route, section completion checks, document drop zone, success moment, unsaved-changes guard, phone layout, dark mode; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string
