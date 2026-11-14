@@ -706,7 +706,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v381 — 1.0.3.542 (Overtime Payment picker lists the employee own Stage 1 requests not payable yet with the reason; dashboard and picker show BC load errors instead of empty lists; for BC 1.0.3.650 and 651)'
+export const PORTAL_API_BUILD = 'v382 — 1.0.3.543 (Overtime Payment View opens the Stage 1 Overtime Request in a viewer on the same page instead of a new tab; Overtime Request link to a missing request shows a message; for BC 1.0.3.650 and 651)'
 
 interface LookupSpec {
   service: string

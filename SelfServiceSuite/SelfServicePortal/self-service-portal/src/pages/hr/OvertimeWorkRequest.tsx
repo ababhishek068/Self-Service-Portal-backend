@@ -776,6 +776,26 @@ export function OvertimeWorkRequest() {
         </div>
       ) : null}
 
+      {mode === 'detail' && !shown ? (
+        listQuery.isLoading ? (
+          <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+            <p className="font-semibold">Overtime Request {selectedNo} is not in your list.</p>
+            <p className="mt-1">
+              Only your own Overtime Requests are listed here. Go back to{' '}
+              <button type="button" className="font-semibold underline-offset-2 hover:underline" onClick={() => goTo('list')}>
+                My requests
+              </button>
+              .
+            </p>
+          </div>
+        )
+      ) : null}
+
       {mode === 'detail' && shown ? (
         <div className="portal-rise-children space-y-4">
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">

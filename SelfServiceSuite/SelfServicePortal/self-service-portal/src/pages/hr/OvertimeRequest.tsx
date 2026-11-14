@@ -50,6 +50,7 @@ import {
 import { fetchOvertimeWorkRequests, type OvertimeWorkRequest as OvertimeWorkRow } from '@/api/endpoints/overtimeWork'
 import { getLocalPurchaseProjects } from '@/api/endpoints/requestEndpoint'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import { OvertimeStage1Viewer, type OvertimeStage1View } from '@/components/hr/OvertimeStage1Viewer'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { DataTable, type DataTableColumn } from '@/components/shared/DataTable'
@@ -641,6 +642,104 @@ function printApprovedWorkRequest(work: OvertimeWorkRow) {
   return true
 }
 
+/** A BC Stage 1 Overtime Request in the shape the payment form and the print use. */
+function bcStage1AsWorkRow(row: OvertimeRequestRow): OvertimeWorkRow {
+  return {
+    id: row.requestNo,
+    requestNo: row.requestNo,
+    status: row.status,
+    employeeNo: row.employeeNo,
+    employeeName: row.employeeName,
+    designation: row.designation,
+    departmentCode: row.departmentCode,
+    departmentName: row.departmentName,
+    overtimeDate: row.overtimeDate,
+    normalHoursFrom: row.startTime,
+    normalHoursTo: row.endTime,
+    overtimeFrom: row.startTime,
+    overtimeTo: row.endTime,
+    totalHours: row.totalHours,
+    workLocation: 'office' as const,
+    reason: row.reason,
+    expectedDeliverables: '',
+    lines: row.lines.map((line) => ({
+      overtimeDate: line.overtimeDate,
+      startTime: line.startTime,
+      endTime: line.endTime,
+      dayType: line.dayType,
+      workLocation: 'office' as const,
+      reason: line.reason,
+      totalHours: line.totalHours,
+    })),
+    requesterUserId: row.requesterUserId,
+    createdAt: row.createdAt,
+    submittedAt: row.submittedAt,
+    approvedAt: row.approvedAt,
+    decisionRemarks: row.decisionRemarks,
+    steps: [],
+    linkedPaymentRequestNo: row.paymentRequestNo ?? '',
+    linkedAt: '',
+  }
+}
+
+const WORK_LOCATION_LABELS: Record<string, string> = { office: 'Office', field: 'Field', projectSite: 'Project Site' }
+
+/** The Stage 1 request for the in-page viewer: BC owns status, lines and approvals; the portal copy adds location and deliverables. */
+function stage1ViewOf(bc: OvertimeRequestRow | null, local: OvertimeWorkRow | null): OvertimeStage1View | null {
+  if (!bc && !local) return null
+  const localLines = local?.lines ?? []
+  const lines = localLines.length
+    ? localLines.map((line) => ({
+        overtimeDate: line.overtimeDate,
+        startTime: line.startTime,
+        endTime: line.endTime,
+        dayType: line.dayType,
+        location: WORK_LOCATION_LABELS[line.workLocation] ?? line.workLocation ?? '',
+        hours: Number(line.totalHours || 0),
+        reason: line.reason,
+      }))
+    : (bc?.lines ?? []).map((line) => ({
+        overtimeDate: line.overtimeDate,
+        startTime: line.startTime,
+        endTime: line.endTime,
+        dayType: line.dayType,
+        location: '',
+        hours: Number(line.totalHours || 0),
+        reason: line.reason,
+      }))
+  const steps = bc?.steps.length
+    ? bc.steps.map((step) => ({ ...step, status: step.skipped ? 'Skipped' : step.status }))
+    : (local?.steps ?? [])
+  return {
+    requestNo: bc?.requestNo ?? local?.requestNo ?? '',
+    status: bc?.status ?? local?.status ?? '',
+    period: dateRange(lines, bc?.overtimeDate ?? local?.overtimeDate ?? ''),
+    totalHours: bc?.totalHours ?? local?.totalHours ?? 0,
+    employee: [bc?.employeeName ?? local?.employeeName, bc?.employeeNo ?? local?.employeeNo].filter(Boolean).join(' · '),
+    designation: bc?.designation || local?.designation || '',
+    department: bc?.departmentName || bc?.departmentCode || local?.departmentName || local?.departmentCode || '',
+    justification: local?.reason || bc?.reason || '',
+    expectedDeliverables: local?.expectedDeliverables || '',
+    lines: [...lines]
+      .sort((left, right) => (left.overtimeDate + left.startTime).localeCompare(right.overtimeDate + right.startTime))
+      .map((line) => ({
+        date: shortDate(line.overtimeDate),
+        time: `${clockText(line.startTime)} – ${clockText(line.endTime)}`,
+        category: DAY_TYPES.find((type) => type.value === line.dayType)?.label.split(' (')[0] ?? line.dayType,
+        location: line.location,
+        hours: line.hours,
+        reason: line.reason || '',
+      })),
+    steps: steps.map((step) => ({
+      label: step.label,
+      approver: step.approverName || step.approverUserId,
+      status: step.status,
+      decidedAt: step.decidedAt ? formatDateTime(step.decidedAt) : '',
+      comment: step.comment,
+    })),
+  }
+}
+
 export function OvertimeRequest() {
   const toast = useToast()
   const confirm = useConfirm()
@@ -659,6 +758,8 @@ export function OvertimeRequest() {
   const [workCompletedOn, setWorkCompletedOn] = useState('')
   const [employeeRemarks, setEmployeeRemarks] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  /** The Stage 1 Overtime Request open in the in-page viewer (View), or null. */
+  const [viewStage1No, setViewStage1No] = useState<string | null>(null)
 
   const contextQuery = useQuery({ queryKey: CONTEXT_KEY, queryFn: fetchOvertimeContext, staleTime: 60_000 })
   const stage1PayableQuery = useQuery({
@@ -685,43 +786,7 @@ export function OvertimeRequest() {
     () =>
       (stage1PayableQuery.data ?? [])
         .filter((row) => (editingNo ? row.requestNo === priorWorkRequestNo : row.canRequestPayment))
-        .map((row) => ({
-          id: row.requestNo,
-          requestNo: row.requestNo,
-          status: 'Approved' as const,
-          employeeNo: row.employeeNo,
-          employeeName: row.employeeName,
-          designation: row.designation,
-          departmentCode: row.departmentCode,
-          departmentName: row.departmentName,
-          overtimeDate: row.overtimeDate,
-          normalHoursFrom: row.startTime,
-          normalHoursTo: row.endTime,
-          overtimeFrom: row.startTime,
-          overtimeTo: row.endTime,
-          totalHours: row.totalHours,
-          overtimeType: 'weekday' as const,
-          workLocation: 'office' as const,
-          reason: row.reason,
-          expectedDeliverables: '',
-          lines: row.lines.map((line) => ({
-            overtimeDate: line.overtimeDate,
-            startTime: line.startTime,
-            endTime: line.endTime,
-            dayType: line.dayType,
-            workLocation: 'office' as const,
-            reason: line.reason,
-            totalHours: line.totalHours,
-          })),
-          requesterUserId: row.requesterUserId,
-          createdAt: row.createdAt,
-          submittedAt: row.submittedAt,
-          approvedAt: row.approvedAt,
-          decisionRemarks: row.decisionRemarks,
-          steps: [],
-          linkedPaymentRequestNo: row.paymentRequestNo ?? '',
-          linkedAt: '',
-        })),
+        .map(bcStage1AsWorkRow),
     [stage1PayableQuery.data, editingNo, priorWorkRequestNo],
   )
   const approvedWorkQuery = { data: payableStage1, isLoading: stage1PayableQuery.isLoading }
@@ -738,8 +803,25 @@ export function OvertimeRequest() {
     queryKey: ['hr', 'overtime-work-for-payment'],
     queryFn: fetchOvertimeWorkRequests,
     staleTime: 30_000,
-    enabled: mode === 'detail' && Boolean(selectedNo),
+    enabled: (mode === 'detail' && Boolean(selectedNo)) || Boolean(viewStage1No),
   })
+  const stage1View = useMemo(() => {
+    if (!viewStage1No) return null
+    const bc = (stage1PayableQuery.data ?? []).find((row) => row.requestNo === viewStage1No) ?? null
+    const local = (stage1WorkQuery.data ?? []).find((row) => row.requestNo === viewStage1No) ?? null
+    return stage1ViewOf(bc, local)
+  }, [viewStage1No, stage1PayableQuery.data, stage1WorkQuery.data])
+  /** Print the Stage 1 request: the portal copy when it exists, else BC's. */
+  const printStage1 = (requestNo: string) => {
+    const work =
+      (stage1WorkQuery.data ?? []).find((row) => row.requestNo === requestNo) ??
+      (stage1PayableQuery.data ?? []).filter((row) => row.requestNo === requestNo).map(bcStage1AsWorkRow)[0]
+    if (!work) {
+      toast.error(`Overtime Request ${requestNo} could not be loaded for printing.`)
+      return
+    }
+    if (!printApprovedWorkRequest(work)) toast.error('Allow pop-ups to print the overtime request.')
+  }
 
   const context = contextQuery.data
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data])
@@ -951,9 +1033,6 @@ export function OvertimeRequest() {
         ? paymentContextQuery.error.message
         : overtimeRoutingMessage(paymentContext?.routingProblem ?? '')
       : ''
-  const linkedWork = shown?.otRequestNo
-    ? (stage1WorkQuery.data ?? []).find((row) => row.requestNo === shown.otRequestNo) ?? null
-    : null
 
   // Payment has no Add Line: selecting an approved work request loads its hours.
   useEffect(() => {
@@ -1034,27 +1113,13 @@ export function OvertimeRequest() {
             Withdraw
           </Button>
         ) : null}
-        {linkedWork ? (
+        {shown?.otRequestNo ? (
           <>
-            <Button asChild type="button" variant="outline">
-              <Link
-                to={`/hr/overtime-work-request?request=${encodeURIComponent(linkedWork.requestNo)}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                View Overtime Request
-              </Link>
+            <Button type="button" variant="outline" onClick={() => setViewStage1No(shown.otRequestNo ?? null)}>
+              <Eye className="mr-2 h-4 w-4" />
+              View Overtime Request
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                if (!printApprovedWorkRequest(linkedWork)) {
-                  toast.error('Allow pop-ups to print the approved overtime request.')
-                }
-              }}
-            >
+            <Button type="button" variant="outline" onClick={() => printStage1(shown.otRequestNo ?? '')}>
               <Printer className="mr-2 h-4 w-4" />
               Print Overtime Request
             </Button>
@@ -1283,27 +1348,21 @@ export function OvertimeRequest() {
                         </p>
                         {priorWorkRequestNo ? (
                           <div className="flex flex-wrap gap-2">
-                            <Button asChild type="button" variant="outline" size="sm">
-                              <Link
-                                to={`/hr/overtime-work-request?request=${encodeURIComponent(priorWorkRequestNo)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <Eye className="mr-2 h-4 w-4" />
-                                View
-                              </Link>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setViewStage1No(priorWorkRequestNo)}
+                            >
+                              <Eye className="mr-2 h-4 w-4" />
+                              View
                             </Button>
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
                               disabled={!selectedPriorWork}
-                              onClick={() => {
-                                if (!selectedPriorWork) return
-                                if (!printApprovedWorkRequest(selectedPriorWork)) {
-                                  toast.error('Allow pop-ups to print the approved overtime work request.')
-                                }
-                              }}
+                              onClick={() => printStage1(priorWorkRequestNo)}
                             >
                               <Printer className="mr-2 h-4 w-4" />
                               Print
@@ -1499,6 +1558,15 @@ export function OvertimeRequest() {
             </HistorySection>
           ) : null}
         </div>
+      ) : null}
+
+      {viewStage1No ? (
+        <OvertimeStage1Viewer
+          view={stage1View}
+          loading={stage1PayableQuery.isLoading || stage1WorkQuery.isLoading}
+          onClose={() => setViewStage1No(null)}
+          onPrint={() => printStage1(viewStage1No)}
+        />
       ) : null}
     </PageWrapper>
   )
