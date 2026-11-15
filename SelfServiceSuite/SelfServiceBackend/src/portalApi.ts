@@ -182,6 +182,7 @@ import {
 } from './overtimeRequests.js'
 import {
   addAdvanceSettlementExpense,
+  confirmAdvanceReceipt,
   getAdvanceSettlementContext,
   saveAdvanceSettlementDetails,
 } from './advanceSettlement.js'
@@ -707,7 +708,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v385 — 1.0.3.546 (Advance Settlement lists only advances BC can settle, approved but unpaid ones greyed out with the reason, prerequisite ticks follow the selected advance; includes 545 ESSP Staff Salary Advance form and overtime Print without pop-ups; for BC 1.0.3.652)'
+export const PORTAL_API_BUILD = 'v386 — 1.0.3.547 (Advance Request: requester confirms receipt of the paid advance before settlement, ESSP Advance Request Types dropdown with Other Specify; Advance Settlement needs the receipt confirmation; includes 545 and 546; for BC 1.0.3.653)'
 
 interface LookupSpec {
   service: string
@@ -7459,6 +7460,20 @@ export function buildPortalApiRouter() {
       if (docNo) await requireOwnedPortalRequest(`salaryAdvance-${docNo}`, authUser)
       res.setHeader('Cache-Control', 'private, no-store')
       res.json(await getSalaryAdvanceContext(authUser, docNo))
+    }),
+  )
+
+  /** BC 1.0.3.653 — the requester confirms receipt of the paid advance; settlement is allowed only after it. */
+  router.post(
+    '/advance-payment/:no/confirm-receipt',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const advanceNo = String(req.params.no ?? '').trim().toUpperCase()
+      if (!advanceNo) throw portalError('Advance number is required.', 422)
+      await requireOwnedPortalRequest(`imprest-${advanceNo}`, authUser)
+      res.json(
+        await confirmAdvanceReceipt(authUser.employeeNo, advanceNo, String(req.body?.remarks ?? '')),
+      )
     }),
   )
 

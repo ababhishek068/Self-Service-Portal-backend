@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { CheckCircle2, Circle, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
@@ -74,9 +75,16 @@ function isPaid(row: PortalRequest) {
   return truthyFlag(payload.FullyPaid ?? payload.Fully_Paid) || isPosted(row)
 }
 
+function receiptConfirmed(row: PortalRequest) {
+  const payload = row.payload ?? {}
+  return truthyFlag(payload.ReceiptConfirmed ?? payload.Receipt_Confirmed)
+}
+
 /** Why one of the employee's approved advances is not in BC's settleable list. */
-function notSettleableReason(row: PortalRequest) {
-  return isPaid(row) ? 'a settlement is already open' : 'approved, not paid yet'
+function notSettleableReason(row: PortalRequest, withReceipt: boolean) {
+  if (!isPaid(row)) return 'approved, not paid yet'
+  if (withReceipt && !receiptConfirmed(row)) return 'paid, confirm receipt first'
+  return 'a settlement is already open'
 }
 
 type PrerequisiteState = 'met' | 'unmet' | 'open'
@@ -107,11 +115,15 @@ function Prerequisite({
   loading,
   selectedSettleable,
   unpaid,
+  withReceipt,
+  awaitingReceipt,
 }: {
   available: number
   loading: boolean
   selectedSettleable: boolean
   unpaid: string[]
+  withReceipt: boolean
+  awaitingReceipt: string[]
 }) {
   const state: PrerequisiteState = selectedSettleable ? 'met' : 'open'
   return (
@@ -121,8 +133,11 @@ function Prerequisite({
         Prerequisite — you can start an Advance Settlement only after:
       </p>
       <ul className="mt-1.5 space-y-1 pl-6">
-        <PrerequisiteItem state={state}>an approved Advance Payment Request, and</PrerequisiteItem>
-        <PrerequisiteItem state={state}>the advance has been paid.</PrerequisiteItem>
+        <PrerequisiteItem state={state}>an approved Advance Payment Request,</PrerequisiteItem>
+        <PrerequisiteItem state={state}>{withReceipt ? 'the advance has been paid, and' : 'the advance has been paid.'}</PrerequisiteItem>
+        {withReceipt ? (
+          <PrerequisiteItem state={state}>you have confirmed receipt of the money in ESSP.</PrerequisiteItem>
+        ) : null}
       </ul>
       <p className="mt-1.5 text-xs text-teal-900/80">
         {loading
@@ -131,6 +146,25 @@ function Prerequisite({
             ? `${available} approved and paid advance${available === 1 ? '' : 's'} can be settled. An advance with an open settlement is not listed again (no duplicate settlement).`
             : 'No approved and paid advance is waiting for settlement.'}
       </p>
+      {!loading && awaitingReceipt.length ? (
+        <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+          <p>
+            Paid, receipt not confirmed yet: open the advance and click <span className="font-semibold">Confirm Receipt</span>.
+            It can then be settled here.
+          </p>
+          <p className="mt-1 flex flex-wrap gap-2">
+            {awaitingReceipt.map((advanceNo) => (
+              <Link
+                key={advanceNo}
+                to={`/finance/advance-request?open=${encodeURIComponent(`imprest-${advanceNo}`)}`}
+                className="rounded-full bg-white px-2 py-0.5 font-semibold text-sky-900 ring-1 ring-sky-200 hover:bg-sky-100"
+              >
+                {advanceNo} → Confirm Receipt
+              </Link>
+            ))}
+          </p>
+        </div>
+      ) : null}
       {!loading && unpaid.length ? (
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
@@ -174,6 +208,16 @@ export function ImprestSurrender() {
     ? (imprestQuery.data ?? []).filter((row) => isSurrenderableImprest(row) && !settleableNos.has(row.requestNo))
     : []
   const unpaid = waiting.filter((row) => !isPaid(row)).map((row) => row.requestNo)
+  // BC 1.0.3.653: paid advances wait for the requester's receipt confirmation before settlement.
+  const withReceipt = settleableQuery.data?.supportsReceiptConfirmation === true
+  const awaitingReceipt = withReceipt
+    ? Array.from(
+        new Set([
+          ...(settleableQuery.data?.awaitingReceipt ?? []).map((row) => row.advanceNo),
+          ...waiting.filter((row) => isPaid(row) && !receiptConfirmed(row)).map((row) => row.requestNo),
+        ]),
+      )
+    : []
   // Only what BC's PortalAdvanceSettlementContext allows (BC refuses the rest: "must be paid before settlement");
   // without that context, the employee's paid advances.
   const imprestOptions = settleableQuery.isSuccess
@@ -183,7 +227,7 @@ export function ImprestSurrender() {
           value: row.advanceNo,
         })),
         ...waiting.map((row) => ({
-          label: `${row.requestNo} — ${notSettleableReason(row)}`,
+          label: `${row.requestNo} — ${notSettleableReason(row, withReceipt)}`,
           value: `blocked:${row.requestNo}`,
           disabled: true,
         })),
@@ -267,6 +311,8 @@ export function ImprestSurrender() {
             loading={settleableQuery.isLoading}
             selectedSettleable={settleableNos.has(advanceNo)}
             unpaid={unpaid}
+            withReceipt={withReceipt}
+            awaitingReceipt={awaitingReceipt}
           />
           {advanceNo ? (
           <div>

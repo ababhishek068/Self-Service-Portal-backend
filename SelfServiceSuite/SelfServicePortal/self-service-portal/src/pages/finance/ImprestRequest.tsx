@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
 import { useMemo } from 'react'
-import { Landmark, UserCheck } from 'lucide-react'
+import { Banknote, HandCoins, Landmark, Receipt, UserCheck } from 'lucide-react'
 import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { AdvanceRequestCreate } from '@/components/finance/AdvanceRequestCreate'
 import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
+import { confirmAdvanceReceipt } from '@/api/endpoints/advanceSettlement'
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
@@ -22,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
+import type { AfterApproval } from '@/components/shared/RequestProgress'
 import type { LookupOption } from '@/api/endpoints/lookups'
 
 const today = formatISO(new Date(), { representation: 'date' })
@@ -32,6 +34,52 @@ const ADVANCE_APPROVERS: TrackerStep[] = [
   { key: 'line-manager', heading: 'Line Manager', owner: 'Workflow User Group', icon: UserCheck },
   { key: 'final-approver', heading: 'FAD | COO | CEO', owner: 'By amount: <50k · 50–100k · >100k ETB', icon: Landmark },
 ]
+
+function payloadFlag(request: PortalRequest, keys: string[]) {
+  const payload = request.payload ?? {}
+  return keys.some((key) => payload[key] === true || String(payload[key] ?? '').toLowerCase() === 'true')
+}
+
+/** BC pays an advance through Payment Schedule posting (Fully Paid) or by posting it. */
+function advancePaid(request: PortalRequest) {
+  return request.status === 'Posted' || payloadFlag(request, ['FullyPaid', 'Fully_Paid', 'Posted'])
+}
+
+function receiptConfirmed(request: PortalRequest) {
+  return payloadFlag(request, ['ReceiptConfirmed', 'Receipt_Confirmed'])
+}
+
+function fullySettled(request: PortalRequest) {
+  return /^full/i.test(String(request.payload?.SurrenderStatus ?? request.payload?.Surrender_Status ?? '').trim())
+}
+
+/**
+ * Business requirement (Nov 2026): approval → Finance pays → the requester confirms receipt in ESSP → only then
+ * settlement (BC 1.0.3.653). On older BC there is no receipt step.
+ */
+function advanceAfterApproval(request: PortalRequest, withReceipt: boolean): AfterApproval {
+  const paid = advancePaid(request)
+  const received = receiptConfirmed(request)
+  const settled = fullySettled(request)
+  const steps: TrackerStep[] = [
+    { key: 'payment', heading: 'Finance', owner: 'Pays the advance', icon: Banknote },
+    ...(withReceipt ? [{ key: 'receipt', heading: 'Receipt', owner: 'You confirm in ESSP', icon: HandCoins }] : []),
+    { key: 'settlement', heading: 'Settlement', owner: 'Advance Settlement', icon: Receipt },
+  ]
+  if (settled) return { steps, caption: 'Settled', current: steps.length }
+  if (!paid) return { steps, caption: 'Waiting for Finance to pay the advance', current: 0 }
+  if (withReceipt && !received) return { steps, caption: 'Paid · confirm receipt (Confirm Receipt)', current: 1 }
+  return { steps, caption: 'Settle the advance under Advance Settlement', current: withReceipt ? 2 : 1 }
+}
+
+function receiptStatus(request: PortalRequest) {
+  const payload = request.payload ?? {}
+  if (receiptConfirmed(request)) {
+    const on = firstPayloadDate(payload, ['ReceiptConfirmedOn', 'Receipt_Confirmed_On'])
+    return on ? `Confirmed on ${on}` : 'Confirmed'
+  }
+  return advancePaid(request) ? 'Paid — waiting for your confirmation (Confirm Receipt)' : undefined
+}
 
 function paymentStatus(request: PortalRequest) {
   const payload = request.payload ?? {}
@@ -268,6 +316,9 @@ export function ImprestRequest() {
     purposeContext.data?.purposes?.length ? purposeContext.data.purposes : fallbackPurposes
   // ESSP spec: Project / Assignment (Optional) — on BC 1.0.3.651+, which reports the field.
   const supportsProject = purposeContext.data?.supportsProjectAssignment === true
+  // BC 1.0.3.653: confirm receipt before settlement, and the ESSP Advance Request Types list.
+  const supportsReceipt = purposeContext.data?.supportsReceiptConfirmation === true
+  const advanceTypeOptions = purposeContext.data?.advanceTypes?.length ? purposeContext.data.advanceTypes : imprestTypes.options
   const purposeHint = purposeContext.data?.purposeGroupCaption
     ? `Purposes for ${purposeContext.data.purposeGroupCaption}${
         purposeContext.data.divisionCode ? ` (${purposeContext.data.divisionCode})` : ''
@@ -278,7 +329,7 @@ export function ImprestRequest() {
     <MultiStepRequestPage
       title="Advance Request"
       headerLabel="New Advance Request"
-      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). Settlement is not part of this form: settle later via Advance Settlement (within two working days of return)."
+      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm receipt here (Confirm Receipt); only then can it be settled via Advance Settlement (within two working days of return)."
       module={module}
       queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
@@ -306,13 +357,33 @@ export function ImprestRequest() {
           module={module}
           purposeOptions={purposeOptions}
           purposeHint={purposeHint}
-          advanceTypes={imprestTypes.options}
+          advanceTypes={advanceTypeOptions}
           supportsProject={supportsProject}
           onCreated={onCreated}
           onCancel={onCancel}
         />
       )}
       progressApprovers={ADVANCE_APPROVERS}
+      progressAfterApproval={(request) => advanceAfterApproval(request, supportsReceipt)}
+      extraDetailActions={[
+        {
+          id: 'confirm-receipt',
+          label: 'Confirm Receipt',
+          visibleWhen: (request) =>
+            supportsReceipt &&
+            ['Approved', 'Posted'].includes(request.status) &&
+            advancePaid(request) &&
+            !receiptConfirmed(request),
+          confirm: {
+            title: 'Confirm receipt of the advance?',
+            message:
+              'Confirm only once the advance is in your hands or your account. After you confirm, you can settle the advance under Advance Settlement.',
+            confirmLabel: 'Confirm Receipt',
+          },
+          run: (requestId) => confirmAdvanceReceipt(documentNoFromRequestId(requestId)),
+          successMessage: 'Receipt confirmed. You can now settle the advance under Advance Settlement.',
+        },
+      ]}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}
       attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."
@@ -476,6 +547,7 @@ export function ImprestRequest() {
           paths: ['payload.ActivityLocation', 'payload.Activity_Location'],
         },
         { label: 'Project / Assignment', paths: ['payload.ProjectAssignment', 'payload.Project_Assignment'] },
+        { label: 'Advance Type (Other)', paths: ['payload.AdvanceTypeDetails', 'payload.Advance_Type_Details'] },
         ...financeOrgDetailFields,
         {
           label: 'Job Title',
@@ -502,6 +574,7 @@ export function ImprestRequest() {
         { label: 'Status', paths: ['request.status'], format: 'status' },
         // Shown only once BC has a payment for the advance (spec section 5).
         { label: 'Payment Status', paths: [], resolve: paymentStatus },
+        { label: 'Receipt Confirmation', paths: [], resolve: (request) => (supportsReceipt ? receiptStatus(request) : undefined) },
         {
           label: 'Payment Reference',
           paths: ['payload.PVNo', 'payload.PV_No', 'payload.PaymentVoucherNo', 'payload.Payment_Voucher_No'],
@@ -550,7 +623,7 @@ export function ImprestRequest() {
         onValuesChange: (values, form, requestId) =>
           applyImprestLineAmount(values, form, requestId, imprestTypes.options),
         fields: [
-          { name: 'advanceType', label: 'Advance Type', type: 'select', options: imprestTypes.options },
+          { name: 'advanceType', label: 'Advance Type', type: 'select', options: advanceTypeOptions },
           {
             name: 'destination',
             label: 'Travel Destination (location)',

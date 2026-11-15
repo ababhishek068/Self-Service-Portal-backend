@@ -17,7 +17,7 @@ interface RequestProgressProps {
    * Stages after the approvals, in place of the closing Approved step (Medical Claim: the payment
    * voucher, then Paid). Reached when the document is approved, done when it is posted.
    */
-  afterApproval?: { steps: TrackerStep[]; caption: string }
+  afterApproval?: AfterApproval
   /**
    * The approvers this document goes to (e.g. Advance: Line Manager → FAD | COO | CEO), shown until BC
    * has approval entries in place of the generic Approval workflow step.
@@ -27,6 +27,13 @@ interface RequestProgressProps {
   creating?: 'new' | 'edit'
   className?: string
 }
+
+/**
+ * Stages after the approvals. `current` (0-based) says which one the document is at, for stages BC reports
+ * one by one (Advance: paid, receipt confirmed, settled); a value past the last step means all are done. Without
+ * it the first stage is current until the document is posted.
+ */
+export type AfterApproval = { steps: TrackerStep[]; caption: string; current?: number }
 
 /** One approver (or group of approvers at the same BC sequence) in the latest approval round. */
 type ApproverGroup = {
@@ -169,7 +176,13 @@ function workflow({
   let stage: ProcessStage
   const approvalsDone =
     isApproved(status) || (groups.length > 0 && groups.every((group) => group.status === 'Approved') && !normalized.includes('reject'))
-  if (approvalsDone && afterApproval?.steps.length && !isPosted(status)) {
+  if (approvalsDone && afterApproval?.steps.length && afterApproval.current !== undefined) {
+    const at = Math.max(0, afterApproval.current)
+    stage =
+      at >= afterApproval.steps.length
+        ? { index: steps.length, state: 'active' }
+        : { index: firstAfter + at, state: 'active', caption: afterApproval.caption }
+  } else if (approvalsDone && afterApproval?.steps.length && !isPosted(status)) {
     stage = { index: firstAfter, state: 'active', caption: afterApproval.caption }
   } else if (approvalsDone) {
     stage = { index: steps.length, state: 'active' }

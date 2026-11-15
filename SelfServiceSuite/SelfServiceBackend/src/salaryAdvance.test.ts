@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { parseAdvanceSettlementContext } from './advanceSettlement.js'
 import {
   assertEligible,
   parseSalaryAdvanceContext,
@@ -189,5 +190,25 @@ describe('Staff Salary Advance to Business Central', () => {
     assert.doesNotThrow(() => assertEligible(context, saved.plan, today))
     assert.throws(() => assertEligible(context, { ...saved.plan, requestedAmount: 30000 }, today), /Amount within policy limit/)
     assert.equal(salaryAdvancePlanFromHeader({ RequestedAmount: 0, PercentageofSalary: 20 }), null)
+  })
+})
+
+describe('Advance receipt confirmation before settlement (BC 1.0.3.653)', () => {
+  it('reads the paid advances still waiting for the requester to confirm receipt', () => {
+    const context = parseAdvanceSettlementContext(
+      JSON.stringify({
+        employeeNo: 'ABH-010',
+        supportsReceiptConfirmation: true,
+        awaitingReceipt: [{ advanceNo: 'IMP-000014', purpose: 'UAT', amount: 40000, datePosted: '2026-11-15' }, {}],
+        settleableAdvances: [],
+      }),
+    )
+    assert.equal(context.supportsReceiptConfirmation, true)
+    assert.deepEqual(context.awaitingReceipt, [
+      { advanceNo: 'IMP-000014', purpose: 'UAT', amount: 40000, datePosted: '2026-11-15' },
+    ])
+    const older = parseAdvanceSettlementContext(JSON.stringify({ employeeNo: 'ABH-010', settleableAdvances: [] }))
+    assert.equal(older.supportsReceiptConfirmation, false)
+    assert.deepEqual(older.awaitingReceipt, [])
   })
 })

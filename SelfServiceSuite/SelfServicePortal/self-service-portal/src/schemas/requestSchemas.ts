@@ -264,6 +264,8 @@ export const advanceRequestCreateSchema = z
       .number({ message: 'Enter the requested amount' })
       .positive('Requested amount must be greater than zero'),
     advanceType: z.string().min(1, 'Choose the advance type'),
+    /** BC 1.0.3.653: required (by the form) when the Advance Type is Other (Specify). */
+    advanceTypeDetails: z.string().max(100, 'Keep it within 100 characters').optional(),
   })
   .superRefine(refineAdvanceHeader)
 

@@ -11,9 +11,20 @@ export type SettleableAdvance = {
   posted: boolean
 }
 
+/** BC 1.0.3.653: a paid advance whose receipt the requester has not confirmed in ESSP yet. */
+export type AwaitingReceiptAdvance = {
+  advanceNo: string
+  purpose: string
+  amount: number
+  datePosted: string
+}
+
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
+  /** BC 1.0.3.653: settlement only after the requester confirmed receipt (false on older BC). */
+  supportsReceiptConfirmation: boolean
+  awaitingReceipt: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
   advanceNo: string
@@ -86,9 +97,22 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
   const advanceRaw =
     raw.advance && typeof raw.advance === 'object' ? (raw.advance as Record<string, unknown>) : null
 
+  const awaiting = Array.isArray(raw.awaitingReceipt) ? raw.awaitingReceipt : []
+  const awaitingReceipt = awaiting
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+    .map((record) => ({
+      advanceNo: str(record.advanceNo),
+      purpose: str(record.purpose),
+      amount: num(record.amount),
+      datePosted: str(record.datePosted),
+    }))
+    .filter((row) => row.advanceNo)
+
   return {
     employeeNo: str(raw.employeeNo),
     settleableAdvances,
+    supportsReceiptConfirmation: bool(raw.supportsReceiptConfirmation),
+    awaitingReceipt,
     surrenderNo: str(raw.surrenderNo),
     status: str(raw.status),
     advanceNo: str(raw.advanceNo),
@@ -161,4 +185,31 @@ export async function addAdvanceSettlementExpense(input: {
     expenseAmount: input.expenseAmount,
   })
   return Number(result.returnValue ?? 0)
+}
+
+/** BC 1.0.3.653: the requester confirms receipt of the paid advance; settlement is allowed only after it. */
+export async function confirmAdvanceReceipt(employeeNo: string, advanceNo: string, remarks: string) {
+  try {
+    const result = await callSoapMethod('PortalAdvanceConfirmReceipt', {
+      employeeNo,
+      docNo: advanceNo,
+      remarks: remarks.trim().slice(0, 250),
+    })
+    const raw = parseSoapJson(result.returnValue)
+    return {
+      advanceNo: str(raw.advanceNo) || advanceNo,
+      receiptConfirmed: bool(raw.receiptConfirmed),
+      receiptConfirmedOn: str(raw.receiptConfirmedOn),
+      receivedAmount: num(raw.receivedAmount),
+    }
+  } catch (error) {
+    const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
+    if (/Method '?PortalAdvanceConfirmReceipt'? is invalid|PortalAdvanceConfirmReceipt.*(not found|not published)/i.test(message)) {
+      throw Object.assign(
+        new Error('Confirm Receipt needs Business Central 1.0.3.653. Ask the BC administrator to publish it.'),
+        { status: 503 },
+      )
+    }
+    throw error
+  }
 }

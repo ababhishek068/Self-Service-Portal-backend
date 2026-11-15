@@ -11,9 +11,20 @@ export type SettleableAdvance = {
   posted: boolean
 }
 
+/** BC 1.0.3.653: a paid advance whose receipt the requester has not confirmed in ESSP yet. */
+export type AwaitingReceiptAdvance = {
+  advanceNo: string
+  purpose: string
+  amount: number
+  datePosted: string
+}
+
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
+  /** BC 1.0.3.653: settlement only after the requester confirmed receipt (false on older BC). */
+  supportsReceiptConfirmation?: boolean
+  awaitingReceipt?: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
   advanceNo: string
@@ -69,4 +80,13 @@ export async function addAdvanceSettlementExpense(payload: {
 }) {
   requireAuthApiUrl()
   return authPost<{ lineNo: number; surrenderNo: string }>('/api/advance-settlement/expenses', payload)
+}
+
+/** BC 1.0.3.653: confirm receipt of the paid advance (`advanceNo` = IMP-…); settlement opens after it. */
+export async function confirmAdvanceReceipt(advanceNo: string, remarks = '') {
+  requireAuthApiUrl()
+  return authPost<{ advanceNo: string; receiptConfirmed: boolean; receiptConfirmedOn: string; receivedAmount: number }>(
+    `/api/advance-payment/${encodeURIComponent(advanceNo)}/confirm-receipt`,
+    { remarks },
+  )
 }

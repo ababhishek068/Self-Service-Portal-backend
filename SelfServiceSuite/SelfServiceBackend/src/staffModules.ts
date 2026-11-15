@@ -752,6 +752,19 @@ const imprest: ModuleSpec = {
         if (!soapMethodMissing(error, 'PortalAdvanceProjectAssignment')) throw error
       }
     }
+    // BC 1.0.3.653: Advance Type "Other (Specify)" — what the advance is for.
+    const advanceTypeDetails = String(req.body?.advanceTypeDetails ?? '').trim()
+    if (advanceTypeDetails) {
+      try {
+        await callSoapMethod('PortalAdvanceTypeDetails', {
+          employeeNo: user.employeeNo,
+          docNo: no,
+          details: advanceTypeDetails.slice(0, 100),
+        })
+      } catch (error) {
+        if (!soapMethodMissing(error, 'PortalAdvanceTypeDetails')) throw error
+      }
+    }
   },
 }
 

@@ -1,3 +1,4 @@
+import type { AfterApproval } from '@/components/shared/RequestProgress'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, ArrowLeft, History, Pencil, Plus, Send, Trash2 } from 'lucide-react'
@@ -125,7 +126,7 @@ export interface MultiStepRequestConfig {
    */
   processBanner?: ReactNode | ((request: PortalRequest | null) => ReactNode)
   /** Stages after the approvals on the Workflow Progress tracker (Medical Claim: payment voucher, then Paid). */
-  progressAfterApproval?: (request: PortalRequest) => { steps: TrackerStep[]; caption: string } | undefined
+  progressAfterApproval?: (request: PortalRequest) => AfterApproval | undefined
   /** The approvers to show on Workflow Progress before BC has approval entries (new form, draft). */
   progressApprovers?: TrackerStep[]
   /** Some workflows should show the process only after a request is started. */

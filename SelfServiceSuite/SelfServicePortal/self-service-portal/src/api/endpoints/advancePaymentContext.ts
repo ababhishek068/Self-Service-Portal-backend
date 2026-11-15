@@ -15,6 +15,26 @@ export type AdvancePaymentContext = {
   purposes: LookupOption[]
   /** BC 1.0.3.651: Imprest Header has the optional Project / Assignment field. */
   supportsProjectAssignment: boolean
+  /** BC 1.0.3.653: the requester confirms receipt of the paid advance before settlement. */
+  supportsReceiptConfirmation: boolean
+  /**
+   * BC 1.0.3.653: the ESSP Advance Request Types, in the client's order (empty on older BC). `meta.requiresOtherDetails`
+   * marks Other (Specify); `meta.glAccount` is blank until Finance sets the account.
+   */
+  advanceTypes: LookupOption[]
+}
+
+type AdvanceTypeRow = { code?: string; description?: string; glAccount?: string; requiresOtherDetails?: boolean; sortOrder?: number }
+
+function mapAdvanceTypes(rows: AdvanceTypeRow[] | undefined): LookupOption[] {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => String(row.code ?? '').trim())
+    .sort((left, right) => Number(left.sortOrder ?? 0) - Number(right.sortOrder ?? 0))
+    .map((row) => ({
+      value: String(row.code ?? '').trim(),
+      label: String(row.description ?? row.code ?? '').trim(),
+      meta: { glAccount: String(row.glAccount ?? '').trim(), requiresOtherDetails: row.requiresOtherDetails === true },
+    }))
 }
 
 export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<AdvancePaymentContext> {
@@ -28,6 +48,8 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroupCaption?: string
     purposes?: AdvancePaymentPurposeRow[]
     supportsProjectAssignment?: boolean
+    supportsReceiptConfirmation?: boolean
+    advanceTypes?: AdvanceTypeRow[]
   }>(`/api/advance-payment/context${query}`)
 
   return {
@@ -38,5 +60,7 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroupCaption: String(raw.purposeGroupCaption ?? '').trim(),
     purposes: mapAdvancePaymentPurposes(raw.purposes),
     supportsProjectAssignment: raw.supportsProjectAssignment === true,
+    supportsReceiptConfirmation: raw.supportsReceiptConfirmation === true,
+    advanceTypes: mapAdvanceTypes(raw.advanceTypes),
   }
 }

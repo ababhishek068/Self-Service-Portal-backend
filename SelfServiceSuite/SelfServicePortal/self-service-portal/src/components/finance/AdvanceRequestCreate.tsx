@@ -256,6 +256,7 @@ export function AdvanceRequestCreate({
       projectAssignment: '',
       requestedAmount: '',
       advanceType: '',
+      advanceTypeDetails: '',
       purpose: '',
     },
   })
@@ -271,7 +272,11 @@ export function AdvanceRequestCreate({
   const days = activityStart ? activityDays(activityStart, activityEnd) : 0
   const shownAmount = useCountUp(amount)
   const purposeLabel = purposeOptions.find((option) => option.value === purposeCode)?.label ?? ''
-  const advanceTypeLabel = advanceTypes.find((option) => option.value === text('advanceType'))?.label ?? ''
+  const advanceTypeOption = advanceTypes.find((option) => option.value === text('advanceType'))
+  const advanceTypeLabel = advanceTypeOption?.label ?? ''
+  // ESSP Advance Request Types (BC 1.0.3.653): Other (Specify) needs what the advance is for.
+  const typeNeedsDetails =
+    advanceTypeOption?.meta?.requiresOtherDetails === true || /^other\b/i.test(advanceTypeLabel)
 
   const section1Done =
     Boolean(purposeCode) && (!needsOther || text('otherPurposeDetails').trim().length > 0) && text('justification').trim().length >= 10
@@ -345,6 +350,7 @@ export function AdvanceRequestCreate({
           activityEndDate: end,
           activityLocation: String(values.activityLocation ?? '').trim(),
           ...(supportsProject ? { projectAssignment: String(values.projectAssignment ?? '').trim() } : {}),
+          ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
           // The requested amount (ETB) on the chosen Advance Type: BC needs the type for the account.
           lines: [
             {
@@ -406,6 +412,11 @@ export function AdvanceRequestCreate({
         if (needsOther && !String(values.otherPurposeDetails ?? '').trim()) {
           form.setError('otherPurposeDetails', { type: 'manual', message: 'Describe the purpose when Other (Specify) is selected' })
           flagSection('adv-s1')
+          return
+        }
+        if (typeNeedsDetails && String(values.advanceTypeDetails ?? '').trim().length < 3) {
+          form.setError('advanceTypeDetails', { type: 'manual', message: 'Specify the advance type when Other (Specify) is selected' })
+          flagSection('adv-s2')
           return
         }
         create.mutate({ values, submit })
@@ -686,6 +697,21 @@ export function AdvanceRequestCreate({
                 <p className="text-xs text-[var(--portal-muted)]">Decides the Business Central account the advance is paid from</p>
                 <FieldError message={errors.advanceType?.message} />
               </div>
+              {typeNeedsDetails ? (
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="adv-type-details">
+                    Specify the advance type
+                    <Required />
+                  </Label>
+                  <Input
+                    id="adv-type-details"
+                    maxLength={100}
+                    placeholder="What is this advance for?"
+                    {...form.register('advanceTypeDetails')}
+                  />
+                  <FieldError message={errors.advanceTypeDetails?.message} />
+                </div>
+              ) : null}
             </div>
             <p className="mt-4 text-xs text-[var(--portal-muted)]">
               Need several cost items, such as per diem and transport? Save first, then add advance lines to the request.
