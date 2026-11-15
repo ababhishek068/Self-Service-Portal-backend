@@ -707,7 +707,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v384 — 1.0.3.545 (ESSP Staff Salary Advance form per the ABH form and infographic: amount in ETB, repayment over 1 to 3 months, live eligibility checks, declaration, Line Manager then HR Manager then CFO, document view with HR verification and Finance records; overtime Print without pop-ups; for BC 1.0.3.652)'
+export const PORTAL_API_BUILD = 'v385 — 1.0.3.546 (Advance Settlement lists only advances BC can settle, approved but unpaid ones greyed out with the reason, prerequisite ticks follow the selected advance; includes 545 ESSP Staff Salary Advance form and overtime Print without pop-ups; for BC 1.0.3.652)'
 
 interface LookupSpec {
   service: string

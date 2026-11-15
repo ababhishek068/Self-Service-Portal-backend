@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, Info } from 'lucide-react'
+import { CheckCircle2, Circle, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
 import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
@@ -64,8 +64,56 @@ const SETTLEMENT_ATTACHMENT_CATEGORIES = [
   { label: 'Other supporting document', value: 'Other supporting document' },
 ]
 
-/** ESSP spec section 2: settlement can start only after the advance is approved and paid. */
-function Prerequisite({ available, loading }: { available: number; loading: boolean }) {
+function truthyFlag(value: unknown) {
+  return value === true || ['true', 'yes', '1'].includes(String(value ?? '').toLowerCase())
+}
+
+/** BC pays an advance through Payment Schedule posting (Fully Paid when the whole amount is paid) or posts it. */
+function isPaid(row: PortalRequest) {
+  const payload = row.payload ?? {}
+  return truthyFlag(payload.FullyPaid ?? payload.Fully_Paid) || isPosted(row)
+}
+
+/** Why one of the employee's approved advances is not in BC's settleable list. */
+function notSettleableReason(row: PortalRequest) {
+  return isPaid(row) ? 'a settlement is already open' : 'approved, not paid yet'
+}
+
+type PrerequisiteState = 'met' | 'unmet' | 'open'
+
+function PrerequisiteItem({ state, children }: { state: PrerequisiteState; children: string }) {
+  const icon =
+    state === 'met' ? (
+      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+    ) : state === 'unmet' ? (
+      <XCircle className="h-4 w-4 text-red-600" />
+    ) : (
+      <Circle className="h-4 w-4 text-teal-700/60" />
+    )
+  return (
+    <li className="flex items-center gap-2">
+      {icon}
+      {children}
+    </li>
+  )
+}
+
+/**
+ * ESSP spec section 2: settlement can start only after the advance is approved and paid. The ticks follow
+ * the selected advance; unpaid approved advances are named so the employee knows who to ask.
+ */
+function Prerequisite({
+  available,
+  loading,
+  selectedSettleable,
+  unpaid,
+}: {
+  available: number
+  loading: boolean
+  selectedSettleable: boolean
+  unpaid: string[]
+}) {
+  const state: PrerequisiteState = selectedSettleable ? 'met' : 'open'
   return (
     <div className="rounded-xl border border-teal-200 bg-teal-50/80 px-4 py-3 text-sm text-teal-950">
       <p className="flex items-center gap-2 font-semibold">
@@ -73,22 +121,26 @@ function Prerequisite({ available, loading }: { available: number; loading: bool
         Prerequisite — you can start an Advance Settlement only after:
       </p>
       <ul className="mt-1.5 space-y-1 pl-6">
-        <li className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-          an approved Advance Payment Request, and
-        </li>
-        <li className="flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-          the advance has been paid.
-        </li>
+        <PrerequisiteItem state={state}>an approved Advance Payment Request, and</PrerequisiteItem>
+        <PrerequisiteItem state={state}>the advance has been paid.</PrerequisiteItem>
       </ul>
       <p className="mt-1.5 text-xs text-teal-900/80">
         {loading
           ? 'Checking Business Central for advances you can settle…'
           : available > 0
             ? `${available} approved and paid advance${available === 1 ? '' : 's'} can be settled. An advance with an open settlement is not listed again (no duplicate settlement).`
-            : 'No approved and paid advance is waiting for settlement. Finance must pay (Fully Paid) the advance in Business Central first.'}
+            : 'No approved and paid advance is waiting for settlement.'}
       </p>
+      {!loading && unpaid.length ? (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
+          <span>
+            <span className="font-semibold">{unpaid.join(', ')}</span> {unpaid.length === 1 ? 'is' : 'are'} approved but not
+            paid in Business Central yet. Finance pays the advance through the Payment Schedule (Business Central then marks
+            it Fully Paid once the whole amount is paid) or posts it; it then appears here for settlement.
+          </span>
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -116,13 +168,29 @@ export function ImprestSurrender() {
   })
 
   const settleable = settleableQuery.data?.settleableAdvances ?? []
-  const imprestOptions =
-    settleable.length > 0
-      ? settleable.map((row) => ({
+  const settleableNos = new Set(settleable.map((row) => row.advanceNo))
+  // The employee's approved advances BC will not settle yet (not paid, or a settlement is open).
+  const waiting = settleableQuery.isSuccess
+    ? (imprestQuery.data ?? []).filter((row) => isSurrenderableImprest(row) && !settleableNos.has(row.requestNo))
+    : []
+  const unpaid = waiting.filter((row) => !isPaid(row)).map((row) => row.requestNo)
+  // Only what BC's PortalAdvanceSettlementContext allows (BC refuses the rest: "must be paid before settlement");
+  // without that context, the employee's paid advances.
+  const imprestOptions = settleableQuery.isSuccess
+    ? [
+        ...settleable.map((row) => ({
           label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}`,
           value: row.advanceNo,
-        }))
-      : (imprestQuery.data ?? []).filter(isSurrenderableImprest).map((row) => ({
+        })),
+        ...waiting.map((row) => ({
+          label: `${row.requestNo} — ${notSettleableReason(row)}`,
+          value: `blocked:${row.requestNo}`,
+          disabled: true,
+        })),
+      ]
+    : (imprestQuery.data ?? [])
+        .filter((row) => isSurrenderableImprest(row) && isPaid(row))
+        .map((row) => ({
           label: `${row.requestNo}${row.status && row.status !== 'Posted' ? ` (${row.status})` : ''}`,
           value: row.requestNo,
         }))
@@ -130,8 +198,8 @@ export function ImprestSurrender() {
     ? 'Loading settleable advances from Business Central…'
     : settleableQuery.isError && imprestQuery.isError
       ? 'Could not load advances from Business Central.'
-      : imprestOptions.length === 0
-        ? 'No approved and paid advance is available to settle. Finance must mark the advance Fully Paid in Business Central first.'
+      : imprestOptions.filter((option) => !('disabled' in option && option.disabled)).length === 0
+        ? 'No approved and paid advance is available to settle yet.'
         : 'Select advance request'
 
   return (
@@ -194,7 +262,12 @@ export function ImprestSurrender() {
 
         return (
           <div className="space-y-3">
-          <Prerequisite available={settleable.length} loading={settleableQuery.isLoading} />
+          <Prerequisite
+            available={settleable.length}
+            loading={settleableQuery.isLoading}
+            selectedSettleable={settleableNos.has(advanceNo)}
+            unpaid={unpaid}
+          />
           {advanceNo ? (
           <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Advance details (retrieved from Business Central)</p>
