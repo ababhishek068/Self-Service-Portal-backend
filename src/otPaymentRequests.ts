@@ -50,6 +50,11 @@ export type OtPaymentRequest = {
   requesterUserId: string
   rejectedAtStage: string
   decisionRemarks: string
+  /** BC 1.0.3.654: an approver sent the request back to the employee for correction (now a draft). */
+  sentBack?: boolean
+  sentBackBy?: string
+  sentBackOn?: string
+  sentBackRemarks?: string
   addedToSheet: boolean
   canDecide: boolean
   createdAt: string
@@ -131,6 +136,10 @@ export function parseOtPaymentRequest(value: unknown): OtPaymentRequest {
     requesterUserId: str(row.requesterUserId),
     rejectedAtStage: str(row.rejectedAtStage),
     decisionRemarks: str(row.decisionRemarks),
+    sentBack: row.sentBack === true || str(row.sentBack).toLowerCase() === 'true',
+    sentBackBy: str(row.sentBackBy),
+    sentBackOn: str(row.sentBackOn),
+    sentBackRemarks: str(row.sentBackRemarks),
     addedToSheet: bool(row.addedToSheet),
     canDecide: bool(row.canDecide),
     createdAt: str(row.createdAt),
@@ -364,6 +373,33 @@ export async function decideOtPaymentApproval(input: {
     remarks,
   })
   return parseOtPaymentRequest(parseJson(result.returnValue))
+}
+
+/**
+ * BC 1.0.3.654: the approver sends the overtime payment request (Stage 2) back to the employee for
+ * correction; it becomes a draft with the approver's remarks.
+ */
+export async function sendBackOtPaymentApproval(input: { approverUserIds: string; paymentNo: string; remarks: string }) {
+  const remarks = input.remarks.trim().slice(0, 250)
+  if (remarks.length < 3) {
+    throw Object.assign(new Error('Enter what the employee must correct (at least 3 characters).'), { status: 422 })
+  }
+  try {
+    const result = await callSoapMethod('PortalOTPaymentSendBack', {
+      approverUserIds: input.approverUserIds,
+      paymentNo: input.paymentNo,
+      remarks,
+    })
+    return parseOtPaymentRequest(parseJson(result.returnValue))
+  } catch (error) {
+    if (/Method '?PortalOTPaymentSendBack'? is invalid|PortalOTPaymentSendBack.*(not found|not published)/i.test(String((error as Error)?.message ?? ''))) {
+      throw Object.assign(
+        new Error('Send Back for overtime payment needs Business Central 1.0.3.654. Reject it with a reason, or ask the BC administrator to publish 1.0.3.654.'),
+        { status: 503 },
+      )
+    }
+    throw error
+  }
 }
 
 function sameId(left: string, right: string) {

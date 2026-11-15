@@ -50,6 +50,11 @@ export interface OvertimeWorkRequest {
   submittedAt: string
   approvedAt: string
   decisionRemarks: string
+  /** BC 1.0.3.654: an approver sent it back for correction (it is a draft again). */
+  sentBack?: boolean
+  sentBackBy?: string
+  sentBackOn?: string
+  sentBackRemarks?: string
   steps: OvertimeWorkStep[]
   /** Set once this work request is linked to an Overtime Payment Request. */
   linkedPaymentRequestNo?: string

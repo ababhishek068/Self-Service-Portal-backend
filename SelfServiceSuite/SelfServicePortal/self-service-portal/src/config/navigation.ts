@@ -37,6 +37,17 @@ import {
   Wrench,
 } from 'lucide-react'
 
+/**
+ * Menu links switched off for now (pages and existing documents stay reachable by URL). 15 Nov 2026: Petty
+ * Cash is an Advance Type ("Petty Cash Advance") on the Advance Request, so ABH hides the Petty Cash menus
+ * until they confirm; to bring them back, remove the paths here.
+ */
+export const HIDDEN_NAV_PATHS: ReadonlySet<string> = new Set(['/finance/petty-cash', '/finance/petty-cash-replenishment'])
+
+export function navPathHidden(path: string | undefined) {
+  return Boolean(path) && HIDDEN_NAV_PATHS.has(String(path))
+}
+
 export interface NavItem {
   label: string
   path?: string

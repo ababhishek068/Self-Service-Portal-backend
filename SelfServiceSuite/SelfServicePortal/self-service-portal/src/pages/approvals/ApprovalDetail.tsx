@@ -49,6 +49,9 @@ const DECISION_COPY: Record<ApprovalDecision, { title: string; description: stri
   },
 }
 
+/** BC 1.0.3.654: Send Back on overtime cancels the workflow; the corrected request is approved again. */
+const OVERTIME_SEND_BACK_TYPES = new Set(['overtime', 'overtimePayment'])
+
 const hiddenLineFields = new Set([
   'id',
   'recid',
@@ -803,7 +806,13 @@ export function ApprovalDetail() {
       <ConfirmDialog
         open={Boolean(decision)}
         title={decision ? DECISION_COPY[decision].title : 'Submit request'}
-        description={decision ? DECISION_COPY[decision].description : ''}
+        description={
+          decision === 'Returned' && OVERTIME_SEND_BACK_TYPES.has(String(request?.requestType ?? ''))
+            ? 'The request goes back to the employee as a draft with your comment. When they correct it and submit it again, the Workflow User Group approves it again.'
+            : decision
+              ? DECISION_COPY[decision].description
+              : ''
+        }
         confirmLabel={decision ? DECISION_COPY[decision].confirmLabel : 'Submit'}
         onCancel={() => setDecision(null)}
         onConfirm={() => {

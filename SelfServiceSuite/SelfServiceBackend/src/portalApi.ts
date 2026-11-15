@@ -165,6 +165,7 @@ import {
 } from './hrServiceLetters.js'
 import {
   decideOvertimeApproval,
+  sendBackOvertimeApproval,
   deleteOvertimeRequest,
   getOvertimeContext,
   getOvertimeRequestByNo,
@@ -189,6 +190,7 @@ import {
 import { createOnce, createOnceKey } from './createOnce.js'
 import {
   decideOtPaymentApproval,
+  sendBackOtPaymentApproval,
   deleteOtPaymentRequest,
   getOtPaymentByNo,
   getOtPaymentContext,
@@ -580,6 +582,18 @@ async function approvalCommentLimits() {
 }
 
 /**
+ * Overtime approvals (BC 1.0.3.654) offer Send Back for Correction; the remarks are kept in full (250).
+ */
+async function withOvertimeSendBack<T extends { payload?: unknown }>(detail: T) {
+  const limits = await approvalCommentLimits()
+  return {
+    ...detail,
+    approvalComment: { max: limits.max, sendBackMax: limits.max },
+    payload: { ...((detail.payload as Record<string, unknown> | undefined) ?? {}), sendBackSupported: true },
+  }
+}
+
+/**
  * Send Back for Correction needs the requester to reopen (Cancel Approval) and send the document
  * again (Request Approval) from the portal, so only modules with both actions offer it.
  */
@@ -708,7 +722,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v386 — 1.0.3.547 (Advance Request: requester confirms receipt of the paid advance before settlement, ESSP Advance Request Types dropdown with Other Specify; Advance Settlement needs the receipt confirmation; includes 545 and 546; for BC 1.0.3.653)'
+export const PORTAL_API_BUILD = 'v387 — 1.0.3.548 (Overtime Send Back for Correction on Stage 1 and Stage 2 approvals with the reason shown to the requester; Petty Cash menus hidden as Petty Cash Advance is an Advance Type; includes 545 to 547; for BC 1.0.3.654)'
 
 interface LookupSpec {
   service: string
@@ -6875,7 +6889,7 @@ export function buildPortalApiRouter() {
             throw portalError('Overtime approval was not found for this user', 404)
           }
           const detail = overtimeToPortalRequest(request, authUser.userID)
-          res.json({ ...detail, approvalComment: await approvalCommentLimits() })
+          res.json(await withOvertimeSendBack(detail))
           return
         }
         if (soapRef.module === OT_PAYMENT_MODULE) {
@@ -6887,7 +6901,7 @@ export function buildPortalApiRouter() {
             throw portalError('Overtime payment approval was not found for this user', 404)
           }
           const detail = otPaymentToPortalRequest(request, authUser.userID)
-          res.json({ ...detail, approvalComment: await approvalCommentLimits() })
+          res.json(await withOvertimeSendBack(detail))
           return
         }
         if (soapRef.module === OVERTIME_WORK_MODULE) {
@@ -7020,6 +7034,18 @@ export function buildPortalApiRouter() {
         req.body?.comment ?? req.body?.comments,
         !soapRef && (await bcTakesLongApprovalComments()),
       )
+      if (soapRef && decision === 'Returned' && (soapRef.module === OVERTIME_MODULE || soapRef.module === OT_PAYMENT_MODULE)) {
+        // BC 1.0.3.654: Send Back for Correction on overtime (Stage 1 request, Stage 2 payment request).
+        const joined = await soapApproverIds(authUser)
+        if (soapRef.module === OVERTIME_MODULE) {
+          await sendBackOvertimeApproval({ approverUserIds: joined, requestNo: soapRef.no, remarks: comment })
+        } else {
+          await sendBackOtPaymentApproval({ approverUserIds: joined, paymentNo: soapRef.no, remarks: comment })
+        }
+        forgetNotifications(authUser)
+        res.json({ id: `${soapRef.module}-${soapRef.no}`, requestNo: soapRef.no, status: decision })
+        return
+      }
       if (soapRef) {
         if (decision === 'Returned') {
           throw portalError(

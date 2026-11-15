@@ -100,6 +100,11 @@ export type OvertimeRequest = {
   approvedAt: string
   rejectedAtStage: string
   decisionRemarks: string
+  /** BC 1.0.3.654: an approver sent the request back to the employee for correction (now a draft). */
+  sentBack?: boolean
+  sentBackBy?: string
+  sentBackOn?: string
+  sentBackRemarks?: string
   sheetNo: string
   addedToSheet: boolean
   addedAt: string
@@ -303,6 +308,10 @@ export function parseOvertimeRequest(value: unknown): OvertimeRequest {
     approvedAt: str(row.approvedAt),
     rejectedAtStage: str(row.rejectedAtStage),
     decisionRemarks: str(row.decisionRemarks),
+    sentBack: row.sentBack === true || str(row.sentBack).toLowerCase() === 'true',
+    sentBackBy: str(row.sentBackBy),
+    sentBackOn: str(row.sentBackOn),
+    sentBackRemarks: str(row.sentBackRemarks),
     sheetNo: str(row.sheetNo),
     addedToSheet: bool(row.addedToSheet),
     addedAt: str(row.addedAt),
@@ -645,6 +654,33 @@ export async function decideOvertimeApproval(input: {
     remarks,
   })
   return parseOvertimeRequest(parseJson(result.returnValue))
+}
+
+/**
+ * BC 1.0.3.654: the approver sends the overtime request (Stage 1) back to the employee for correction;
+ * it becomes a draft with the approver's remarks and the approvals start again when it is submitted.
+ */
+export async function sendBackOvertimeApproval(input: { approverUserIds: string; requestNo: string; remarks: string }) {
+  const remarks = input.remarks.trim().slice(0, 250)
+  if (remarks.length < 3) {
+    throw Object.assign(new Error('Enter what the employee must correct (at least 3 characters).'), { status: 422 })
+  }
+  try {
+    const result = await callSoapMethod('PortalOvertimeSendBack', {
+      approverUserIds: input.approverUserIds,
+      requestNo: input.requestNo,
+      remarks,
+    })
+    return parseOvertimeRequest(parseJson(result.returnValue))
+  } catch (error) {
+    if (/Method '?PortalOvertimeSendBack'? is invalid|PortalOvertimeSendBack.*(not found|not published)/i.test(String((error as Error)?.message ?? ''))) {
+      throw Object.assign(
+        new Error('Send Back for overtime needs Business Central 1.0.3.654. Reject it with a reason, or ask the BC administrator to publish 1.0.3.654.'),
+        { status: 503 },
+      )
+    }
+    throw overtimeCallError(error)
+  }
 }
 
 function sameId(left: string, right: string) {

@@ -15,6 +15,7 @@ import {
   otPaymentToPortalRequest,
   parseOtPaymentContext,
   parseOtPaymentRequests,
+  sendBackOtPaymentApproval,
 } from './otPaymentRequests.js'
 import {
   applyBcStage1,
@@ -28,6 +29,7 @@ import {
 } from './overtimeWorkRequests.js'
 import {
   parseOvertimeRequest,
+  sendBackOvertimeApproval,
   overtimeCategoryProblem,
   overtimeActingUserMayView,
   overtimeDocumentLines,
@@ -560,5 +562,46 @@ describe('Resubmit after Withdraw (Overtime Payment Request)', () => {
     assert.equal(draftPaymentFor(rows, 'otr-00002 '), 'OTP-00002')
     assert.equal(draftPaymentFor(rows, 'OTR-00001'), '')
     assert.equal(draftPaymentFor(rows, 'OTR-00003'), '')
+  })
+})
+
+describe('Send Back for Correction on overtime (BC 1.0.3.654)', () => {
+  it('needs what to correct before Business Central is called', async () => {
+    await assert.rejects(
+      sendBackOvertimeApproval({ approverUserIds: 'GRP1', requestNo: 'OTR-00012', remarks: ' x ' }),
+      /what the employee must correct/,
+    )
+    await assert.rejects(
+      sendBackOtPaymentApproval({ approverUserIds: 'GRP1', paymentNo: 'OTP-00012', remarks: '' }),
+      /what the employee must correct/,
+    )
+  })
+
+  it('shows the requester who sent it back and why, only while it is a draft', () => {
+    const sentBack = parseOvertimeRequest(
+      bcStage1Json({
+        status: 'Draft',
+        sentBack: true,
+        sentBackBy: 'Hermon Getachew Tolla',
+        sentBackOn: '2026-11-15T10:00:00',
+        sentBackRemarks: 'Correct the end time on 3 Nov',
+      }),
+    )
+    assert.equal(sentBack.sentBack, true)
+    assert.equal(sentBack.sentBackRemarks, 'Correct the end time on 3 Nov')
+    const row = applyBcStage1(
+      { bcStage1: true, requestNo: 'OTR-00012', status: 'Pending Approval', steps: [] } as unknown as Parameters<typeof applyBcStage1>[0],
+      sentBack,
+    )
+    assert.equal(row.sentBack, true)
+    assert.equal(row.status, 'Draft')
+    assert.equal(row.sentBackBy, 'Hermon Getachew Tolla')
+    const resubmitted = applyBcStage1(row, { ...sentBack, status: 'Pending Approval' })
+    assert.equal(resubmitted.sentBack, false)
+    const [payment] = parseOtPaymentRequests(
+      JSON.stringify([{ paymentNo: 'OTP-00012', status: 'Draft', sentBack: true, sentBackRemarks: 'Wrong completion date' }]),
+    )
+    assert.equal(payment!.sentBack, true)
+    assert.equal(payment!.sentBackRemarks, 'Wrong completion date')
   })
 })

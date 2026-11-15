@@ -26,6 +26,11 @@ export type OtPaymentRequest = {
   superiorUserId: string
   rejectedAtStage: string
   decisionRemarks: string
+  /** BC 1.0.3.654: an approver sent it back for correction (it is a draft again). */
+  sentBack?: boolean
+  sentBackBy?: string
+  sentBackOn?: string
+  sentBackRemarks?: string
   addedToSheet: boolean
   createdAt: string
   submittedAt: string

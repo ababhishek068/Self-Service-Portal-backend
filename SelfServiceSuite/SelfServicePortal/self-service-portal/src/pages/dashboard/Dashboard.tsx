@@ -1,3 +1,4 @@
+import { navPathHidden } from '@/config/navigation'
 import type { MouseEvent, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -385,6 +386,7 @@ export function Dashboard() {
         ? BACKEND_NOT_CONFIGURED
         : null
   const visibleTiles = tiles.filter((tile) => {
+    if (navPathHidden(tile.href)) return false
     if (tile.requiresApproval) return canApprove
     return !tile.roles || has(tile.roles)
   })

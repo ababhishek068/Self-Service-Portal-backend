@@ -46,6 +46,7 @@ import { useToast } from '@/components/feedback/ToastProvider'
 import { formatDateTime } from '@/utils/formatters'
 import { printHtml } from '@/utils/printHtml'
 import { overtimeRequestParam } from '@/utils/requestLinks'
+import { OvertimeSentBackNotice } from '@/components/hr/OvertimeSentBackNotice'
 
 const LIST_KEY = ['hr', 'overtime-work-requests'] as const
 const CONTEXT_KEY = ['hr', 'overtime-context'] as const
@@ -652,7 +653,7 @@ export function OvertimeWorkRequest() {
       header: 'Hours',
       cell: (row) => `${row.totalHours}h${(row.lines?.length ?? 0) > 1 ? ` · ${row.lines.length} lines` : ''}`,
     },
-    { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
+    { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.sentBack ? 'Returned' : row.status} /> },
     { id: 'updated', header: 'Updated', cell: (row) => formatDateTime(row.submittedAt || row.createdAt) },
   ]
 
@@ -795,6 +796,14 @@ export function OvertimeWorkRequest() {
 
       {mode === 'detail' && shown ? (
         <div className="portal-rise-children space-y-4">
+          {shown.sentBack ? (
+            <OvertimeSentBackNotice
+              by={shown.sentBackBy}
+              on={shown.sentBackOn}
+              remarks={shown.sentBackRemarks}
+              editLabel="Edit"
+            />
+          ) : null}
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
             <span className="text-sm font-semibold text-slate-900">{shown.requestNo}</span>
             <StatusBadge status={shown.status} />

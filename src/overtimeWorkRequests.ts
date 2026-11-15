@@ -84,6 +84,11 @@ export type OvertimeWorkRequest = {
   bcStage1?: boolean
   /** From BC on read: show "Request overtime payment" (Stage 1 approved, no Stage 2 yet). */
   canRequestPayment?: boolean
+  /** From BC 1.0.3.654 on read: an approver sent it back for correction (it is a draft again). */
+  sentBack?: boolean
+  sentBackBy?: string
+  sentBackOn?: string
+  sentBackRemarks?: string
   paymentApproved?: boolean
   addedToSheet?: boolean
 }
@@ -144,6 +149,10 @@ export function applyBcStage1(row: OvertimeWorkRequest, bc: OvertimeRequest | nu
     canRequestPayment: bc.canRequestPayment,
     paymentApproved: bc.paymentApproved,
     addedToSheet: bc.addedToSheet,
+    sentBack: bc.sentBack === true && bc.status === 'Draft',
+    sentBackBy: bc.sentBackBy ?? '',
+    sentBackOn: bc.sentBackOn ?? '',
+    sentBackRemarks: bc.sentBackRemarks ?? '',
   }
 }
 

@@ -1,3 +1,4 @@
+import { navPathHidden } from '@/config/navigation'
 import { useMemo } from 'react'
 import {
   erpConnectorRoles,
@@ -48,8 +49,8 @@ export function usePermissions() {
       canViewGatePassReport: hasAnyRole(roles, gatePassReportRoles),
       canViewErpConnector: hasAnyRole(roles, erpConnectorRoles),
       capabilitySummary: roleCapabilitySummary[primary] ?? roleCapabilitySummary.staff ?? '',
-      quickLinks: roleQuickLinks.filter((link) =>
-        link.href === '/approvals' ? canApprove : hasAnyRole(roles, link.roles),
+      quickLinks: roleQuickLinks.filter(
+        (link) => !navPathHidden(link.href) && (link.href === '/approvals' ? canApprove : hasAnyRole(roles, link.roles)),
       ),
     }
   }, [employee?.canApprove, employee?.roles])

@@ -50,6 +50,7 @@ import {
 import { fetchOvertimeWorkRequests, type OvertimeWorkRequest as OvertimeWorkRow } from '@/api/endpoints/overtimeWork'
 import { getLocalPurchaseProjects } from '@/api/endpoints/requestEndpoint'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import { OvertimeSentBackNotice } from '@/components/hr/OvertimeSentBackNotice'
 import { OvertimeStage1Viewer, type OvertimeStage1View } from '@/components/hr/OvertimeStage1Viewer'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { PageWrapper } from '@/components/layout/PageWrapper'
@@ -106,6 +107,10 @@ function otPaymentAsListRow(row: OtPaymentRequest): OvertimeRequestRow {
     approvedAt: row.approvedAt,
     rejectedAtStage: row.rejectedAtStage ?? '',
     decisionRemarks: row.decisionRemarks || row.superiorJustification,
+    sentBack: row.sentBack === true && row.status === 'Draft',
+    sentBackBy: row.sentBackBy,
+    sentBackOn: row.sentBackOn,
+    sentBackRemarks: row.sentBackRemarks,
     sheetNo: stage1?.sheetNo ?? '',
     addedToSheet: row.addedToSheet,
     addedAt: stage1?.addedAt ?? '',
@@ -1018,7 +1023,7 @@ export function OvertimeRequest() {
     },
     { id: 'hours', header: 'Hours', cell: (row) => hoursText(row.totalHours) },
     { id: 'amount', header: 'Estimated amount', cell: (row) => formatAmount(row.estimatedAmount) },
-    { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
+    { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.sentBack ? 'Returned' : row.status} /> },
     { id: 'waiting', header: 'Where it is', cell: (row) => <span className="text-xs text-slate-600">{waitingFor(row)}</span> },
   ]
 
@@ -1251,10 +1256,18 @@ export function OvertimeRequest() {
 
       {mode === 'form' || shown ? (
         <div className="space-y-4">
+          {shown?.sentBack ? (
+            <OvertimeSentBackNotice
+              by={shown.sentBackBy}
+              on={shown.sentBackOn}
+              remarks={shown.sentBackRemarks}
+              editLabel="Edit and submit"
+            />
+          ) : null}
           {shown ? (
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <span className="text-sm font-semibold text-slate-900">{shown.requestNo}</span>
-              <StatusBadge status={shown.status} />
+              <StatusBadge status={shown.sentBack ? 'Returned' : shown.status} />
               <span className="text-sm text-slate-600">{waitingFor(shown)}</span>
               {shown.decisionRemarks && shown.status === 'Rejected' ? (
                 <span className="text-sm text-red-700">Reason: {shown.decisionRemarks}</span>

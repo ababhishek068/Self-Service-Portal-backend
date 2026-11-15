@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { navigationMenu, type NavItem } from '@/config/navigation'
+import { navPathHidden, navigationMenu, type NavItem } from '@/config/navigation'
 import { hasAnyRole, type PortalRole } from '@/config/roles'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -13,6 +13,7 @@ const UNDER_CONSTRUCTION_MESSAGE =
  */
 function filterByRoles(items: NavItem[], userRoles: PortalRole[]): NavItem[] {
   return items
+    .filter((item) => !navPathHidden(item.path))
     .filter((item) => !item.roles || hasAnyRole(userRoles, item.roles))
     .map((item) =>
       item.children ? { ...item, children: filterByRoles(item.children, userRoles) } : item,
