@@ -256,20 +256,28 @@ function useStaffClaimLineChange(claimTypes: LookupOption[], glAccounts: LookupO
             form.setValue('patient', 'self', { shouldValidate: false })
           }
         }
+      }
 
+      // The G/L account follows the claim type. Also fill it when it is empty with the same claim type: the
+      // next line's form starts with the same claim type (Medical Claim always does) and a blank account, which
+      // used to leave the hidden account field invalid and the line's Submit doing nothing (UAT 16 Nov 2026).
+      const currentAccountNo = String(form.getValues('accountNo') ?? '').trim()
+      if (claimTypeChanged || !currentAccountNo) {
         let accountNo = glAccountForClaimType(claimType, claimTypes)
         if (!accountNo && isMedicalClaim(claimType)) {
           accountNo = findMedicalAllowanceAccount(glAccounts)?.value ?? ''
         }
-        form.setValue('accountNo', accountNo, { shouldValidate: true })
-        if (accountNo) {
-          const accountName = accountNameForNo(accountNo, glAccounts)
-          form.setValue('accountName', accountDisplay(accountNo, accountName), { shouldValidate: false })
-        } else {
-          form.setValue('accountName', '', { shouldValidate: false })
-          // Some existing BC claim types (for example GOV in UAT) have no
-          // configured G/L mapping. Preserve the previously-working flow by
-          // letting the requester choose the G/L account manually below.
+        if (accountNo || claimTypeChanged) {
+          form.setValue('accountNo', accountNo, { shouldValidate: Boolean(accountNo) })
+          if (accountNo) {
+            const accountName = accountNameForNo(accountNo, glAccounts)
+            form.setValue('accountName', accountDisplay(accountNo, accountName), { shouldValidate: false })
+          } else {
+            form.setValue('accountName', '', { shouldValidate: false })
+            // Some existing BC claim types (for example GOV in UAT) have no
+            // configured G/L mapping. Preserve the previously-working flow by
+            // letting the requester choose the G/L account manually below.
+          }
         }
       }
 

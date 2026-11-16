@@ -658,6 +658,8 @@ function AddLineForm({
     if (!onValuesChange) return
     void onValuesChange(watchedValues, form, requestId)
   }, [watchedValues, form, onValuesChange, requestId])
+  // A rule failing on a field the form does not show must still say so (never a silent Submit).
+  const [hiddenFieldError, setHiddenFieldError] = useState<string | null>(null)
   const mutation = useMutation({
     mutationFn: async (values: FieldValues) => {
       const payload = line.buildLinePayload ? line.buildLinePayload(values) : values
@@ -700,6 +702,11 @@ function AddLineForm({
           {mutation.error instanceof Error ? mutation.error.message : 'Could not add line'}
         </p>
       ) : null}
+      {hiddenFieldError ? (
+        <p className="mt-2 text-xs font-medium text-red-600" role="alert">
+          {hiddenFieldError}
+        </p>
+      ) : null}
       <div className="mt-3">
         <div className="flex flex-wrap gap-2">
           <Button
@@ -708,8 +715,30 @@ function AddLineForm({
             disabled={mutation.isPending}
             onClick={() => {
               const currentValues = form.getValues()
+              setHiddenFieldError(null)
               if (!normalizeAndValidateSelectValues(lineFields, currentValues, form)) return
-              void form.handleSubmit((values) => mutation.mutate(values))()
+              void form.handleSubmit(
+                (values) => mutation.mutate(values),
+                (errors) => {
+                  const values = form.getValues()
+                  const shown = new Set(
+                    lineFields
+                      .filter((field) => !field.visibleWhen || field.visibleWhen(values))
+                      .map((field) => field.name),
+                  )
+                  const hidden = Object.entries(errors)
+                    .filter(([name]) => !shown.has(name))
+                    .map(([, error]) => String((error as { message?: unknown } | undefined)?.message ?? '').trim())
+                    .filter(Boolean)
+                  if (hidden.length) {
+                    const message = `The line was not saved: ${hidden.join(' ')}`
+                    setHiddenFieldError(message)
+                    toast.error(message, 'Line not saved')
+                  } else {
+                    toast.error('Some line details are missing or invalid. They are marked in red.', 'Line not saved')
+                  }
+                },
+              )()
             }}
           >
             {mutation.isPending ? 'Submitting…' : initialLine ? 'Save' : 'Submit'}

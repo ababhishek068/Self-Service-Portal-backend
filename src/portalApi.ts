@@ -722,7 +722,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v387 — 1.0.3.548 (Overtime Send Back for Correction on Stage 1 and Stage 2 approvals with the reason shown to the requester; Petty Cash menus hidden as Petty Cash Advance is an Advance Type; includes 545 to 547; for BC 1.0.3.654)'
+export const PORTAL_API_BUILD = 'v388 — 1.0.3.549 (Medical Claim and Staff Claim: the second claim line with the same claim type now saves, the G/L account fills when empty and a rule failing on a hidden field is shown instead of a silent Submit; includes 545 to 548; for BC 1.0.3.654)'
 
 interface LookupSpec {
   service: string
