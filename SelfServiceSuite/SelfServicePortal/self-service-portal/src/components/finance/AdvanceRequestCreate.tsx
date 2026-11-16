@@ -507,7 +507,7 @@ export function AdvanceRequestCreate({
           <Section
             id="adv-s1"
             number={1}
-            title="Employee Information & Request Purpose"
+            title="Employee Information & Activity / Purpose"
             hint="Your details come from your employee record"
             done={section1Done}
             shake={shakeSection === 'adv-s1'}
@@ -556,10 +556,15 @@ export function AdvanceRequestCreate({
             <div className="mt-5 grid gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="adv-purpose">
-                  Request purpose
+                  Activity / Purpose of Assignment
                   <Required />
                 </Label>
-                <Select id="adv-purpose" options={purposeOptions} placeholder="Choose a purpose" {...form.register('requestPurpose')} />
+                <Select
+                  id="adv-purpose"
+                  options={purposeOptions}
+                  placeholder="Choose the activity / purpose"
+                  {...form.register('requestPurpose')}
+                />
                 <p className="text-xs text-[var(--portal-muted)]">{purposeHint}</p>
                 <FieldError message={errors.requestPurpose?.message} />
               </div>
@@ -567,7 +572,7 @@ export function AdvanceRequestCreate({
                 <div className="adv-reveal space-y-1.5">
                   <div className="flex items-baseline justify-between">
                     <Label htmlFor="adv-other">
-                      Other purpose details
+                      Other (specify) — describe the activity
                       <Required />
                     </Label>
                     <Counter value={text('otherPurposeDetails')} />

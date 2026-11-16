@@ -723,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v392 — 1.0.3.553 (Advance Payment: clear Confirm Payment Received step on the paid advance, on the settlement page and in the bell, per BC 1.0.3.660 portal note; ghost overtime copies purged once BC says not found; includes 545 to 552; for BC 1.0.3.660)'
+export const PORTAL_API_BUILD = 'v393 — 1.0.3.554 (Advance Request: Activity / Purpose of Assignment, one list of the client 15 purposes for every requester; includes 545 to 553; for BC 1.0.3.661)'
 
 interface LookupSpec {
   service: string

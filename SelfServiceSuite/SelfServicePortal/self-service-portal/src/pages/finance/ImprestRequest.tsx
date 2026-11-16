@@ -12,7 +12,7 @@ import { advancePaid, fullySettled, receiptConfirmed } from '@/utils/advanceRece
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
-  purposeOptionsForDivision,
+  allAdvancePurposeOptions,
   purposeRequiresOtherDetails,
 } from '@/data/advanceRequestPurpose'
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
@@ -283,13 +283,8 @@ export function ImprestRequest() {
   const { employee } = useAuth()
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
   const destinations = useLookupOptions('travel-destinations')
-  const fallbackPurposes = useMemo(
-    () =>
-      purposeOptionsForDivision(
-        `${employee?.departmentCode ?? ''} ${employee?.placeOfDuty ?? ''} ${employee?.jobGrade ?? ''}`,
-      ),
-    [employee?.departmentCode, employee?.placeOfDuty, employee?.jobGrade],
-  )
+  // Activity / Purpose of Assignment: the same list for every requester (BC 1.0.3.661; client 16 Nov 2026).
+  const fallbackPurposes = useMemo(() => allAdvancePurposeOptions(), [])
   const purposeContext = useQuery({
     queryKey: ['advance-payment-context', employee?.employeeNo ?? ''],
     queryFn: () => fetchAdvancePaymentContext(String(employee?.employeeNo ?? '')),
@@ -302,11 +297,7 @@ export function ImprestRequest() {
   // BC 1.0.3.653: confirm receipt before settlement, and the ESSP Advance Request Types list.
   const supportsReceipt = purposeContext.data?.supportsReceiptConfirmation === true
   const advanceTypeOptions = purposeContext.data?.advanceTypes?.length ? purposeContext.data.advanceTypes : imprestTypes.options
-  const purposeHint = purposeContext.data?.purposeGroupCaption
-    ? `Purposes for ${purposeContext.data.purposeGroupCaption}${
-        purposeContext.data.divisionCode ? ` (${purposeContext.data.divisionCode})` : ''
-      }. Choose Other (Specify) when needed.`
-    : 'Purpose list comes from Business Central for your division. Choose Other (Specify) to add details.'
+  const purposeHint = 'What the advance is for. Choose Other (Specify) to describe an activity not in the list.'
 
   return (
     <MultiStepRequestPage
@@ -361,8 +352,8 @@ export function ImprestRequest() {
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
               ESSP submission → Business Central → Line Manager approval → final approver by amount (ETB):
               below 50,000 → FAD; 50,000–100,000 → COO; above 100,000 → CEO. The Line Manager is the
-              Workflow User Group on the Advance Request workflow. Request Purpose comes from BC for your
-              division — choose Other (Specify) when needed. Settlement is only via Advance Settlement.
+              Workflow User Group on the Advance Request workflow. Activity / Purpose of Assignment is one list for
+              every requester — choose Other (Specify) when needed. Settlement is only via Advance Settlement.
             </p>
           </div>
         </div>
@@ -415,7 +406,7 @@ export function ImprestRequest() {
         },
         {
           name: 'requestPurpose',
-          label: 'Request Purpose *',
+          label: 'Activity / Purpose of Assignment *',
           type: 'select',
           options: purposeOptions,
           valuePaths: ['RequestPurposeCode', 'Request_Purpose_Code'],
@@ -487,7 +478,7 @@ export function ImprestRequest() {
           format: 'date',
         },
         {
-          label: 'Request Purpose',
+          label: 'Activity / Purpose of Assignment',
           paths: ['payload.RequestPurposeText', 'payload.RequestPurposeCode', 'payload.Purpose'],
         },
         {

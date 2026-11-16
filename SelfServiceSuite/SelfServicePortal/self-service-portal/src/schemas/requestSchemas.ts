@@ -200,7 +200,7 @@ const advanceHeaderShape = {
   requestDate: optionalText,
   dateRequired: needByDateField,
   /** BC purpose code from PortalAdvancePaymentContext (e.g. AC-RES, GN-OTH). */
-  requestPurpose: z.string().min(1, 'Request purpose is required'),
+  requestPurpose: z.string().min(1, 'Choose the Activity / Purpose of Assignment'),
   otherPurposeDetails: z.string().optional().default(''),
   justification: z.string().trim().min(10, 'Explain why the advance is needed (at least 10 characters)'),
   activityLocation: optionalText,

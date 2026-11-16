@@ -5,24 +5,24 @@ export const PURPOSE_BY_DIVISION: Record<string, LookupOption[]> = {
   consulting: [
     { value: 'AC-RES', label: 'Research', meta: { requiresOtherDetails: false } },
     { value: 'AC-SUR', label: 'Surveys', meta: { requiresOtherDetails: false } },
-    { value: 'AC-FLD', label: 'Field assessments', meta: { requiresOtherDetails: false } },
-    { value: 'AC-PRJ', label: 'Project implementation', meta: { requiresOtherDetails: false } },
+    { value: 'AC-FLD', label: 'Field Assessments', meta: { requiresOtherDetails: false } },
+    { value: 'AC-PRJ', label: 'Project Implementation', meta: { requiresOtherDetails: false } },
   ],
   workforce: [
-    { value: 'AW-DEP', label: 'Staff deployment', meta: { requiresOtherDetails: false } },
-    { value: 'AW-SUP', label: 'Field supervision', meta: { requiresOtherDetails: false } },
-    { value: 'AW-REC', label: 'Recruitment activities', meta: { requiresOtherDetails: false } },
+    { value: 'AW-DEP', label: 'Staff Deployment', meta: { requiresOtherDetails: false } },
+    { value: 'AW-SUP', label: 'Field Supervision', meta: { requiresOtherDetails: false } },
+    { value: 'AW-REC', label: 'Recruitment Activities', meta: { requiresOtherDetails: false } },
   ],
   academy: [
     { value: 'AA-TRN', label: 'Training', meta: { requiresOtherDetails: false } },
     { value: 'AA-WKS', label: 'Workshops', meta: { requiresOtherDetails: false } },
-    { value: 'AA-FLD', label: 'Field-based learning', meta: { requiresOtherDetails: false } },
+    { value: 'AA-FLD', label: 'Field-Based Learning', meta: { requiresOtherDetails: false } },
   ],
   corporate: [
-    { value: 'CO-PRC', label: 'Procurement missions', meta: { requiresOtherDetails: false } },
+    { value: 'CO-PRC', label: 'Procurement Missions', meta: { requiresOtherDetails: false } },
     { value: 'CO-ADM', label: 'Administration', meta: { requiresOtherDetails: false } },
     { value: 'CO-LOG', label: 'Logistics', meta: { requiresOtherDetails: false } },
-    { value: 'CO-OPS', label: 'Operational assignments', meta: { requiresOtherDetails: false } },
+    { value: 'CO-OPS', label: 'Operational Assignments', meta: { requiresOtherDetails: false } },
   ],
   general: [{ value: 'GN-OTH', label: 'Other (Specify)', meta: { requiresOtherDetails: true } }],
 }
@@ -35,6 +35,21 @@ export function divisionFamily(divisionOrDept: string) {
   return 'corporate'
 }
 
+/**
+ * Activity / Purpose of Assignment (client, 16 Nov 2026): one list for every requester, in this order. BC 1.0.3.661
+ * returns the same; this is the offline fallback.
+ */
+export function allAdvancePurposeOptions(): LookupOption[] {
+  return [
+    ...PURPOSE_BY_DIVISION.consulting,
+    ...PURPOSE_BY_DIVISION.workforce,
+    ...PURPOSE_BY_DIVISION.academy,
+    ...PURPOSE_BY_DIVISION.corporate,
+    ...PURPOSE_BY_DIVISION.general,
+  ]
+}
+
+/** Before BC 1.0.3.661 (division-filtered purposes). */
 export function purposeOptionsForDivision(divisionOrDept: string): LookupOption[] {
   const family = divisionFamily(divisionOrDept)
   const specific = PURPOSE_BY_DIVISION[family] ?? PURPOSE_BY_DIVISION.corporate
