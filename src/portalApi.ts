@@ -132,6 +132,7 @@ import {
   portalDraftDeleteAllowed,
   portalModuleDocumentOwnedByUser,
   resolveAttachmentDocNo,
+  soapMethodMissing,
   storeOriginatedPurchaseVisible,
   type ModuleSpec,
 } from './staffModules.js'
@@ -184,8 +185,10 @@ import {
 import {
   addAdvanceSettlementExpense,
   confirmAdvanceReceipt,
+  deleteAdvanceSettlementExpense,
   getAdvanceSettlementContext,
   saveAdvanceSettlementDetails,
+  saveAdvanceSettlementExpense,
 } from './advanceSettlement.js'
 import { createOnce, createOnceKey } from './createOnce.js'
 import {
@@ -724,7 +727,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v398 — 1.0.3.559 (Advance Settlement in three sections: Advance Summary, Expense Entries and Supporting Documents, Expense Reconciliation and Settlement; includes 545 to 558; for BC 1.0.3.662)'
+export const PORTAL_API_BUILD = 'v399 — 1.0.3.560 (Advance Settlement as the client sample: Advance Information and Total Advance Received, one card per expense with purpose, category, amount, receipt or reference no. and its documents, Financial Reconciliation with Remaining Balance and outcome, then declaration and Submit; includes 545 to 559; for BC 1.0.3.663)'
 
 interface LookupSpec {
   service: string
@@ -7632,29 +7635,75 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  /**
+   * Add an expense entry (BC 1.0.3.636), or — with `entryNo` or a receipt / reference no. — create or change one through
+   * BC 1.0.3.663 (PortalAdvanceSettlementSaveExpense).
+   */
   router.post(
     '/advance-settlement/expenses',
     safe(async (req, res) => {
       const surrenderNo = String(req.body?.surrenderNo ?? req.body?.docNo ?? '').trim()
+      const entryNo = Math.max(0, Math.trunc(Number(req.body?.entryNo ?? req.body?.lineNo ?? 0) || 0))
       const expenseCategory = String(req.body?.expenseCategory ?? req.body?.category ?? '').trim()
       const expenseDescription = String(
         req.body?.expenseDescription ?? req.body?.description ?? '',
       ).trim()
       const expenseAmount = Number(req.body?.expenseAmount ?? req.body?.amount ?? 0)
+      const referenceNo = String(req.body?.referenceNo ?? '').trim().slice(0, 50)
       if (!surrenderNo) throw portalError('Settlement document number is required.', 422)
-      if (!expenseCategory) throw portalError('Expense category is required.', 422)
+      if (!entryNo && !expenseCategory) throw portalError('Expense category is required.', 422)
       if (expenseDescription.length < 3) {
-        throw portalError('Enter an expense description (at least 3 characters).', 422)
+        throw portalError('Enter the expense purpose (at least 3 characters).', 422)
       }
-      if (!(expenseAmount > 0)) throw portalError('Enter an expense amount greater than zero.', 422)
+      if (!Number.isFinite(expenseAmount) || expenseAmount < 0 || (!entryNo && expenseAmount <= 0)) {
+        throw portalError('Enter an expense amount greater than zero.', 422)
+      }
       await requireOwnedPortalRequest(`imprestSurrender-${surrenderNo}`, user(req))
-      const lineNo = await addAdvanceSettlementExpense({
-        surrenderNo,
-        expenseCategory,
-        expenseDescription,
-        expenseAmount,
+      const lineNo =
+        entryNo || referenceNo
+          ? await saveAdvanceSettlementExpense({
+              surrenderNo,
+              entryNo,
+              expenseCategory,
+              expenseDescription: expenseDescription.slice(0, 250),
+              expenseAmount,
+              referenceNo,
+            }).catch((error) => {
+              if (soapMethodMissing(error, 'PortalAdvanceSettlementSaveExpense')) {
+                throw portalError(
+                  'Changing an expense entry or saving its receipt / reference number needs Business Central 1.0.3.663.',
+                  501,
+                  'BC_663_REQUIRED',
+                )
+              }
+              throw error
+            })
+          : await addAdvanceSettlementExpense({
+              surrenderNo,
+              expenseCategory,
+              expenseDescription,
+              expenseAmount,
+            })
+      res.json({ lineNo, entryNo: lineNo, surrenderNo })
+    }),
+  )
+
+  /** BC 1.0.3.663 — remove an expense entry the employee added to a draft settlement. */
+  router.delete(
+    '/advance-settlement/expenses/:entryNo',
+    safe(async (req, res) => {
+      const surrenderNo = String(req.query.surrenderNo ?? '').trim()
+      const entryNo = Math.trunc(Number(req.params.entryNo ?? 0) || 0)
+      if (!surrenderNo) throw portalError('Settlement document number is required.', 422)
+      if (entryNo <= 0) throw portalError('Expense entry number is required.', 422)
+      await requireOwnedPortalRequest(`imprestSurrender-${surrenderNo}`, user(req))
+      await deleteAdvanceSettlementExpense(surrenderNo, entryNo).catch((error) => {
+        if (soapMethodMissing(error, 'PortalAdvanceSettlementDeleteExpense')) {
+          throw portalError('Removing an expense entry needs Business Central 1.0.3.663.', 501, 'BC_663_REQUIRED')
+        }
+        throw error
       })
-      res.json({ lineNo, surrenderNo })
+      res.json({ ok: true, entryNo, surrenderNo })
     }),
   )
 

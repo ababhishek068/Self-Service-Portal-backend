@@ -1,4 +1,4 @@
-import { authGet, authPost } from '@/api/client/authClient'
+import { authDelete, authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
 
 export type SettleableAdvance = {
@@ -30,6 +30,8 @@ export type AdvanceSettlementContext = {
   supportsReceiptConfirmation?: boolean
   /** BC 1.0.3.662: receipt can be confirmed right after approval, before Finance's payment is in BC. */
   receiptAfterApproval?: boolean
+  /** BC 1.0.3.663: expense entries can be changed and removed, with a receipt / reference no. */
+  supportsExpenseEntries?: boolean
   awaitingReceipt?: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
@@ -55,7 +57,23 @@ export type AdvanceSettlementContext = {
     amount: number
     paymentDate: string
   }
-  lines: Array<Record<string, unknown>>
+  lines: SettlementLine[]
+}
+
+/** One expense line of a settlement (PortalAdvanceSettlementContext `lines`; `lineNo` is BC's Entry No). */
+export type SettlementLine = {
+  lineNo?: number | string
+  accountNo?: string
+  accountName?: string
+  expenseCategory?: string
+  expenseDescription?: string
+  issuedAmount?: number
+  actualSpent?: number
+  /** BC 1.0.3.663 */
+  referenceNo?: string
+  /** BC 1.0.3.663: added by the employee in ESSP (not copied from the advance). */
+  esspEntry?: boolean
+  [key: string]: unknown
 }
 
 export async function fetchAdvanceSettlementContext(surrenderNo = '') {
@@ -86,6 +104,27 @@ export async function addAdvanceSettlementExpense(payload: {
 }) {
   requireAuthApiUrl()
   return authPost<{ lineNo: number; surrenderNo: string }>('/api/advance-settlement/expenses', payload)
+}
+
+/** BC 1.0.3.663: create (entryNo 0) or change an expense entry, with its receipt / reference no. */
+export async function saveAdvanceSettlementExpense(payload: {
+  surrenderNo: string
+  entryNo: number
+  expenseCategory: string
+  expenseDescription: string
+  expenseAmount: number
+  referenceNo: string
+}) {
+  requireAuthApiUrl()
+  return authPost<{ lineNo: number; entryNo: number; surrenderNo: string }>('/api/advance-settlement/expenses', payload)
+}
+
+/** BC 1.0.3.663: remove an expense entry the employee added. */
+export async function deleteAdvanceSettlementExpense(surrenderNo: string, entryNo: number) {
+  requireAuthApiUrl()
+  return authDelete<{ ok: boolean }>(
+    `/api/advance-settlement/expenses/${encodeURIComponent(String(entryNo))}?surrenderNo=${encodeURIComponent(surrenderNo)}`,
+  )
 }
 
 /** BC 1.0.3.653: confirm receipt of the paid advance (`advanceNo` = IMP-…); settlement opens after it. */

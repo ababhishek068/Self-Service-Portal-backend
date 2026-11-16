@@ -324,8 +324,10 @@ export function ImprestSurrender() {
       buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Settlement for ${values.imprest}` })}
       // Re-saving the header makes BC re-copy the advance lines and drop the expense lines.
       allowHeaderEdit={false}
-      // Client, 16 Nov 2026: three sequential sections — 1 Advance Summary, 2 Expense Entries & Supporting
-      // Documents, 3 Expense Reconciliation & Settlement.
+      // Client, 16 Nov 2026: three sequential sections — 1 Advance Summary, 2 Expense Entries and Supporting
+      // Documents, 3 Expense Reconciliation and Settlement (one card per expense on BC 1.0.3.663).
+      // Step 5 of the client's workflow: the declaration, then Submit for Processing — the actions follow the sections.
+      detailActionsPlacement="bottom"
       detailLayout={({ request, details, lines, attachments }) => (
         <AdvanceSettlementSections request={request} details={details} lines={lines} attachments={attachments} />
       )}

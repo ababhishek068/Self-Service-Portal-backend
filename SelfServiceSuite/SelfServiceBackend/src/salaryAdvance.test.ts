@@ -213,6 +213,20 @@ describe('Advance receipt confirmation before settlement (BC 1.0.3.653)', () => 
     assert.deepEqual(older.awaitingReceipt, [])
   })
 
+  it('BC 1.0.3.663: settlement expense entries carry their receipt / reference no.', () => {
+    const context = parseAdvanceSettlementContext(
+      JSON.stringify({
+        surrenderNo: 'SUR-000003',
+        supportsExpenseEntries: true,
+        lines: [{ lineNo: 2, expenseCategory: 'ACCOM', expenseDescription: 'Hotel', actualSpent: 5000, referenceNo: 'R-1', esspEntry: true }],
+      }),
+    )
+    assert.equal(context.supportsExpenseEntries, true)
+    assert.equal(context.lines[0]!.referenceNo, 'R-1')
+    assert.equal(context.lines[0]!.esspEntry, true)
+    assert.equal(parseAdvanceSettlementContext(JSON.stringify({ surrenderNo: 'SUR-000003' })).supportsExpenseEntries, false)
+  })
+
   it('BC 1.0.3.662: approved advances wait for the receipt before Finance has paid in BC', () => {
     const context = parseAdvanceSettlementContext(
       JSON.stringify({

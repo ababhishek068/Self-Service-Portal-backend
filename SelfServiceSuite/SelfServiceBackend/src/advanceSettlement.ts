@@ -30,6 +30,8 @@ export type AdvanceSettlementContext = {
   supportsReceiptConfirmation: boolean
   /** BC 1.0.3.662: receipt can be confirmed right after approval, before Finance's payment is in BC. */
   receiptAfterApproval: boolean
+  /** BC 1.0.3.663: expense entries can be changed and removed, with a receipt / reference no. */
+  supportsExpenseEntries: boolean
   awaitingReceipt: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
@@ -121,6 +123,7 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     settleableAdvances,
     supportsReceiptConfirmation: bool(raw.supportsReceiptConfirmation),
     receiptAfterApproval: bool(raw.receiptAfterApproval),
+    supportsExpenseEntries: bool(raw.supportsExpenseEntries),
     awaitingReceipt,
     surrenderNo: str(raw.surrenderNo),
     status: str(raw.status),
@@ -194,6 +197,34 @@ export async function addAdvanceSettlementExpense(input: {
     expenseAmount: input.expenseAmount,
   })
   return Number(result.returnValue ?? 0)
+}
+
+/**
+ * BC 1.0.3.663: create (entryNo 0) or change one expense entry — purpose, category, amount and receipt / reference
+ * no. Returns the entry no.
+ */
+export async function saveAdvanceSettlementExpense(input: {
+  surrenderNo: string
+  entryNo: number
+  expenseCategory: string
+  expenseDescription: string
+  expenseAmount: number
+  referenceNo: string
+}) {
+  const result = await callSoapMethod('PortalAdvanceSettlementSaveExpense', {
+    surrenderNo: input.surrenderNo,
+    entryNo: input.entryNo,
+    expenseCategory: input.expenseCategory,
+    expenseDescription: input.expenseDescription,
+    expenseAmount: input.expenseAmount,
+    referenceNo: input.referenceNo,
+  })
+  return Number(result.returnValue ?? 0)
+}
+
+/** BC 1.0.3.663: remove an expense entry the employee added. */
+export async function deleteAdvanceSettlementExpense(surrenderNo: string, entryNo: number) {
+  await callSoapMethod('PortalAdvanceSettlementDeleteExpense', { surrenderNo, entryNo })
 }
 
 /** BC 1.0.3.653: the requester confirms receipt of the paid advance; settlement is allowed only after it. */

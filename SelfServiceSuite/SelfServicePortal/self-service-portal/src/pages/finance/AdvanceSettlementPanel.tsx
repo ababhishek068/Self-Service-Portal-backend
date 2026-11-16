@@ -5,13 +5,10 @@ import {
   BadgeCheck,
   Check,
   CheckCircle2,
-  Coins,
   HandCoins,
   Loader2,
   Plus,
-  ReceiptText,
   Save,
-  Scale,
   Wallet,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -34,6 +31,8 @@ import {
   settlementMissing,
   useAdvanceSettlementContext,
 } from '@/hooks/useAdvanceSettlementContext'
+import { SettlementExpenseEntries } from '@/components/finance/SettlementExpenseEntries'
+import { StatusBadge } from '@/components/shared/StatusBadge'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDate } from '@/utils/formatters'
 import type { PortalRequest } from '@/types/erp.types'
@@ -77,16 +76,24 @@ export function AdvanceSettlementSections({
     </div>
   )
 
+  // BC 1.0.3.663: one card per expense (client redesign); older BC keeps the line table and Add an expense entry.
+  const entryCards = Boolean(ctx?.supportsExpenseEntries)
+
   return (
     <div className="space-y-5">
-      <SettlementSection number={1} title="Advance Summary" hint="The advance received, from Business Central" done={Boolean(ctx)}>
-        {ctx ? <AdvanceReceived ctx={ctx} /> : contextState}
-        <div className="mt-5 border-t border-slate-200 pt-4">{details}</div>
+      <SettlementSection number={1} title="Advance Summary" hint="The approved advance and the amount received" done={Boolean(ctx)}>
+        {ctx ? <AdvanceInformation ctx={ctx} request={request} /> : contextState}
+        <details className="group mt-3 text-sm">
+          <summary className="cursor-pointer select-none text-xs font-medium text-[var(--portal-navy)] hover:underline">
+            More settlement details
+          </summary>
+          <div className="mt-3 border-t border-slate-200 pt-3">{details}</div>
+        </details>
       </SettlementSection>
 
       <SettlementSection
         number={2}
-        title="Expense Entries & Supporting Documents"
+        title="Expense Entries and Supporting Documents"
         hint={
           ctx
             ? `${formatAmount(ctx.totalActualExpenses)} entered · ${documents} ${documents === 1 ? 'document' : 'documents'}`
@@ -94,22 +101,28 @@ export function AdvanceSettlementSections({
         }
         done={expensesEntered && documents > 0}
       >
-        <p className="text-sm text-slate-600">
-          {isDraft
-            ? 'Enter the actual amount spent on each advance line, add every other expense with its purpose and amount, then attach the receipts and supporting documents.'
-            : 'The expenses and documents submitted with this settlement.'}
-        </p>
-        <div className="mt-4 space-y-5 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
-          {lines}
-          {isDraft && ctx ? <AddExpenseEntry surrenderNo={ctx.surrenderNo} /> : null}
-          {attachments}
-        </div>
+        {entryCards && ctx ? (
+          <SettlementExpenseEntries request={request} ctx={ctx} editable={isDraft} />
+        ) : (
+          <>
+            <p className="text-sm text-slate-600">
+              {isDraft
+                ? 'Enter the actual amount spent on each advance line, add every other expense with its purpose and amount, then attach the receipts and supporting documents.'
+                : 'The expenses and documents submitted with this settlement.'}
+            </p>
+            <div className="mt-4 space-y-5 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
+              {lines}
+              {isDraft && ctx ? <AddExpenseEntry surrenderNo={ctx.surrenderNo} /> : null}
+              {attachments}
+            </div>
+          </>
+        )}
       </SettlementSection>
 
       <SettlementSection
         number={3}
-        title="Expense Reconciliation & Settlement"
-        hint="Calculated automatically from the advance and the expenses"
+        title="Expense Reconciliation and Settlement"
+        hint="Calculated automatically from the advance summary and the expense entries"
         done={Boolean(ctx) && settlementMissing(ctx!).length === 0}
       >
         {ctx ? <SettlementSummary key={`${ctx.surrenderNo}:${request.status}`} ctx={ctx} editable={isDraft} /> : contextState}
@@ -151,19 +164,27 @@ function SettlementSection({
   )
 }
 
-/** Section 1: the advance this settlement accounts for. */
-function AdvanceReceived({ ctx }: { ctx: AdvanceSettlementContext }) {
+/** Section 1 (client sample): Advance Information, then Total Advance Received. */
+function AdvanceInformation({ ctx, request }: { ctx: AdvanceSettlementContext; request: PortalRequest }) {
   const advanceNo = ctx.advanceNo || ctx.advance?.advanceNo || ''
   const purpose = ctx.advance?.requestPurposeText || ctx.advance?.purpose || ctx.purpose
+  const payload = request.payload ?? {}
+  const department =
+    request.departmentName ||
+    request.departmentCode ||
+    String(payload.DepartmentName ?? payload.Department ?? payload.ShortcutDimension2Code ?? payload.GlobalDimension1Code ?? '')
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3">
-      <div>
-        <p className="text-xs font-medium text-slate-600">Total Advance Received</p>
-        <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</p>
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-900">Advance Information</p>
+        <p className="flex items-center gap-2 text-xs text-slate-500">
+          Settlement {request.requestNo}
+          <StatusBadge status={request.status} />
+        </p>
       </div>
-      <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+      <dl className="mt-3 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
         <div className="min-w-0">
-          <dt className="text-xs text-slate-500">Advance Request</dt>
+          <dt className="text-xs text-slate-500">Advance Request No.</dt>
           <dd className="font-semibold">
             {advanceNo ? (
               <Link
@@ -178,41 +199,28 @@ function AdvanceReceived({ ctx }: { ctx: AdvanceSettlementContext }) {
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-slate-500">Paid on</dt>
+          <dt className="text-xs text-slate-500">Advance Date</dt>
           <dd className="font-semibold">{ctx.advance?.paymentDate ? formatDate(ctx.advance.paymentDate) : '—'}</dd>
         </div>
         <div className="min-w-0">
           <dt className="text-xs text-slate-500">Purpose</dt>
-          <dd className="truncate font-semibold" title={purpose}>
-            {purpose || '—'}
-          </dd>
+          <dd className="break-words font-semibold">{purpose || '—'}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-slate-500">Department</dt>
+          <dd className="font-semibold">{department || '—'}</dd>
         </div>
       </dl>
+      <div className="mt-4 rounded-lg bg-sky-50 px-4 py-3 ring-1 ring-sky-100">
+        <p className="text-xs text-slate-600">Total Advance Received</p>
+        <p className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</p>
+      </div>
     </div>
   )
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <h4 className="text-sm font-semibold text-[var(--portal-navy)]">{children}</h4>
-}
-
-function Tile({ icon, label, hint, value, tone }: { icon: ReactNode; label: string; hint: string; value: string; tone?: string }) {
-  return (
-    <div className={cn('flex flex-1 flex-col items-center rounded-xl border px-3 py-3 text-center', tone ?? 'border-sky-100 bg-sky-50/70')}>
-      <span className="text-sky-700">{icon}</span>
-      <p className="mt-1 text-sm font-semibold text-slate-900">{label}</p>
-      <p className="text-[11px] text-slate-500">{hint}</p>
-      <p className="mt-1.5 text-lg font-bold tabular-nums text-slate-950">{value}</p>
-    </div>
-  )
-}
-
-function Operator({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex items-center justify-center text-2xl font-bold text-[var(--portal-navy)]" aria-hidden="true">
-      {children}
-    </span>
-  )
 }
 
 function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; editable: boolean }) {
@@ -259,87 +267,54 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
     save.mutate()
   }
 
-  const balanceLabel =
-    outcome === 'refundDue'
-      ? 'To be returned'
-      : outcome === 'additionalClaim'
-        ? 'Additional amount claimed'
-        : 'No outstanding amount'
-
   return (
     <div className="space-y-4">
-      {/* Reconciliation: the advance against the actual expenses */}
-      <section>
-        <SectionTitle>Reconciliation</SectionTitle>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Calculated automatically by Business Central for advance {ctx.advanceNo || ctx.advance?.advanceNo || '—'}
-          {ctx.advance?.paymentDate ? ` (paid ${formatDate(ctx.advance.paymentDate)})` : ''}.
-        </p>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-          <Tile icon={<Coins className="h-6 w-6" />} label="Total Advance Received" hint="From Business Central" value={formatAmount(ctx.totalAdvanceReceived)} />
-          <Operator>−</Operator>
-          <Tile icon={<ReceiptText className="h-6 w-6" />} label="Total Actual Expenses" hint="Sum of the expense entries" value={formatAmount(ctx.totalActualExpenses)} />
-          <Operator>=</Operator>
-          <Tile
-            icon={<Scale className="h-6 w-6" />}
-            label="Balance"
-            hint={`Difference · ${balanceLabel}`}
-            value={formatAmount(Math.abs(ctx.settlementBalance))}
-            tone={
-              outcome === 'refundDue'
-                ? 'border-orange-200 bg-orange-50/80'
-                : outcome === 'additionalClaim'
-                  ? 'border-amber-200 bg-amber-50/80'
-                  : 'border-emerald-200 bg-emerald-50/80'
-            }
-          />
-        </div>
-      </section>
+      {/* Financial Reconciliation (client sample): advance, expenses, remaining balance */}
+      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+        <SectionTitle>Financial Reconciliation</SectionTitle>
+        <dl className="mt-3 space-y-2 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-slate-600">Total Advance Received</dt>
+            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-slate-600">Total Actual Expenses</dt>
+            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalActualExpenses)}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+            <dt className="text-base font-semibold text-slate-900">Remaining Balance</dt>
+            <dd
+              className={cn(
+                'text-2xl font-bold tabular-nums',
+                outcome === 'additionalClaim' ? 'text-amber-700' : outcome === 'refundDue' ? 'text-emerald-700' : 'text-slate-900',
+              )}
+            >
+              {ctx.settlementBalance < 0 ? '− ' : ''}
+              {formatAmount(Math.abs(ctx.settlementBalance))}
+            </dd>
+          </div>
+        </dl>
 
-      {/* Settlement outcome — the one BC calculated is highlighted */}
-      <section className="border-t border-slate-200 pt-4">
-        <SectionTitle>Settlement Outcome</SectionTitle>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          {(Object.keys(SETTLEMENT_SCENARIOS) as Outcome[]).map((key) => {
-            const scenario = SETTLEMENT_SCENARIOS[key]
-            const active = key === outcome
-            const Icon = key === 'fullySettled' ? BadgeCheck : key === 'refundDue' ? HandCoins : Wallet
-            return (
-              <div
-                key={key}
-                aria-current={active ? 'true' : undefined}
-                className={cn(
-                  'rounded-xl border px-3 py-3 transition',
-                  active
-                    ? 'border-teal-400 bg-teal-50 shadow-sm ring-2 ring-teal-300/60'
-                    : 'border-slate-200 bg-slate-50/60 opacity-60',
-                )}
-              >
-                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Icon className={cn('h-5 w-5', active ? 'text-teal-700' : 'text-slate-400')} />
-                  {scenario.letter}. {scenario.title}
-                  {active ? (
-                    <span className="ml-auto rounded-full bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                      Your outcome
-                    </span>
-                  ) : null}
-                </p>
-                <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-xs text-slate-700">
-                  <li>{scenario.rule}</li>
-                  <li>{scenario.action}</li>
-                </ul>
-                {key === 'fullySettled' && active ? (
-                  <p className="mt-2 rounded-lg bg-emerald-100 px-2 py-1 text-center text-xs font-semibold text-emerald-800">
-                    Advance is fully accounted for
-                  </p>
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
-
-        {outcome === 'refundDue' ? (
-          <OutcomeDetails title="Additional information — Advance Surrender">
+        <div className="mt-5">
+          <SectionTitle>Settlement Outcome</SectionTitle>
+          {outcome ? (
+            <div
+              className={cn(
+                'mt-2 rounded-lg px-3 py-3',
+                outcome === 'additionalClaim' ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-emerald-50 ring-1 ring-emerald-200',
+              )}
+            >
+              <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <CheckCircle2 className={cn('h-4 w-4', outcome === 'additionalClaim' ? 'text-amber-700' : 'text-emerald-700')} />
+                {SETTLEMENT_SCENARIOS[outcome].title}
+              </p>
+              <p className="mt-1 text-sm text-slate-700">{outcomeSentence(outcome, ctx)}</p>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500">Business Central has not calculated the outcome yet.</p>
+          )}
+          {outcome === 'refundDue' ? (
+            <OutcomeDetails title="Additional information — Advance Surrender">
             <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || ctx.settlementBalance)} />
             {editable ? (
               <>
@@ -368,8 +343,8 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
           </OutcomeDetails>
         ) : null}
 
-        {outcome === 'additionalClaim' ? (
-          <OutcomeDetails title="Additional information — Additional Reimbursement">
+          {outcome === 'additionalClaim' ? (
+            <OutcomeDetails title="Additional information — Additional Reimbursement">
             <ReadOnlyAmount label="Additional amount claimed" value={formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} />
             <div className="space-y-1.5 md:col-span-2">
               <Label htmlFor="asp-claim">Justification for exceeding the advance {editable ? '*' : ''}</Label>
@@ -384,10 +359,32 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
             </p>
           </OutcomeDetails>
         ) : null}
+        </div>
+
+        <div className="mt-5">
+          <SectionTitle>Settlement Options</SectionTitle>
+          <ul className="mt-2 space-y-1 text-sm">
+            {(Object.keys(SETTLEMENT_SCENARIOS) as Outcome[]).map((key) => {
+              const active = key === outcome
+              const Icon = key === 'fullySettled' ? BadgeCheck : key === 'refundDue' ? HandCoins : Wallet
+              return (
+                <li key={key} aria-current={active ? 'true' : undefined} className={cn('flex items-center gap-2', active ? 'font-semibold text-slate-900' : 'text-slate-600')}>
+                  <Icon className={cn('h-4 w-4', active ? 'text-teal-700' : 'text-slate-400')} />
+                  {SETTLEMENT_SCENARIOS[key].title}
+                  <span className="text-xs font-normal text-slate-500">· {SETTLEMENT_SCENARIOS[key].rule}</span>
+                  {active ? <span className="rounded-full bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">This settlement</span> : null}
+                </li>
+              )
+            })}
+          </ul>
+          <p className="mt-2 text-xs text-slate-500">The system determines the outcome from the reconciliation balance.</p>
+        </div>
       </section>
 
-      {/* Declaration + save */}
-      <section className="border-t border-slate-200 pt-4">
+      {/* Step 5: declaration, then Submit for Processing (below) */}
+      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+        <SectionTitle>Declaration and Submission</SectionTitle>
+        <div className="mt-2" />
         {editable ? (
           <form className="space-y-3" onSubmit={onSubmit}>
             {missing.length ? (
@@ -398,7 +395,9 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
             ) : (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                 <CheckCircle2 className="h-4 w-4" />
-                {dirty ? 'Save the settlement details, then submit for processing.' : 'Settlement is complete. You can submit it for processing.'}
+                {dirty
+                  ? 'Save the settlement details, then press Submit for Processing below.'
+                  : 'Settlement is complete. Press Submit for Processing below.'}
               </div>
             )}
             <label className="flex items-start gap-2 text-sm text-slate-800">
@@ -426,6 +425,17 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
       </section>
     </div>
   )
+}
+
+/** The outcome in one sentence, as in the client's sample. */
+function outcomeSentence(outcome: Outcome, ctx: AdvanceSettlementContext) {
+  if (outcome === 'refundDue') {
+    return `Employee must return ${formatAmount(ctx.refundAmount || ctx.settlementBalance)} to the organization.`
+  }
+  if (outcome === 'additionalClaim') {
+    return `The organization reimburses the employee ${formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} (additional expenses).`
+  }
+  return 'The advance is fully accounted for; nothing is outstanding.'
 }
 
 function OutcomeDetails({ title, children }: { title: string; children: ReactNode }) {
