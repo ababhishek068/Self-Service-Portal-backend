@@ -164,9 +164,17 @@ export interface MultiStepRequestConfig {
   /** Replace the header Edit form on a draft (e.g. the Staff Salary Advance form). */
   customEdit?: (ctx: {
     request: PortalRequest
-    onSaved: () => void
+    /** Saved (and maybe submitted): the page reloads the document; a draft opens in the form again. */
+    onSaved: () => void | Promise<void>
     onCancel: () => void
+    /** The draft was deleted: back to the list. */
+    onDeleted: () => void
   }) => ReactNode
+  /**
+   * A draft opens straight in `customEdit` — the same form it was created with — instead of the detail page
+   * (Advance Request, client 16 Nov 2026). Cancel there goes back to the list.
+   */
+  draftOpensInEdit?: boolean
 
   /** Curated fields shown on the detail screen. Undefined values are hidden. */
   detailFields?: MultiStepDetailFieldConfig[]
@@ -898,6 +906,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('open'))
   const [actionId, setActionId] = useState<string | null>(null)
   const [editingHeader, setEditingHeader] = useState(false)
+  // Remounts the custom edit form after a save so it starts from what Business Central now holds.
+  const [editVersion, setEditVersion] = useState(0)
   const [editingLine, setEditingLine] = useState<Record<string, unknown> | null>(null)
   const [showLineForm, setShowLineForm] = useState(false)
   const [receiveLine, setReceiveLine] = useState<Record<string, unknown> | null>(null)
@@ -1138,17 +1148,30 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
       }))
       .filter(({ value }) => value !== null && value !== undefined && value !== '')
 
-    if (selected && editingHeader && config.customEdit) {
+    const draftInForm = Boolean(config.draftOpensInEdit && editable)
+    if (selected && config.customEdit && (editingHeader || draftInForm)) {
+      const backToList = () => {
+        setEditingHeader(false)
+        setSelectedId(null)
+        setMode('list')
+      }
       return (
         <PageWrapper title={config.title}>
-          {config.customEdit({
-            request: selected,
-            onSaved: () => {
-              setEditingHeader(false)
-              void refresh()
-            },
-            onCancel: () => setEditingHeader(false),
-          })}
+          <div key={`${selected.id}:${editVersion}`} className="contents">
+            {config.customEdit({
+              request: selected,
+              onSaved: async () => {
+                setEditingHeader(false)
+                await refresh()
+                setEditVersion((version) => version + 1)
+              },
+              onCancel: draftInForm ? backToList : () => setEditingHeader(false),
+              onDeleted: () => {
+                backToList()
+                void queryClient.invalidateQueries({ queryKey: config.queryKey })
+              },
+            })}
+          </div>
         </PageWrapper>
       )
     }
@@ -1401,6 +1424,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                 {sentBack ? (
                   <SentBackNotice
                     sentBack={sentBack}
+                    submitLabel={config.submitButtonLabel}
                     busy={actionId === selected.id}
                     onReopen={() =>
                       void runAction(

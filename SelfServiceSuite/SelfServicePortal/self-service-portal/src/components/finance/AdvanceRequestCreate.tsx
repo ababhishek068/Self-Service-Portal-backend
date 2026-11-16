@@ -14,6 +14,7 @@ import {
   Landmark,
   Loader2,
   Monitor,
+  Plus,
   Save,
   Send,
   Trash2,
@@ -23,11 +24,25 @@ import {
 } from 'lucide-react'
 import { AuthApiError } from '@/api/client/authClient'
 import { getEmployeeProfileDetails } from '@/api/endpoints/profile'
-import { createModuleRequest, getModuleRequest, type EndpointConfig } from '@/api/endpoints/requestEndpoint'
+import {
+  addRequestLine,
+  createModuleRequest,
+  deleteModuleRequest,
+  deleteRequestAttachment,
+  deleteRequestLine,
+  getModuleRequest,
+  submitModuleRequest,
+  updateRequestHeader,
+  updateRequestLine,
+  uploadRequestAttachment,
+  type EndpointConfig,
+} from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
+import { ApprovalHistorySection } from '@/components/shared/ApprovalHistory'
 import { RequestProgress } from '@/components/shared/RequestProgress'
+import { SentBackNotice } from '@/components/shared/SentBackNotice'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import { attachmentVisual, formatFileSize } from '@/components/shared/attachmentUi'
 import { Button } from '@/components/ui/button'
@@ -40,8 +55,9 @@ import { advanceAttachmentCategories } from '@/data/essOptions'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { advanceRequestCreateSchema } from '@/schemas/requestSchemas'
-import { formatDateTime } from '@/utils/formatters'
-import type { PortalRequest } from '@/types/erp.types'
+import { formatDate, formatDateTime } from '@/utils/formatters'
+import { approvalHistorySteps, canDeleteDocumentDraft, sentBackInfo } from '@/utils/requestStatus'
+import type { Attachment, PortalRequest } from '@/types/erp.types'
 
 const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'jpg', 'png'])
 const MAX_FILE_BYTES = 10_000_000
@@ -63,6 +79,9 @@ const SECTION_OF_FIELD: Record<string, string> = {
 }
 
 type PendingFile = { id: string; file: File; category: string; description: string }
+/** An advance line beyond the first (Advance Type + amount); `lineNo` once Business Central has it. */
+type CostItem = { key: string; lineNo: string; advanceType: string; amount: string }
+type SavedLine = { lineNo: string; advanceType: string; amount: number; noOfDays: number }
 
 const etb = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -73,6 +92,60 @@ function newRequestId() {
 
 function round2(value: number) {
   return Math.round(value * 100) / 100
+}
+
+function newItemKey() {
+  return `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** First non-empty payload value (BC returns 0001-01-01 for an unset date). */
+function payloadText(payload: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = String(payload[key] ?? '').trim()
+    if (value && !value.startsWith('0001-01-01')) return value
+  }
+  return ''
+}
+
+function payloadDate(payload: Record<string, unknown>, keys: string[]) {
+  return payloadText(payload, keys).slice(0, 10)
+}
+
+/** The advance lines Business Central holds for a saved request. */
+function savedLines(request: PortalRequest | undefined): SavedLine[] {
+  const rows = Array.isArray(request?.payload?.lines) ? (request!.payload!.lines as Record<string, unknown>[]) : []
+  return rows
+    .map((row) => ({
+      lineNo: String(row.lineNo ?? row.id ?? '').trim(),
+      advanceType: String(row.advanceType ?? '').trim(),
+      amount: Number(row.amount ?? 0) || 0,
+      noOfDays: Number(row.noOfDays ?? 0) || 0,
+    }))
+    .filter((line) => line.lineNo)
+}
+
+/** Form values of a saved draft, from its Business Central header and first line. */
+function savedFormValues(request: PortalRequest, firstLine: SavedLine | undefined): FieldValues {
+  const payload = request.payload ?? {}
+  return {
+    requestDate: payloadDate(payload, ['Date', 'RequestDate']),
+    dateRequired: payloadDate(payload, ['DateRequired', 'Date_Required', 'PaymentReleaseDate', 'Payment_Release_Date']),
+    requestPurpose: payloadText(payload, ['RequestPurposeCode', 'Request_Purpose_Code']),
+    otherPurposeDetails: payloadText(payload, ['OtherPurposeDetails', 'Other_Purpose_Details']),
+    justification: payloadText(payload, ['RequestJustification', 'Request_Justification', 'Purpose']),
+    activityStartDate: payloadDate(payload, ['ActivityStartDate', 'Activity_Start_Date']),
+    activityEndDate: payloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']),
+    activityLocation: payloadText(payload, ['ActivityLocation', 'Activity_Location']),
+    projectAssignment: payloadText(payload, ['ProjectAssignment', 'Project_Assignment']),
+    requestedAmount: firstLine && firstLine.amount > 0 ? String(firstLine.amount) : '',
+    advanceType: firstLine?.advanceType ?? '',
+    advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details']),
+    purpose: '',
+  }
+}
+
+function needsTypeDetails(option: LookupOption | undefined) {
+  return option?.meta?.requiresOtherDetails === true || /^other\b/i.test(String(option?.label ?? ''))
 }
 
 function activityDays(start: string, end: string) {
@@ -198,7 +271,8 @@ function Counter({ value }: { value: string }) {
 }
 
 /**
- * New Advance Request on one page, laid out as the ABH "ESSP – Advance Request" developer handover:
+ * New Advance Request on one page, laid out as the ABH "ESSP – Advance Request" developer handover. With `request`
+ * it edits that draft (it opens in this same form, client 16 Nov 2026):
  * 1 Employee Information & Request Purpose · 2 Advance Request Details (Requested Amount in ETB)
  * · 3 Supporting Documents & Submission (Save as Draft / Submit for Approval / Cancel / View History)
  * · 4 Approval Workflow & Limits, a live route that follows the amount. Business Central creates the
@@ -211,7 +285,10 @@ export function AdvanceRequestCreate({
   purposeHint,
   advanceTypes,
   supportsProject,
+  request,
   onCreated,
+  onSaved,
+  onDeleted,
   onCancel,
 }: {
   module: EndpointConfig
@@ -219,7 +296,13 @@ export function AdvanceRequestCreate({
   purposeHint: string
   advanceTypes: LookupOption[]
   supportsProject: boolean
-  onCreated: (request: PortalRequest) => void
+  /** A saved draft (or an advance reopened after a send back) to edit. */
+  request?: PortalRequest
+  onCreated?: (request: PortalRequest) => void
+  /** Edit: saved (and maybe submitted); the page reloads the request. */
+  onSaved?: () => void | Promise<void>
+  /** Edit: the draft was deleted. */
+  onDeleted?: () => void
   onCancel: () => void
 }) {
   const toast = useToast()
@@ -231,9 +314,27 @@ export function AdvanceRequestCreate({
     staleTime: 5 * 60 * 1000,
   })
   const profile = profileQuery.data
-  const requestDate = useMemo(() => new Date().toISOString(), [])
-  const today = requestDate.slice(0, 10)
+  const editing = Boolean(request)
+  const initialLines = useMemo(() => savedLines(request), [request])
+  const sentBack = sentBackInfo(request)
+  const historySteps = request ? approvalHistorySteps(request) : []
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const requestDate = useMemo(
+    () => (request ? payloadText(request.payload ?? {}, ['Date', 'RequestDate']) || request.createdAt || '' : new Date().toISOString()),
+    [request],
+  )
   const clientRequestId = useRef(newRequestId())
+  const [extraItems, setExtraItems] = useState<CostItem[]>(() =>
+    initialLines.slice(1).map((line) => ({
+      key: newItemKey(),
+      lineNo: line.lineNo,
+      advanceType: line.advanceType,
+      amount: line.amount > 0 ? String(line.amount) : '',
+    })),
+  )
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({})
+  const [savedAttachments, setSavedAttachments] = useState<Attachment[]>(() => request?.attachments ?? [])
+  const [removingAttachment, setRemovingAttachment] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const [files, setFiles] = useState<PendingFile[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -244,7 +345,9 @@ export function AdvanceRequestCreate({
   const form = useForm<FieldValues>({
     // The schema coerces Requested Amount to a number; the form keeps plain field values.
     resolver: zodResolver(advanceRequestCreateSchema) as unknown as Resolver<FieldValues>,
-    defaultValues: {
+    defaultValues: request
+      ? savedFormValues(request, initialLines[0])
+      : {
       requestDate: today,
       dateRequired: today,
       requestPurpose: '',
@@ -266,7 +369,10 @@ export function AdvanceRequestCreate({
   const purposeCode = text('requestPurpose')
   const activityStart = text('activityStartDate')
   const activityEnd = text('activityEndDate') || activityStart
-  const amount = Number(watched.requestedAmount ?? 0) > 0 ? Number(watched.requestedAmount) : 0
+  const firstAmount = Number(watched.requestedAmount ?? 0) > 0 ? Number(watched.requestedAmount) : 0
+  const extraTotal = extraItems.reduce((sum, item) => sum + (Number(item.amount) > 0 ? Number(item.amount) : 0), 0)
+  // The approval route follows the whole advance: every cost item.
+  const amount = round2(firstAmount + extraTotal)
   const needsOther = purposeRequiresOtherDetails(purposeCode, purposeOptions)
   const finalLimit = APPROVAL_LIMITS.find((limit) => limit.matches(amount))
   const days = activityStart ? activityDays(activityStart, activityEnd) : 0
@@ -274,9 +380,11 @@ export function AdvanceRequestCreate({
   const purposeLabel = purposeOptions.find((option) => option.value === purposeCode)?.label ?? ''
   const advanceTypeOption = advanceTypes.find((option) => option.value === text('advanceType'))
   const advanceTypeLabel = advanceTypeOption?.label ?? ''
-  // ESSP Advance Request Types (BC 1.0.3.653): Other (Specify) needs what the advance is for.
+  // ESSP Advance Request Types (BC 1.0.3.653): Other (Specify) needs what the advance is for (one text per request).
   const typeNeedsDetails =
-    advanceTypeOption?.meta?.requiresOtherDetails === true || /^other\b/i.test(advanceTypeLabel)
+    needsTypeDetails(advanceTypeOption) ||
+    extraItems.some((item) => needsTypeDetails(advanceTypes.find((option) => option.value === item.advanceType)))
+  const extraItemsValid = extraItems.every((item) => Boolean(item.advanceType) && Number(item.amount) > 0)
 
   const section1Done =
     Boolean(purposeCode) && (!needsOther || text('otherPurposeDetails').trim().length > 0) && text('justification').trim().length >= 10
@@ -286,9 +394,16 @@ export function AdvanceRequestCreate({
     Boolean(activityStart) &&
     activityEnd >= activityStart &&
     text('dateRequired') <= activityStart &&
-    amount > 0 &&
-    Boolean(text('advanceType'))
-  const dirty = form.formState.isDirty || files.length > 0
+    firstAmount > 0 &&
+    Boolean(text('advanceType')) &&
+    extraItemsValid
+  const itemsChanged =
+    extraItems.length !== Math.max(0, initialLines.length - 1) ||
+    extraItems.some((item, index) => {
+      const saved = initialLines[index + 1]
+      return !saved || item.lineNo !== saved.lineNo || item.advanceType !== saved.advanceType || Number(item.amount) !== saved.amount
+    })
+  const dirty = form.formState.isDirty || files.length > 0 || itemsChanged
 
   const expectedApprovers: TrackerStep[] = [
     { key: 'line-manager', heading: 'Line Manager', owner: 'Approves every request first', icon: UserCheck },
@@ -314,54 +429,108 @@ export function AdvanceRequestCreate({
   // After the success moment, open the saved request.
   useEffect(() => {
     if (!success) return
-    const timer = window.setTimeout(() => onCreated(success.request), prefersReducedMotion() ? 400 : 1600)
+    const timer = window.setTimeout(
+      () => (editing ? void onSaved?.() : onCreated?.(success.request)),
+      prefersReducedMotion() ? 400 : 1600,
+    )
     return () => window.clearTimeout(timer)
-  }, [success, onCreated])
+  }, [success, onCreated, onSaved, editing])
+
+  const encodeFiles = () =>
+    Promise.all(
+      files.map(async (item) => ({
+        fileName: item.file.name,
+        fileType: item.file.type || 'application/octet-stream',
+        size: item.file.size,
+        contentBase64: await readFileBase64(item.file),
+        description: `${item.category}: ${item.description.trim() || item.file.name}`,
+      })),
+    )
+
+  /** The header fields Business Central keeps (create and edit). */
+  const headerBody = (values: FieldValues) => {
+    const start = String(values.activityStartDate ?? '')
+    const end = String(values.activityEndDate ?? '') || start
+    const code = String(values.requestPurpose ?? '').trim()
+    const label = purposeOptions.find((option) => option.value === code)?.label ?? code
+    const justification = String(values.justification ?? '').trim()
+    return {
+      dateRequired: values.dateRequired,
+      requestPurpose: code,
+      purposeCode: code,
+      otherPurposeDetails: needsOther ? String(values.otherPurposeDetails ?? '').trim() : '',
+      justification,
+      purpose: justification || label,
+      title: justification || label || 'Advance Request',
+      activityStartDate: start,
+      activityEndDate: end,
+      activityLocation: String(values.activityLocation ?? '').trim(),
+      ...(supportsProject ? { projectAssignment: String(values.projectAssignment ?? '').trim() } : {}),
+      ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
+    }
+  }
+
+  /** Every cost item as a BC advance line: the amount over the activity days (no travel fields). */
+  const lineBodies = (values: FieldValues) => {
+    const start = String(values.activityStartDate ?? '')
+    const lineDays = activityDays(start, String(values.activityEndDate ?? '') || start)
+    const line = (advanceType: string, value: number) => ({
+      advanceType,
+      amount: round2(value),
+      noOfDays: lineDays,
+      dailyRate: round2(value / lineDays),
+      destination: '',
+      dutyArea: '',
+    })
+    return [
+      { lineNo: initialLines[0]?.lineNo ?? '', ...line(String(values.advanceType ?? ''), Number(values.requestedAmount)) },
+      ...extraItems.map((item) => ({ lineNo: item.lineNo, ...line(item.advanceType, Number(item.amount)) })),
+    ]
+  }
+
+  /** Edit: header, then the lines (removed, changed, new), new documents, and Submit when asked. */
+  const saveDraft = async (values: FieldValues, submit: boolean) => {
+    const id = request!.id
+    let wrote = false
+    try {
+      await updateRequestHeader(id, headerBody(values))
+      wrote = true
+      const wanted = lineBodies(values)
+      const keep = new Set(wanted.map((line) => line.lineNo).filter(Boolean))
+      for (const saved of initialLines) {
+        if (!keep.has(saved.lineNo)) await deleteRequestLine(id, saved.lineNo)
+      }
+      for (const { lineNo, ...line } of wanted) {
+        const saved = initialLines.find((row) => row.lineNo === lineNo)
+        if (!lineNo || !saved) {
+          await addRequestLine(id, line)
+        } else if (saved.advanceType !== line.advanceType || saved.amount !== line.amount || saved.noOfDays !== line.noOfDays) {
+          await updateRequestLine(id, lineNo, line)
+        }
+      }
+      for (const attachment of await encodeFiles()) await uploadRequestAttachment(id, attachment)
+      if (submit) await submitModuleRequest(module, id)
+    } catch (error) {
+      // Part of it may be in BC already: reload the request so the form shows what BC holds.
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { partlySaved: wrote })
+    }
+    return request!
+  }
 
   const create = useMutation({
     mutationFn: async ({ values, submit }: { values: FieldValues; submit: boolean }) => {
-      const attachments = await Promise.all(
-        files.map(async (item) => ({
-          fileName: item.file.name,
-          fileType: item.file.type || 'application/octet-stream',
-          size: item.file.size,
-          contentBase64: await readFileBase64(item.file),
-          description: `${item.category}: ${item.description.trim() || item.file.name}`,
-        })),
-      )
-      const start = String(values.activityStartDate ?? '')
-      const end = String(values.activityEndDate ?? '') || start
-      const lineDays = activityDays(start, end)
-      const requested = round2(Number(values.requestedAmount))
-      const code = String(values.requestPurpose ?? '').trim()
-      const label = purposeOptions.find((option) => option.value === code)?.label ?? code
-      const justification = String(values.justification ?? '').trim()
+      if (request) return saveDraft(values, submit)
+      const attachments = await encodeFiles()
       return createModuleRequest(
         module,
         {
-          dateRequired: values.dateRequired,
-          requestPurpose: code,
-          purposeCode: code,
-          otherPurposeDetails: needsOther ? String(values.otherPurposeDetails ?? '').trim() : '',
-          justification,
-          purpose: justification || label,
-          title: justification || label || 'Advance Request',
-          activityStartDate: start,
-          activityEndDate: end,
-          activityLocation: String(values.activityLocation ?? '').trim(),
-          ...(supportsProject ? { projectAssignment: String(values.projectAssignment ?? '').trim() } : {}),
-          ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
-          // The requested amount (ETB) on the chosen Advance Type: BC needs the type for the account.
-          lines: [
-            {
-              advanceType: values.advanceType,
-              amount: requested,
-              noOfDays: lineDays,
-              dailyRate: round2(requested / lineDays),
-              destination: '',
-              dutyArea: '',
-            },
-          ],
+          ...headerBody(values),
+          // Each cost item (Advance Type + amount in ETB) is an advance line: BC needs the type for the account.
+          lines: lineBodies(values).map((line) => {
+            const body: Record<string, unknown> = { ...line }
+            delete body.lineNo
+            return body
+          }),
           attachments,
           submit,
           clientRequestId: clientRequestId.current,
@@ -370,23 +539,39 @@ export function AdvanceRequestCreate({
         { timeout: 120_000 },
       )
     },
-    onSuccess: (request, { submit }) => {
+    onSuccess: (saved, { submit }) => {
       toast.success(
         submit
-          ? `${request.requestNo} is with Business Central for approval: the Line Manager first, then ${finalLimit?.approver ?? 'the final approver'}.`
-          : `${request.requestNo} is saved as a draft. It is not sent for approval until you submit it.`,
-        submit ? 'Submitted for approval' : 'Saved as draft',
+          ? `${saved.requestNo} is with Business Central for approval: the Line Manager first, then ${finalLimit?.approver ?? 'the final approver'}.`
+          : editing
+            ? `${saved.requestNo} is saved. It is not sent for approval until you submit it.`
+            : `${saved.requestNo} is saved as a draft. It is not sent for approval until you submit it.`,
+        submit ? 'Submitted for approval' : editing ? 'Draft saved' : 'Saved as draft',
       )
-      setSuccess({ request, submit })
+      // Edit + Save as Draft: reload what BC now holds and stay in the form.
+      if (editing && !submit) {
+        void onSaved?.()
+        return
+      }
+      setSuccess({ request: saved, submit })
     },
     onError: async (error) => {
       const message = error instanceof Error ? error.message : 'The advance request could not be saved.'
+      if (editing) {
+        if ((error as { partlySaved?: boolean }).partlySaved) {
+          toast.error(`${message} Part of your changes may be saved; the form now shows what Business Central holds.`, 'Not fully saved')
+          void onSaved?.()
+          return
+        }
+        setFormError(message)
+        return
+      }
       const documentNo = error instanceof AuthApiError ? error.documentNo : undefined
       if (documentNo) {
         // BC saved the draft but a later step failed: keep it, open it, and say it was not submitted.
         toast.error(`${message} Open draft ${documentNo}, correct it and submit it again.`, `Saved as draft ${documentNo}, not submitted`)
         try {
-          onCreated(await getModuleRequest(module, `${module.module}-${documentNo}`))
+          onCreated?.(await getModuleRequest(module, `${module.module}-${documentNo}`))
         } catch {
           setFormError(`Draft ${documentNo} was saved but could not be opened. Find it in My Advance Requests.`)
         }
@@ -396,7 +581,16 @@ export function AdvanceRequestCreate({
     },
   })
 
-  const busy = create.isPending || Boolean(success)
+  const removeDraft = useMutation({
+    mutationFn: () => deleteModuleRequest(module, request!.id),
+    onSuccess: () => {
+      toast.success(`${request!.requestNo} is deleted.`, 'Draft deleted')
+      onDeleted?.()
+    },
+    onError: (error) => setFormError(error instanceof Error ? error.message : 'The draft could not be deleted.'),
+  })
+
+  const busy = create.isPending || removeDraft.isPending || Boolean(success)
 
   const flagSection = (sectionId: string) => {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
@@ -414,6 +608,17 @@ export function AdvanceRequestCreate({
           flagSection('adv-s1')
           return
         }
+        if (!extraItemsValid) {
+          setItemErrors(
+            Object.fromEntries(
+              extraItems
+                .filter((item) => !item.advanceType || !(Number(item.amount) > 0))
+                .map((item) => [item.key, !item.advanceType ? 'Choose the advance type' : 'Enter an amount above zero']),
+            ),
+          )
+          flagSection('adv-s2')
+          return
+        }
         if (typeNeedsDetails && String(values.advanceTypeDetails ?? '').trim().length < 3) {
           form.setError('advanceTypeDetails', { type: 'manual', message: 'Specify the advance type when Other (Specify) is selected' })
           flagSection('adv-s2')
@@ -422,6 +627,7 @@ export function AdvanceRequestCreate({
         create.mutate({ values, submit })
       },
       (invalid) => {
+        if (!extraItemsValid) setItemErrors(Object.fromEntries(extraItems.filter((item) => !item.advanceType || !(Number(item.amount) > 0)).map((item) => [item.key, 'Choose the advance type and an amount above zero'])))
         const first = Object.keys(invalid)[0] ?? ''
         setFormError('Some required details are missing or invalid. They are marked in red.')
         flagSection(SECTION_OF_FIELD[first] ?? 'adv-s2')
@@ -431,15 +637,64 @@ export function AdvanceRequestCreate({
 
   const cancel = async () => {
     if (dirty) {
-      const discard = await confirm({
-        title: 'Discard this advance request?',
-        message: 'Nothing has been saved yet. Your entries and documents will be lost.',
-        confirmLabel: 'Discard',
-        tone: 'danger',
-      })
+      const discard = await confirm(
+        editing
+          ? {
+              title: 'Discard your changes?',
+              message: `${request!.requestNo} stays as it was last saved. The changes and documents you added here will be lost.`,
+              confirmLabel: 'Discard changes',
+              tone: 'danger',
+            }
+          : {
+              title: 'Discard this advance request?',
+              message: 'Nothing has been saved yet. Your entries and documents will be lost.',
+              confirmLabel: 'Discard',
+              tone: 'danger',
+            },
+      )
       if (!discard) return
     }
     onCancel()
+  }
+
+  const deleteDraft = async () => {
+    const yes = await confirm({
+      title: `Delete draft ${request!.requestNo}?`,
+      message: 'The draft, its advance lines and documents are deleted in Business Central. This cannot be undone.',
+      confirmLabel: 'Delete draft',
+      cancelLabel: 'Keep',
+      tone: 'danger',
+    })
+    if (yes) removeDraft.mutate()
+  }
+
+  const removeSavedAttachment = async (attachment: Attachment) => {
+    const yes = await confirm({
+      title: `Remove ${attachment.fileName}?`,
+      message: 'The document is removed from the request in Business Central.',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    })
+    if (!yes) return
+    setRemovingAttachment(attachment.id)
+    try {
+      await deleteRequestAttachment(request!.id, attachment.id)
+      setSavedAttachments((current) => current.filter((row) => row.id !== attachment.id))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'The document could not be removed.', 'Not removed')
+    } finally {
+      setRemovingAttachment(null)
+    }
+  }
+
+  const updateItem = (key: string, patch: Partial<CostItem>) => {
+    setExtraItems((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)))
+    setItemErrors((current) => {
+      if (!current[key]) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
   }
 
   const addFiles = (list: FileList | null) => {
@@ -481,19 +736,46 @@ export function AdvanceRequestCreate({
   return (
     <div className="adv-form space-y-4">
       {/* Standard: Workflow Progress first. */}
-      <RequestProgress status="Draft" creating="new" requiresLines={false} expectedApprovers={expectedApprovers} />
+      {request && sentBack ? (
+        <RequestProgress
+          status={request.status}
+          hasLines={initialLines.length > 0}
+          module="imprest"
+          payload={request.payload}
+          approvalSteps={request.approvalSteps}
+          expectedApprovers={expectedApprovers}
+        />
+      ) : (
+        <RequestProgress
+          status="Draft"
+          creating={editing ? 'edit' : 'new'}
+          requiresLines={false}
+          expectedApprovers={expectedApprovers}
+        />
+      )}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-[var(--portal-text)]">New Advance Request</h2>
+          <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight text-[var(--portal-text)]">
+            {request ? `Advance Request ${request.requestNo}` : 'New Advance Request'}
+            {request ? (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                {sentBack ? 'Sent back for correction' : 'Draft'}
+              </span>
+            ) : null}
+          </h2>
           <p className="mt-0.5 text-sm text-[var(--portal-muted)]">
-            Funds for an approved business activity. You settle them later in Advance Settlement.
+            {request
+              ? 'Saved in Business Central, not sent for approval yet. Change what you need, then Save Draft or Submit for Approval.'
+              : 'Funds for an approved business activity. You settle them later in Advance Settlement.'}
           </p>
         </div>
         <p className="text-xs text-[var(--portal-muted)]">
           Fields marked <span className="font-semibold text-rose-600">*</span> are required
         </p>
       </div>
+
+      {sentBack ? <SentBackNotice sentBack={{ ...sentBack, reopenRequired: false }} submitLabel="Submit for Approval" /> : null}
 
       {formError ? (
         <div className="adv-reveal flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
@@ -614,7 +896,7 @@ export function AdvanceRequestCreate({
                 <p className="text-sm font-medium text-[var(--portal-text)]">Request date</p>
                 <p className="flex h-10 items-center gap-2 rounded-md bg-[var(--portal-surface-sunken)] px-3 text-sm text-[var(--portal-text-soft)]">
                   <CalendarClock className="h-4 w-4 shrink-0 text-[var(--portal-navy)]" aria-hidden="true" />
-                  <span className="tabular-nums">{formatDateTime(requestDate)}</span>
+                  <span className="tabular-nums">{editing ? formatDate(requestDate) : formatDateTime(requestDate)}</span>
                 </p>
                 <p className="text-xs text-[var(--portal-muted)]">Set by the system</p>
               </div>
@@ -718,19 +1000,114 @@ export function AdvanceRequestCreate({
                 </div>
               ) : null}
             </div>
-            <p className="mt-4 text-xs text-[var(--portal-muted)]">
-              Need several cost items, such as per diem and transport? Save first, then add advance lines to the request.
-            </p>
+            {extraItems.length ? (
+              <ul className="mt-4 space-y-3 border-t border-[var(--portal-card-border)] pt-4" aria-label="More cost items">
+                {extraItems.map((item, index) => (
+                  <li key={item.key} className="adv-reveal space-y-1">
+                    <div className="grid items-start gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                      <div className={cn('adv-amount', Boolean(itemErrors[item.key]) && !(Number(item.amount) > 0) && 'is-invalid')}>
+                        <span className="adv-amount-currency">ETB</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          aria-label={`Amount of cost item ${index + 2}`}
+                          value={item.amount}
+                          disabled={busy}
+                          onChange={(event) => updateItem(item.key, { amount: event.target.value })}
+                        />
+                      </div>
+                      <Select
+                        aria-label={`Advance type of cost item ${index + 2}`}
+                        value={item.advanceType}
+                        options={advanceTypes}
+                        placeholder="Choose an advance type"
+                        disabled={busy}
+                        onChange={(event) => updateItem(item.key, { advanceType: event.target.value })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-10"
+                        disabled={busy}
+                        aria-label={`Remove cost item ${index + 2}`}
+                        onClick={() => setExtraItems((current) => current.filter((row) => row.key !== item.key))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <FieldError message={itemErrors[item.key]} />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => setExtraItems((current) => [...current, { key: newItemKey(), lineNo: '', advanceType: '', amount: '' }])}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Add another cost item
+              </Button>
+              {extraItems.length ? (
+                <p className="text-sm text-[var(--portal-text)]">
+                  Total requested{' '}
+                  <span className="font-semibold tabular-nums">ETB {etb.format(amount)}</span>
+                </p>
+              ) : (
+                <p className="text-xs text-[var(--portal-muted)]">One line per advance type, for example per diem and transport.</p>
+              )}
+            </div>
           </Section>
 
           <Section
             id="adv-s3"
             number={3}
             title="Supporting Documents & Submission"
-            hint={files.length ? `${files.length} ${files.length === 1 ? 'document' : 'documents'} attached` : 'Documents are optional'}
+            hint={
+              files.length + savedAttachments.length
+                ? `${files.length + savedAttachments.length} ${files.length + savedAttachments.length === 1 ? 'document' : 'documents'} attached`
+                : 'Documents are optional'
+            }
             done={section1Done && section2Done}
             shake={false}
           >
+            {savedAttachments.length ? (
+              <ul className="mb-3 space-y-2" aria-label="Documents already on the request">
+                {savedAttachments.map((attachment) => {
+                  const { Icon, tone } = attachmentVisual(attachment.fileName)
+                  return (
+                    <li key={attachment.id} className="adv-file">
+                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1', tone)} aria-hidden="true">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--portal-text)]">{attachment.fileName}</p>
+                        <p className="truncate text-[11px] text-[var(--portal-muted)]">
+                          {attachment.description || 'Saved in Business Central'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy || removingAttachment === attachment.id}
+                        aria-label={`Remove ${attachment.fileName}`}
+                        onClick={() => void removeSavedAttachment(attachment)}
+                      >
+                        {removingAttachment === attachment.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : null}
             <input
               ref={fileInput}
               type="file"
@@ -807,15 +1184,33 @@ export function AdvanceRequestCreate({
             ) : null}
 
             <div className="adv-actions">
-              <div className="flex gap-2">
-                <Button type="button" variant="ghost" disabled={create.isPending} onClick={() => void cancel()}>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="ghost" disabled={create.isPending || removeDraft.isPending} onClick={() => void cancel()}>
                   <X className="mr-1.5 h-4 w-4" />
                   Cancel
                 </Button>
-                <Button type="button" variant="ghost" disabled title="History appears once the request is saved">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!historySteps.length}
+                  title={historySteps.length ? undefined : 'History appears once the request has been sent for approval'}
+                  onClick={() => scrollTo('adv-history')}
+                >
                   <History className="mr-1.5 h-4 w-4" />
                   View History
                 </Button>
+                {request && canDeleteDocumentDraft(request.status, 'imprest') ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                    disabled={busy}
+                    onClick={() => void deleteDraft()}
+                  >
+                    {removeDraft.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}
+                    {removeDraft.isPending ? 'Deleting…' : 'Delete Draft'}
+                  </Button>
+                ) : null}
               </div>
               <div className="adv-actions-main">
                 <Button type="button" variant="outline" disabled={busy} onClick={() => run(false)}>
@@ -824,7 +1219,7 @@ export function AdvanceRequestCreate({
                   ) : (
                     <Save className="mr-1.5 h-4 w-4" />
                   )}
-                  {create.isPending && !create.variables?.submit ? 'Saving…' : 'Save as Draft'}
+                  {create.isPending && !create.variables?.submit ? 'Saving…' : editing ? 'Save Draft' : 'Save as Draft'}
                 </Button>
                 <Button type="button" className="adv-submit" disabled={busy} onClick={() => run(true)}>
                   {create.isPending && create.variables?.submit ? (
@@ -936,9 +1331,16 @@ export function AdvanceRequestCreate({
                   id: 'adv-s2',
                   label: 'Dates, amount and advance type',
                   done: section2Done,
-                  detail: section2Done ? `${days} ${days === 1 ? 'day' : 'days'}, ${advanceTypeLabel}` : '',
+                  detail: section2Done
+                    ? `${days} ${days === 1 ? 'day' : 'days'}, ${extraItems.length ? `${extraItems.length + 1} cost items` : advanceTypeLabel}`
+                    : '',
                 },
-                { id: 'adv-s3', label: 'Supporting documents', done: true, detail: files.length ? `${files.length} attached` : 'Optional' },
+                {
+                  id: 'adv-s3',
+                  label: 'Supporting documents',
+                  done: true,
+                  detail: files.length + savedAttachments.length ? `${files.length + savedAttachments.length} attached` : 'Optional',
+                },
               ].map((item) => (
                 <li key={item.id}>
                   <button type="button" className="adv-check" onClick={() => scrollTo(item.id)}>
@@ -957,6 +1359,12 @@ export function AdvanceRequestCreate({
           </section>
         </aside>
       </div>
+
+      {historySteps.length ? (
+        <div id="adv-history" className="scroll-mt-24">
+          <ApprovalHistorySection steps={historySteps} />
+        </div>
+      ) : null}
 
       {success
         ? createPortal(

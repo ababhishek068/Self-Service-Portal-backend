@@ -11,10 +11,13 @@ export function SentBackNotice({
   sentBack,
   busy,
   onReopen,
+  submitLabel = 'Request Approval',
 }: {
   sentBack: SentBackInfo
   busy?: boolean
   onReopen?: () => void
+  /** The page's send button (e.g. Submit for Approval). */
+  submitLabel?: string
 }) {
   const approver = sentBack.by || 'The approver'
   return (
@@ -35,8 +38,8 @@ export function SentBackNotice({
           </p>
           <p className="mt-2 text-xs text-orange-900">
             {sentBack.reopenRequired
-              ? 'Press Reopen to Correct, update the purpose / justification (and any other fields the comment asks for), then press Request Approval.'
-              : 'Update the purpose / justification (and any other fields the comment asks for), then press Request Approval.'}{' '}
+              ? `Press Reopen to Correct, update the purpose / justification (and any other fields the comment asks for), then press ${submitLabel}.`
+              : `Update the purpose / justification (and any other fields the comment asks for), then press ${submitLabel}.`}{' '}
             The approvals already given are kept and the request goes back to {approver}.
           </p>
         </div>

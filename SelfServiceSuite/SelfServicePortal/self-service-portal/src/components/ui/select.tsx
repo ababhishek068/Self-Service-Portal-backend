@@ -207,11 +207,11 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                   <span className="truncate">Type to search {options.length} options</span>
                 </div>
               ) : null}
-              <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
+              <div ref={listRef} className="max-h-72 overflow-y-auto py-1">
                 {placeholder && !normalizedQuery ? (
                   <button
                     type="button"
-                    className="block w-full truncate px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-50"
+                    className="block w-full truncate px-3 py-1.5 text-left text-sm! leading-5! text-slate-400 hover:bg-slate-50 sm:py-1"
                     onMouseDown={(event) => {
                       event.preventDefault()
                       commit('')
@@ -226,7 +226,8 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                     type="button"
                     disabled={option.disabled}
                     className={cn(
-                      'block w-full truncate px-3 py-2 text-left text-sm',
+                      // Compact rows (client, 16 Nov 2026). `!`: the global `button { font: inherit }` rule beats utilities.
+                      'block w-full truncate px-3 py-1.5 text-left text-sm! leading-5! sm:py-1',
                       option.disabled
                         ? 'cursor-not-allowed text-slate-400'
                         : 'hover:bg-slate-100',
@@ -247,7 +248,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
                   </button>
                 ))}
                 {filtered.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
+                  <div className="px-3 py-1.5 text-sm text-slate-400">No matches</div>
                 ) : null}
               </div>
             </div>

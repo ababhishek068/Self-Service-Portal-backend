@@ -724,7 +724,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v396 — 1.0.3.557 (Overtime Request: BC drives the list on every portal server and the portal copies are kept outside the release folder, so upgrades no longer lose them; includes 545 to 556; for BC 1.0.3.661)'
+export const PORTAL_API_BUILD = 'v397 — 1.0.3.558 (Advance Request: a draft reopens in the one-page form with several cost items, Delete Draft for a cancelled advance, Confirm Payment Received right after approval, Activity / Purpose in the client order with Other last, compact dropdowns; includes 545 to 557; for BC 1.0.3.662)'
 
 interface LookupSpec {
   service: string
@@ -3338,16 +3338,20 @@ export function overtimeSentBackNotificationItems(
 
 /**
  * BC 1.0.3.653+ (ERP 660): the user's advances Finance has paid whose receipt they have not confirmed yet
- * (`awaitingReceipt`); settlement is possible only after "Confirm Payment Received".
+ * (`awaitingReceipt`); settlement is possible only after "Confirm Payment Received". BC 1.0.3.662 lists them from
+ * approval on (`paid` false until Finance's payment is in BC).
  */
 export function advanceReceiptNotificationItems(
-  awaiting: Array<{ advanceNo: string; amount: number; purpose: string }>,
+  awaiting: Array<{ advanceNo: string; amount: number; purpose: string; paid?: boolean }>,
 ): PortalNotification[] {
   return awaiting.map((row) => ({
     id: `advanceReceipt:imprest-${row.advanceNo}`,
     kind: 'advanceReceipt',
     count: 1,
-    title: `${row.advanceNo} is paid — confirm you received the money`,
+    title:
+      row.paid === false
+        ? `${row.advanceNo} is approved — confirm here once you receive the money`
+        : `${row.advanceNo} is paid — confirm you received the money`,
     description: [
       row.amount > 0 ? `ETB ${row.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '',
       row.purpose,

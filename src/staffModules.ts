@@ -3324,7 +3324,9 @@ export async function cancelPortalModuleRequest(
   ) {
     throw Object.assign(
       new Error(
-        `Business Central accepted the cancellation for ${no}, but the document is not Open or an active approval entry still exists.`,
+        spec.module === 'imprest'
+          ? `Business Central cancelled the approval of ${no} but did not reopen it. Business Central 1.0.3.662 reopens an Advance Request after Cancel Approval or a send back; ask the ERP team to install it, then try again.`
+          : `Business Central accepted the cancellation for ${no}, but the document is not Open or an active approval entry still exists.`,
       ),
       { status: 502, code: 'APPROVAL_CANCELLATION_INCOMPLETE' },
     )
@@ -3369,7 +3371,22 @@ export async function deletePortalModuleDocument(
     user,
     no,
   })
-  const result = await callSoapMethod(spec.soap.deleteDocument, params)
+  let result: SoapResult
+  try {
+    result = await callSoapMethod(spec.soap.deleteDocument, params)
+  } catch (error) {
+    // BC before 1.0.3.662 deletes only an Open / Cancelled advance; one left on Pending Approval after its
+    // approval was cancelled needs 662 (which reopens it first).
+    if (spec.module === 'imprest' && /only a pending or cancelled/i.test(String((error as Error)?.message ?? ''))) {
+      throw Object.assign(
+        new Error(
+          `Business Central still holds ${no} as Pending Approval although its approval was cancelled, so it cannot delete it yet. Business Central 1.0.3.662 reopens and deletes such an Advance Request; ask the ERP team to install it.`,
+        ),
+        { status: 422, code: 'DOCUMENT_DELETE_FAILED' },
+      )
+    }
+    throw error
+  }
   if (!ok(result) && !approvalOk(result)) {
     throw Object.assign(
       new Error(

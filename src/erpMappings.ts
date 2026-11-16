@@ -491,8 +491,27 @@ export function resolveModuleRequestStatus(
     if (latestStatus.includes('approve')) return 'Approved'
   }
   if (base === 'Returned' || base === 'Rejected' || base === 'Approved') return base
+  if (advanceApprovalCancelledButPending(requestType, base, approvalEntries)) return 'Cancelled'
   if (base === 'Pending Approval' || documentSentForApproval(row)) return 'Pending Approval'
   return base
+}
+
+/**
+ * An Advance Request whose every approval entry was cancelled while BC kept the header on Pending Approval
+ * (the company's workflow has no Open document response on cancel; BC 1.0.3.662 reopens it). Its approval is
+ * cancelled: the portal offers Delete Draft (BC 662 reopens and deletes it) instead of a dead Cancel Approval.
+ */
+export function advanceApprovalCancelledButPending(
+  requestType: PortalModuleKey,
+  base: string,
+  approvalEntries: ODataRecord[],
+) {
+  return (
+    requestType === 'imprest' &&
+    base === 'Pending Approval' &&
+    approvalEntries.length > 0 &&
+    approvalEntries.every((entry) => approvalEntryStatus(entry).includes('cancel'))
+  )
 }
 
 /**

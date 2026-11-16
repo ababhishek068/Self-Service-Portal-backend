@@ -3872,4 +3872,30 @@ describe('Bell: advance paid, confirm payment received (BC 1.0.3.653+ / ERP 660)
     assert.match(item!.description, /ETB 40,000\.00 · UAT · Advance Settlement opens after you confirm/)
     assert.deepEqual(advanceReceiptNotificationItems([]), [])
   })
+
+  it('BC 1.0.3.662: an approved advance not paid in BC yet asks to confirm once the money arrives', () => {
+    const [item] = advanceReceiptNotificationItems([{ advanceNo: 'IMP-000020', amount: 23900, purpose: 'UAT', paid: false }])
+    assert.match(item!.title, /IMP-000020 is approved — confirm here once you receive the money/)
+  })
+})
+
+describe('Advance Request: approval cancelled but BC kept Pending Approval (UAT IMP-000015)', () => {
+  const header = { No: 'IMP-000015', Status: 'Pending Approval' }
+  const cancelled = [
+    { EntryNo: 501, SequenceNo: 1, Status: 'Canceled', ApproverID: 'HERMON' },
+    { EntryNo: 502, SequenceNo: 2, Status: 'Canceled', ApproverID: 'TESFAYE' },
+  ]
+
+  it('shows the advance as Cancelled so Delete Draft is offered', () => {
+    assert.equal(resolveModuleRequestStatus(header, 'imprest', cancelled), 'Cancelled')
+  })
+
+  it('stays Pending Approval while an approval entry is active, and on other modules', () => {
+    assert.equal(
+      resolveModuleRequestStatus(header, 'imprest', [...cancelled, { EntryNo: 503, SequenceNo: 1, Status: 'Open' }]),
+      'Pending Approval',
+    )
+    assert.equal(resolveModuleRequestStatus(header, 'staffClaim', cancelled), 'Pending Approval')
+    assert.equal(resolveModuleRequestStatus(header, 'imprest', []), 'Pending Approval')
+  })
 })

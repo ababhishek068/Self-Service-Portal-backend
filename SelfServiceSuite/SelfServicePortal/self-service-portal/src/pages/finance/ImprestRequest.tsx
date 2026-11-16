@@ -1,15 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
-import { differenceInCalendarDays, formatISO, parseISO } from 'date-fns'
+import { formatISO } from 'date-fns'
 import { useMemo } from 'react'
 import { Banknote, HandCoins, Landmark, Receipt, UserCheck } from 'lucide-react'
-import type { FieldValues, UseFormReturn } from 'react-hook-form'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { AdvanceRequestCreate } from '@/components/finance/AdvanceRequestCreate'
 import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
 import { AdvanceReceiptPanel } from '@/components/finance/AdvanceReceiptPanel'
 import { advancePaid, fullySettled, receiptConfirmed } from '@/utils/advanceReceipt'
-import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
   allAdvancePurposeOptions,
@@ -18,14 +16,13 @@ import {
 import { financeOrgDetailFields } from '@/data/financeOrgDetailFields'
 import { advanceAttachmentCategories, imprestTypeOptions } from '@/data/essOptions'
 import { FINANCE_CANCEL_STATUSES } from '@/lib/utils'
-import { imprestHeaderSchema, imprestLineHeaderSchema } from '@/schemas/requestSchemas'
+import { advanceLineSchema, imprestHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency } from '@/utils/formatters'
 import { useAuth } from '@/hooks/useAuth'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import type { PortalRequest } from '@/types/erp.types'
 import type { TrackerStep } from '@/components/shared/ProcessTracker'
 import type { AfterApproval } from '@/components/shared/RequestProgress'
-import type { LookupOption } from '@/api/endpoints/lookups'
 
 const today = formatISO(new Date(), { representation: 'date' })
 const module = { module: 'imprest', entity: 'selfServiceImprestRequests' } as const
@@ -38,9 +35,10 @@ const ADVANCE_APPROVERS: TrackerStep[] = [
 
 /**
  * Business requirement (Nov 2026): approval → Finance pays → the requester confirms receipt in ESSP → only then
- * settlement (BC 1.0.3.653). On older BC there is no receipt step.
+ * settlement (BC 1.0.3.653). On older BC there is no receipt step. BC 1.0.3.662 (`afterApproval`): the receipt can
+ * be confirmed right after approval, like the Store receipt; settlement still waits for Finance's payment in BC.
  */
-function advanceAfterApproval(request: PortalRequest, withReceipt: boolean): AfterApproval {
+function advanceAfterApproval(request: PortalRequest, withReceipt: boolean, afterApproval: boolean): AfterApproval {
   const paid = advancePaid(request)
   const received = receiptConfirmed(request)
   const settled = fullySettled(request)
@@ -50,18 +48,31 @@ function advanceAfterApproval(request: PortalRequest, withReceipt: boolean): Aft
     { key: 'settlement', heading: 'Settlement', owner: 'Advance Settlement', icon: Receipt },
   ]
   if (settled) return { steps, caption: 'Settled', current: steps.length }
+  if (withReceipt && afterApproval) {
+    if (!received) {
+      return paid
+        ? { steps, caption: 'Paid · confirm you received the money', current: 1 }
+        : { steps, caption: 'Finance pays the advance · confirm below once you receive it', current: 0 }
+    }
+    return paid
+      ? { steps, caption: 'Settle the advance under Advance Settlement', current: 2 }
+      : { steps, caption: 'Received · settle once Finance has recorded the payment in Business Central', current: 2 }
+  }
   if (!paid) return { steps, caption: 'Waiting for Finance to pay the advance', current: 0 }
   if (withReceipt && !received) return { steps, caption: 'Paid · confirm you received the money', current: 1 }
   return { steps, caption: 'Settle the advance under Advance Settlement', current: withReceipt ? 2 : 1 }
 }
 
-function receiptStatus(request: PortalRequest) {
+function receiptStatus(request: PortalRequest, afterApproval: boolean) {
   const payload = request.payload ?? {}
   if (receiptConfirmed(request)) {
     const on = firstPayloadDate(payload, ['ReceiptConfirmedOn', 'Receipt_Confirmed_On'])
     return on ? `Confirmed on ${on}` : 'Confirmed'
   }
-  return advancePaid(request) ? 'Paid — waiting for your confirmation (Confirm Payment Received)' : undefined
+  if (advancePaid(request)) return 'Paid — waiting for your confirmation (Confirm Payment Received)'
+  return afterApproval && ['Approved', 'Posted'].includes(request.status)
+    ? 'Approved — confirm once you receive the money (Confirm Payment Received)'
+    : undefined
 }
 
 function paymentStatus(request: PortalRequest) {
@@ -76,190 +87,12 @@ function paymentStatus(request: PortalRequest) {
   return undefined
 }
 
-function documentNoFromRequestId(requestId: string) {
-  const separator = requestId.indexOf('-')
-  return separator >= 0 ? requestId.slice(separator + 1) : requestId
-}
-
-let imprestAmountRequest = 0
-let imprestCalcBusy = false
-let imprestPrevValues: FieldValues = {}
-let imprestPrevRequestId = ''
-
-function roundMoney(value: number) {
-  return Math.round(value * 100) / 100
-}
-
-function usesManualDailyRate(advanceType: string, options: LookupOption[]) {
-  const selected = options.find((option) => String(option.value) === advanceType)
-  const rateSource = String(selected?.meta?.rateSource ?? '').trim().toLowerCase()
-  return rateSource === 'manual' || rateSource === '1'
-}
-
-function erpCalcKey(values: FieldValues) {
-  const advanceType = String(values.advanceType ?? '').trim()
-  const destination = String(values.destination ?? '').trim()
-  return [advanceType, destination, Number(values.noOfDays ?? 0)].join('|')
-}
-
-function inclusiveTravelDays(travelDate: string, returnDate: string) {
-  try {
-    const start = parseISO(travelDate)
-    const end = parseISO(returnDate)
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0
-    return Math.max(1, differenceInCalendarDays(end, start) + 1)
-  } catch {
-    return 0
-  }
-}
-
 function firstPayloadDate(payload: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = String(payload[key] ?? '').trim()
     if (value && !value.startsWith('0001-01-01')) return value.slice(0, 10)
   }
   return ''
-}
-
-async function applyImprestLineAmount(
-  values: FieldValues,
-  form: UseFormReturn<FieldValues>,
-  requestId: string,
-  imprestTypes: LookupOption[],
-) {
-  // Calculation state must not leak from one draft to another. Repeating the
-  // same type/destination/days on a new request still requires a fresh ERP call.
-  if (requestId !== imprestPrevRequestId) {
-    imprestAmountRequest += 1
-    imprestPrevRequestId = requestId
-    imprestPrevValues = {}
-    imprestCalcBusy = false
-  }
-  if (imprestCalcBusy) return
-
-  const advanceType = String(values.advanceType ?? '').trim()
-  const destination = String(values.destination ?? '').trim()
-  const noOfDays = Number(values.noOfDays ?? 0)
-  const amount = Number(values.amount ?? 0)
-  const dailyRate = Number(values.dailyRate ?? 0)
-  const calcKey = erpCalcKey(values)
-  const prevKey = erpCalcKey(imprestPrevValues)
-
-  const erpFieldsChanged = calcKey !== prevKey
-  const dailyRateChanged = values.dailyRate !== imprestPrevValues.dailyRate
-  const amountChanged = values.amount !== imprestPrevValues.amount
-  // Business Central's FetchImprestLineAmount resolves the destination-rate
-  // record by both advance type and destination code. Do not calculate before
-  // the destination exists, and always recalculate when it changes.
-  const canFetchFromErp = Boolean(advanceType) && Boolean(destination) && noOfDays > 0
-
-  if (erpFieldsChanged && canFetchFromErp) {
-    if (usesManualDailyRate(advanceType, imprestTypes)) {
-      form.clearErrors('dailyRate')
-      form.clearErrors('amount')
-      imprestPrevValues = { ...values }
-      return
-    }
-    const requestKey = ++imprestAmountRequest
-    imprestCalcBusy = true
-    const clearedValues = { ...values, amount: '', dailyRate: '' }
-    imprestPrevValues = clearedValues
-    form.setValue('dailyRate', '', { shouldValidate: false })
-    form.setValue('amount', '', { shouldValidate: false })
-    try {
-      const {
-        amount: fetchedAmount,
-        dailyRate: fetchedRate,
-        requiresManualRate,
-      } = await fetchImprestLineAmount({
-        headerNo: documentNoFromRequestId(requestId),
-        noOfDays,
-        advanceType,
-        destinationCode: destination,
-      })
-      if (requestKey !== imprestAmountRequest) return
-      form.clearErrors('dailyRate')
-      form.clearErrors('amount')
-      if (requiresManualRate) {
-        imprestPrevValues = clearedValues
-        return
-      }
-      if (fetchedAmount > 0) {
-        const rate = fetchedRate > 0 ? fetchedRate : roundMoney(fetchedAmount / noOfDays)
-        form.setValue('amount', fetchedAmount, { shouldValidate: true })
-        form.setValue('dailyRate', rate, { shouldValidate: true })
-        imprestPrevValues = { ...values, amount: fetchedAmount, dailyRate: rate }
-      } else {
-        form.setError('dailyRate', {
-          type: 'manual',
-          message:
-            'ERP returned no daily rate for this type and destination. Enter daily rate or amount manually.',
-        })
-        imprestPrevValues = clearedValues
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Could not calculate daily rate from Business Central. Check advance type, destination and days.'
-      form.setError('dailyRate', { type: 'manual', message })
-      imprestPrevValues = clearedValues
-    } finally {
-      imprestCalcBusy = false
-    }
-    return
-  }
-
-  imprestPrevValues = { ...values }
-
-  if (!noOfDays) return
-
-  imprestCalcBusy = true
-  try {
-    if (dailyRateChanged && dailyRate > 0) {
-      const nextAmount = roundMoney(dailyRate * noOfDays)
-      form.setValue('amount', nextAmount, { shouldValidate: true })
-      imprestPrevValues = { ...values, amount: nextAmount }
-      return
-    }
-    if (amountChanged && amount > 0) {
-      const nextRate = roundMoney(amount / noOfDays)
-      form.setValue('dailyRate', nextRate, { shouldValidate: true })
-      imprestPrevValues = { ...values, dailyRate: nextRate }
-    }
-  } finally {
-    imprestCalcBusy = false
-  }
-}
-
-function destinationFromRequest(
-  request: PortalRequest,
-  destinationOptions: Array<{ value: string; label: string }>,
-) {
-  const payload = request.payload ?? {}
-  const raw = String(
-    payload.ActivityLocation ??
-      payload.Activity_Location ??
-      payload.TravelDestination ??
-      payload.Travel_Destination ??
-      payload.Destination ??
-      payload.DestinationCode ??
-      '',
-  ).trim()
-  if (!raw) return ''
-  const codes = new Set(destinationOptions.map((option) => String(option.value)))
-  if (codes.has(raw)) return raw
-  const byLabel = destinationOptions.find(
-    (option) => String(option.label).trim().toLowerCase() === raw.toLowerCase(),
-  )
-  if (byLabel) return String(byLabel.value)
-  const partial = destinationOptions.find((option) => {
-    const label = String(option.label).trim().toLowerCase()
-    const code = String(option.value).trim().toLowerCase()
-    const needle = raw.toLowerCase()
-    return label.includes(needle) || needle.includes(label) || code === needle
-  })
-  return partial ? String(partial.value) : ''
 }
 
 function imprestListSearchExtra(row: PortalRequest): Array<string | number | undefined | null> {
@@ -282,7 +115,6 @@ function imprestListSearchExtra(row: PortalRequest): Array<string | number | und
 export function ImprestRequest() {
   const { employee } = useAuth()
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
-  const destinations = useLookupOptions('travel-destinations')
   // Activity / Purpose of Assignment: the same list for every requester (BC 1.0.3.661; client 16 Nov 2026).
   const fallbackPurposes = useMemo(() => allAdvancePurposeOptions(), [])
   const purposeContext = useQuery({
@@ -296,8 +128,19 @@ export function ImprestRequest() {
   const supportsProject = purposeContext.data?.supportsProjectAssignment === true
   // BC 1.0.3.653: confirm receipt before settlement, and the ESSP Advance Request Types list.
   const supportsReceipt = purposeContext.data?.supportsReceiptConfirmation === true
+  // BC 1.0.3.662: Confirm Payment Received right after approval (client, 16 Nov 2026: like the Store receipt).
+  const receiptAfterApproval = supportsReceipt && purposeContext.data?.receiptAfterApproval === true
   const advanceTypeOptions = purposeContext.data?.advanceTypes?.length ? purposeContext.data.advanceTypes : imprestTypes.options
+  const advanceTypeLabel = (code: unknown) =>
+    advanceTypeOptions.find((option) => option.value === String(code ?? ''))?.label || String(code ?? '')
   const purposeHint = 'What the advance is for. Choose Other (Specify) to describe an activity not in the list.'
+  const createForm = {
+    module,
+    purposeOptions,
+    purposeHint,
+    advanceTypes: advanceTypeOptions,
+    supportsProject,
+  }
 
   return (
     <MultiStepRequestPage
@@ -326,21 +169,18 @@ export function ImprestRequest() {
       }}
       // Developer handover: one page — employee & purpose, details with Requested Amount (ETB),
       // supporting documents, and Save as Draft / Submit for Approval / Cancel / View History.
-      customCreate={({ onCreated, onCancel }) => (
-        <AdvanceRequestCreate
-          module={module}
-          purposeOptions={purposeOptions}
-          purposeHint={purposeHint}
-          advanceTypes={advanceTypeOptions}
-          supportsProject={supportsProject}
-          onCreated={onCreated}
-          onCancel={onCancel}
-        />
+      customCreate={({ onCreated, onCancel }) => <AdvanceRequestCreate {...createForm} onCreated={onCreated} onCancel={onCancel} />}
+      // A saved draft opens in the same one-page form (client, 16 Nov 2026), not the old line editor.
+      draftOpensInEdit
+      customEdit={({ request, onSaved, onCancel, onDeleted }) => (
+        <AdvanceRequestCreate {...createForm} request={request} onSaved={onSaved} onDeleted={onDeleted} onCancel={onCancel} />
       )}
       progressApprovers={ADVANCE_APPROVERS}
-      progressAfterApproval={(request) => advanceAfterApproval(request, supportsReceipt)}
-      // BC 1.0.3.653+: after Finance pays, a clear "Confirm Payment Received" step on the request itself.
-      detailSupplement={({ request }) => <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} />}
+      progressAfterApproval={(request) => advanceAfterApproval(request, supportsReceipt, receiptAfterApproval)}
+      // BC 1.0.3.653+: a clear "Confirm Payment Received" step on the request itself (662: right after approval).
+      detailSupplement={({ request }) => (
+        <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} receiptAfterApproval={receiptAfterApproval} />
+      )}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}
       attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."
@@ -531,7 +371,11 @@ export function ImprestRequest() {
         { label: 'Status', paths: ['request.status'], format: 'status' },
         // Shown only once BC has a payment for the advance (spec section 5).
         { label: 'Payment Status', paths: [], resolve: paymentStatus },
-        { label: 'Receipt Confirmation', paths: [], resolve: (request) => (supportsReceipt ? receiptStatus(request) : undefined) },
+        {
+          label: 'Receipt Confirmation',
+          paths: [],
+          resolve: (request) => (supportsReceipt ? receiptStatus(request, receiptAfterApproval) : undefined),
+        },
         {
           label: 'Payment Reference',
           paths: ['payload.PVNo', 'payload.PV_No', 'payload.PaymentVoucherNo', 'payload.Payment_Voucher_No'],
@@ -549,79 +393,27 @@ export function ImprestRequest() {
       line={{
         label: 'Advance Lines',
         addLabel: 'Add Advance Line',
-        schema: imprestLineHeaderSchema,
-        defaultValues: {
-          advanceType: '',
-          destination: '',
-          dutyArea: '',
-          noOfDays: 1,
-          dailyRate: '',
-          amount: '',
-        },
-        defaultValuesFromRequest: (request) => {
-          const payload = request.payload ?? {}
-          // Days of the activity (inclusive); older requests fall back to their travel dates.
-          const startDate = firstPayloadDate(payload, [
-            'ActivityStartDate',
-            'Activity_Start_Date',
-            'TravelStartDate',
-            'Travel_Start_Date',
-          ])
-          const endDate =
-            firstPayloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']) ||
-            firstPayloadDate(payload, ['ExpectedReturnDate', 'Expected_Return_Date']) ||
-            startDate
-          const days = startDate && endDate ? inclusiveTravelDays(startDate, endDate) : 0
-          return {
-            destination: destinationFromRequest(request, destinations.options),
-            ...(days > 0 ? { noOfDays: days } : {}),
-          }
-        },
-        onValuesChange: (values, form, requestId) =>
-          applyImprestLineAmount(values, form, requestId, imprestTypes.options),
+        // Advance Type + amount only (no travel fields); drafts are edited in the one-page form.
+        schema: advanceLineSchema,
+        defaultValues: { advanceType: '', amount: '' },
         fields: [
           { name: 'advanceType', label: 'Advance Type', type: 'select', options: advanceTypeOptions },
-          {
-            name: 'destination',
-            label: 'Travel Destination (location)',
-            type: 'select',
-            options: destinations.options,
-            placeholder: destinations.isLoading
-              ? 'Loading travel destinations…'
-              : destinations.isError
-                ? 'Could not load travel destinations'
-                : 'Select travel destination',
-          },
-          { name: 'dutyArea', label: 'Duty Area', type: 'text' },
-          { name: 'noOfDays', label: 'No. of Days', type: 'number' },
-          {
-            name: 'dailyRate',
-            label: 'Daily Rate (ERP)',
-            type: 'number',
-            placeholder: 'Auto-filled from Business Central Destination Rates',
-          },
-          {
-            name: 'amount',
-            label: 'Amount',
-            type: 'number',
-            placeholder: 'Auto-filled from ERP (daily rate × days)',
-          },
+          { name: 'amount', label: 'Amount (ETB)', type: 'number' },
         ],
         columns: [
-          { key: 'advanceType', header: 'Advance Type' },
-          { key: 'destination', header: 'Travel Destination' },
+          { key: 'advanceType', header: 'Advance Type', format: (value) => advanceTypeLabel(value) },
+          {
+            key: 'destination',
+            header: 'Travel Destination',
+            visibleWhen: (lines) => lines.some((row) => String(row.destination ?? '').trim()),
+          },
           { key: 'accountNo', header: 'Account No.' },
           { key: 'accountName', header: 'Account Name' },
-          {
-            key: 'dailyRate',
-            header: 'Daily Rate',
-            format: (value) => (Number(value ?? 0) > 0 ? formatCurrency(Number(value)) : '—'),
-          },
           { key: 'amount', header: 'Amount', format: (value) => formatCurrency(Number(value ?? 0)) },
-          { key: 'noOfDays', header: 'No of Days' },
         ],
         emptyText: '*** No Advance Lines Found ***',
         requiredMessage: 'Add at least one advance line with an amount above 0 (ETB) before Request Approval.',
+        canAdd: false,
         canEdit: false,
       }}
     />

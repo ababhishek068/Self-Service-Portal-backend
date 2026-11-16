@@ -11,12 +11,16 @@ export type SettleableAdvance = {
   posted: boolean
 }
 
-/** BC 1.0.3.653: a paid advance whose receipt the requester has not confirmed in ESSP yet. */
+/**
+ * BC 1.0.3.653: a paid advance whose receipt the requester has not confirmed in ESSP yet. BC 1.0.3.662: any approved
+ * one (the requester confirms when the money reaches them); `paid` says whether Finance's payment is in BC.
+ */
 export type AwaitingReceiptAdvance = {
   advanceNo: string
   purpose: string
   amount: number
   datePosted: string
+  paid: boolean
 }
 
 export type AdvanceSettlementContext = {
@@ -24,6 +28,8 @@ export type AdvanceSettlementContext = {
   settleableAdvances: SettleableAdvance[]
   /** BC 1.0.3.653: settlement only after the requester confirmed receipt (false on older BC). */
   supportsReceiptConfirmation: boolean
+  /** BC 1.0.3.662: receipt can be confirmed right after approval, before Finance's payment is in BC. */
+  receiptAfterApproval: boolean
   awaitingReceipt: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
@@ -105,6 +111,8 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
       purpose: str(record.purpose),
       amount: num(record.amount),
       datePosted: str(record.datePosted),
+      // Before BC 662 only paid advances were listed.
+      paid: record.paid === undefined ? true : bool(record.paid),
     }))
     .filter((row) => row.advanceNo)
 
@@ -112,6 +120,7 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     employeeNo: str(raw.employeeNo),
     settleableAdvances,
     supportsReceiptConfirmation: bool(raw.supportsReceiptConfirmation),
+    receiptAfterApproval: bool(raw.receiptAfterApproval),
     awaitingReceipt,
     surrenderNo: str(raw.surrenderNo),
     status: str(raw.status),

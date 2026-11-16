@@ -1,6 +1,7 @@
 /**
  * Advance Payment after approval (BC 1.0.3.653+, ERP 1.0.3.660): Finance pays → the requester confirms
  * "I received the money" in ESSP → only then Advance Settlement. Read from the BC Imprest Header (QyImprestHeader).
+ * BC 1.0.3.662: the confirmation is possible right after approval; settlement still needs Finance's payment in BC.
  */
 type AdvanceDocument = { status?: string; payload?: Record<string, unknown> }
 
@@ -22,7 +23,15 @@ export function fullySettled(request: AdvanceDocument) {
   return /^full/i.test(String(request.payload?.SurrenderStatus ?? request.payload?.Surrender_Status ?? '').trim())
 }
 
-/** Approved (or posted) advance that Finance paid and the requester has not confirmed yet. */
-export function awaitingReceiptConfirmation(request: AdvanceDocument) {
-  return ['Approved', 'Posted'].includes(String(request.status ?? '')) && advancePaid(request) && !receiptConfirmed(request)
+/**
+ * Approved (or posted) advance whose receipt the requester has not confirmed yet: once Finance paid it in BC, or
+ * from approval on with BC 1.0.3.662 (`receiptAfterApproval`, like the Store receipt).
+ */
+export function awaitingReceiptConfirmation(request: AdvanceDocument, receiptAfterApproval = false) {
+  return (
+    ['Approved', 'Posted'].includes(String(request.status ?? '')) &&
+    (receiptAfterApproval || advancePaid(request)) &&
+    !receiptConfirmed(request) &&
+    !fullySettled(request)
+  )
 }

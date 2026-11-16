@@ -204,11 +204,35 @@ describe('Advance receipt confirmation before settlement (BC 1.0.3.653)', () => 
       }),
     )
     assert.equal(context.supportsReceiptConfirmation, true)
+    assert.equal(context.receiptAfterApproval, false)
     assert.deepEqual(context.awaitingReceipt, [
-      { advanceNo: 'IMP-000014', purpose: 'UAT', amount: 40000, datePosted: '2026-11-15' },
+      { advanceNo: 'IMP-000014', purpose: 'UAT', amount: 40000, datePosted: '2026-11-15', paid: true },
     ])
     const older = parseAdvanceSettlementContext(JSON.stringify({ employeeNo: 'ABH-010', settleableAdvances: [] }))
     assert.equal(older.supportsReceiptConfirmation, false)
     assert.deepEqual(older.awaitingReceipt, [])
+  })
+
+  it('BC 1.0.3.662: approved advances wait for the receipt before Finance has paid in BC', () => {
+    const context = parseAdvanceSettlementContext(
+      JSON.stringify({
+        employeeNo: 'ABH-010',
+        supportsReceiptConfirmation: true,
+        receiptAfterApproval: true,
+        awaitingReceipt: [
+          { advanceNo: 'IMP-000020', purpose: 'UAT', amount: 23900, datePosted: '', paid: false },
+          { advanceNo: 'IMP-000014', purpose: 'UAT', amount: 40000, datePosted: '2026-11-15', paid: true },
+        ],
+        settleableAdvances: [],
+      }),
+    )
+    assert.equal(context.receiptAfterApproval, true)
+    assert.deepEqual(
+      context.awaitingReceipt.map((row) => [row.advanceNo, row.paid]),
+      [
+        ['IMP-000020', false],
+        ['IMP-000014', true],
+      ],
+    )
   })
 })

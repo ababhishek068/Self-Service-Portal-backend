@@ -87,12 +87,40 @@ export type AdvancePaymentPurposeRow = {
   sortOrder?: number
 }
 
+/** True for an "Other (Specify)" entry, which always goes last in a dropdown (client, 16 Nov 2026). */
+export function isOtherOption(option: { value?: unknown; label?: unknown; meta?: Record<string, unknown> }) {
+  const code = String(option.value ?? '').trim().toUpperCase()
+  return (
+    option.meta?.requiresOtherDetails === true ||
+    code === 'GN-OTH' ||
+    code.endsWith('-OTH') ||
+    code.endsWith('-OTHER') ||
+    /^other\b/i.test(String(option.label ?? '').trim())
+  )
+}
+
+/**
+ * The client's order (Research … Operational Assignments), then any purpose HR added (in BC's order: group, then
+ * sort order), and Other (Specify) last. BC 1.0.3.661 already sends that order; sorting by sort order alone mixed
+ * the groups (Other ended up in the middle).
+ */
 export function mapAdvancePaymentPurposes(
   purposes: AdvancePaymentPurposeRow[] | undefined,
 ): LookupOption[] {
   if (!Array.isArray(purposes) || purposes.length === 0) return []
-  return [...purposes]
-    .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0) || a.code.localeCompare(b.code))
+  const clientOrder = allAdvancePurposeOptions().map((option) => String(option.value))
+  const rank = (row: AdvancePaymentPurposeRow, index: number) => {
+    const code = String(row.code ?? '').trim().toUpperCase()
+    if (isOtherOption({ value: code, label: row.description, meta: { requiresOtherDetails: row.requiresOtherDetails === true } })) {
+      return 1_000_000 + index
+    }
+    const known = clientOrder.indexOf(code)
+    return known >= 0 ? known : 1_000 + index
+  }
+  return purposes
+    .map((row, index) => ({ row, order: rank(row, index) }))
+    .sort((left, right) => left.order - right.order)
+    .map(({ row }) => row)
     .map((row) => ({
       value: String(row.code ?? '').trim(),
       label: String(row.description ?? row.code ?? '').trim(),

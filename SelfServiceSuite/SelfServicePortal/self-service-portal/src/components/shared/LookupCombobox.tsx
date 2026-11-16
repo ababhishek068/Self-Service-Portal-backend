@@ -120,7 +120,7 @@ export function LookupCombobox({
               onClick={() => choose(option)}
               onMouseEnter={() => setActive(index)}
               className={cn(
-                'cursor-pointer px-3 py-2',
+                'cursor-pointer px-3 py-1.5 leading-5 sm:py-1',
                 index === active ? 'bg-teal-50 text-teal-900' : 'text-slate-800',
                 option.value === value && 'font-semibold',
               )}

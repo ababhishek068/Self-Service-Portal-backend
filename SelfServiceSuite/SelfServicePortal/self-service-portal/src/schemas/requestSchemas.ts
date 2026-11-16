@@ -269,6 +269,12 @@ export const advanceRequestCreateSchema = z
   })
   .superRefine(refineAdvanceHeader)
 
+/** Advance Request line: Advance Type and amount in ETB (no travel fields; client spec). */
+export const advanceLineSchema = z.object({
+  advanceType: z.string().min(1, 'Advance type is required'),
+  amount: moneyField,
+})
+
 export const imprestLineHeaderSchema = z.object({
   advanceType: z.string().min(1, 'Advance type is required'),
   destination: z.string().min(1, 'Travel destination is required'),

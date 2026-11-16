@@ -83,8 +83,10 @@ function receiptConfirmed(row: PortalRequest) {
 }
 
 /** Why one of the employee's approved advances is not in BC's settleable list. */
-function notSettleableReason(row: PortalRequest, withReceipt: boolean) {
-  if (!isPaid(row)) return 'approved, not paid yet'
+function notSettleableReason(row: PortalRequest, withReceipt: boolean, receiptAfterApproval: boolean) {
+  // BC 1.0.3.662: the requester confirms first (right after approval), then Finance's payment must be in BC.
+  if (withReceipt && receiptAfterApproval && !receiptConfirmed(row)) return 'confirm payment received first'
+  if (!isPaid(row)) return receiptAfterApproval ? 'received, Finance has not recorded the payment yet' : 'approved, not paid yet'
   if (withReceipt && !receiptConfirmed(row)) return 'paid, confirm payment received first'
   return 'a settlement is already open'
 }
@@ -118,6 +120,7 @@ function Prerequisite({
   selectedSettleable,
   unpaid,
   withReceipt,
+  receiptAfterApproval,
   awaitingReceipt,
   onConfirmReceipt,
   confirming,
@@ -127,6 +130,8 @@ function Prerequisite({
   selectedSettleable: boolean
   unpaid: string[]
   withReceipt: boolean
+  /** BC 1.0.3.662: receipt is confirmed right after approval, before Finance's payment is in BC. */
+  receiptAfterApproval: boolean
   awaitingReceipt: string[]
   /** BC 1.0.3.653+: confirm the payment of a paid advance was received (PortalAdvanceConfirmReceipt). */
   onConfirmReceipt: (advanceNo: string) => void
@@ -141,10 +146,19 @@ function Prerequisite({
       </p>
       <ul className="mt-1.5 space-y-1 pl-6">
         <PrerequisiteItem state={state}>an approved Advance Payment Request,</PrerequisiteItem>
-        <PrerequisiteItem state={state}>{withReceipt ? 'the advance has been paid, and' : 'the advance has been paid.'}</PrerequisiteItem>
-        {withReceipt ? (
-          <PrerequisiteItem state={state}>you have confirmed receipt of the money in ESSP.</PrerequisiteItem>
-        ) : null}
+        {withReceipt && receiptAfterApproval ? (
+          <>
+            <PrerequisiteItem state={state}>you have confirmed receipt of the money in ESSP, and</PrerequisiteItem>
+            <PrerequisiteItem state={state}>Finance has recorded the payment in Business Central.</PrerequisiteItem>
+          </>
+        ) : (
+          <>
+            <PrerequisiteItem state={state}>{withReceipt ? 'the advance has been paid, and' : 'the advance has been paid.'}</PrerequisiteItem>
+            {withReceipt ? (
+              <PrerequisiteItem state={state}>you have confirmed receipt of the money in ESSP.</PrerequisiteItem>
+            ) : null}
+          </>
+        )}
       </ul>
       <p className="mt-1.5 text-xs text-teal-900/80">
         {loading
@@ -156,8 +170,9 @@ function Prerequisite({
       {!loading && awaitingReceipt.length ? (
         <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <p>
-            Finance has paid {awaitingReceipt.length === 1 ? 'this advance' : 'these advances'}: confirm you received the money,
-            then the advance can be settled here.
+            {receiptAfterApproval
+              ? `Confirm you received the money for ${awaitingReceipt.length === 1 ? 'this approved advance' : 'these approved advances'} once Finance has paid you; then ${awaitingReceipt.length === 1 ? 'it' : 'they'} can be settled here.`
+              : `Finance has paid ${awaitingReceipt.length === 1 ? 'this advance' : 'these advances'}: confirm you received the money, then the advance can be settled here.`}
           </p>
           <ul className="mt-2 space-y-1.5">
             {awaitingReceipt.map((advanceNo) => (
@@ -186,9 +201,12 @@ function Prerequisite({
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
           <span>
-            <span className="font-semibold">{unpaid.join(', ')}</span> {unpaid.length === 1 ? 'is' : 'are'} approved but not
-            paid in Business Central yet. Finance pays the advance through the Payment Schedule (Business Central then marks
-            it Fully Paid once the whole amount is paid) or posts it; it then appears here for settlement.
+            <span className="font-semibold">{unpaid.join(', ')}</span>{' '}
+            {receiptAfterApproval
+              ? `${unpaid.length === 1 ? 'is' : 'are'} received, but Finance has not recorded the payment in Business Central yet.`
+              : `${unpaid.length === 1 ? 'is' : 'are'} approved but not paid in Business Central yet.`}{' '}
+            Finance records it through the Payment Schedule (Business Central marks it Fully Paid once the whole amount is
+            paid) or posts it; it then appears here for settlement.
           </span>
         </p>
       ) : null}
@@ -235,14 +253,20 @@ export function ImprestSurrender() {
   const waiting = settleableQuery.isSuccess
     ? (imprestQuery.data ?? []).filter((row) => isSurrenderableImprest(row) && !settleableNos.has(row.requestNo))
     : []
-  const unpaid = waiting.filter((row) => !isPaid(row)).map((row) => row.requestNo)
-  // BC 1.0.3.653: paid advances wait for the requester's receipt confirmation before settlement.
+  // BC 1.0.3.653: paid advances wait for the requester's receipt confirmation before settlement; BC 1.0.3.662 asks
+  // for it right after approval (then Finance's payment in BC is the last step).
   const withReceipt = settleableQuery.data?.supportsReceiptConfirmation === true
+  const receiptAfterApproval = withReceipt && settleableQuery.data?.receiptAfterApproval === true
+  const unpaid = waiting
+    .filter((row) => !isPaid(row) && (!receiptAfterApproval || receiptConfirmed(row)))
+    .map((row) => row.requestNo)
   const awaitingReceipt = withReceipt
     ? Array.from(
         new Set([
           ...(settleableQuery.data?.awaitingReceipt ?? []).map((row) => row.advanceNo),
-          ...waiting.filter((row) => isPaid(row) && !receiptConfirmed(row)).map((row) => row.requestNo),
+          ...waiting
+            .filter((row) => (receiptAfterApproval || isPaid(row)) && !receiptConfirmed(row))
+            .map((row) => row.requestNo),
         ]),
       )
     : []
@@ -255,7 +279,7 @@ export function ImprestSurrender() {
           value: row.advanceNo,
         })),
         ...waiting.map((row) => ({
-          label: `${row.requestNo} — ${notSettleableReason(row, withReceipt)}`,
+          label: `${row.requestNo} — ${notSettleableReason(row, withReceipt, receiptAfterApproval)}`,
           value: `blocked:${row.requestNo}`,
           disabled: true,
         })),
@@ -340,6 +364,7 @@ export function ImprestSurrender() {
             selectedSettleable={settleableNos.has(advanceNo)}
             unpaid={unpaid}
             withReceipt={withReceipt}
+            receiptAfterApproval={receiptAfterApproval}
             awaitingReceipt={awaitingReceipt}
             onConfirmReceipt={(advanceNo) => void confirmReceipt(advanceNo)}
             confirming={receiptConfirmation.isPending ? (receiptConfirmation.variables?.advanceNo ?? null) : null}
