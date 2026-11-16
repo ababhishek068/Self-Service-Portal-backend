@@ -34,6 +34,8 @@ interface DashboardSummary {
   rejectedDocuments: number
   leaveApplications: number
   staffClaims: number
+  /** Medical Claims (Staff Claim documents flagged medical), not counted in staffClaims. */
+  medicalClaims?: number
   imprestRequisitions: number
   imprestSurrenders: number
   pettyCash?: number

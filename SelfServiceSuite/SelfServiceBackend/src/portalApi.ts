@@ -723,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v393 — 1.0.3.554 (Advance Request: Activity / Purpose of Assignment, one list of the client 15 purposes for every requester; includes 545 to 553; for BC 1.0.3.661)'
+export const PORTAL_API_BUILD = 'v394 — 1.0.3.555 (Dashboard: Medical Claims get their own card and are no longer counted as Staff Claims; includes 545 to 554; for BC 1.0.3.661)'
 
 interface LookupSpec {
   service: string
@@ -7337,10 +7337,19 @@ export function buildPortalApiRouter() {
         ['Draft', 'Pending Approval', 'Returned'].includes(row.status),
       ).length
       const overtimeRequests = overtimeRows.length + portalOnlyWorkRows.length
+      // Medical Claims are Staff Claim documents in BC (BC 1.0.3.648 Is Medical Claim): counted on their own card,
+      // as the Staff Claims page does not list them (UAT 16 Nov 2026).
+      const medicalClaimRows = claims.filter(
+        (row) =>
+          isMedicalClaimHeader(((row as { payload?: unknown }).payload ?? {}) as ODataRecord) ||
+          /medical/i.test(String((row as { title?: unknown }).title ?? '')),
+      )
+      const staffOnlyClaimCount = claims.length - medicalClaimRows.length
       const documentsByModule = [
         { key: 'leave', label: 'Leave', count: leaveApplications },
         { key: 'overtime', label: 'Overtime', count: overtimeRequests },
-        { key: 'staffClaim', label: 'Staff Claims', count: claims.length },
+        { key: 'staffClaim', label: 'Staff Claims', count: staffOnlyClaimCount },
+        { key: 'medicalClaim', label: 'Medical Claims', count: medicalClaimRows.length },
         { key: 'imprest', label: 'Advance Request', count: imprest.length },
         { key: 'imprestSurrender', label: 'Advance Settlement', count: surrender.length },
         { key: 'pettyCash', label: 'Petty Cash', count: pettyCash.length },
@@ -7366,7 +7375,8 @@ export function buildPortalApiRouter() {
         approvedDocuments: decidedQueues.approved.length,
         rejectedDocuments: decidedQueues.rejected.length,
         leaveApplications,
-        staffClaims: claims.length,
+        staffClaims: staffOnlyClaimCount,
+        medicalClaims: medicalClaimRows.length,
         imprestRequisitions: imprest.length,
         imprestSurrenders: surrender.length,
         pettyCash: pettyCash.length,

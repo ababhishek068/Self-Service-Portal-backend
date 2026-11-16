@@ -108,6 +108,7 @@ const tiles: DashboardTile[] = [
   },
   { id: 'leaveApplications', label: 'Leave Applications', href: '/hr/leave-request', icon: CalendarDays, tone: 'lime' },
   { id: 'staffClaims', label: 'Staff Claims', href: '/finance/staff-claim', icon: Receipt, tone: 'blue' },
+  { id: 'medicalClaims', label: 'Medical Claims', href: '/finance/medical-claim', icon: HeartPulse, tone: 'blue' },
   { id: 'imprestRequisitions', label: 'Advance Requests', href: '/finance/advance-request', icon: Banknote, tone: 'blue' },
   { id: 'pettyCash', label: 'Petty Cash Request', href: '/finance/petty-cash', icon: Coins, tone: 'blue' },
   { id: 'imprestSurrenders', label: 'Advance Settlements', href: '/finance/advance-settlement', icon: ReceiptText, tone: 'blue' },
