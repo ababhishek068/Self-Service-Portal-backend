@@ -723,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v390 — 1.0.3.551 (Medical Claim opened from a dashboard, bell or approval link now opens on the Medical Claim page, not as a Staff Claim; includes 545 to 550; for BC 1.0.3.654)'
+export const PORTAL_API_BUILD = 'v391 — 1.0.3.552 (Bell notifies the requester when an Overtime Request or Overtime Payment Request is sent back for correction; includes 545 to 551; for BC 1.0.3.654)'
 
 interface LookupSpec {
   service: string
@@ -3308,6 +3308,41 @@ async function sentBackNotifications(authUser: AuthUser): Promise<PortalNotifica
 }
 
 /**
+ * BC 1.0.3.654: the user's Overtime Requests (Stage 1) and Overtime Payment Requests (Stage 2) an approver
+ * sent back, still drafts waiting for the correction. Overtime keeps the send back on its own BC tables,
+ * not in the approval entries the other modules use, so it is read from the overtime lists.
+ */
+export function overtimeSentBackNotificationItems(
+  stage1: Array<{ requestNo: string; status: string; sentBack?: boolean; sentBackBy?: string; sentBackRemarks?: string }>,
+  stage2: Array<{ paymentNo: string; status: string; sentBack?: boolean; sentBackBy?: string; sentBackRemarks?: string }>,
+): PortalNotification[] {
+  const item = (no: string, module: string, what: string, by = '', remarks = ''): PortalNotification => ({
+    id: `returned:${module}-${no}`,
+    kind: 'returned',
+    count: 1,
+    title: `${what} ${no} was sent back to you for correction`,
+    description: [by, remarks].filter(Boolean).join(': '),
+    module,
+    requestId: `${module}-${no}`,
+  })
+  return [
+    ...stage1
+      .filter((row) => row.sentBack && row.status === 'Draft')
+      .map((row) => item(row.requestNo, OVERTIME_MODULE, 'Overtime Request', row.sentBackBy, row.sentBackRemarks)),
+    ...stage2
+      .filter((row) => row.sentBack && row.status === 'Draft')
+      .map((row) => item(row.paymentNo, OT_PAYMENT_MODULE, 'Overtime Payment Request', row.sentBackBy, row.sentBackRemarks)),
+  ]
+}
+
+async function overtimeSentBackNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
+  const employeeNo = String(authUser.employeeNo ?? '').trim()
+  if (!employeeNo) return []
+  const [stage1, stage2] = await Promise.all([listOvertimeRequests(employeeNo), listOtPaymentRequests(employeeNo)])
+  return overtimeSentBackNotificationItems(stage1, stage2)
+}
+
+/**
  * Local Purchase steps waiting for the user: the Operations Manager and FAD approvals, the
  * Procurement Officer's steps (LPR, RFQ, quotes, PO, invoice), Technical, the Finance checker and
  * the Store Keeper's receipt, one line per LPR.
@@ -3424,13 +3459,14 @@ async function workOutNotifications(authUser: AuthUser, key: string): Promise<Po
       console.warn('Notifications: part not loaded', error instanceof Error ? error.message : error)
       return fallback
     }
-  const [approvals, returned, store, localPurchase] = await Promise.all([
+  const [approvals, returned, overtimeReturned, store, localPurchase] = await Promise.all([
     approvalNotification(authUser).catch(failed(null)),
     sentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
+    overtimeSentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
     storeNotifications(authUser).catch(failed([] as PortalNotification[])),
     localPurchaseNotification(authUser).catch(failed(null)),
   ])
-  const items = [approvals, ...returned, ...store, localPurchase].filter(
+  const items = [approvals, ...returned, ...overtimeReturned, ...store, localPurchase].filter(
     (item): item is PortalNotification => Boolean(item && item.count > 0),
   )
   const value = { total: items.reduce((sum, item) => sum + item.count, 0), items }

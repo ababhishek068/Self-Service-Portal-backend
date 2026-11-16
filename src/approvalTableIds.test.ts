@@ -99,6 +99,7 @@ import {
   authUserCanManageHrPolicies,
   parseHrPolicyUpload,
   isMedicalClaimHeader,
+  overtimeSentBackNotificationItems,
 } from './portalApi.js'
 
 import { deriveCodeunitSoapUrl, codeunitSoapNamespace } from './bcClient.js'
@@ -3836,5 +3837,26 @@ describe('integration-safe create (ESSP spec: no duplicate submissions)', () => 
     await assert.rejects(createOnce('k-none', async () => { throw new Error('BC down') }), /BC down/)
     await new Promise((resolve) => setTimeout(resolve, 0))
     assert.equal(await createOnce('k-none', async () => 'ADV-00102'), 'ADV-00102')
+  })
+})
+
+describe('Bell: overtime sent back for correction (BC 1.0.3.654)', () => {
+  it('lists the requester own drafts an approver sent back, linked to the overtime pages', () => {
+    const items = overtimeSentBackNotificationItems(
+      [
+        { requestNo: 'OTR-00001', status: 'Draft', sentBack: true, sentBackBy: 'Hermon Getachew Tolla', sentBackRemarks: 'please correct the time' },
+        { requestNo: 'OTR-00002', status: 'Pending Approval', sentBack: false },
+        { requestNo: 'OTR-00003', status: 'Draft', sentBack: false },
+      ],
+      [{ paymentNo: 'OTP-00004', status: 'Draft', sentBack: true, sentBackRemarks: 'wrong completion date' }],
+    )
+    assert.deepEqual(
+      items.map((item) => [item.kind, item.module, item.requestId, item.description]),
+      [
+        ['returned', 'overtime', 'overtime-OTR-00001', 'Hermon Getachew Tolla: please correct the time'],
+        ['returned', 'overtimePayment', 'overtimePayment-OTP-00004', 'wrong completion date'],
+      ],
+    )
+    assert.match(items[0]!.title, /Overtime Request OTR-00001 was sent back to you for correction/)
   })
 })
