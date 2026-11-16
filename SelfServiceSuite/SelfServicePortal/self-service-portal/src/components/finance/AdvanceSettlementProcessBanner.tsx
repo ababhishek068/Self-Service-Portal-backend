@@ -19,13 +19,13 @@ function steps(request: PortalRequest | null, ctx: AdvanceSettlementContext | un
     },
     {
       key: 'expenses',
-      heading: 'Actual Expenses & Documents',
+      heading: 'Expense Entries & Documents',
       owner: ctx && ctx.totalActualExpenses > 0 ? `${formatAmount(ctx.totalActualExpenses)} entered` : 'Enter & attach',
       icon: ListPlus,
     },
     {
       key: 'outcome',
-      heading: 'Settlement Outcome',
+      heading: 'Reconciliation & Outcome',
       owner: outcome ? `${outcome.letter}. ${outcome.title}` : 'Calculated by the system',
       icon: Calculator,
     },

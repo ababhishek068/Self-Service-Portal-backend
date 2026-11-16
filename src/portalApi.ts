@@ -724,7 +724,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v397 — 1.0.3.558 (Advance Request: a draft reopens in the one-page form with several cost items, Delete Draft for a cancelled advance, Confirm Payment Received right after approval, Activity / Purpose in the client order with Other last, compact dropdowns; includes 545 to 557; for BC 1.0.3.662)'
+export const PORTAL_API_BUILD = 'v398 — 1.0.3.559 (Advance Settlement in three sections: Advance Summary, Expense Entries and Supporting Documents, Expense Reconciliation and Settlement; includes 545 to 558; for BC 1.0.3.662)'
 
 interface LookupSpec {
   service: string

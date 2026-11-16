@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, Circle, HandCoins, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
-import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
+import { AdvanceSettlementSections } from '@/pages/finance/AdvanceSettlementPanel'
 import { settlementSubmitProblem } from '@/hooks/useAdvanceSettlementContext'
 import { fetchAdvanceSettlementContext } from '@/api/endpoints/advanceSettlement'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
@@ -313,6 +313,7 @@ export function ImprestSurrender() {
       requiresAttachmentBeforeSubmit
       requiredAttachmentMessage="Attach the expense receipts / supporting documents before submitting the settlement."
       attachmentCategoryOptions={SETTLEMENT_ATTACHMENT_CATEGORIES}
+      attachmentsTitle="Supporting documents"
       attachmentCategoryHint="Attach every expense receipt; for Advance Surrender the refund payment receipt, for Additional Reimbursement the documents for the extra expenses. Several files can be attached."
       module={module}
       queryKey={['finance', 'advance-settlement']}
@@ -323,7 +324,11 @@ export function ImprestSurrender() {
       buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Settlement for ${values.imprest}` })}
       // Re-saving the header makes BC re-copy the advance lines and drop the expense lines.
       allowHeaderEdit={false}
-      detailSupplement={({ request }) => <AdvanceSettlementPanel request={request} />}
+      // Client, 16 Nov 2026: three sequential sections — 1 Advance Summary, 2 Expense Entries & Supporting
+      // Documents, 3 Expense Reconciliation & Settlement.
+      detailLayout={({ request, details, lines, attachments }) => (
+        <AdvanceSettlementSections request={request} details={details} lines={lines} attachments={attachments} />
+      )}
       headerFields={[
         {
           name: 'imprest',
@@ -469,9 +474,9 @@ export function ImprestSurrender() {
         },
       ]}
       line={{
-        label: 'Actual Expenses',
+        label: 'Expense entries',
         lineHint:
-          'Enter the actual amount spent on each line; add other expenses with Add Expense Entry above. Business Central recalculates the balance and the outcome.',
+          'Enter the actual amount spent on each line and press Save; add other expenses below. Business Central recalculates the reconciliation in section 3.',
         schema: imprestSurrenderHeaderSchema,
         defaultValues: {},
         canAdd: false,

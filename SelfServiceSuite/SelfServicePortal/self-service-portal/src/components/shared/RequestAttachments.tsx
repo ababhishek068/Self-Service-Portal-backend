@@ -30,6 +30,8 @@ interface RequestAttachmentsProps {
   /** When set, user picks a template category before uploading. */
   categoryOptions?: Array<{ label: string; value: string }>
   categoryHint?: string
+  /** Heading of the attachment list (default Attachments). */
+  title?: string
 }
 
 function readFileBase64(file: File): Promise<string> {
@@ -67,6 +69,7 @@ export function RequestAttachments({
   onUpdated,
   categoryOptions,
   categoryHint,
+  title,
 }: RequestAttachmentsProps) {
   const toast = useToast()
   const confirm = useConfirm()
@@ -367,6 +370,7 @@ export function RequestAttachments({
         />
       ) : null}
       <AttachmentPanel
+        title={title}
         attachments={attachments}
         uploading={pendingUpload}
         isUploading={uploading}

@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   BadgeCheck,
+  Check,
   CheckCircle2,
   Coins,
   HandCoins,
@@ -39,46 +41,159 @@ import type { PortalRequest } from '@/types/erp.types'
 type Outcome = keyof typeof SETTLEMENT_SCENARIOS
 
 /**
- * Advance Settlement detail, laid out as the ABH ESSP spec: 3. Financial Reconciliation
- * (Total Advance Received from BC, Total Actual Expenses, Balance), 4. the settlement scenario
- * with its additional information, adding expense entries, and the declaration. BC calculates
- * everything (PortalAdvanceSettlementContext / Save / AddExpense, BC 1.0.3.636).
+ * The Advance Settlement document in three sequential sections (client, 16 Nov 2026):
+ * 1. Advance Summary — the advance received and its details;
+ * 2. Expense Entries & Supporting Documents — the expense entries (purpose and amount) and the attachments;
+ * 3. Expense Reconciliation & Settlement — Total Advance Received − Total Actual Expenses = Balance, the outcome
+ *    (A Fully Settled / B Advance Surrender / C Additional Reimbursement) with its details, and the declaration.
+ * Business Central calculates the figures (PortalAdvanceSettlementContext / Save / AddExpense, BC 1.0.3.636).
  */
-export function AdvanceSettlementPanel({ request }: { request: PortalRequest }) {
-  const surrenderNo = String(request.requestNo ?? '').trim()
+export function AdvanceSettlementSections({
+  request,
+  details,
+  lines,
+  attachments,
+}: {
+  request: PortalRequest
+  details: ReactNode
+  lines: ReactNode
+  attachments: ReactNode
+}) {
   const isDraft = request.status === 'Draft'
   const contextQuery = useAdvanceSettlementContext(request)
+  const ctx = contextQuery.data?.surrenderNo ? contextQuery.data : undefined
+  const documents = request.attachments?.length ?? 0
+  const expensesEntered = Boolean(ctx && ctx.totalActualExpenses > 0)
+  const contextState = contextQuery.isLoading ? (
+    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      Loading the settlement from Business Central…
+    </div>
+  ) : (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      {contextQuery.error instanceof Error
+        ? contextQuery.error.message
+        : 'Business Central did not return the settlement reconciliation (needs BC 1.0.3.636).'}
+    </div>
+  )
 
-  if (!surrenderNo) return null
-  if (contextQuery.isLoading) {
-    return (
-      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading the settlement reconciliation from Business Central…
-      </div>
-    )
-  }
-  if (contextQuery.isError || !contextQuery.data?.surrenderNo) {
-    return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        {contextQuery.error instanceof Error
-          ? contextQuery.error.message
-          : 'Business Central did not return the settlement reconciliation (needs BC 1.0.3.636).'}
-      </div>
-    )
-  }
-  return <SettlementSummary key={`${surrenderNo}:${request.status}`} ctx={contextQuery.data} editable={isDraft} />
+  return (
+    <div className="space-y-5">
+      <SettlementSection number={1} title="Advance Summary" hint="The advance received, from Business Central" done={Boolean(ctx)}>
+        {ctx ? <AdvanceReceived ctx={ctx} /> : contextState}
+        <div className="mt-5 border-t border-slate-200 pt-4">{details}</div>
+      </SettlementSection>
+
+      <SettlementSection
+        number={2}
+        title="Expense Entries & Supporting Documents"
+        hint={
+          ctx
+            ? `${formatAmount(ctx.totalActualExpenses)} entered · ${documents} ${documents === 1 ? 'document' : 'documents'}`
+            : 'What you spent, with the receipts'
+        }
+        done={expensesEntered && documents > 0}
+      >
+        <p className="text-sm text-slate-600">
+          {isDraft
+            ? 'Enter the actual amount spent on each advance line, add every other expense with its purpose and amount, then attach the receipts and supporting documents.'
+            : 'The expenses and documents submitted with this settlement.'}
+        </p>
+        <div className="mt-4 space-y-5 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
+          {lines}
+          {isDraft && ctx ? <AddExpenseEntry surrenderNo={ctx.surrenderNo} /> : null}
+          {attachments}
+        </div>
+      </SettlementSection>
+
+      <SettlementSection
+        number={3}
+        title="Expense Reconciliation & Settlement"
+        hint="Calculated automatically from the advance and the expenses"
+        done={Boolean(ctx) && settlementMissing(ctx!).length === 0}
+      >
+        {ctx ? <SettlementSummary key={`${ctx.surrenderNo}:${request.status}`} ctx={ctx} editable={isDraft} /> : contextState}
+      </SettlementSection>
+    </div>
+  )
 }
 
-function SectionTitle({ number, children }: { number: number; children: ReactNode }) {
+/** A numbered section of the settlement, styled like the Advance Request form's sections. */
+function SettlementSection({
+  number,
+  title,
+  hint,
+  done,
+  children,
+}: {
+  number: number
+  title: string
+  hint: string
+  done: boolean
+  children: ReactNode
+}) {
+  const id = `settlement-s${number}`
   return (
-    <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--portal-navy)] text-xs font-bold text-white">
-        {number}
-      </span>
-      {children}
-    </h3>
+    <section id={id} className={cn('adv-section scroll-mt-24', done && 'is-done')} aria-labelledby={`${id}-title`}>
+      <header className="adv-section-head">
+        <span className={cn('adv-step', done && 'is-done')} aria-hidden="true">
+          {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : number}
+        </span>
+        <div className="min-w-0">
+          <h3 id={`${id}-title`} className="text-[0.95rem] font-semibold leading-tight">
+            {number}. {title}
+          </h3>
+          <p className="text-xs text-white/70">{hint}</p>
+        </div>
+      </header>
+      <div className="p-4 sm:p-5">{children}</div>
+    </section>
   )
+}
+
+/** Section 1: the advance this settlement accounts for. */
+function AdvanceReceived({ ctx }: { ctx: AdvanceSettlementContext }) {
+  const advanceNo = ctx.advanceNo || ctx.advance?.advanceNo || ''
+  const purpose = ctx.advance?.requestPurposeText || ctx.advance?.purpose || ctx.purpose
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-4 rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3">
+      <div>
+        <p className="text-xs font-medium text-slate-600">Total Advance Received</p>
+        <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</p>
+      </div>
+      <dl className="grid min-w-0 flex-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+        <div className="min-w-0">
+          <dt className="text-xs text-slate-500">Advance Request</dt>
+          <dd className="font-semibold">
+            {advanceNo ? (
+              <Link
+                to={`/finance/advance-request?open=${encodeURIComponent(`imprest-${advanceNo}`)}`}
+                className="text-[var(--portal-navy)] underline-offset-2 hover:underline"
+              >
+                {advanceNo}
+              </Link>
+            ) : (
+              '—'
+            )}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-slate-500">Paid on</dt>
+          <dd className="font-semibold">{ctx.advance?.paymentDate ? formatDate(ctx.advance.paymentDate) : '—'}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-slate-500">Purpose</dt>
+          <dd className="truncate font-semibold" title={purpose}>
+            {purpose || '—'}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h4 className="text-sm font-semibold text-[var(--portal-navy)]">{children}</h4>
 }
 
 function Tile({ icon, label, hint, value, tone }: { icon: ReactNode; label: string; hint: string; value: string; tone?: string }) {
@@ -153,9 +268,9 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
 
   return (
     <div className="space-y-4">
-      {/* 3. Financial Reconciliation Overview */}
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 sm:px-5">
-        <SectionTitle number={3}>Financial Reconciliation</SectionTitle>
+      {/* Reconciliation: the advance against the actual expenses */}
+      <section>
+        <SectionTitle>Reconciliation</SectionTitle>
         <p className="mt-0.5 text-xs text-slate-500">
           Calculated automatically by Business Central for advance {ctx.advanceNo || ctx.advance?.advanceNo || '—'}
           {ctx.advance?.paymentDate ? ` (paid ${formatDate(ctx.advance.paymentDate)})` : ''}.
@@ -181,9 +296,9 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
         </div>
       </section>
 
-      {/* 4. Settlement Scenarios — the one BC calculated is highlighted */}
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 sm:px-5">
-        <SectionTitle number={4}>Settlement Outcome</SectionTitle>
+      {/* Settlement outcome — the one BC calculated is highlighted */}
+      <section className="border-t border-slate-200 pt-4">
+        <SectionTitle>Settlement Outcome</SectionTitle>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           {(Object.keys(SETTLEMENT_SCENARIOS) as Outcome[]).map((key) => {
             const scenario = SETTLEMENT_SCENARIOS[key]
@@ -249,7 +364,7 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
                 <ReadOnlyAmount label="Payment receipt / reference" value={ctx.refundPaymentReference || '—'} />
               </>
             )}
-            <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Attachments below.</p>
+            <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Supporting Documents (section 2).</p>
           </OutcomeDetails>
         ) : null}
 
@@ -264,15 +379,15 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
                 <p className="whitespace-pre-wrap text-sm text-slate-900">{ctx.additionalClaimJustification || '—'}</p>
               )}
             </div>
-            <p className="text-xs text-slate-500 md:col-span-3">Attach the supporting documents for the extra expenses under Attachments below.</p>
+            <p className="text-xs text-slate-500 md:col-span-3">
+              Attach the supporting documents for the extra expenses under Supporting Documents (section 2).
+            </p>
           </OutcomeDetails>
         ) : null}
       </section>
 
-      {editable ? <AddExpenseEntry surrenderNo={ctx.surrenderNo} /> : null}
-
       {/* Declaration + save */}
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 sm:px-5">
+      <section className="border-t border-slate-200 pt-4">
         {editable ? (
           <form className="space-y-3" onSubmit={onSubmit}>
             {missing.length ? (
@@ -335,14 +450,12 @@ function ReadOnlyAmount({ label, value }: { label: string; value: string }) {
 function AddExpenseEntry({ surrenderNo }: { surrenderNo: string }) {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const categoriesQuery = useQuery({
     queryKey: ['finance', 'advance-settlement', 'expense-categories'],
     queryFn: fetchPettyCashExpenseCategories,
-    enabled: open,
     staleTime: 5 * 60_000,
   })
   const options = (categoriesQuery.data?.rows ?? [])
@@ -361,7 +474,6 @@ function AddExpenseEntry({ surrenderNo }: { surrenderNo: string }) {
       setCategory('')
       setDescription('')
       setAmount('')
-      setOpen(false)
       // Refresh the reconciliation and the Actual Expenses lines.
       await queryClient.invalidateQueries({ queryKey: [...SETTLEMENT_QUERY_ROOT] })
       toast.success('Expense entry added. Business Central recalculated the settlement.')
@@ -378,23 +490,16 @@ function AddExpenseEntry({ surrenderNo }: { surrenderNo: string }) {
         : ''
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 sm:px-5">
+    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-base font-semibold text-slate-900">Actual expense entries</p>
+          <p className="text-sm font-semibold text-slate-900">Add an expense entry</p>
           <p className="text-xs text-slate-500">
-            Enter the actual amount spent on each advance line in Actual Expenses below, and add any other expense here.
+            Each expense with its purpose and amount, for example accommodation, transport or meals.
           </p>
         </div>
-        {!open ? (
-          <Button type="button" variant="outline" onClick={() => setOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Expense Entry
-          </Button>
-        ) : null}
       </div>
-      {open ? (
-        <div className="mt-3 grid gap-3 md:grid-cols-[1.2fr_2fr_1fr]">
+      <div className="mt-3 grid gap-3 md:grid-cols-[1.2fr_2fr_1fr]">
           <div className="space-y-1.5">
             <Label htmlFor="asp-exp-cat">Expense category *</Label>
             <Select
@@ -406,7 +511,7 @@ function AddExpenseEntry({ surrenderNo }: { surrenderNo: string }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="asp-exp-desc">Description *</Label>
+            <Label htmlFor="asp-exp-desc">Purpose / description *</Label>
             <Input id="asp-exp-desc" value={description} maxLength={250} onChange={(event) => setDescription(event.target.value)} />
           </div>
           <div className="space-y-1.5">
@@ -415,16 +520,25 @@ function AddExpenseEntry({ surrenderNo }: { surrenderNo: string }) {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2 md:col-span-3">
             {problem && (category || description || amount) ? <span className="mr-auto text-xs text-amber-800">{problem}</span> : null}
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
+            {category || description || amount ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCategory('')
+                  setDescription('')
+                  setAmount('')
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
             <Button type="button" disabled={Boolean(problem) || add.isPending} onClick={() => add.mutate()}>
               {add.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
               Add expense
             </Button>
           </div>
         </div>
-      ) : null}
-    </section>
+    </div>
   )
 }

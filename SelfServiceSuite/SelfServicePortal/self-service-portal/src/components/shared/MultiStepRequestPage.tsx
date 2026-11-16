@@ -197,6 +197,8 @@ export interface MultiStepRequestConfig {
   /** Template attachment categories (e.g. store requisition spec / drawing / photo). */
   attachmentCategoryOptions?: Array<{ label: string; value: string }>
   attachmentCategoryHint?: string
+  /** Heading of the attachments block (default Attachments). */
+  attachmentsTitle?: string
   /** Prevent approval until at least one BC document attachment exists. */
   requiresAttachmentBeforeSubmit?: boolean
   requiredAttachmentMessage?: string
@@ -211,6 +213,18 @@ export interface MultiStepRequestConfig {
   detailSupplement?: (ctx: { request: PortalRequest }) => ReactNode
   /** Replace the detail field grid for some requests (e.g. the BC-style LPR card); `details` is the default grid. */
   detailOverride?: (ctx: { request: PortalRequest; details: ReactNode }) => ReactNode
+  /**
+   * Arrange the document body yourself from its rendered parts (Advance Settlement: 1 Advance Summary, 2 Expense
+   * Entries & Supporting Documents, 3 Reconciliation & Settlement). Default order: supplement, details, lines,
+   * attachments.
+   */
+  detailLayout?: (ctx: {
+    request: PortalRequest
+    supplement: ReactNode
+    details: ReactNode
+    lines: ReactNode
+    attachments: ReactNode
+  }) => ReactNode
   /**
    * A module's own approval history (e.g. the Local Purchase chain log), shown at the very bottom of
    * the detail page next to the standard Approval and Comment History.
@@ -1457,8 +1471,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </div>
                   )
                 })()}
-                {config.detailSupplement ? config.detailSupplement({ request: selected }) : null}
                 {(() => {
+                  const supplementPart = config.detailSupplement ? config.detailSupplement({ request: selected }) : null
+                  const detailsPart = (() => {
                   const details = (
                     <section>
                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1478,9 +1493,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     </section>
                   )
                   return config.detailOverride ? config.detailOverride({ request: selected, details }) : details
-                })()}
-
-                {!detailFields.length && headerFields.length ? (
+                })()
+                  const headerInfoPart = !detailFields.length && headerFields.length ? (
                   <section className="border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-[var(--portal-navy)]">Request Information</h3>
                     <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1494,10 +1508,9 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       ))}
                     </dl>
                   </section>
-                ) : null}
-
-                {/* Lines before attachments so settlement/line totals are visible without scrolling past empty attachments */}
-                {bcCard && config.bcCardLines ? (
+                ) : null
+                  // Lines before attachments so settlement/line totals are visible without scrolling past empty attachments.
+                  const linesPart = bcCard && config.bcCardLines ? (
                   <div className="border-t border-slate-200 pt-4">{config.bcCardLines({ request: selected })}</div>
                 ) : config.line ? (
                   <section className="border-t border-slate-200 pt-4">
@@ -1650,9 +1663,8 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                       </div>
                     )}
                   </section>
-                ) : null}
-
-                {supportsAttachments && selected ? (
+                ) : null
+                  const attachmentsPart = supportsAttachments && selected ? (
                   <RequestAttachments
                     requestId={selected.id}
                     attachments={selected.attachments}
@@ -1660,11 +1672,36 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
                     canDelete={canDeleteRequestItems(editingStatus(selected), config.module.module)}
                     categoryOptions={config.attachmentCategoryOptions}
                     categoryHint={config.attachmentCategoryHint}
+                    title={config.attachmentsTitle}
                     onUpdated={() => {
                       void refresh()
                     }}
                   />
-                ) : null}
+                ) : null
+                  if (config.detailLayout) {
+                    return config.detailLayout({
+                      request: selected,
+                      supplement: supplementPart,
+                      details: (
+                        <>
+                          {detailsPart}
+                          {headerInfoPart}
+                        </>
+                      ),
+                      lines: linesPart,
+                      attachments: attachmentsPart,
+                    })
+                  }
+                  return (
+                    <>
+                      {supplementPart}
+                      {detailsPart}
+                      {headerInfoPart}
+                      {linesPart}
+                      {attachmentsPart}
+                    </>
+                  )
+                })()}
 
                 {/* History is always the last thing on the page, closed until View more. */}
                 {config.detailFooter ? config.detailFooter({ request: selected }) : null}
