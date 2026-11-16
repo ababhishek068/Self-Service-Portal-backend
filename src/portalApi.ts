@@ -208,6 +208,7 @@ import {
 import {
   applyBcStage1,
   mergeBcStage1Rows,
+  adoptBcStage1Request,
   bcStage1Snapshot,
   decideOvertimeWorkApproval,
   deleteOvertimeWorkRequest,
@@ -723,7 +724,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v394 — 1.0.3.555 (Dashboard: Medical Claims get their own card and are no longer counted as Staff Claims; includes 545 to 554; for BC 1.0.3.661)'
+export const PORTAL_API_BUILD = 'v395 — 1.0.3.556 (Overtime Request list driven by Business Central: a BC request with no copy on this portal server is adopted, so it is listed and opens; includes 545 to 555; for BC 1.0.3.661)'
 
 interface LookupSpec {
   service: string
@@ -8114,10 +8115,21 @@ export function buildPortalApiRouter() {
 
   // Overtime Work Request (prior permission). Payment requests require an approved work request.
   /** BC owns Stage 1 status, Workflow User Group steps and the Stage 2 link of BC-backed rows. */
-  async function withBcStage1State(rows: OvertimeWorkRequest[], employeeNo: string) {
-    if (!rows.some((row) => row.bcStage1)) return rows.map((row) => applyBcStage1(row, null))
-    // null = BC not readable: keep the rows; a request deleted in BC drops out of the list (UAT 16 Nov 2026).
+  async function withBcStage1State(localRows: OvertimeWorkRequest[], employeeNo: string) {
+    // BC drives the list: null = BC not readable (keep the rows); a request deleted in BC drops out
+    // (UAT 16 Nov 2026), and one this server has no copy of is adopted from BC.
     const bcRows = await listOvertimeRequests(employeeNo).catch(() => null)
+    let rows = localRows
+    if (bcRows) {
+      const localNos = new Set(localRows.map((row) => row.requestNo.trim().toUpperCase()))
+      const adopted: OvertimeWorkRequest[] = []
+      for (const bc of bcRows) {
+        if (localNos.has(bc.requestNo.trim().toUpperCase())) continue
+        const copy = await adoptBcStage1Request(bc, employeeNo).catch(() => null)
+        if (copy) adopted.push(copy)
+      }
+      rows = [...adopted, ...localRows]
+    }
     const merged = mergeBcStage1Rows(rows, bcRows)
     if (bcRows) {
       // BC 1.0.3.660 note ("ghost OTR", Clear Portal Test Docs): purge the portal copy of a request BC deleted,
@@ -8132,6 +8144,15 @@ export function buildPortalApiRouter() {
       )
     }
     return merged
+  }
+
+  /** The portal copy of the employee's overtime request, adopted from BC when this server has none. */
+  async function overtimeWorkRowOrAdopt(requestNo: string, employeeNo: string) {
+    const local = await getOvertimeWorkRequest(requestNo, employeeNo)
+    if (local) return local
+    const bc = await getOvertimeRequestByNo(requestNo).catch(() => null)
+    if (!bc || bc.employeeNo.trim().toUpperCase() !== employeeNo.trim().toUpperCase()) return null
+    return adoptBcStage1Request(bc, employeeNo)
   }
 
   router.get(
@@ -8200,7 +8221,7 @@ export function buildPortalApiRouter() {
         },
         submit,
       )
-      const existing = requestNo ? await getOvertimeWorkRequest(requestNo, authUser.employeeNo) : null
+      const existing = requestNo ? await overtimeWorkRowOrAdopt(requestNo, authUser.employeeNo) : null
       if (requestNo && !existing) throw portalError(`Overtime request ${requestNo} was not found.`, 404)
       if (existing && !existing.bcStage1 && existing.status !== 'Draft' && existing.status !== 'Rejected') {
         throw portalError(`Overtime request ${existing.requestNo} can no longer be changed.`, 409)
@@ -8268,7 +8289,7 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       const no = String(req.params.no ?? '').trim()
-      const row = await getOvertimeWorkRequest(no, authUser.employeeNo)
+      const row = await overtimeWorkRowOrAdopt(no, authUser.employeeNo)
       if (row?.bcStage1) {
         // Stop the BC Stage 1 workflow first; the local row mirrors BC's answer.
         const bc = await withdrawOvertimeRequest(authUser.employeeNo, row.requestNo)
@@ -8285,7 +8306,7 @@ export function buildPortalApiRouter() {
     safe(async (req, res) => {
       const authUser = user(req)
       const no = String(req.params.no ?? '').trim()
-      const row = await getOvertimeWorkRequest(no, authUser.employeeNo)
+      const row = await overtimeWorkRowOrAdopt(no, authUser.employeeNo)
       if (row?.bcStage1) {
         await deleteOvertimeRequest(authUser.employeeNo, row.requestNo)
         res.json(await deleteOvertimeWorkRequest(authUser.employeeNo, no, true))

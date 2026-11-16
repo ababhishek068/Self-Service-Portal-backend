@@ -18,6 +18,7 @@ import {
   sendBackOtPaymentApproval,
 } from './otPaymentRequests.js'
 import {
+  adoptBcStage1Request,
   applyBcStage1,
   bcStage1Snapshot,
   mergeBcStage1Rows,
@@ -627,5 +628,34 @@ describe('Overtime Request deleted in Business Central (UAT 16 Nov 2026)', () =>
   it('keeps every row when BC could not be read', () => {
     const rows = mergeBcStage1Rows([local('OTR-00001')], null)
     assert.deepEqual(rows.map((row) => row.requestNo), ['OTR-00001'])
+  })
+})
+
+describe('Overtime Request in BC without a copy on this portal server (UAT 16 Nov 2026)', () => {
+  const originalCwd = process.cwd()
+  let dir = ''
+  before(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'otw-adopt-'))
+    process.chdir(dir)
+  })
+  after(async () => {
+    process.chdir(originalCwd)
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('adopts the BC request so the Overtime Request page lists it and it can be edited', async () => {
+    const bc = parseOvertimeRequest(
+      bcStage1Json({ requestNo: 'OTR-00001', status: 'Approved', employeeNo: 'ABH-010', createdAt: '2026-11-16T09:24:00' }),
+    )
+    const copy = await adoptBcStage1Request(bc, 'ABH-010')
+    assert.equal(copy?.requestNo, 'OTR-00001')
+    assert.equal(copy?.bcStage1, true)
+    assert.equal(copy?.status, 'Approved')
+    assert.equal(copy?.lines.length, 2)
+    assert.equal(copy?.lines[0]!.workLocation, 'office')
+    assert.equal(copy?.createdAt, '2026-11-16T09:24:00')
+    const rows = await listOvertimeWorkRequests('ABH-010')
+    assert.deepEqual(rows.map((row) => row.requestNo), ['OTR-00001'])
+    assert.equal(await adoptBcStage1Request(parseOvertimeRequest(bcStage1Json({ lines: [], overtimeDate: '' })), 'ABH-010'), null)
   })
 })

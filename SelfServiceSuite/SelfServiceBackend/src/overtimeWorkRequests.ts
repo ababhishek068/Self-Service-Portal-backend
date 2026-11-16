@@ -594,6 +594,8 @@ export async function saveOvertimeWorkRequest(input: {
   submit: boolean
   /** BC Stage 1 state after PortalOvertimeSave: the local row takes BC's number, status and steps. */
   bc?: BcStage1Snapshot
+  /** A copy adopted from BC keeps BC's creation time. */
+  createdAt?: string
 }) {
   const store = await readStore()
   const existing = input.requestNo
@@ -644,7 +646,7 @@ export async function saveOvertimeWorkRequest(input: {
     expectedDeliverables: input.details.expectedDeliverables,
     lines,
     requesterUserId: input.requesterUserId,
-    createdAt: existing?.createdAt || now,
+    createdAt: existing?.createdAt || input.createdAt || now,
     submittedAt: input.bc?.submittedAt || (input.submit ? now : existing?.submittedAt || ''),
     approvedAt: input.bc?.approvedAt || '',
     decisionRemarks: '',
@@ -662,6 +664,44 @@ export async function saveOvertimeWorkRequest(input: {
   ]
   await writeStore(store)
   return row
+}
+
+/**
+ * A BC Stage 1 request this portal server has no copy of (made through another portal server, or after the copy
+ * was cleared): keep a copy built from BC, so the Overtime Request page lists it and Edit / Withdraw / Delete work
+ * on it (UAT 16 Nov 2026). The portal-only extras are blank: expected deliverables, and Office as each line's
+ * work location.
+ */
+export async function adoptBcStage1Request(bc: OvertimeRequest, employeeNo: string) {
+  const source = bc.lines.length
+    ? bc.lines
+    : bc.overtimeDate
+      ? [{ overtimeDate: bc.overtimeDate, startTime: bc.startTime, endTime: bc.endTime, dayType: bc.dayType, reason: bc.reason }]
+      : []
+  if (!source.length || !bc.requestNo.trim()) return null
+  return saveOvertimeWorkRequest({
+    employeeNo,
+    requesterUserId: bc.requesterUserId,
+    details: {
+      reason: bc.reason,
+      expectedDeliverables: '',
+      lines: source.map((line) => ({
+        overtimeDate: line.overtimeDate,
+        startTime: line.startTime,
+        endTime: line.endTime,
+        dayType: line.dayType as OvertimeWorkDayType,
+        workLocation: 'office' as OvertimeWorkLocation,
+        reason: line.reason || bc.reason,
+      })),
+      employeeName: bc.employeeName,
+      designation: bc.designation,
+      departmentCode: bc.departmentCode,
+      departmentName: bc.departmentName,
+    },
+    submit: bc.status !== 'Draft',
+    bc: bcStage1Snapshot(bc),
+    createdAt: bc.createdAt || bc.submittedAt,
+  })
 }
 
 export async function withdrawOvertimeWorkRequest(
