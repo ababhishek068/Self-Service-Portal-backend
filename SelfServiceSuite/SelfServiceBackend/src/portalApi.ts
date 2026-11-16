@@ -724,7 +724,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v395 — 1.0.3.556 (Overtime Request list driven by Business Central: a BC request with no copy on this portal server is adopted, so it is listed and opens; includes 545 to 555; for BC 1.0.3.661)'
+export const PORTAL_API_BUILD = 'v396 — 1.0.3.557 (Overtime Request: BC drives the list on every portal server and the portal copies are kept outside the release folder, so upgrades no longer lose them; includes 545 to 556; for BC 1.0.3.661)'
 
 interface LookupSpec {
   service: string

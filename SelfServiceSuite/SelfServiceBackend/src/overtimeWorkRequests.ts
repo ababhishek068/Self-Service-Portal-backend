@@ -206,8 +206,23 @@ const LOCATIONS: OvertimeWorkLocation[] = ['office', 'field', 'projectSite']
 /** Same as BC Stage 1 (ABH Overtime Request Mgt MaxLines): a full month of daily lines from a Start → End Date period. */
 const OVERTIME_WORK_MAX_LINES = 31
 
+const STORE_FILE = 'overtime-work-requests.json'
+
+/** Where the store was before 1.0.3.557: inside the release folder, so each portal upgrade lost it. */
+function legacyStorePath() {
+  return path.resolve(process.cwd(), 'data', STORE_FILE)
+}
+
+/**
+ * Outside the release folder, like the send-back corrections (approvalCorrections.ts), so a portal upgrade keeps
+ * the overtime copies (expected deliverables, each line's work location): PORTAL_DATA_DIR, else
+ * C:\ProgramData\ABH-Portal on Windows. Elsewhere (development, tests) ./data as before.
+ */
 function storePath() {
-  return path.resolve(process.cwd(), 'data', 'overtime-work-requests.json')
+  const dir =
+    process.env.PORTAL_DATA_DIR ||
+    (process.platform === 'win32' ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'ABH-Portal') : '')
+  return dir ? path.join(dir, STORE_FILE) : legacyStorePath()
 }
 
 function str(value: unknown) {
@@ -344,7 +359,11 @@ export function overtimeWorkLinesForPayment(row: OvertimeWorkRequest) {
 
 async function readStore(): Promise<StoreFile> {
   try {
-    const raw = await readFile(storePath(), 'utf8')
+    const raw = await readFile(storePath(), 'utf8').catch(async (error: NodeJS.ErrnoException) => {
+      // First start after the move: carry the store over from the release folder once.
+      if (error?.code !== 'ENOENT' || storePath() === legacyStorePath()) throw error
+      return readFile(legacyStorePath(), 'utf8')
+    })
     const parsed = JSON.parse(raw) as StoreFile
     return {
       sequence: Number(parsed.sequence) || 0,
