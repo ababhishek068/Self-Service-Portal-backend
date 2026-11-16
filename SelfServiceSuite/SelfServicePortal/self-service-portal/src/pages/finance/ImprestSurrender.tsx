@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Info, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, HandCoins, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
 import { AdvanceSettlementPanel } from '@/pages/finance/AdvanceSettlementPanel'
@@ -10,6 +10,8 @@ import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
+import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import { useConfirmAdvanceReceipt } from '@/hooks/useConfirmAdvanceReceipt'
 import type { PortalRequest } from '@/types/erp.types'
 
 const module = { module: 'imprestSurrender', entity: 'selfServiceImprestSurrenders' } as const
@@ -83,7 +85,7 @@ function receiptConfirmed(row: PortalRequest) {
 /** Why one of the employee's approved advances is not in BC's settleable list. */
 function notSettleableReason(row: PortalRequest, withReceipt: boolean) {
   if (!isPaid(row)) return 'approved, not paid yet'
-  if (withReceipt && !receiptConfirmed(row)) return 'paid, confirm receipt first'
+  if (withReceipt && !receiptConfirmed(row)) return 'paid, confirm payment received first'
   return 'a settlement is already open'
 }
 
@@ -117,6 +119,8 @@ function Prerequisite({
   unpaid,
   withReceipt,
   awaitingReceipt,
+  onConfirmReceipt,
+  confirming,
 }: {
   available: number
   loading: boolean
@@ -124,6 +128,9 @@ function Prerequisite({
   unpaid: string[]
   withReceipt: boolean
   awaitingReceipt: string[]
+  /** BC 1.0.3.653+: confirm the payment of a paid advance was received (PortalAdvanceConfirmReceipt). */
+  onConfirmReceipt: (advanceNo: string) => void
+  confirming: string | null
 }) {
   const state: PrerequisiteState = selectedSettleable ? 'met' : 'open'
   return (
@@ -147,22 +154,32 @@ function Prerequisite({
             : 'No approved and paid advance is waiting for settlement.'}
       </p>
       {!loading && awaitingReceipt.length ? (
-        <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <p>
-            Paid, receipt not confirmed yet: open the advance and click <span className="font-semibold">Confirm Receipt</span>.
-            It can then be settled here.
+            Finance has paid {awaitingReceipt.length === 1 ? 'this advance' : 'these advances'}: confirm you received the money,
+            then the advance can be settled here.
           </p>
-          <p className="mt-1 flex flex-wrap gap-2">
+          <ul className="mt-2 space-y-1.5">
             {awaitingReceipt.map((advanceNo) => (
-              <Link
-                key={advanceNo}
-                to={`/finance/advance-request?open=${encodeURIComponent(`imprest-${advanceNo}`)}`}
-                className="rounded-full bg-white px-2 py-0.5 font-semibold text-sky-900 ring-1 ring-sky-200 hover:bg-sky-100"
-              >
-                {advanceNo} → Confirm Receipt
-              </Link>
+              <li key={advanceNo} className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/finance/advance-request?open=${encodeURIComponent(`imprest-${advanceNo}`)}`}
+                  className="font-semibold text-amber-950 underline-offset-2 hover:underline"
+                >
+                  {advanceNo}
+                </Link>
+                <button
+                  type="button"
+                  disabled={confirming === advanceNo}
+                  onClick={() => onConfirmReceipt(advanceNo)}
+                  className="inline-flex items-center gap-1 rounded-full bg-[var(--portal-navy)] px-2.5 py-1 font-semibold text-white hover:bg-[var(--portal-navy-dark)] disabled:opacity-60"
+                >
+                  <HandCoins className="h-3.5 w-3.5" />
+                  {confirming === advanceNo ? 'Confirming…' : 'Confirm payment received'}
+                </button>
+              </li>
             ))}
-          </p>
+          </ul>
         </div>
       ) : null}
       {!loading && unpaid.length ? (
@@ -190,6 +207,17 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 export function ImprestSurrender() {
   const receipts = useLookupOptions('posted-receipts')
+  const confirm = useConfirm()
+  const receiptConfirmation = useConfirmAdvanceReceipt()
+  const confirmReceipt = async (advanceNo: string) => {
+    const ok = await confirm({
+      title: `Confirm you received ${advanceNo}?`,
+      message:
+        'Confirm only once the money is in your hands or your bank account. The advance can then be settled here.',
+      confirmLabel: 'Yes, I received it',
+    })
+    if (ok) receiptConfirmation.mutate({ advanceNo })
+  }
   // BC 1.0.3.636: only approved + paid advances from PortalAdvanceSettlementContext.
   const settleableQuery = useQuery({
     queryKey: ['finance', 'advance-settlement', 'context', 'create'],
@@ -313,6 +341,8 @@ export function ImprestSurrender() {
             unpaid={unpaid}
             withReceipt={withReceipt}
             awaitingReceipt={awaitingReceipt}
+            onConfirmReceipt={(advanceNo) => void confirmReceipt(advanceNo)}
+            confirming={receiptConfirmation.isPending ? (receiptConfirmation.variables?.advanceNo ?? null) : null}
           />
           {advanceNo ? (
           <div>

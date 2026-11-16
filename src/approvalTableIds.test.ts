@@ -100,6 +100,7 @@ import {
   parseHrPolicyUpload,
   isMedicalClaimHeader,
   overtimeSentBackNotificationItems,
+  advanceReceiptNotificationItems,
 } from './portalApi.js'
 
 import { deriveCodeunitSoapUrl, codeunitSoapNamespace } from './bcClient.js'
@@ -3858,5 +3859,17 @@ describe('Bell: overtime sent back for correction (BC 1.0.3.654)', () => {
       ],
     )
     assert.match(items[0]!.title, /Overtime Request OTR-00001 was sent back to you for correction/)
+  })
+})
+
+describe('Bell: advance paid, confirm payment received (BC 1.0.3.653+ / ERP 660)', () => {
+  it('reminds the requester of each paid advance whose receipt is not confirmed, linked to the advance', () => {
+    const [item] = advanceReceiptNotificationItems([{ advanceNo: 'IMP-000014', amount: 40000, purpose: 'UAT' }])
+    assert.equal(item!.kind, 'advanceReceipt')
+    assert.equal(item!.module, 'imprest')
+    assert.equal(item!.requestId, 'imprest-IMP-000014')
+    assert.match(item!.title, /IMP-000014 is paid — confirm you received the money/)
+    assert.match(item!.description, /ETB 40,000\.00 · UAT · Advance Settlement opens after you confirm/)
+    assert.deepEqual(advanceReceiptNotificationItems([]), [])
   })
 })

@@ -723,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v391 — 1.0.3.552 (Bell notifies the requester when an Overtime Request or Overtime Payment Request is sent back for correction; includes 545 to 551; for BC 1.0.3.654)'
+export const PORTAL_API_BUILD = 'v392 — 1.0.3.553 (Advance Payment: clear Confirm Payment Received step on the paid advance, on the settlement page and in the bell, per BC 1.0.3.660 portal note; ghost overtime copies purged once BC says not found; includes 545 to 552; for BC 1.0.3.660)'
 
 interface LookupSpec {
   service: string
@@ -3207,7 +3207,7 @@ async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurch
 
 export interface PortalNotification {
   id: string
-  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive' | 'localPurchase'
+  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive' | 'localPurchase' | 'advanceReceipt'
   count: number
   title: string
   description: string
@@ -3335,6 +3335,37 @@ export function overtimeSentBackNotificationItems(
   ]
 }
 
+/**
+ * BC 1.0.3.653+ (ERP 660): the user's advances Finance has paid whose receipt they have not confirmed yet
+ * (`awaitingReceipt`); settlement is possible only after "Confirm Payment Received".
+ */
+export function advanceReceiptNotificationItems(
+  awaiting: Array<{ advanceNo: string; amount: number; purpose: string }>,
+): PortalNotification[] {
+  return awaiting.map((row) => ({
+    id: `advanceReceipt:imprest-${row.advanceNo}`,
+    kind: 'advanceReceipt',
+    count: 1,
+    title: `${row.advanceNo} is paid — confirm you received the money`,
+    description: [
+      row.amount > 0 ? `ETB ${row.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '',
+      row.purpose,
+      'Advance Settlement opens after you confirm.',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    module: 'imprest',
+    requestId: `imprest-${row.advanceNo}`,
+  }))
+}
+
+async function advanceReceiptNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
+  const employeeNo = String(authUser.employeeNo ?? '').trim()
+  if (!employeeNo) return []
+  const context = await getAdvanceSettlementContext(employeeNo, '')
+  return context.supportsReceiptConfirmation ? advanceReceiptNotificationItems(context.awaitingReceipt) : []
+}
+
 async function overtimeSentBackNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
   const employeeNo = String(authUser.employeeNo ?? '').trim()
   if (!employeeNo) return []
@@ -3459,14 +3490,15 @@ async function workOutNotifications(authUser: AuthUser, key: string): Promise<Po
       console.warn('Notifications: part not loaded', error instanceof Error ? error.message : error)
       return fallback
     }
-  const [approvals, returned, overtimeReturned, store, localPurchase] = await Promise.all([
+  const [approvals, returned, overtimeReturned, advanceReceipts, store, localPurchase] = await Promise.all([
     approvalNotification(authUser).catch(failed(null)),
     sentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
     overtimeSentBackNotifications(authUser).catch(failed([] as PortalNotification[])),
+    advanceReceiptNotifications(authUser).catch(failed([] as PortalNotification[])),
     storeNotifications(authUser).catch(failed([] as PortalNotification[])),
     localPurchaseNotification(authUser).catch(failed(null)),
   ])
-  const items = [approvals, ...returned, ...overtimeReturned, ...store, localPurchase].filter(
+  const items = [approvals, ...returned, ...overtimeReturned, ...advanceReceipts, ...store, localPurchase].filter(
     (item): item is PortalNotification => Boolean(item && item.count > 0),
   )
   const value = { total: items.reduce((sum, item) => sum + item.count, 0), items }
@@ -8076,7 +8108,20 @@ export function buildPortalApiRouter() {
     if (!rows.some((row) => row.bcStage1)) return rows.map((row) => applyBcStage1(row, null))
     // null = BC not readable: keep the rows; a request deleted in BC drops out of the list (UAT 16 Nov 2026).
     const bcRows = await listOvertimeRequests(employeeNo).catch(() => null)
-    return mergeBcStage1Rows(rows, bcRows)
+    const merged = mergeBcStage1Rows(rows, bcRows)
+    if (bcRows) {
+      // BC 1.0.3.660 note ("ghost OTR", Clear Portal Test Docs): purge the portal copy of a request BC deleted,
+      // but only after BC answers "not found" for that number itself (never on an empty or failed list).
+      const kept = new Set(merged.map((row) => row.requestNo))
+      const gone = rows.filter((row) => row.bcStage1 && !kept.has(row.requestNo))
+      await Promise.all(
+        gone.map(async (row) => {
+          const bc = await getOvertimeRequestByNo(row.requestNo).catch(() => undefined)
+          if (bc === null) await deleteOvertimeWorkRequest(employeeNo, row.requestNo, true).catch(() => undefined)
+        }),
+      )
+    }
+    return merged
   }
 
   router.get(

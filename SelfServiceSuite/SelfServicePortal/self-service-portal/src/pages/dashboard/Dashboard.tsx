@@ -33,6 +33,7 @@ import {
   ShoppingCart,
   Store,
   Wallet,
+  HandCoins,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PortalNotificationKind } from '@/api/endpoints/notifications'
@@ -171,6 +172,7 @@ const BANNER_ICONS: Partial<Record<PortalNotificationKind, LucideIcon>> = {
   storeLpr: ShoppingCart,
   storeReceive: PackageOpen,
   localPurchase: ClipboardList,
+  advanceReceipt: HandCoins,
 }
 
 function greetingFor(date: Date) {

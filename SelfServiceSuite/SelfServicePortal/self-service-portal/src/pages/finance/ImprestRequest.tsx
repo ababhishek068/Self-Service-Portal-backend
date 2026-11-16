@@ -7,7 +7,8 @@ import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
 import { AdvanceRequestCreate } from '@/components/finance/AdvanceRequestCreate'
 import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
-import { confirmAdvanceReceipt } from '@/api/endpoints/advanceSettlement'
+import { AdvanceReceiptPanel } from '@/components/finance/AdvanceReceiptPanel'
+import { advancePaid, fullySettled, receiptConfirmed } from '@/utils/advanceReceipt'
 import { fetchImprestLineAmount } from '@/api/endpoints/imprestCalc'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
@@ -35,24 +36,6 @@ const ADVANCE_APPROVERS: TrackerStep[] = [
   { key: 'final-approver', heading: 'FAD | COO | CEO', owner: 'By amount: <50k · 50–100k · >100k ETB', icon: Landmark },
 ]
 
-function payloadFlag(request: PortalRequest, keys: string[]) {
-  const payload = request.payload ?? {}
-  return keys.some((key) => payload[key] === true || String(payload[key] ?? '').toLowerCase() === 'true')
-}
-
-/** BC pays an advance through Payment Schedule posting (Fully Paid) or by posting it. */
-function advancePaid(request: PortalRequest) {
-  return request.status === 'Posted' || payloadFlag(request, ['FullyPaid', 'Fully_Paid', 'Posted'])
-}
-
-function receiptConfirmed(request: PortalRequest) {
-  return payloadFlag(request, ['ReceiptConfirmed', 'Receipt_Confirmed'])
-}
-
-function fullySettled(request: PortalRequest) {
-  return /^full/i.test(String(request.payload?.SurrenderStatus ?? request.payload?.Surrender_Status ?? '').trim())
-}
-
 /**
  * Business requirement (Nov 2026): approval → Finance pays → the requester confirms receipt in ESSP → only then
  * settlement (BC 1.0.3.653). On older BC there is no receipt step.
@@ -63,12 +46,12 @@ function advanceAfterApproval(request: PortalRequest, withReceipt: boolean): Aft
   const settled = fullySettled(request)
   const steps: TrackerStep[] = [
     { key: 'payment', heading: 'Finance', owner: 'Pays the advance', icon: Banknote },
-    ...(withReceipt ? [{ key: 'receipt', heading: 'Receipt', owner: 'You confirm in ESSP', icon: HandCoins }] : []),
+    ...(withReceipt ? [{ key: 'receipt', heading: 'Payment received', owner: 'You confirm in ESSP', icon: HandCoins }] : []),
     { key: 'settlement', heading: 'Settlement', owner: 'Advance Settlement', icon: Receipt },
   ]
   if (settled) return { steps, caption: 'Settled', current: steps.length }
   if (!paid) return { steps, caption: 'Waiting for Finance to pay the advance', current: 0 }
-  if (withReceipt && !received) return { steps, caption: 'Paid · confirm receipt (Confirm Receipt)', current: 1 }
+  if (withReceipt && !received) return { steps, caption: 'Paid · confirm you received the money', current: 1 }
   return { steps, caption: 'Settle the advance under Advance Settlement', current: withReceipt ? 2 : 1 }
 }
 
@@ -78,7 +61,7 @@ function receiptStatus(request: PortalRequest) {
     const on = firstPayloadDate(payload, ['ReceiptConfirmedOn', 'Receipt_Confirmed_On'])
     return on ? `Confirmed on ${on}` : 'Confirmed'
   }
-  return advancePaid(request) ? 'Paid — waiting for your confirmation (Confirm Receipt)' : undefined
+  return advancePaid(request) ? 'Paid — waiting for your confirmation (Confirm Payment Received)' : undefined
 }
 
 function paymentStatus(request: PortalRequest) {
@@ -329,7 +312,7 @@ export function ImprestRequest() {
     <MultiStepRequestPage
       title="Advance Request"
       headerLabel="New Advance Request"
-      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm receipt here (Confirm Receipt); only then can it be settled via Advance Settlement (within two working days of return)."
+      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm here that you received the money (Confirm Payment Received); only then can it be settled via Advance Settlement (within two working days of return)."
       module={module}
       queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
@@ -365,25 +348,8 @@ export function ImprestRequest() {
       )}
       progressApprovers={ADVANCE_APPROVERS}
       progressAfterApproval={(request) => advanceAfterApproval(request, supportsReceipt)}
-      extraDetailActions={[
-        {
-          id: 'confirm-receipt',
-          label: 'Confirm Receipt',
-          visibleWhen: (request) =>
-            supportsReceipt &&
-            ['Approved', 'Posted'].includes(request.status) &&
-            advancePaid(request) &&
-            !receiptConfirmed(request),
-          confirm: {
-            title: 'Confirm receipt of the advance?',
-            message:
-              'Confirm only once the advance is in your hands or your account. After you confirm, you can settle the advance under Advance Settlement.',
-            confirmLabel: 'Confirm Receipt',
-          },
-          run: (requestId) => confirmAdvanceReceipt(documentNoFromRequestId(requestId)),
-          successMessage: 'Receipt confirmed. You can now settle the advance under Advance Settlement.',
-        },
-      ]}
+      // BC 1.0.3.653+: after Finance pays, a clear "Confirm Payment Received" step on the request itself.
+      detailSupplement={({ request }) => <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} />}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}
       attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."

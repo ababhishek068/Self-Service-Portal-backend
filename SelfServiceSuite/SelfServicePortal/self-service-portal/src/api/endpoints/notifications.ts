@@ -9,6 +9,8 @@ export type PortalNotificationKind =
   | 'storeLpr'
   | 'storeReceive'
   | 'localPurchase'
+  /** BC 1.0.3.653+: an advance Finance paid, waiting for "Confirm Payment Received". */
+  | 'advanceReceipt'
 
 export interface PortalNotification {
   id: string
