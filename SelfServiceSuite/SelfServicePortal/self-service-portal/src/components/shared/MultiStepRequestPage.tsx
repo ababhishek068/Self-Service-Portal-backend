@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, ArrowLeft, History, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   type FieldValues,
   type Resolver,
@@ -156,6 +156,11 @@ export interface MultiStepRequestConfig {
     onCreated: (request: PortalRequest) => void
     onCancel: () => void
   }) => ReactNode
+  /**
+   * The page a document belongs on when it is not this one (e.g. a Medical Claim opened on Staff Claims
+   * through a dashboard or bell link, which share the BC claim module): the page goes there instead.
+   */
+  pageFor?: (request: PortalRequest) => string | null
   /** Replace the header Edit form on a draft (e.g. the Staff Salary Advance form). */
   customEdit?: (ctx: {
     request: PortalRequest
@@ -1017,6 +1022,13 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   }
 
   const selected = detailQuery.data
+  // A document that belongs on another page (Medical vs Staff Claim) opens there, with all its rules.
+  const navigate = useNavigate()
+  const ownPage = selected && config.pageFor ? config.pageFor(selected) : null
+  useEffect(() => {
+    if (!ownPage || !selected) return
+    navigate(`${ownPage}?open=${encodeURIComponent(selected.id)}`, { replace: true })
+  }, [ownPage, selected, navigate])
   const bcCard = selected ? config.bcCard?.(selected) === true : false
   // A stage-tracking process banner is the document's tracker (in place of Workflow Progress).
   const stageBanner = typeof config.processBanner === 'function'

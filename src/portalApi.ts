@@ -723,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v389 — 1.0.3.550 (Overtime Request deleted in Business Central no longer stays in the portal list or dashboard; includes 545 to 549; for BC 1.0.3.654)'
+export const PORTAL_API_BUILD = 'v390 — 1.0.3.551 (Medical Claim opened from a dashboard, bell or approval link now opens on the Medical Claim page, not as a Staff Claim; includes 545 to 550; for BC 1.0.3.654)'
 
 interface LookupSpec {
   service: string

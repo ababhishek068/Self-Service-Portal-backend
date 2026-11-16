@@ -1,3 +1,4 @@
+import { isMedicalClaimDocument } from '@/data/processStages'
 import { navPathHidden } from '@/config/navigation'
 import type { MouseEvent, ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -155,6 +156,10 @@ function quickLinkMeta(href: string): { icon: LucideIcon; tone: Tone } {
 
 /** Recent Activity opens each request on its module page. */
 function activityHref(row: PortalRequest) {
+  // Medical Claims are Staff Claim documents in BC; they open on the Medical Claim page.
+  if (row.requestType === 'staffClaim' && isMedicalClaimDocument(row)) {
+    return `/finance/medical-claim?open=${encodeURIComponent(row.id)}`
+  }
   return requestPageHref(row.requestType, row.id)
 }
 

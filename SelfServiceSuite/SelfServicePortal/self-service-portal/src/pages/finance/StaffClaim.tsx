@@ -415,6 +415,11 @@ export function StaffClaim({ medicalOnly = false }: { medicalOnly?: boolean }) {
   return (
     <MultiStepRequestPage
       title={medicalOnly ? 'Medical Claim' : 'Staff Claims'}
+      // Staff and Medical Claims share the BC claim module: a link may open one on the other's page
+      // (UAT 16 Nov 2026: a Medical Claim draft reopened as a Staff Claim).
+      pageFor={(request) =>
+        isMedicalClaimRequest(request) === medicalOnly ? null : medicalOnly ? '/finance/staff-claim' : '/finance/medical-claim'
+      }
       headerLabel={medicalOnly ? 'New Medical Claim' : 'New Staff Claim'}
       description={
         medicalOnly
