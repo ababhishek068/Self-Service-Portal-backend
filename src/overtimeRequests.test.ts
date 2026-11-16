@@ -20,6 +20,7 @@ import {
 import {
   applyBcStage1,
   bcStage1Snapshot,
+  mergeBcStage1Rows,
   buildSteps,
   decideOvertimeWorkApproval,
   listOvertimeWorkApprovals,
@@ -603,5 +604,28 @@ describe('Send Back for Correction on overtime (BC 1.0.3.654)', () => {
     )
     assert.equal(payment!.sentBack, true)
     assert.equal(payment!.sentBackRemarks, 'Wrong completion date')
+  })
+})
+
+describe('Overtime Request deleted in Business Central (UAT 16 Nov 2026)', () => {
+  type Row = Parameters<typeof applyBcStage1>[0]
+  const local = (requestNo: string, bcStage1 = true) =>
+    ({ bcStage1, requestNo, status: 'Pending Approval', steps: [] }) as unknown as Row
+
+  it('drops the copy of a request BC no longer has, keeps portal-only rows', () => {
+    const bc = [parseOvertimeRequest(bcStage1Json({ requestNo: 'OTR-00002', status: 'Approved' }))]
+    const rows = mergeBcStage1Rows([local('OTR-00001'), local('otr-00002'), local('OWR-0007', false)], bc)
+    assert.deepEqual(
+      rows.map((row) => [row.requestNo, row.status]),
+      [
+        ['otr-00002', 'Approved'],
+        ['OWR-0007', 'Pending Approval'],
+      ],
+    )
+  })
+
+  it('keeps every row when BC could not be read', () => {
+    const rows = mergeBcStage1Rows([local('OTR-00001')], null)
+    assert.deepEqual(rows.map((row) => row.requestNo), ['OTR-00001'])
   })
 })

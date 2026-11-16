@@ -207,6 +207,7 @@ import {
 } from './otPaymentRequests.js'
 import {
   applyBcStage1,
+  mergeBcStage1Rows,
   bcStage1Snapshot,
   decideOvertimeWorkApproval,
   deleteOvertimeWorkRequest,
@@ -722,7 +723,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v388 — 1.0.3.549 (Medical Claim and Staff Claim: the second claim line with the same claim type now saves, the G/L account fills when empty and a rule failing on a hidden field is shown instead of a silent Submit; includes 545 to 548; for BC 1.0.3.654)'
+export const PORTAL_API_BUILD = 'v389 — 1.0.3.550 (Overtime Request deleted in Business Central no longer stays in the portal list or dashboard; includes 545 to 549; for BC 1.0.3.654)'
 
 interface LookupSpec {
   service: string
@@ -7196,6 +7197,7 @@ export function buildPortalApiRouter() {
       }
       // Sources that failed: shown on the dashboard instead of silently counting 0.
       const warnings: string[] = []
+      let overtimeBcRead = true
       const listModules: SupportedFrontendModule[] = [
         'imprest',
         'imprestSurrender',
@@ -7226,6 +7228,7 @@ export function buildPortalApiRouter() {
         }).catch(() => [] as ODataRecord[]),
         Promise.all(listModules.map((module) => mappedModuleRows(module, authUser))),
         listOvertimeRequests(authUser.employeeNo).catch((error: unknown) => {
+          overtimeBcRead = false
           warnings.push(
             `Overtime requests could not be loaded from Business Central: ${error instanceof Error ? error.message : String(error)}`,
           )
@@ -7253,8 +7256,9 @@ export function buildPortalApiRouter() {
       // The portal keeps a local copy of each BC Stage 1 request (same OTR number). BC's row carries the
       // live status and amount, so the copy is listed only when BC has no such request.
       const bcOvertimeNos = new Set(overtimeRows.map((row) => row.requestNo.trim().toUpperCase()))
+      // A copy of a BC request that BC no longer has (deleted in BC) is not shown either.
       const portalOnlyWorkRows = overtimeWorkRows.filter(
-        (row) => !bcOvertimeNos.has(row.requestNo.trim().toUpperCase()),
+        (row) => !bcOvertimeNos.has(row.requestNo.trim().toUpperCase()) && !(overtimeBcRead && row.bcStage1),
       )
       const overtimeWorkRecent = portalOnlyWorkRows.map((row) => overtimeWorkToPortalRequest(row))
       const allMine = [...moduleRows.flat(), ...leaveRecent, ...overtimeRecent, ...overtimeWorkRecent].toSorted(
@@ -8034,9 +8038,9 @@ export function buildPortalApiRouter() {
   /** BC owns Stage 1 status, Workflow User Group steps and the Stage 2 link of BC-backed rows. */
   async function withBcStage1State(rows: OvertimeWorkRequest[], employeeNo: string) {
     if (!rows.some((row) => row.bcStage1)) return rows.map((row) => applyBcStage1(row, null))
-    const bcRows = await listOvertimeRequests(employeeNo).catch(() => [])
-    const byNo = new Map(bcRows.map((row) => [row.requestNo.toUpperCase(), row]))
-    return rows.map((row) => applyBcStage1(row, byNo.get(row.requestNo.toUpperCase())))
+    // null = BC not readable: keep the rows; a request deleted in BC drops out of the list (UAT 16 Nov 2026).
+    const bcRows = await listOvertimeRequests(employeeNo).catch(() => null)
+    return mergeBcStage1Rows(rows, bcRows)
   }
 
   router.get(

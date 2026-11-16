@@ -156,6 +156,19 @@ export function applyBcStage1(row: OvertimeWorkRequest, bc: OvertimeRequest | nu
   }
 }
 
+/**
+ * The portal's Overtime Request rows with BC's live Stage 1 state. A row that mirrors a BC request BC no
+ * longer has (deleted in BC) is left out; its local copy is kept, not deleted, so nothing is lost if BC
+ * was only read wrongly. When BC could not be read (`bcRows` null) every row stays as it is.
+ */
+export function mergeBcStage1Rows(rows: OvertimeWorkRequest[], bcRows: OvertimeRequest[] | null) {
+  if (!bcRows) return rows.map((row) => applyBcStage1(row, null))
+  const byNo = new Map(bcRows.map((row) => [row.requestNo.trim().toUpperCase(), row]))
+  return rows
+    .filter((row) => !row.bcStage1 || byNo.has(row.requestNo.trim().toUpperCase()))
+    .map((row) => applyBcStage1(row, byNo.get(row.requestNo.trim().toUpperCase())))
+}
+
 export type OvertimeWorkDetails = {
   /** No longer collected on the form; kept empty for older stored rows. */
   normalHoursFrom?: string
