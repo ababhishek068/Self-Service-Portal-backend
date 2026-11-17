@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldValues, type Resolver } from 'react-hook-form'
-import { differenceInCalendarDays, parseISO } from 'date-fns'
+import { addDays, differenceInCalendarDays, format as formatDay, parseISO } from 'date-fns'
 import {
   BadgeCheck,
   Building2,
@@ -14,7 +14,6 @@ import {
   Landmark,
   Loader2,
   Monitor,
-  Plus,
   Save,
   Send,
   Trash2,
@@ -38,6 +37,8 @@ import {
   type EndpointConfig,
 } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
+import type { AdvanceOutstanding } from '@/api/endpoints/advanceOutstanding'
+import { AdvanceOutstandingNotice } from '@/components/finance/AdvanceOutstandingNotice'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { ApprovalHistorySection } from '@/components/shared/ApprovalHistory'
@@ -48,6 +49,7 @@ import { attachmentVisual, formatFileSize } from '@/components/shared/attachment
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { purposeRequiresOtherDetails } from '@/data/advanceRequestPurpose'
@@ -79,7 +81,10 @@ const SECTION_OF_FIELD: Record<string, string> = {
 }
 
 type PendingFile = { id: string; file: File; category: string; description: string }
-/** An advance line beyond the first (Advance Type + amount); `lineNo` once Business Central has it. */
+/**
+ * One chosen Advance Type and its amount — one Business Central advance line each (BC posts every line to its type's
+ * account). `lineNo` once Business Central has it. With one type, the Requested Amount field is its amount.
+ */
 type CostItem = { key: string; lineNo: string; advanceType: string; amount: string }
 type SavedLine = { lineNo: string; advanceType: string; amount: number; noOfDays: number }
 
@@ -124,9 +129,34 @@ function savedLines(request: PortalRequest | undefined): SavedLine[] {
     .filter((line) => line.lineNo)
 }
 
-/** Form values of a saved draft, from its Business Central header and first line. */
-function savedFormValues(request: PortalRequest, firstLine: SavedLine | undefined): FieldValues {
+/**
+ * The chosen Advance Types of a saved request: one item per type, in line order. Lines of the same type (several cost
+ * items of one type, before 17 Nov 2026) become one; the others are removed on the next save.
+ */
+function itemsFromLines(lines: SavedLine[]): CostItem[] {
+  const items: CostItem[] = []
+  for (const line of lines) {
+    if (!line.advanceType) continue
+    const index = items.findIndex((item) => item.advanceType === line.advanceType)
+    if (index >= 0) {
+      items[index] = { ...items[index]!, amount: String(round2((Number(items[index]!.amount) || 0) + line.amount)) }
+    } else {
+      items.push({ key: newItemKey(), lineNo: line.lineNo, advanceType: line.advanceType, amount: line.amount > 0 ? String(line.amount) : '' })
+    }
+  }
+  return items
+}
+
+/** A comparable picture of the chosen types (and, with several, their amounts) to tell whether they changed. */
+function itemsSignature(items: CostItem[]) {
+  const several = items.length > 1
+  return items.map((item) => `${item.lineNo}|${item.advanceType}|${several ? Number(item.amount) || 0 : ''}`).join(';')
+}
+
+/** Form values of a saved draft, from its Business Central header and its advance lines. */
+function savedFormValues(request: PortalRequest, items: CostItem[]): FieldValues {
   const payload = request.payload ?? {}
+  const total = round2(items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))
   return {
     requestDate: payloadDate(payload, ['Date', 'RequestDate']),
     dateRequired: payloadDate(payload, ['DateRequired', 'Date_Required', 'PaymentReleaseDate', 'Payment_Release_Date']),
@@ -137,8 +167,8 @@ function savedFormValues(request: PortalRequest, firstLine: SavedLine | undefine
     activityEndDate: payloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']),
     activityLocation: payloadText(payload, ['ActivityLocation', 'Activity_Location']),
     projectAssignment: payloadText(payload, ['ProjectAssignment', 'Project_Assignment']),
-    requestedAmount: firstLine && firstLine.amount > 0 ? String(firstLine.amount) : '',
-    advanceType: firstLine?.advanceType ?? '',
+    requestedAmount: total > 0 ? String(total) : '',
+    advanceType: items[0]?.advanceType ?? '',
     advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details']),
     purpose: '',
   }
@@ -185,7 +215,8 @@ function useCountUp(target: number) {
     const started = performance.now()
     let frame = 0
     const tick = (now: number) => {
-      const t = Math.min(1, (now - started) / 520)
+      // The first frame can be stamped before `started`: never below 0 (it dipped below the old value).
+      const t = Math.max(0, Math.min(1, (now - started) / 520))
       const next = from + (target - from) * (1 - Math.pow(1 - t, 3))
       current.current = next
       setValue(next)
@@ -276,8 +307,9 @@ function Counter({ value }: { value: string }) {
  * 1 Employee Information & Request Purpose · 2 Advance Request Details (Requested Amount in ETB)
  * · 3 Supporting Documents & Submission (Save as Draft / Submit for Approval / Cancel / View History)
  * · 4 Approval Workflow & Limits, a live route that follows the amount. Business Central creates the
- * advance, its first line (the amount on the chosen Advance Type), the attachments and — on
- * Submit — starts its approval workflow.
+ * advance, one line per chosen Advance Type (client, 17 Nov 2026: several types, each with its amount), the
+ * attachments and — on Submit — starts its approval workflow. With BC 1.0.3.667 (`outstanding`), Submit is refused
+ * while the employee has the maximum (4) advances not settled, and the settle-by date (activity end + 7 days) shows.
  */
 export function AdvanceRequestCreate({
   module,
@@ -285,6 +317,7 @@ export function AdvanceRequestCreate({
   purposeHint,
   advanceTypes,
   supportsProject,
+  outstanding,
   request,
   onCreated,
   onSaved,
@@ -296,6 +329,8 @@ export function AdvanceRequestCreate({
   purposeHint: string
   advanceTypes: LookupOption[]
   supportsProject: boolean
+  /** BC 1.0.3.667: advances not settled and whether a new one may be submitted (null on older BC). */
+  outstanding?: AdvanceOutstanding | null
   /** A saved draft (or an advance reopened after a send back) to edit. */
   request?: PortalRequest
   onCreated?: (request: PortalRequest) => void
@@ -316,6 +351,7 @@ export function AdvanceRequestCreate({
   const profile = profileQuery.data
   const editing = Boolean(request)
   const initialLines = useMemo(() => savedLines(request), [request])
+  const initialItems = useMemo(() => itemsFromLines(initialLines), [initialLines])
   const sentBack = sentBackInfo(request)
   const historySteps = request ? approvalHistorySteps(request) : []
   const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
@@ -324,14 +360,7 @@ export function AdvanceRequestCreate({
     [request],
   )
   const clientRequestId = useRef(newRequestId())
-  const [extraItems, setExtraItems] = useState<CostItem[]>(() =>
-    initialLines.slice(1).map((line) => ({
-      key: newItemKey(),
-      lineNo: line.lineNo,
-      advanceType: line.advanceType,
-      amount: line.amount > 0 ? String(line.amount) : '',
-    })),
-  )
+  const [typeItems, setTypeItems] = useState<CostItem[]>(initialItems)
   const [itemErrors, setItemErrors] = useState<Record<string, string>>({})
   const [savedAttachments, setSavedAttachments] = useState<Attachment[]>(() => request?.attachments ?? [])
   const [removingAttachment, setRemovingAttachment] = useState<string | null>(null)
@@ -346,7 +375,7 @@ export function AdvanceRequestCreate({
     // The schema coerces Requested Amount to a number; the form keeps plain field values.
     resolver: zodResolver(advanceRequestCreateSchema) as unknown as Resolver<FieldValues>,
     defaultValues: request
-      ? savedFormValues(request, initialLines[0])
+      ? savedFormValues(request, initialItems)
       : {
       requestDate: today,
       dateRequired: today,
@@ -370,21 +399,33 @@ export function AdvanceRequestCreate({
   const activityStart = text('activityStartDate')
   const activityEnd = text('activityEndDate') || activityStart
   const firstAmount = Number(watched.requestedAmount ?? 0) > 0 ? Number(watched.requestedAmount) : 0
-  const extraTotal = extraItems.reduce((sum, item) => sum + (Number(item.amount) > 0 ? Number(item.amount) : 0), 0)
-  // The approval route follows the whole advance: every cost item.
-  const amount = round2(firstAmount + extraTotal)
+  // Several Advance Types (client, 17 Nov 2026): each has its amount and the Requested Amount is their total.
+  const several = typeItems.length > 1
+  const itemsTotal = round2(typeItems.reduce((sum, item) => sum + (Number(item.amount) > 0 ? Number(item.amount) : 0), 0))
+  // The approval route follows the whole advance.
+  const amount = several ? itemsTotal : round2(firstAmount)
+  const firstType = typeItems[0]?.advanceType ?? ''
+  const limitReached = Boolean(outstanding && !outstanding.canRequest)
+  const settleBy =
+    outstanding && activityEnd
+      ? (() => {
+          try {
+            return formatDay(addDays(parseISO(activityEnd), outstanding.settlementDueDays), 'd MMM yyyy')
+          } catch {
+            return ''
+          }
+        })()
+      : ''
   const needsOther = purposeRequiresOtherDetails(purposeCode, purposeOptions)
   const finalLimit = APPROVAL_LIMITS.find((limit) => limit.matches(amount))
   const days = activityStart ? activityDays(activityStart, activityEnd) : 0
   const shownAmount = useCountUp(amount)
   const purposeLabel = purposeOptions.find((option) => option.value === purposeCode)?.label ?? ''
-  const advanceTypeOption = advanceTypes.find((option) => option.value === text('advanceType'))
-  const advanceTypeLabel = advanceTypeOption?.label ?? ''
+  const typeLabel = (code: string) => advanceTypes.find((option) => option.value === code)?.label ?? code
+  const advanceTypeLabel = firstType ? typeLabel(firstType) : ''
   // ESSP Advance Request Types (BC 1.0.3.653): Other (Specify) needs what the advance is for (one text per request).
-  const typeNeedsDetails =
-    needsTypeDetails(advanceTypeOption) ||
-    extraItems.some((item) => needsTypeDetails(advanceTypes.find((option) => option.value === item.advanceType)))
-  const extraItemsValid = extraItems.every((item) => Boolean(item.advanceType) && Number(item.amount) > 0)
+  const typeNeedsDetails = typeItems.some((item) => needsTypeDetails(advanceTypes.find((option) => option.value === item.advanceType)))
+  const itemsValid = !several || typeItems.every((item) => Number(item.amount) > 0)
 
   const section1Done =
     Boolean(purposeCode) && (!needsOther || text('otherPurposeDetails').trim().length > 0) && text('justification').trim().length >= 10
@@ -394,15 +435,10 @@ export function AdvanceRequestCreate({
     Boolean(activityStart) &&
     activityEnd >= activityStart &&
     text('dateRequired') <= activityStart &&
-    firstAmount > 0 &&
-    Boolean(text('advanceType')) &&
-    extraItemsValid
-  const itemsChanged =
-    extraItems.length !== Math.max(0, initialLines.length - 1) ||
-    extraItems.some((item, index) => {
-      const saved = initialLines[index + 1]
-      return !saved || item.lineNo !== saved.lineNo || item.advanceType !== saved.advanceType || Number(item.amount) !== saved.amount
-    })
+    amount > 0 &&
+    typeItems.length > 0 &&
+    itemsValid
+  const itemsChanged = itemsSignature(typeItems) !== itemsSignature(initialItems)
   const dirty = form.formState.isDirty || files.length > 0 || itemsChanged
 
   const expectedApprovers: TrackerStep[] = [
@@ -414,6 +450,21 @@ export function AdvanceRequestCreate({
       icon: Landmark,
     },
   ]
+
+  // The form's Advance Type is the first chosen type and, with several, its Requested Amount is their total — so the
+  // schema's checks (a type, an amount above zero) hold for one type and for many.
+  useEffect(() => {
+    if (String(form.getValues('advanceType') ?? '') !== firstType) {
+      form.setValue('advanceType', firstType, { shouldDirty: true, shouldValidate: form.formState.isSubmitted })
+    }
+  }, [firstType, form])
+  useEffect(() => {
+    if (!several) return
+    const total = itemsTotal > 0 ? String(itemsTotal) : ''
+    if (String(form.getValues('requestedAmount') ?? '') !== total) {
+      form.setValue('requestedAmount', total, { shouldDirty: true, shouldValidate: form.formState.isSubmitted })
+    }
+  }, [several, itemsTotal, form])
 
   // Leaving the page with unsaved entries asks first.
   useEffect(() => {
@@ -470,7 +521,7 @@ export function AdvanceRequestCreate({
     }
   }
 
-  /** Every cost item as a BC advance line: the amount over the activity days (no travel fields). */
+  /** Every chosen Advance Type as a BC advance line: its amount over the activity days (no travel fields). */
   const lineBodies = (values: FieldValues) => {
     const start = String(values.activityStartDate ?? '')
     const lineDays = activityDays(start, String(values.activityEndDate ?? '') || start)
@@ -482,10 +533,8 @@ export function AdvanceRequestCreate({
       destination: '',
       dutyArea: '',
     })
-    return [
-      { lineNo: initialLines[0]?.lineNo ?? '', ...line(String(values.advanceType ?? ''), Number(values.requestedAmount)) },
-      ...extraItems.map((item) => ({ lineNo: item.lineNo, ...line(item.advanceType, Number(item.amount)) })),
-    ]
+    if (several) return typeItems.map((item) => ({ lineNo: item.lineNo, ...line(item.advanceType, Number(item.amount)) }))
+    return [{ lineNo: typeItems[0]?.lineNo ?? '', ...line(String(values.advanceType ?? ''), Number(values.requestedAmount)) }]
   }
 
   /** Edit: header, then the lines (removed, changed, new), new documents, and Submit when asked. */
@@ -525,7 +574,7 @@ export function AdvanceRequestCreate({
         module,
         {
           ...headerBody(values),
-          // Each cost item (Advance Type + amount in ETB) is an advance line: BC needs the type for the account.
+          // Each chosen Advance Type (with its amount in ETB) is an advance line: BC needs the type for the account.
           lines: lineBodies(values).map((line) => {
             const body: Record<string, unknown> = { ...line }
             delete body.lineNo
@@ -599,8 +648,17 @@ export function AdvanceRequestCreate({
     window.setTimeout(() => setShakeSection(null), 650)
   }
 
+  const amountErrors = () =>
+    Object.fromEntries(typeItems.filter((item) => !(Number(item.amount) > 0)).map((item) => [item.key, 'Enter an amount above zero']))
+
   const run = (submit: boolean) => {
     setFormError(null)
+    if (submit && limitReached) {
+      setFormError(
+        `You cannot submit a new advance while ${outstanding!.unsettledCount} of your advances are not settled (the limit is ${outstanding!.maxUnsettled}). Settle one first; you can save this request as a draft meanwhile.`,
+      )
+      return
+    }
     void form.handleSubmit(
       (values) => {
         if (needsOther && !String(values.otherPurposeDetails ?? '').trim()) {
@@ -608,14 +666,8 @@ export function AdvanceRequestCreate({
           flagSection('adv-s1')
           return
         }
-        if (!extraItemsValid) {
-          setItemErrors(
-            Object.fromEntries(
-              extraItems
-                .filter((item) => !item.advanceType || !(Number(item.amount) > 0))
-                .map((item) => [item.key, !item.advanceType ? 'Choose the advance type' : 'Enter an amount above zero']),
-            ),
-          )
+        if (!itemsValid) {
+          setItemErrors(amountErrors())
           flagSection('adv-s2')
           return
         }
@@ -627,7 +679,7 @@ export function AdvanceRequestCreate({
         create.mutate({ values, submit })
       },
       (invalid) => {
-        if (!extraItemsValid) setItemErrors(Object.fromEntries(extraItems.filter((item) => !item.advanceType || !(Number(item.amount) > 0)).map((item) => [item.key, 'Choose the advance type and an amount above zero'])))
+        if (!itemsValid) setItemErrors(amountErrors())
         const first = Object.keys(invalid)[0] ?? ''
         setFormError('Some required details are missing or invalid. They are marked in red.')
         flagSection(SECTION_OF_FIELD[first] ?? 'adv-s2')
@@ -687,8 +739,26 @@ export function AdvanceRequestCreate({
     }
   }
 
-  const updateItem = (key: string, patch: Partial<CostItem>) => {
-    setExtraItems((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)))
+  /** The Advance Types chosen in the multi-select, in the order chosen; each keeps its amount and BC line. */
+  const selectTypes = (codes: string[]) => {
+    const single = several ? undefined : typeItems[0]
+    const singleAmount = String(form.getValues('requestedAmount') ?? '')
+    const next = codes.map((code) => {
+      const existing = typeItems.find((item) => item.advanceType === code)
+      if (!existing) return { key: newItemKey(), lineNo: '', advanceType: code, amount: '' }
+      // One type becoming several: the amount entered for it stays with it.
+      return single && existing.key === single.key && codes.length > 1 ? { ...existing, amount: singleAmount } : existing
+    })
+    // Several becoming one: the remaining type's amount is the Requested Amount again.
+    if (several && next.length === 1) {
+      form.setValue('requestedAmount', next[0]!.amount, { shouldDirty: true, shouldValidate: form.formState.isSubmitted })
+    }
+    setTypeItems(next)
+    setItemErrors({})
+  }
+
+  const updateItemAmount = (key: string, value: string) => {
+    setTypeItems((current) => current.map((item) => (item.key === key ? { ...item, amount: value } : item)))
     setItemErrors((current) => {
       if (!current[key]) return current
       const next = { ...current }
@@ -776,6 +846,9 @@ export function AdvanceRequestCreate({
       </div>
 
       {sentBack ? <SentBackNotice sentBack={{ ...sentBack, reopenRequired: false }} submitLabel="Submit for Approval" /> : null}
+
+      {/* Client, 17 Nov 2026 (BC 1.0.3.667): no new advance with 4 not settled; overdue settlements are named. */}
+      <AdvanceOutstandingNotice outstanding={outstanding} />
 
       {formError ? (
         <div className="adv-reveal flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
@@ -938,6 +1011,12 @@ export function AdvanceRequestCreate({
                   ) : null}
                 </div>
                 <Input id="adv-end" type="date" min={activityStart || today} {...form.register('activityEndDate')} />
+                {settleBy ? (
+                  <p className="text-xs text-[var(--portal-muted)]">
+                    Settle the advance by <span className="font-medium text-[var(--portal-text-soft)]">{settleBy}</span>, within{' '}
+                    {outstanding!.settlementDueDays} days of the activity end
+                  </p>
+                ) : null}
                 <FieldError message={errors.activityEndDate?.message} />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
@@ -953,10 +1032,10 @@ export function AdvanceRequestCreate({
               ) : null}
               <div className="space-y-1.5">
                 <Label htmlFor="adv-amount">
-                  Requested amount
+                  {several ? 'Total requested amount' : 'Requested amount'}
                   <Required />
                 </Label>
-                <div className={cn('adv-amount', Boolean(errors.requestedAmount) && 'is-invalid')}>
+                <div className={cn('adv-amount', Boolean(errors.requestedAmount) && !several && 'is-invalid', several && 'is-readonly')}>
                   <span className="adv-amount-currency">ETB</span>
                   <input
                     id="adv-amount"
@@ -965,23 +1044,36 @@ export function AdvanceRequestCreate({
                     step="0.01"
                     inputMode="decimal"
                     placeholder="0.00"
+                    readOnly={several}
+                    tabIndex={several ? -1 : undefined}
                     aria-describedby="adv-amount-help"
                     aria-invalid={Boolean(errors.requestedAmount)}
                     {...form.register('requestedAmount')}
                   />
                 </div>
                 <p id="adv-amount-help" className="text-xs text-[var(--portal-muted)]">
-                  More than zero. Currency is ETB.
+                  {several ? 'The total of the amounts per advance type below.' : 'More than zero. Currency is ETB.'}
                 </p>
-                <FieldError message={errors.requestedAmount?.message} />
+                {several ? null : <FieldError message={errors.requestedAmount?.message} />}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="adv-type">
                   Advance type
                   <Required />
                 </Label>
-                <Select id="adv-type" options={advanceTypes} placeholder="Choose an advance type" {...form.register('advanceType')} />
-                <p className="text-xs text-[var(--portal-muted)]">Decides the Business Central account the advance is paid from</p>
+                <MultiSelect
+                  id="adv-type"
+                  options={advanceTypes}
+                  value={typeItems.map((item) => item.advanceType)}
+                  onChange={selectTypes}
+                  placeholder="Choose one or more advance types"
+                  disabled={busy}
+                  invalid={Boolean(errors.advanceType)}
+                  aria-describedby="adv-type-help"
+                />
+                <p id="adv-type-help" className="text-xs text-[var(--portal-muted)]">
+                  Choose every type the advance covers. Each type is paid from its own Business Central account.
+                </p>
                 <FieldError message={errors.advanceType?.message} />
               </div>
               {typeNeedsDetails ? (
@@ -1000,70 +1092,61 @@ export function AdvanceRequestCreate({
                 </div>
               ) : null}
             </div>
-            {extraItems.length ? (
-              <ul className="mt-4 space-y-3 border-t border-[var(--portal-card-border)] pt-4" aria-label="More cost items">
-                {extraItems.map((item, index) => (
-                  <li key={item.key} className="adv-reveal space-y-1">
-                    <div className="grid items-start gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                      <div className={cn('adv-amount', Boolean(itemErrors[item.key]) && !(Number(item.amount) > 0) && 'is-invalid')}>
-                        <span className="adv-amount-currency">ETB</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          inputMode="decimal"
-                          placeholder="0.00"
-                          aria-label={`Amount of cost item ${index + 2}`}
-                          value={item.amount}
-                          disabled={busy}
-                          onChange={(event) => updateItem(item.key, { amount: event.target.value })}
-                        />
-                      </div>
-                      <Select
-                        aria-label={`Advance type of cost item ${index + 2}`}
-                        value={item.advanceType}
-                        options={advanceTypes}
-                        placeholder="Choose an advance type"
-                        disabled={busy}
-                        onChange={(event) => updateItem(item.key, { advanceType: event.target.value })}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-10"
-                        disabled={busy}
-                        aria-label={`Remove cost item ${index + 2}`}
-                        onClick={() => setExtraItems((current) => current.filter((row) => row.key !== item.key))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <FieldError message={itemErrors[item.key]} />
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => setExtraItems((current) => [...current, { key: newItemKey(), lineNo: '', advanceType: '', amount: '' }])}
-              >
-                <Plus className="mr-1.5 h-4 w-4" />
-                Add another cost item
-              </Button>
-              {extraItems.length ? (
-                <p className="text-sm text-[var(--portal-text)]">
-                  Total requested{' '}
-                  <span className="font-semibold tabular-nums">ETB {etb.format(amount)}</span>
+            {several ? (
+              <div className="adv-reveal mt-4 border-t border-[var(--portal-card-border)] pt-4">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium text-[var(--portal-text)]">
+                    Amount per advance type
+                    <Required />
+                  </p>
+                  <p className="text-xs text-[var(--portal-muted)]">{typeItems.length} types</p>
+                </div>
+                <ul className="mt-2 space-y-2" aria-label="Amount per advance type">
+                  {typeItems.map((item) => {
+                    const label = typeLabel(item.advanceType)
+                    return (
+                      <li key={item.key} className="space-y-1">
+                        <div className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,15rem)_auto]">
+                          <span className="truncate text-sm font-medium text-[var(--portal-text)]" title={label}>
+                            {label}
+                          </span>
+                          <div className={cn('adv-amount', Boolean(itemErrors[item.key]) && 'is-invalid')}>
+                            <span className="adv-amount-currency">ETB</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              inputMode="decimal"
+                              placeholder="0.00"
+                              aria-label={`Amount for ${label}`}
+                              aria-invalid={Boolean(itemErrors[item.key])}
+                              value={item.amount}
+                              disabled={busy}
+                              onChange={(event) => updateItemAmount(item.key, event.target.value)}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-10 justify-self-end"
+                            disabled={busy}
+                            aria-label={`Remove ${label}`}
+                            onClick={() => selectTypes(typeItems.filter((row) => row.key !== item.key).map((row) => row.advanceType))}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <FieldError message={itemErrors[item.key]} />
+                      </li>
+                    )
+                  })}
+                </ul>
+                <p className="mt-3 text-right text-sm text-[var(--portal-text)]">
+                  Total requested <span className="font-semibold tabular-nums">ETB {etb.format(amount)}</span>
                 </p>
-              ) : (
-                <p className="text-xs text-[var(--portal-muted)]">One line per advance type, for example per diem and transport.</p>
-              )}
-            </div>
+              </div>
+            ) : null}
           </Section>
 
           <Section
@@ -1221,7 +1304,13 @@ export function AdvanceRequestCreate({
                   )}
                   {create.isPending && !create.variables?.submit ? 'Saving…' : editing ? 'Save Draft' : 'Save as Draft'}
                 </Button>
-                <Button type="button" className="adv-submit" disabled={busy} onClick={() => run(true)}>
+                <Button
+                  type="button"
+                  className="adv-submit"
+                  disabled={busy || limitReached}
+                  title={limitReached ? 'Settle one of your advances first: the limit of advances not settled is reached' : undefined}
+                  onClick={() => run(true)}
+                >
                   {create.isPending && create.variables?.submit ? (
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                   ) : (
@@ -1332,7 +1421,7 @@ export function AdvanceRequestCreate({
                   label: 'Dates, amount and advance type',
                   done: section2Done,
                   detail: section2Done
-                    ? `${days} ${days === 1 ? 'day' : 'days'}, ${extraItems.length ? `${extraItems.length + 1} cost items` : advanceTypeLabel}`
+                    ? `${days} ${days === 1 ? 'day' : 'days'}, ${several ? `${typeItems.length} advance types` : advanceTypeLabel}`
                     : '',
                 },
                 {

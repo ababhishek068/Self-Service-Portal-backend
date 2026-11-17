@@ -7,6 +7,7 @@ import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOr
 import { AdvanceRequestCreate } from '@/components/finance/AdvanceRequestCreate'
 import { fetchAdvancePaymentContext } from '@/api/endpoints/advancePaymentContext'
 import { AdvanceReceiptPanel } from '@/components/finance/AdvanceReceiptPanel'
+import { AdvanceSettleByNote } from '@/components/finance/AdvanceOutstandingNotice'
 import { advancePaid, fullySettled, receiptConfirmed } from '@/utils/advanceReceipt'
 import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import {
@@ -120,7 +121,8 @@ export function ImprestRequest() {
   const purposeContext = useQuery({
     queryKey: ['advance-payment-context', employee?.employeeNo ?? ''],
     queryFn: () => fetchAdvancePaymentContext(String(employee?.employeeNo ?? '')),
-    staleTime: 5 * 60 * 1000,
+    // BC 1.0.3.667: it also says whether a new advance may be submitted (4 not settled), so it is kept fresh.
+    staleTime: 60 * 1000,
   })
   const purposeOptions =
     purposeContext.data?.purposes?.length ? purposeContext.data.purposes : fallbackPurposes
@@ -134,19 +136,23 @@ export function ImprestRequest() {
   const advanceTypeLabel = (code: unknown) =>
     advanceTypeOptions.find((option) => option.value === String(code ?? ''))?.label || String(code ?? '')
   const purposeHint = 'What the advance is for. Choose Other (Specify) to describe an activity not in the list.'
+  // BC 1.0.3.667 (client, 17 Nov 2026): settle within 7 days of the activity end; no new advance with 4 not settled.
+  const outstanding = purposeContext.data?.outstanding ?? null
+  const settleDays = outstanding?.settlementDueDays ?? 7
   const createForm = {
     module,
     purposeOptions,
     purposeHint,
     advanceTypes: advanceTypeOptions,
     supportsProject,
+    outstanding,
   }
 
   return (
     <MultiStepRequestPage
       title="Advance Request"
       headerLabel="New Advance Request"
-      description="Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, add the advance lines (amount in ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm here that you received the money (Confirm Payment Received); only then can it be settled via Advance Settlement (within two working days of return)."
+      description={`Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, choose one or more advance types with the amount of each (ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm here that you received the money (Confirm Payment Received); only then can it be settled via Advance Settlement, within ${settleDays} days of the activity end date. An employee with ${outstanding?.maxUnsettled || 4} advances not settled cannot request a new one until one is settled.`}
       module={module}
       queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
@@ -179,7 +185,11 @@ export function ImprestRequest() {
       progressAfterApproval={(request) => advanceAfterApproval(request, supportsReceipt, receiptAfterApproval)}
       // BC 1.0.3.653+: a clear "Confirm Payment Received" step on the request itself (662: right after approval).
       detailSupplement={({ request }) => (
-        <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} receiptAfterApproval={receiptAfterApproval} />
+        <div className="space-y-3">
+          {/* BC 1.0.3.667: settle-by date (activity end + 7 days), or how long the settlement is overdue. */}
+          <AdvanceSettleByNote outstanding={outstanding} advanceNo={request.requestNo} />
+          <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} receiptAfterApproval={receiptAfterApproval} />
+        </div>
       )}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}

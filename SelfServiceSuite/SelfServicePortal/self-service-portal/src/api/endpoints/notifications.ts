@@ -11,6 +11,8 @@ export type PortalNotificationKind =
   | 'localPurchase'
   /** BC 1.0.3.653+: an advance Finance paid, waiting for "Confirm Payment Received". */
   | 'advanceReceipt'
+  /** BC 1.0.3.667: an advance not settled within 7 days of its activity end date. */
+  | 'advanceOverdue'
 
 export interface PortalNotification {
   id: string

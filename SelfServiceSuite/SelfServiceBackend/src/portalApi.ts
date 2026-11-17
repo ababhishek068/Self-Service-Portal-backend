@@ -184,11 +184,13 @@ import {
 } from './overtimeRequests.js'
 import {
   addAdvanceSettlementExpense,
+  assertAdvanceRequestAllowed,
   confirmAdvanceReceipt,
   deleteAdvanceSettlementExpense,
   getAdvanceSettlementContext,
   saveAdvanceSettlementDetails,
   saveAdvanceSettlementExpense,
+  type OutstandingAdvance,
 } from './advanceSettlement.js'
 import { createOnce, createOnceKey } from './createOnce.js'
 import {
@@ -727,7 +729,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v400 — 1.0.3.561 (Advance Request: Confirm Payment Received is asked inside the panel with no pop-up, shows progress and the Business Central answer, and shows Payment received at once; includes 545 to 560; for BC 1.0.3.663)'
+export const PORTAL_API_BUILD = 'v401 — 1.0.3.562 (Advance Request: several Advance Types with an amount each, no new advance with 4 not settled, settle within 7 days of the activity end with overdue warnings in the bell; includes 545 to 561; for BC 1.0.3.667)'
 
 interface LookupSpec {
   service: string
@@ -3211,7 +3213,17 @@ async function localPurchaseWaitingItems(authUser: AuthUser): Promise<LocalPurch
 
 export interface PortalNotification {
   id: string
-  kind: 'approvals' | 'returned' | 'storeIssue' | 'storeAccept' | 'storeLpr' | 'storeReceive' | 'localPurchase' | 'advanceReceipt'
+  kind:
+    | 'approvals'
+    | 'returned'
+    | 'storeIssue'
+    | 'storeAccept'
+    | 'storeLpr'
+    | 'storeReceive'
+    | 'localPurchase'
+    | 'advanceReceipt'
+    /** BC 1.0.3.667: an advance not settled within 7 days of its activity end date. */
+    | 'advanceOverdue'
   count: number
   title: string
   description: string
@@ -3367,11 +3379,64 @@ export function advanceReceiptNotificationItems(
   }))
 }
 
+function longDate(value: string) {
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
+/**
+ * Client rule (17 Nov 2026, BC 1.0.3.667): an advance is settled within 7 days of its activity end date. Once that has
+ * passed — and the employee holds the money without having submitted a settlement — the bell warns them (BC also
+ * e-mails them every few days).
+ */
+export function advanceOverdueNotificationItems(rows: OutstandingAdvance[], dueDays = 7): PortalNotification[] {
+  return rows
+    .filter((row) => row.overdue)
+    .map((row) => {
+      const late = row.daysOverdue > 0 ? `${row.daysOverdue} day${row.daysOverdue === 1 ? '' : 's'} overdue` : 'overdue'
+      const step =
+        row.stage === 'confirmReceipt'
+          ? 'Confirm you received the money, then settle it under Advance Settlement.'
+          : row.stage === 'settlementDraft' && row.settlementNo
+            ? `Complete and submit settlement ${row.settlementNo}.`
+            : 'Settle it under Advance Settlement now.'
+      return {
+        id: `advanceOverdue:imprest-${row.advanceNo}`,
+        kind: 'advanceOverdue' as const,
+        count: 1,
+        title: `${row.advanceNo}: settlement ${late}`,
+        description: [
+          row.settlementDueDate
+            ? `Due ${longDate(row.settlementDueDate)}${row.activityEndDate ? `, ${dueDays} days after the activity ended ${longDate(row.activityEndDate)}` : ''}`
+            : '',
+          row.amount > 0 ? `ETB ${row.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '',
+          step,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        ...(row.stage === 'settlementDraft' && row.settlementNo
+          ? { module: 'imprestSurrender', requestId: `imprestSurrender-${row.settlementNo}` }
+          : { module: 'imprest', requestId: `imprest-${row.advanceNo}` }),
+      }
+    })
+}
+
+/** One BC context answers both: advances waiting for "Confirm Payment Received", and settlements overdue (667). */
 async function advanceReceiptNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
   const employeeNo = String(authUser.employeeNo ?? '').trim()
   if (!employeeNo) return []
   const context = await getAdvanceSettlementContext(employeeNo, '')
-  return context.supportsReceiptConfirmation ? advanceReceiptNotificationItems(context.awaitingReceipt) : []
+  const overdue = context.outstanding
+    ? advanceOverdueNotificationItems(context.outstanding.advances, context.outstanding.settlementDueDays || 7)
+    : []
+  const overdueNos = new Set(overdue.map((item) => item.requestId))
+  const receipts = context.supportsReceiptConfirmation
+    ? // An overdue advance waiting for the receipt is one item: the overdue warning names the step.
+      advanceReceiptNotificationItems(context.awaitingReceipt).filter((item) => !overdueNos.has(item.requestId))
+    : []
+  return [...overdue, ...receipts]
 }
 
 async function overtimeSentBackNotifications(authUser: AuthUser): Promise<PortalNotification[]> {
@@ -5398,6 +5463,10 @@ export function buildPortalApiRouter() {
         )
       }
       const authUser = user(req)
+      // Client rule (17 Nov 2026, BC 1.0.3.667): no new advance while 4 are not settled — refused before a draft exists.
+      if (spec.module === 'imprest' && req.body?.submit === true) {
+        await assertAdvanceRequestAllowed(String(authUser.employeeNo ?? '').trim())
+      }
       // One BC document per form even on double clicks or network retries (clientRequestId).
       const no = await createOnce(createOnceKey(authUser.employeeNo, module, req.body?.clientRequestId), () =>
         createPortalModuleRequest(spec, authUser, req.body ?? {}),

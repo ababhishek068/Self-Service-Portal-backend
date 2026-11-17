@@ -6,6 +6,7 @@ import {
   type AdvancePaymentPurposeRow,
 } from '@/data/advanceRequestPurpose'
 import type { LookupOption } from '@/api/endpoints/lookups'
+import { parseAdvanceOutstanding, type AdvanceOutstanding } from '@/api/endpoints/advanceOutstanding'
 
 export type AdvancePaymentContext = {
   employeeNo: string
@@ -28,6 +29,11 @@ export type AdvancePaymentContext = {
    * marks Other (Specify); `meta.glAccount` is blank until Finance sets the account.
    */
   advanceTypes: LookupOption[]
+  /**
+   * BC 1.0.3.667: the employee's advances not settled, their settle-by dates (activity end + 7 days) and `canRequest`
+   * (false with 4 not settled). Null on older BC.
+   */
+  outstanding: AdvanceOutstanding | null
 }
 
 type AdvanceTypeRow = { code?: string; description?: string; glAccount?: string; requiresOtherDetails?: boolean; sortOrder?: number }
@@ -59,6 +65,7 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     supportsReceiptConfirmation?: boolean
     receiptAfterApproval?: boolean
     advanceTypes?: AdvanceTypeRow[]
+    outstanding?: unknown
   }>(`/api/advance-payment/context${query}`)
 
   return {
@@ -72,5 +79,6 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     supportsReceiptConfirmation: raw.supportsReceiptConfirmation === true,
     receiptAfterApproval: raw.receiptAfterApproval === true,
     advanceTypes: mapAdvanceTypes(raw.advanceTypes),
+    outstanding: parseAdvanceOutstanding(raw.outstanding),
   }
 }

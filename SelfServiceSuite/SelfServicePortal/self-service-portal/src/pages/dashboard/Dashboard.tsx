@@ -34,6 +34,7 @@ import {
   Store,
   Wallet,
   HandCoins,
+  CalendarClock,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { PortalNotificationKind } from '@/api/endpoints/notifications'
@@ -174,6 +175,7 @@ const BANNER_ICONS: Partial<Record<PortalNotificationKind, LucideIcon>> = {
   storeReceive: PackageOpen,
   localPurchase: ClipboardList,
   advanceReceipt: HandCoins,
+  advanceOverdue: CalendarClock,
 }
 
 function greetingFor(date: Date) {
@@ -447,11 +449,13 @@ export function Dashboard() {
     attention.push({
       key: item.id,
       icon: BANNER_ICONS[item.kind] ?? Store,
-      tone: item.kind === 'returned' ? 'orange' : 'indigo',
+      tone: item.kind === 'returned' || item.kind === 'advanceOverdue' ? 'orange' : 'indigo',
       title: item.title,
       detail: item.description,
       href: notificationHref(item),
       count: item.count,
+      // Client, 17 Nov 2026: an overdue advance settlement is a warning, not a routine step.
+      highlight: item.kind === 'advanceOverdue',
     })
   }
 

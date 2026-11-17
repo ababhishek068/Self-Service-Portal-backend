@@ -101,7 +101,9 @@ import {
   isMedicalClaimHeader,
   overtimeSentBackNotificationItems,
   advanceReceiptNotificationItems,
+  advanceOverdueNotificationItems,
 } from './portalApi.js'
+import { advanceLimitMessage, parseAdvanceOutstanding, parseAdvanceSettlementContext } from './advanceSettlement.js'
 
 import { deriveCodeunitSoapUrl, codeunitSoapNamespace } from './bcClient.js'
 import {
@@ -3876,6 +3878,86 @@ describe('Bell: advance paid, confirm payment received (BC 1.0.3.653+ / ERP 660)
   it('BC 1.0.3.662: an approved advance not paid in BC yet asks to confirm once the money arrives', () => {
     const [item] = advanceReceiptNotificationItems([{ advanceNo: 'IMP-000020', amount: 23900, purpose: 'UAT', paid: false }])
     assert.match(item!.title, /IMP-000020 is approved — confirm here once you receive the money/)
+  })
+})
+
+describe('Advance not settled within 7 days of the activity end; limit of 4 (client 17 Nov 2026, BC 1.0.3.667)', () => {
+  const bc = {
+    maxUnsettled: 4,
+    settlementDueDays: 7,
+    unsettledCount: 2,
+    overdueCount: 1,
+    canRequest: true,
+    advances: [
+      {
+        advanceNo: 'IMP-000031',
+        purpose: 'Field visit',
+        amount: 25000,
+        status: 'Approved',
+        stage: 'readyToSettle',
+        settlementNo: '',
+        activityEndDate: '2026-11-05',
+        settlementDueDate: '2026-11-12',
+        overdue: true,
+        daysOverdue: 5,
+      },
+      {
+        advanceNo: 'IMP-000032',
+        purpose: 'Training',
+        amount: 4000,
+        status: 'Pending Approval',
+        stage: 'pendingApproval',
+        settlementNo: '',
+        activityEndDate: '0001-01-01',
+        settlementDueDate: '0001-01-01',
+        overdue: false,
+        daysOverdue: 0,
+      },
+    ],
+  }
+
+  it('reads the outstanding advances, their settle-by dates and the limit', () => {
+    const outstanding = parseAdvanceOutstanding(bc)!
+    assert.equal(outstanding.maxUnsettled, 4)
+    assert.equal(outstanding.unsettledCount, 2)
+    assert.equal(outstanding.canRequest, true)
+    assert.equal(outstanding.overdueCount, 1)
+    assert.equal(outstanding.advances[0]!.settlementDueDate, '2026-11-12')
+    assert.equal(outstanding.advances[1]!.settlementDueDate, '', 'a blank BC date is empty')
+    assert.equal(parseAdvanceOutstanding(undefined), null, 'older BC has no outstanding block')
+  })
+
+  it('without BC\'s flag, 4 not settled means no new advance', () => {
+    const rows = [1, 2, 3, 4].map((n) => ({ advanceNo: `IMP-00004${n}`, stage: 'readyToSettle' }))
+    const outstanding = parseAdvanceOutstanding({ maxUnsettled: 4, advances: rows })!
+    assert.equal(outstanding.canRequest, false)
+    assert.match(advanceLimitMessage(outstanding), /4 of your advances are not settled \(IMP-000041, IMP-000042, IMP-000043, IMP-000044\) and the limit is 4/)
+  })
+
+  it('the settlement context carries it (null on BC before 667)', () => {
+    assert.equal(parseAdvanceSettlementContext(JSON.stringify({ outstanding: bc })).outstanding?.unsettledCount, 2)
+    assert.equal(parseAdvanceSettlementContext(JSON.stringify({})).outstanding, null)
+  })
+
+  it('warns in the bell about each overdue advance only, linked to the advance', () => {
+    const items = advanceOverdueNotificationItems(parseAdvanceOutstanding(bc)!.advances)
+    assert.equal(items.length, 1)
+    assert.equal(items[0]!.kind, 'advanceOverdue')
+    assert.equal(items[0]!.requestId, 'imprest-IMP-000031')
+    assert.equal(items[0]!.title, 'IMP-000031: settlement 5 days overdue')
+    assert.match(items[0]!.description, /Due 12 Nov 2026, 7 days after the activity ended 5 Nov 2026 · ETB 25,000\.00 · Settle it under Advance Settlement now\./)
+  })
+
+  it('a saved settlement draft links to that settlement; a paid advance not confirmed names the receipt first', () => {
+    const [draft] = advanceOverdueNotificationItems([
+      { ...parseAdvanceOutstanding(bc)!.advances[0]!, stage: 'settlementDraft', settlementNo: 'IMPS-0007', daysOverdue: 1 },
+    ])
+    assert.equal(draft!.module, 'imprestSurrender')
+    assert.equal(draft!.requestId, 'imprestSurrender-IMPS-0007')
+    assert.match(draft!.title, /1 day overdue/)
+    assert.match(draft!.description, /Complete and submit settlement IMPS-0007/)
+    const [receipt] = advanceOverdueNotificationItems([{ ...parseAdvanceOutstanding(bc)!.advances[0]!, stage: 'confirmReceipt' }])
+    assert.match(receipt!.description, /Confirm you received the money, then settle it/)
   })
 })
 

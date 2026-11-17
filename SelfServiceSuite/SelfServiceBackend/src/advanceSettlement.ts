@@ -23,9 +23,75 @@ export type AwaitingReceiptAdvance = {
   paid: boolean
 }
 
+/**
+ * BC 1.0.3.667 (client, 17 Nov 2026): one advance not settled yet — from submission until its settlement is posted.
+ * `stage`: pendingApproval, awaitingPayment, confirmReceipt, paymentNotRecorded, readyToSettle, settlementDraft,
+ * settlementSubmitted. It must be settled by `settlementDueDate` (Activity End Date + `settlementDueDays`).
+ */
+export type OutstandingAdvance = {
+  advanceNo: string
+  purpose: string
+  requestPurposeText: string
+  amount: number
+  status: string
+  stage: string
+  settlementNo: string
+  activityEndDate: string
+  settlementDueDate: string
+  overdue: boolean
+  daysOverdue: number
+}
+
+/**
+ * BC 1.0.3.667: an employee with `maxUnsettled` (4) advances not settled cannot request a new one (`canRequest`
+ * false); overdue ones are reminded in the bell and by a daily BC e-mail.
+ */
+export type AdvanceOutstanding = {
+  maxUnsettled: number
+  settlementDueDays: number
+  unsettledCount: number
+  overdueCount: number
+  canRequest: boolean
+  advances: OutstandingAdvance[]
+}
+
+export function parseAdvanceOutstanding(value: unknown): AdvanceOutstanding | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const advances = (Array.isArray(raw.advances) ? raw.advances : [])
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object')
+    .map((row) => ({
+      advanceNo: str(row.advanceNo),
+      purpose: str(row.purpose),
+      requestPurposeText: str(row.requestPurposeText),
+      amount: num(row.amount),
+      status: str(row.status),
+      stage: str(row.stage),
+      settlementNo: str(row.settlementNo),
+      activityEndDate: bcDate(row.activityEndDate),
+      settlementDueDate: bcDate(row.settlementDueDate),
+      overdue: bool(row.overdue),
+      daysOverdue: Math.max(0, Math.trunc(num(row.daysOverdue))),
+    }))
+    .filter((row) => row.advanceNo)
+  const maxUnsettled = Math.max(0, Math.trunc(num(raw.maxUnsettled)))
+  const unsettledCount = Math.max(advances.length, Math.trunc(num(raw.unsettledCount)))
+  return {
+    maxUnsettled,
+    settlementDueDays: Math.max(0, Math.trunc(num(raw.settlementDueDays))),
+    unsettledCount,
+    overdueCount: advances.filter((row) => row.overdue).length,
+    // BC decides; without its flag, the count against the limit.
+    canRequest: raw.canRequest === undefined ? !(maxUnsettled > 0 && unsettledCount >= maxUnsettled) : bool(raw.canRequest),
+    advances,
+  }
+}
+
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
+  /** BC 1.0.3.667: advances not settled, their settle-by dates and whether a new advance may be requested. */
+  outstanding: AdvanceOutstanding | null
   /** BC 1.0.3.653: settlement only after the requester confirmed receipt (false on older BC). */
   supportsReceiptConfirmation: boolean
   /** BC 1.0.3.662: receipt can be confirmed right after approval, before Finance's payment is in BC. */
@@ -75,6 +141,12 @@ function bool(value: unknown) {
   return text === 'true' || text === '1' || text === 'yes'
 }
 
+/** yyyy-mm-dd, or '' for a blank BC date. */
+function bcDate(value: unknown) {
+  const text = str(value).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && !text.startsWith('0001-') ? text : ''
+}
+
 function outcomeKey(value: unknown): AdvanceSettlementContext['settlementOutcome'] {
   const key = str(value)
   if (key === 'fullySettled' || key === 'refundDue' || key === 'additionalClaim') return key
@@ -121,6 +193,7 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
   return {
     employeeNo: str(raw.employeeNo),
     settleableAdvances,
+    outstanding: parseAdvanceOutstanding(raw.outstanding),
     supportsReceiptConfirmation: bool(raw.supportsReceiptConfirmation),
     receiptAfterApproval: bool(raw.receiptAfterApproval),
     supportsExpenseEntries: bool(raw.supportsExpenseEntries),
@@ -154,6 +227,39 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     lines: Array.isArray(raw.lines)
       ? (raw.lines.filter((row) => row && typeof row === 'object') as Array<Record<string, unknown>>)
       : [],
+  }
+}
+
+/** BC 1.0.3.667: `outstanding` of the Advance Request context (PortalAdvancePaymentContext); null on older BC. */
+export async function getAdvanceOutstanding(employeeNo: string) {
+  const result = await callSoapMethod('PortalAdvancePaymentContext', { employeeNo })
+  return parseAdvanceOutstanding(parseSoapJson(result.returnValue).outstanding)
+}
+
+export function advanceLimitMessage(outstanding: AdvanceOutstanding) {
+  const nos = outstanding.advances.map((row) => row.advanceNo).join(', ')
+  return (
+    `You cannot request a new advance yet: ${outstanding.unsettledCount} of your advances are not settled` +
+    `${nos ? ` (${nos})` : ''} and the limit is ${outstanding.maxUnsettled}. ` +
+    'Settle at least one of them under Advance Settlement, then request again.'
+  )
+}
+
+/**
+ * Client rule (17 Nov 2026): no new advance while the employee has the maximum not settled (4). Checked before a new
+ * advance is created with Submit, so nothing is left behind; BC 1.0.3.667 refuses the submit as well. When BC cannot
+ * answer (or is older), BC's own check on submit decides.
+ */
+export async function assertAdvanceRequestAllowed(employeeNo: string) {
+  if (!employeeNo) return
+  let outstanding: AdvanceOutstanding | null = null
+  try {
+    outstanding = await getAdvanceOutstanding(employeeNo)
+  } catch {
+    return
+  }
+  if (outstanding && !outstanding.canRequest) {
+    throw Object.assign(new Error(advanceLimitMessage(outstanding)), { status: 422, code: 'ADVANCE_LIMIT_REACHED' })
   }
 }
 

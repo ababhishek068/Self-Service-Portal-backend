@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Bell,
+  CalendarClock,
   ChevronRight,
   ClipboardCopy,
   ClipboardList,
@@ -28,6 +29,7 @@ const KIND_ICONS: Record<PortalNotificationKind, LucideIcon> = {
   storeReceive: PackageOpen,
   localPurchase: ClipboardList,
   advanceReceipt: HandCoins,
+  advanceOverdue: CalendarClock,
 }
 
 const DISMISSED_KEY = 'abh.notifications.dismissed'
@@ -177,9 +179,11 @@ export function NotificationBell() {
                         className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                           item.kind === 'returned'
                             ? 'bg-orange-100 text-orange-700'
-                            : item.kind === 'advanceReceipt'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-[var(--portal-green)]/15 text-[var(--portal-green)]'
+                            : item.kind === 'advanceOverdue'
+                              ? 'bg-rose-100 text-rose-700'
+                              : item.kind === 'advanceReceipt'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-[var(--portal-green)]/15 text-[var(--portal-green)]'
                         }`}
                       >
                         <Icon className="h-4 w-4" />

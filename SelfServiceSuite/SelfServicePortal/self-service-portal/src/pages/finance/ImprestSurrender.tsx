@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { CheckCircle2, Circle, HandCoins, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
+import { AdvanceOutstandingNotice } from '@/components/finance/AdvanceOutstandingNotice'
+import { settleByText } from '@/api/endpoints/advanceOutstanding'
 import { AdvanceSettlementSections } from '@/pages/finance/AdvanceSettlementPanel'
 import { settlementSubmitProblem } from '@/hooks/useAdvanceSettlementContext'
 import { fetchAdvanceSettlementContext } from '@/api/endpoints/advanceSettlement'
@@ -248,6 +250,12 @@ export function ImprestSurrender() {
   })
 
   const settleable = settleableQuery.data?.settleableAdvances ?? []
+  // BC 1.0.3.667 (client, 17 Nov 2026): settle within 7 days of the activity end date; overdue ones are named.
+  const outstanding = settleableQuery.data?.outstanding ?? null
+  const dueOf = (advanceNo: string) => {
+    const row = outstanding?.advances.find((item) => item.advanceNo === advanceNo)
+    return row ? settleByText(row) : ''
+  }
   const settleableNos = new Set(settleable.map((row) => row.advanceNo))
   // The employee's approved advances BC will not settle yet (not paid, or a settlement is open).
   const waiting = settleableQuery.isSuccess
@@ -275,7 +283,7 @@ export function ImprestSurrender() {
   const imprestOptions = settleableQuery.isSuccess
     ? [
         ...settleable.map((row) => ({
-          label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}`,
+          label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}${dueOf(row.advanceNo) ? ` · ${dueOf(row.advanceNo)}` : ''}`,
           value: row.advanceNo,
         })),
         ...waiting.map((row) => ({
@@ -365,6 +373,7 @@ export function ImprestSurrender() {
 
         return (
           <div className="space-y-3">
+          <AdvanceOutstandingNotice outstanding={outstanding} showSettlementLink={false} />
           <Prerequisite
             available={settleable.length}
             loading={settleableQuery.isLoading}
@@ -406,6 +415,7 @@ export function ImprestSurrender() {
               label="Payment / Advance Date"
               value={dateRequired === undefined || dateRequired === '' ? '—' : formatDate(String(dateRequired))}
             />
+            {dueOf(advanceNo) ? <Detail label="Settle By (activity end + 7 days)" value={dueOf(advanceNo)} /> : null}
           </div>
           </div>
           ) : null}

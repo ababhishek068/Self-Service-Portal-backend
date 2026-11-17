@@ -4101,6 +4101,14 @@ button.portal-band-chip--current:hover {
 .adv-amount.is-invalid {
   border-color: #e11d48;
 }
+/* Several advance types: the requested amount is their total (client, 17 Nov 2026). */
+.adv-amount.is-readonly {
+  background: var(--portal-surface-sunken);
+}
+.adv-amount.is-readonly:focus-within {
+  border-color: var(--portal-card-border-strong);
+  box-shadow: none;
+}
 .adv-amount-currency {
   display: grid;
   place-items: center;

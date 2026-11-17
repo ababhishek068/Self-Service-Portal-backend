@@ -1,5 +1,6 @@
 import { authDelete, authGet, authPost } from '@/api/client/authClient'
 import { requireAuthApiUrl } from '@/api/requireBackend'
+import type { AdvanceOutstanding } from '@/api/endpoints/advanceOutstanding'
 
 export type SettleableAdvance = {
   advanceNo: string
@@ -26,6 +27,8 @@ export type AwaitingReceiptAdvance = {
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
+  /** BC 1.0.3.667: advances not settled with their settle-by dates (the backend parses it); null on older BC. */
+  outstanding?: AdvanceOutstanding | null
   /** BC 1.0.3.653: settlement only after the requester confirmed receipt (false on older BC). */
   supportsReceiptConfirmation?: boolean
   /** BC 1.0.3.662: receipt can be confirmed right after approval, before Finance's payment is in BC. */
