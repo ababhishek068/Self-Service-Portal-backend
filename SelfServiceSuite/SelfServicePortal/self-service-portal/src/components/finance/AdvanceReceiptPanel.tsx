@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Clock, HandCoins, Receipt } from 'lucide-react'
-import { useConfirm } from '@/components/feedback/ConfirmProvider'
+import { CheckCircle2, CircleAlert, Clock, HandCoins, Loader2, Receipt } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useConfirmAdvanceReceipt } from '@/hooks/useConfirmAdvanceReceipt'
@@ -24,15 +23,19 @@ export function AdvanceReceiptPanel({
   supportsReceipt: boolean
   receiptAfterApproval?: boolean
 }) {
-  const confirm = useConfirm()
   const receipt = useConfirmAdvanceReceipt()
   const [remarks, setRemarks] = useState('')
+  // UAT 17 Nov 2026 ("clicking confirm does not happen any"): the confirmation is asked inside this panel (no pop-up
+  // dialog), progress and Business Central's answer are shown here, and the confirmed state shows at once.
+  const [asking, setAsking] = useState(false)
+  const [confirmedNow, setConfirmedNow] = useState<string | null>(null)
   if (!supportsReceipt || !['Approved', 'Posted'].includes(request.status) || fullySettled(request)) return null
   const payload = request.payload ?? {}
   const amount = Number(payload.TotalNetAmount ?? payload.Total_Net_Amount ?? request.amount ?? 0)
   const paid = advancePaid(request)
+  const confirmed = receiptConfirmed(request) || Boolean(confirmedNow)
 
-  if (!paid && !receiptAfterApproval && !receiptConfirmed(request)) {
+  if (!paid && !receiptAfterApproval && !confirmed) {
     return (
       <section className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
         <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
@@ -44,8 +47,8 @@ export function AdvanceReceiptPanel({
     )
   }
 
-  if (receiptConfirmed(request)) {
-    const on = String(payload.ReceiptConfirmedOn ?? payload.Receipt_Confirmed_On ?? '')
+  if (confirmed) {
+    const on = String(payload.ReceiptConfirmedOn ?? payload.Receipt_Confirmed_On ?? '') || confirmedNow || ''
     const confirmedOn = on && !on.startsWith('0001') ? ` — confirmed ${formatDateTime(on)}` : ''
     if (!paid) {
       return (
@@ -76,16 +79,17 @@ export function AdvanceReceiptPanel({
     )
   }
 
-  const confirmNow = async () => {
-    const ok = await confirm({
-      title: `Confirm you received ${request.requestNo}?`,
-      message: paid
-        ? 'Confirm only once the money is in your hands or your bank account. Advance Settlement opens for this advance after you confirm.'
-        : 'Confirm only once Finance has paid you and the money is in your hands or your bank account. Advance Settlement opens once Finance has also recorded the payment in Business Central.',
-      confirmLabel: 'Yes, I received it',
-    })
-    if (ok) receipt.mutate({ advanceNo: request.requestNo, remarks: remarks.trim() })
-  }
+  const confirmNow = () =>
+    receipt.mutate(
+      { advanceNo: request.requestNo, remarks: remarks.trim() },
+      {
+        onSuccess: (result) => {
+          setAsking(false)
+          setConfirmedNow(String(result?.receiptConfirmedOn || new Date().toISOString()))
+        },
+      },
+    )
+  const failure = receipt.isError ? (receipt.error instanceof Error ? receipt.error.message : 'Business Central did not record the confirmation.') : ''
 
   return (
     <section
@@ -113,15 +117,53 @@ export function AdvanceReceiptPanel({
             <Input
               value={remarks}
               maxLength={250}
+              disabled={receipt.isPending}
               onChange={(event) => setRemarks(event.target.value)}
               placeholder="Remarks (optional), e.g. received by bank transfer"
               className="bg-white sm:max-w-md"
             />
-            <Button type="button" disabled={receipt.isPending} onClick={() => void confirmNow()}>
-              <HandCoins className="mr-2 h-4 w-4" />
-              {receipt.isPending ? 'Confirming…' : 'Confirm Payment Received'}
-            </Button>
+            {!asking ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  receipt.reset()
+                  setAsking(true)
+                }}
+              >
+                <HandCoins className="mr-2 h-4 w-4" />
+                Confirm Payment Received
+              </Button>
+            ) : null}
           </div>
+          {asking ? (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-3" role="group" aria-label="Confirm the payment was received">
+              <p className="font-medium text-amber-950">
+                Did you receive {amount > 0 ? formatCurrency(amount) : 'the advance'} for {request.requestNo}?
+              </p>
+              <p className="mt-0.5 text-xs text-amber-900">
+                {paid
+                  ? 'Confirm only once the money is in your hands or your bank account.'
+                  : 'Confirm only once Finance has paid you and the money is in your hands or your bank account.'}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button type="button" disabled={receipt.isPending} onClick={confirmNow}>
+                  {receipt.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                  {receipt.isPending ? 'Confirming with Business Central…' : 'Yes, I received it'}
+                </Button>
+                <Button type="button" variant="outline" disabled={receipt.isPending} onClick={() => setAsking(false)}>
+                  Not yet
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {failure ? (
+            <p className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <span className="font-semibold">Not confirmed.</span> {failure}
+              </span>
+            </p>
+          ) : null}
         </div>
       </div>
     </section>

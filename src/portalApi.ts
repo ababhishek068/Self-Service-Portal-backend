@@ -727,7 +727,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v399 — 1.0.3.560 (Advance Settlement as the client sample: Advance Information and Total Advance Received, one card per expense with purpose, category, amount, receipt or reference no. and its documents, Financial Reconciliation with Remaining Balance and outcome, then declaration and Submit; includes 545 to 559; for BC 1.0.3.663)'
+export const PORTAL_API_BUILD = 'v400 — 1.0.3.561 (Advance Request: Confirm Payment Received is asked inside the panel with no pop-up, shows progress and the Business Central answer, and shows Payment received at once; includes 545 to 560; for BC 1.0.3.663)'
 
 interface LookupSpec {
   service: string
