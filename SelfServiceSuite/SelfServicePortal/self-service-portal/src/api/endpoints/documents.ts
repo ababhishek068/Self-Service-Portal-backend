@@ -55,3 +55,43 @@ export async function downloadPolicyDocument(doc: PolicyDocument): Promise<void>
   link.remove()
   URL.revokeObjectURL(url)
 }
+
+/** Open the document in a new tab (inline) so the employee can read without downloading. */
+export async function viewPolicyDocument(doc: PolicyDocument): Promise<void> {
+  requireAuthApiUrl()
+  const blob = (
+    await authHttp.get<Blob>(`/api/documents/${encodeURIComponent(doc.id)}/view`, { responseType: 'blob' })
+  ).data
+  const typed =
+    blob.type && blob.type !== 'application/octet-stream'
+      ? blob
+      : new Blob([blob], { type: doc.mimeType || 'application/pdf' })
+  const url = URL.createObjectURL(typed)
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    URL.revokeObjectURL(url)
+    throw new Error('Allow pop-ups to view the document, or use Download instead.')
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+export type PolicyAcknowledgmentCommitment = { id: string; label: string }
+
+export type PolicyAcknowledgmentState = {
+  commitments: PolicyAcknowledgmentCommitment[]
+  status: 'Pending' | 'Acknowledged'
+  acknowledgedAt: string
+}
+
+export async function fetchPolicyAcknowledgment(): Promise<PolicyAcknowledgmentState> {
+  requireAuthApiUrl()
+  return authGet<PolicyAcknowledgmentState>('/api/documents/acknowledgment')
+}
+
+export async function submitPolicyAcknowledgment(commitments: Record<string, boolean>): Promise<PolicyAcknowledgmentState> {
+  requireAuthApiUrl()
+  return authPost<PolicyAcknowledgmentState, { commitments: Record<string, boolean> }>(
+    '/api/documents/acknowledgment',
+    { commitments },
+  )
+}

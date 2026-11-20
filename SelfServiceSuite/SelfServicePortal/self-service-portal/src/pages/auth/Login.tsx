@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Building2, Cloud, Download, ExternalLink, Eye, EyeOff, Loader2, TrendingUp, Users } from 'lucide-react'
+import { Building2, Cloud, Download, Eye, EyeOff, Loader2, TrendingUp, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -257,15 +257,6 @@ export function Login() {
             <p className="text-xs leading-relaxed text-white/65">{brand.tagline}</p>
             <nav className="flex flex-wrap items-center gap-2" aria-label="Related systems">
               <a
-                href={brand.links.businessCentral.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="portal-auth-linkchip"
-              >
-                {brand.links.businessCentral.label}
-                <ExternalLink className="h-3 w-3 opacity-80" />
-              </a>
-              <a
                 href={brand.links.sspApk.href}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -439,18 +430,6 @@ export function Login() {
               className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-[var(--portal-muted)] lg:hidden"
               aria-label="Related systems"
             >
-              <a
-                href={brand.links.businessCentral.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-medium text-[var(--portal-navy)] hover:underline"
-              >
-                {brand.links.businessCentral.label}
-                <ExternalLink className="h-3 w-3 opacity-60" />
-              </a>
-              <span className="opacity-40" aria-hidden>
-                ·
-              </span>
               <a
                 href={brand.links.sspApk.href}
                 target="_blank"

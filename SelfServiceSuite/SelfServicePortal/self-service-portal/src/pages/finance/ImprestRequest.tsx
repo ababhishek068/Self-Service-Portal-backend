@@ -128,6 +128,8 @@ export function ImprestRequest() {
     purposeContext.data?.purposes?.length ? purposeContext.data.purposes : fallbackPurposes
   // ESSP spec: Project / Assignment (Optional) — on BC 1.0.3.651+, which reports the field.
   const supportsProject = purposeContext.data?.supportsProjectAssignment === true
+  // BC 1.0.3.668: Yes/No project-related → active Job + justification (replaces free-text when available).
+  const supportsProjectRelated = purposeContext.data?.supportsProjectRelated === true
   // BC 1.0.3.653: confirm receipt before settlement, and the ESSP Advance Request Types list.
   const supportsReceipt = purposeContext.data?.supportsReceiptConfirmation === true
   // BC 1.0.3.662: Confirm Payment Received right after approval (client, 16 Nov 2026: like the Store receipt).
@@ -145,6 +147,7 @@ export function ImprestRequest() {
     purposeHint,
     advanceTypes: advanceTypeOptions,
     supportsProject,
+    supportsProjectRelated,
     outstanding,
   }
 

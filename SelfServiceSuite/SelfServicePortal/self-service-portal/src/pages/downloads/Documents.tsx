@@ -1,11 +1,14 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileText, FileUp, ShieldCheck, Trash2 } from 'lucide-react'
+import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   deletePolicyDocument,
   downloadPolicyDocument,
+  fetchPolicyAcknowledgment,
   listPolicyDocuments,
+  submitPolicyAcknowledgment,
   uploadPolicyDocument,
+  viewPolicyDocument,
   type PolicyDocument,
 } from '@/api/endpoints/documents'
 import { PageWrapper } from '@/components/layout/PageWrapper'
@@ -59,11 +62,20 @@ export function Documents() {
   const [category, setCategory] = useState('Policy Document')
   const [published, setPublished] = useState(true)
   const [file, setFile] = useState<File | null>(null)
-  const [downloadingId, setDownloadingId] = useState('')
+  const [busyId, setBusyId] = useState('')
+  const [checks, setChecks] = useState<Record<string, boolean>>({})
 
   const query = useQuery({ queryKey: ['downloads', 'documents'], queryFn: listPolicyDocuments })
+  const acknowledgmentQuery = useQuery({
+    queryKey: ['downloads', 'acknowledgment'],
+    queryFn: fetchPolicyAcknowledgment,
+  })
   const documents = query.data?.rows ?? []
   const canManage = permissions.isHR && query.data?.canManage === true
+  const acknowledgment = acknowledgmentQuery.data
+  const acknowledged = acknowledgment?.status === 'Acknowledged'
+  const commitmentIds = (acknowledgment?.commitments ?? []).map((row) => row.id)
+  const allChecked = commitmentIds.length > 0 && commitmentIds.every((id) => checks[id] === true)
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -107,6 +119,17 @@ export function Documents() {
     },
   })
 
+  const acknowledgmentMutation = useMutation({
+    mutationFn: () => submitPolicyAcknowledgment(checks),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['downloads', 'acknowledgment'] })
+      toast.success('Your policy acknowledgment was recorded.', 'Acknowledgment submitted')
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Acknowledgment could not be saved.', 'Submit failed')
+    },
+  })
+
   const submitUpload = async () => {
     if (!canManage || uploadMutation.isPending) return
     if (!title.trim()) {
@@ -144,21 +167,33 @@ export function Documents() {
   }
 
   const downloadDocument = async (document: PolicyDocument) => {
-    if (downloadingId) return
-    setDownloadingId(document.id)
+    if (busyId) return
+    setBusyId(`dl-${document.id}`)
     try {
       await downloadPolicyDocument(document)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'The document could not be downloaded.', 'Download failed')
     } finally {
-      setDownloadingId('')
+      setBusyId('')
+    }
+  }
+
+  const viewDocument = async (document: PolicyDocument) => {
+    if (busyId) return
+    setBusyId(`view-${document.id}`)
+    try {
+      await viewPolicyDocument(document)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'The document could not be opened.', 'View failed')
+    } finally {
+      setBusyId('')
     }
   }
 
   return (
     <PageWrapper
       title="HR Policies & Forms"
-      description="Published HR policies, forms and guidelines available to all employees."
+      description="Published HR policies, forms and guidelines available to all employees. View online or download; then submit your acknowledgment."
     >
       {canManage ? (
         <section className="portal-panel mb-6 overflow-visible p-4 sm:p-5" aria-labelledby="hr-document-upload-title">
@@ -267,13 +302,27 @@ export function Documents() {
                 variant="outline"
                 size="sm"
                 className="rounded-full"
-                disabled={Boolean(downloadingId)}
+                disabled={Boolean(busyId)}
+                onClick={() => void viewDocument(document)}
+                aria-label={`View ${document.title}`}
+              >
+                <Eye className="h-4 w-4" />
+                <span className="hidden sm:inline">
+                  {busyId === `view-${document.id}` ? 'Opening…' : 'View'}
+                </span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                disabled={Boolean(busyId)}
                 onClick={() => void downloadDocument(document)}
                 aria-label={`Download ${document.title}`}
               >
                 <Download className="h-4 w-4" />
                 <span className="hidden sm:inline">
-                  {downloadingId === document.id ? 'Downloading…' : 'Download'}
+                  {busyId === `dl-${document.id}` ? 'Downloading…' : 'Download'}
                 </span>
               </Button>
               {canManage ? (
@@ -299,6 +348,77 @@ export function Documents() {
           No published HR policies or forms are available yet.
         </div>
       ) : null}
+
+      <section className="portal-panel mt-6 p-4 sm:p-5" aria-labelledby="policy-ack-title">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="policy-ack-title" className="text-sm font-semibold text-[var(--portal-navy)]">
+              Employee Policy Acknowledgment
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Please read each published policy carefully and confirm your acknowledgment.
+            </p>
+          </div>
+          <span
+            className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+              acknowledged
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+            }`}
+          >
+            {acknowledged ? 'Acknowledged' : 'Pending'}
+          </span>
+        </div>
+
+        {acknowledgmentQuery.isLoading ? (
+          <p className="mt-4 text-sm text-slate-600">Loading acknowledgment…</p>
+        ) : acknowledgmentQuery.isError ? (
+          <p className="mt-4 text-sm text-red-700">Acknowledgment status could not be loaded.</p>
+        ) : acknowledged ? (
+          <p className="mt-4 text-sm text-slate-700">
+            You acknowledged the published HR policies
+            {acknowledgment?.acknowledgedAt
+              ? ` on ${new Date(acknowledgment.acknowledgedAt).toLocaleString()}`
+              : ''}
+            .
+          </p>
+        ) : (
+          <>
+            <p className="mt-4 text-xs font-medium uppercase tracking-wide text-slate-500">
+              Policy acknowledgment status
+            </p>
+            <ul className="mt-3 space-y-3">
+              {(acknowledgment?.commitments ?? []).map((item) => (
+                <li key={item.id}>
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={checks[item.id] === true}
+                      onChange={(event) =>
+                        setChecks((current) => ({ ...current, [item.id]: event.target.checked }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded-full border-slate-300 accent-[var(--portal-navy)]"
+                    />
+                    <span>{item.label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-5">
+              <Button
+                type="button"
+                disabled={!allChecked || acknowledgmentMutation.isPending}
+                onClick={() => acknowledgmentMutation.mutate()}
+              >
+                {acknowledgmentMutation.isPending ? 'Submitting…' : 'Submit Policy Acknowledgment'}
+              </Button>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Submission is enabled only after all required confirmations are checked.
+              </p>
+            </div>
+          </>
+        )}
+      </section>
     </PageWrapper>
   )
 }

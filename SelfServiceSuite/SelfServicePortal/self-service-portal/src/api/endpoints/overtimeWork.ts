@@ -3,7 +3,7 @@ import { requireAuthApiUrl } from '@/api/requireBackend'
 import type { OvertimeDayType } from './overtime'
 
 export type OvertimeWorkStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected' | 'Cancelled'
-export type OvertimeWorkLocation = 'office' | 'field' | 'projectSite'
+export type OvertimeWorkLocation = 'office' | 'field' | 'projectSite' | 'others'
 
 export interface OvertimeWorkStep {
   stage: number
@@ -22,6 +22,8 @@ export interface OvertimeWorkLine {
   endTime: string
   dayType: OvertimeDayType
   workLocation: OvertimeWorkLocation
+  /** Required when workLocation is `others`. */
+  workLocationOther?: string
   reason: string
   totalHours: number
 }
@@ -79,6 +81,7 @@ export interface OvertimeWorkDetails {
     endTime: string
     dayType: OvertimeDayType
     workLocation: OvertimeWorkLocation
+    workLocationOther?: string
     reason: string
   }>
 }

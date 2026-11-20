@@ -166,14 +166,17 @@ function FieldCard({ def, editor }: { def: ProfileFieldDef; editor: ProfileEdito
   if (def.key === 'fullName' && ['firstName', 'middleName', 'lastName'].some((key) => key in editor.draft.fields)) {
     shown = ['firstName', 'middleName', 'lastName'].map((key) => editor.value(key).trim()).filter(Boolean).join(' ')
   }
-  const missing = editor.editing && def.required && !current.trim()
+  // HR verification: mandatory fields stay visible even when empty (client, 20 Nov 2026).
+  const blank = !String(current ?? shown ?? '').trim()
+  const missing = def.required && !def.readOnly && blank
   if (changed && !editor.editing && !def.readOnly && def.type !== 'computed') shown = displayValue(def, current, lookups)
   return (
     <div
       className={cn(
         'flex items-start gap-3 rounded-xl border bg-white p-3 transition-colors',
         changed ? 'border-amber-300 bg-amber-50/40 ring-1 ring-amber-200' : 'border-slate-200',
-        missing && !def.readOnly ? 'border-red-300' : '',
+        missing ? 'border-amber-300 bg-amber-50/50 ring-1 ring-amber-200' : '',
+        missing && editor.editing ? 'border-red-300 ring-red-200' : '',
       )}
     >
       <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--portal-navy)]/[0.06] text-[var(--portal-navy)] [&>svg]:h-5 [&>svg]:w-5">
@@ -182,10 +185,17 @@ function FieldCard({ def, editor }: { def: ProfileFieldDef; editor: ProfileEdito
       <div className="min-w-0 flex-1">
         <label htmlFor={id} className="flex items-center gap-1 text-xs font-medium text-slate-500">
           {def.label}
-          {def.required && !def.readOnly && editor.editing ? <span className="text-red-600">*</span> : null}
+          {def.required && !def.readOnly ? <span className="text-red-600">*</span> : null}
         </label>
         {def.readOnly || def.type === 'computed' || !editor.editing ? (
-          <p className="mt-1 break-words text-sm font-semibold text-slate-900">{shown || '—'}</p>
+          <p
+            className={cn(
+              'mt-1 break-words text-sm font-semibold',
+              missing ? 'text-amber-800' : 'text-slate-900',
+            )}
+          >
+            {shown || (missing ? 'Not filled' : '—')}
+          </p>
         ) : (
           <div className="mt-1">
             <FieldInput
@@ -198,6 +208,9 @@ function FieldCard({ def, editor }: { def: ProfileFieldDef; editor: ProfileEdito
             />
           </div>
         )}
+        {missing && !editor.editing ? (
+          <p className="mt-1 text-[11px] text-amber-800">Mandatory — HR must complete this for verification.</p>
+        ) : null}
         {changed ? (
           <p className="mt-1 text-[11px] text-amber-800">
             {editor.locked ? 'Waiting for HR · was ' : 'Changed · was '}
@@ -214,10 +227,23 @@ export function BioDataEditor({ editor, extra }: { editor: ProfileEditor; extra?
   const identity = fields.filter((field) => field.section === 'identity')
   const contact = fields.filter((field) => field.section === 'contact')
   const contactChanged = contact.some((field) => field.key in editor.draft.fields)
-  const [contactOpen, setContactOpen] = useState(false)
+  const missingMandatory = fields.filter(
+    (field) => field.required && !field.readOnly && !String(editor.value(field.key) || field.display || '').trim(),
+  )
+  // Contact starts open so empty mandatory contact fields are visible for HR verification.
+  const [contactOpen, setContactOpen] = useState(true)
   const open = contactOpen || contactChanged
   return (
     <div className="space-y-6">
+      {missingMandatory.length ? (
+        <p
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+        >
+          <span className="font-semibold">Mandatory fields not filled:</span>{' '}
+          {missingMandatory.map((field) => field.label).join(' · ')}. HR needs these for verification.
+        </p>
+      ) : null}
       <div className="space-y-3">
         <SectionHeading>Personal Information</SectionHeading>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

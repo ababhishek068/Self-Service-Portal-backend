@@ -14,7 +14,7 @@ export type OvertimeWorkStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Re
 
 /** Same bands as overtime payment / the OT sheet. */
 export type OvertimeWorkDayType = 'working' | 'night' | 'restDay' | 'holiday'
-export type OvertimeWorkLocation = 'office' | 'field' | 'projectSite'
+export type OvertimeWorkLocation = 'office' | 'field' | 'projectSite' | 'others'
 
 /** @deprecated Kept for older stored rows; new forms use dayType on each line. */
 export type OvertimeWorkType = 'weekday' | 'weekend' | 'publicHoliday'
@@ -37,6 +37,8 @@ export type OvertimeWorkLine = {
   endTime: string
   dayType: OvertimeWorkDayType
   workLocation: OvertimeWorkLocation
+  /** Required when workLocation is `others` (client Pending issues). */
+  workLocationOther?: string
   reason: string
   totalHours: number
 }
@@ -202,7 +204,7 @@ export type OvertimeWorkDetails = {
 type StoreFile = { sequence: number; rows: OvertimeWorkRequest[] }
 
 const DAY_TYPES: OvertimeWorkDayType[] = ['working', 'night', 'restDay', 'holiday']
-const LOCATIONS: OvertimeWorkLocation[] = ['office', 'field', 'projectSite']
+const LOCATIONS: OvertimeWorkLocation[] = ['office', 'field', 'projectSite', 'others']
 /** Same as BC Stage 1 (ABH Overtime Request Mgt MaxLines): a full month of daily lines from a Start → End Date period. */
 const OVERTIME_WORK_MAX_LINES = 31
 
@@ -275,9 +277,13 @@ function dayTypeLabel(dayType: OvertimeWorkDayType) {
   return 'Normal day hours (6 AM – 10 PM)'
 }
 
-function locationLabel(location: OvertimeWorkLocation) {
+function locationLabel(location: OvertimeWorkLocation, other = '') {
   if (location === 'field') return 'Field'
   if (location === 'projectSite') return 'Project Site'
+  if (location === 'others') {
+    const detail = other.trim()
+    return detail ? `Others (${detail})` : 'Others'
+  }
   return 'Office'
 }
 
@@ -306,12 +312,14 @@ export function normalizeOvertimeWorkRequest(row: OvertimeWorkRequest): Overtime
       const workLocation = (LOCATIONS.includes(rawLocation as OvertimeWorkLocation)
         ? rawLocation
         : headerLocation) as OvertimeWorkLocation
+      const workLocationOther = str((line as OvertimeWorkLine).workLocationOther).slice(0, 100)
       return {
         overtimeDate: str(line.overtimeDate),
         startTime: str(line.startTime).slice(0, 5),
         endTime: str(line.endTime).slice(0, 5),
         dayType: DAY_TYPES.includes(line.dayType) ? line.dayType : legacyTypeToDayType(String(line.dayType ?? '')),
         workLocation,
+        ...(workLocation === 'others' || workLocationOther ? { workLocationOther } : {}),
         reason: str(line.reason),
         totalHours:
           Number(line.totalHours) > 0
@@ -422,6 +430,7 @@ export function validateOvertimeWorkDetails(input: unknown, submit: boolean): Ov
     const workLocation = (LOCATIONS.includes(locationRaw as OvertimeWorkLocation)
       ? locationRaw
       : '') as OvertimeWorkLocation | ''
+    const workLocationOther = str(line.workLocationOther || body.workLocationOther).slice(0, 100)
     // One justification on the form: use overall reason when the line has none.
     const reason = (str(line.reason) || overallReason).slice(0, 500)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(overtimeDate)) throw invalid(`${prefix}Enter the overtime date.`)
@@ -432,7 +441,18 @@ export function validateOvertimeWorkDetails(input: unknown, submit: boolean): Ov
     }
     if (!DAY_TYPES.includes(dayType)) throw invalid(`${prefix}Choose the overtime category.`)
     if (!workLocation) throw invalid(`${prefix}Choose the work location.`)
-    return { overtimeDate, startTime, endTime, dayType, workLocation, reason }
+    if (workLocation === 'others' && !workLocationOther.trim()) {
+      throw invalid(`${prefix}Specify the work location when Others is selected.`)
+    }
+    return {
+      overtimeDate,
+      startTime,
+      endTime,
+      dayType,
+      workLocation,
+      ...(workLocation === 'others' ? { workLocationOther: workLocationOther.trim() } : {}),
+      reason,
+    }
   })
 
   const details: OvertimeWorkDetails = {
@@ -813,9 +833,16 @@ export function overtimeWorkDetailFacts(request: OvertimeWorkRequest) {
       label: 'Work location',
       value: several
         ? [
-            ...new Set(normalized.lines.map((line) => locationLabel(line.workLocation)).filter(Boolean)),
+            ...new Set(
+              normalized.lines
+                .map((line) => locationLabel(line.workLocation, line.workLocationOther))
+                .filter(Boolean),
+            ),
           ].join(' · ')
-        : locationLabel(normalized.lines[0]?.workLocation || normalized.workLocation),
+        : locationLabel(
+            normalized.lines[0]?.workLocation || normalized.workLocation,
+            normalized.lines[0]?.workLocationOther,
+          ),
     },
     { label: 'Designation', value: normalized.designation },
     {
@@ -842,7 +869,7 @@ export function overtimeWorkDocumentLines(request: OvertimeWorkRequest) {
     endTime: line.endTime,
     overtimeHours: Number(line.totalHours.toFixed(2)),
     category: dayTypeLabel(line.dayType),
-    workLocation: locationLabel(line.workLocation),
+    workLocation: locationLabel(line.workLocation, line.workLocationOther),
     reason: line.reason,
   }))
 }

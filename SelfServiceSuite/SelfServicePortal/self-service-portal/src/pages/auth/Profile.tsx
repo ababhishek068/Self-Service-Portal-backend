@@ -96,27 +96,32 @@ function formatFieldValue(field: ProfileSectionField) {
     default: return value
   }
 }
-function fieldsFor(profile: EmployeeProfileDetails, fields: Field[]) {
+function fieldsFor(profile: EmployeeProfileDetails, fields: Field[], includeEmpty = false) {
   return fields.flatMap(([key,label,type]) => {
     const value = display(profile[key])
-    return value ? [{key,label,value:type === 'date' ? formatDate(value) : value}] : []
+    if (!value && !includeEmpty) return []
+    return [{key,label,value: value ? (type === 'date' ? formatDate(value) : value) : 'Not filled', empty: !value}]
   })
 }
-function sectionFields(section: ProfileSection) {
+function sectionFields(section: ProfileSection, includeEmpty = false) {
   return section.fields.flatMap(field => {
     const value = formatFieldValue(field)
-    return value ? [{ key: `${section.key}-${field.key}`, label: field.label, value }] : []
+    if (!value && !includeEmpty) return []
+    return [{ key: `${section.key}-${field.key}`, label: field.label, value: value || 'Not filled', empty: !value }]
   })
 }
-function sectionsForTab(profile: EmployeeProfileDetails, tab: Tab) {
-  return (profile.sections ?? []).filter(section => (SECTION_TABS[section.key] ?? 'bio') === tab && sectionFields(section).length > 0)
+function sectionsForTab(profile: EmployeeProfileDetails, tab: Tab, includeEmpty = false) {
+  return (profile.sections ?? []).filter(section => {
+    if ((SECTION_TABS[section.key] ?? 'bio') !== tab) return false
+    return includeEmpty ? section.fields.length > 0 : sectionFields(section).length > 0
+  })
 }
-function FieldGrid({fields}: {fields: {key: string; label: string; value: string}[]}) {
+function FieldGrid({fields}: {fields: {key: string; label: string; value: string; empty?: boolean}[]}) {
   if (!fields.length) return null
   return <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{fields.map(field =>
-    <div key={field.key} className="rounded-xl border border-slate-200 bg-white p-4">
+    <div key={field.key} className={cn('rounded-xl border bg-white p-4', field.empty ? 'border-amber-200 bg-amber-50/40' : 'border-slate-200')}>
       <dt className="text-xs font-medium text-slate-500">{field.label}</dt>
-      <dd className="mt-1 break-words text-sm font-semibold text-slate-900">{field.value}</dd>
+      <dd className={cn('mt-1 break-words text-sm font-semibold', field.empty ? 'text-amber-800' : 'text-slate-900')}>{field.value}</dd>
     </div>)}
   </dl>
 }
@@ -127,12 +132,12 @@ function SubHeading({children}: {children: ReactNode}) {
 function HrOnlyNote() {
   return <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">This section is kept by HR. Contact HR if something here is wrong.</p>
 }
-function CardSections({sections}: {sections: ProfileSection[]}) {
+function CardSections({sections, includeEmpty = false}: {sections: ProfileSection[]; includeEmpty?: boolean}) {
   if (!sections.length) return null
   return <div className="space-y-6">{sections.map(section =>
     <div key={section.key} className="space-y-3">
       <SubHeading>{section.title}</SubHeading>
-      <FieldGrid fields={sectionFields(section)} />
+      <FieldGrid fields={sectionFields(section, includeEmpty)} />
     </div>)}
   </div>
 }
@@ -140,15 +145,16 @@ function CardSections({sections}: {sections: ProfileSection[]}) {
 function otherDetails(profile: EmployeeProfileDetails) {
   const sections = (profile.sections ?? []).filter(section => section.key === 'other' && sectionFields(section).length > 0)
   if (!sections.length) return null
-  return <div className="space-y-3"><SectionHeading>Other Details</SectionHeading><HrOnlyNote/><FieldGrid fields={sections.flatMap(sectionFields)}/></div>
+  return <div className="space-y-3"><SectionHeading>Other Details</SectionHeading><HrOnlyNote/><FieldGrid fields={sections.flatMap((section) => sectionFields(section))}/></div>
 }
-function ProfileFields({profile, fields}: {profile: EmployeeProfileDetails; fields: Field[]}) {
+function ProfileFields({profile, fields, includeEmpty = false}: {profile: EmployeeProfileDetails; fields: Field[]; includeEmpty?: boolean}) {
   const extras = (profile.extraFields ?? []).flatMap(field => {
     const value = display(field.value)
-    return value ? [{key: `extra-${field.key}`, label: field.label, value}] : []
+    if (!value && !includeEmpty) return []
+    return [{key: `extra-${field.key}`, label: field.label, value: value || 'Not filled', empty: !value}]
   })
   return <div className="space-y-5">
-    <FieldGrid fields={fieldsFor(profile, fields)} />
+    <FieldGrid fields={fieldsFor(profile, fields, includeEmpty)} />
     {extras.length ? <div className="space-y-3">
       <SubHeading>More from Business Central</SubHeading>
       <FieldGrid fields={extras} />
@@ -221,7 +227,8 @@ export function Profile() {
     pay: (structured && sectionsForTab(profile,'pay').length>0) || salaryAllowances.length>0, kin: true, dependants: true, qualifications: true,
     history: true, training: trainingHistory.length>0 || memberships.length>0 || rewards.length>0, assets: assignedAssets.length>0, attachments: true,
   } : {
-    bio: structured ? sectionsForTab(profile,'bio').length>0 : fieldsFor(profile,bioFields).length>0 || Boolean(profile.extraFields?.some(field=>display(field.value))),
+    // Bio always lists the mandatory/flat fields (empty ones show as Not filled) for HR verification.
+    bio: true,
     contract: !structured && fieldsFor(profile,contractFields).length>0,
     job: structured && sectionsForTab(profile,'job').length>0,
     leave: structured && sectionsForTab(profile,'leave').length>0,
@@ -302,7 +309,7 @@ export function Profile() {
           </div>
           {active && unavailable.has(active)?<div role="status" className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">This section could not be fully loaded. Please retry or contact HR.<Button variant="ghost" onClick={()=>void refresh()}>Retry</Button></div>:null}
           {editing && ['job','leave','pay','training','assets'].includes(active ?? '')?<HrOnlyNote/>:null}
-          {active==='bio'?(editing?<BioDataEditor editor={editor} extra={otherDetails(profile)}/>:structured?<CardSections sections={sectionsForTab(profile,'bio')}/>:<ProfileFields profile={profile} fields={bioFields}/>):null}
+          {active==='bio'?(editing?<BioDataEditor editor={editor} extra={otherDetails(profile)}/>:structured?<CardSections sections={sectionsForTab(profile,'bio', true)} includeEmpty/>:<ProfileFields profile={profile} fields={bioFields} includeEmpty/>):null}
           {active==='contract'?<ProfileFields profile={profile} fields={contractFields}/>:null}
           {active==='job'?<CardSections sections={sectionsForTab(profile,'job')}/>:null}
           {active==='leave'?<CardSections sections={sectionsForTab(profile,'leave')}/>:null}

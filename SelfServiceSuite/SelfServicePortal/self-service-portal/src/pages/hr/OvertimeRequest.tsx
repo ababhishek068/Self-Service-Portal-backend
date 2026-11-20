@@ -683,7 +683,12 @@ function bcStage1AsWorkRow(row: OvertimeRequestRow): OvertimeWorkRow {
   }
 }
 
-const WORK_LOCATION_LABELS: Record<string, string> = { office: 'Office', field: 'Field', projectSite: 'Project Site' }
+const WORK_LOCATION_LABELS: Record<string, string> = {
+  office: 'Office',
+  field: 'Field',
+  projectSite: 'Project Site',
+  others: 'Others',
+}
 
 /** The Stage 1 request for the in-page viewer: BC owns status, lines and approvals; the portal copy adds location and deliverables. */
 function stage1ViewOf(bc: OvertimeRequestRow | null, local: OvertimeWorkRow | null): OvertimeStage1View | null {

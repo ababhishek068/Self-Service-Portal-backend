@@ -38,6 +38,7 @@ import {
 } from '@/api/endpoints/requestEndpoint'
 import type { LookupOption } from '@/api/endpoints/lookups'
 import type { AdvanceOutstanding } from '@/api/endpoints/advanceOutstanding'
+import { fetchAdvanceProjects } from '@/api/endpoints/advancePaymentContext'
 import { AdvanceOutstandingNotice } from '@/components/finance/AdvanceOutstandingNotice'
 import { useConfirm } from '@/components/feedback/ConfirmProvider'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -167,6 +168,16 @@ function savedFormValues(request: PortalRequest, items: CostItem[]): FieldValues
     activityEndDate: payloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']),
     activityLocation: payloadText(payload, ['ActivityLocation', 'Activity_Location']),
     projectAssignment: payloadText(payload, ['ProjectAssignment', 'Project_Assignment']),
+    isProjectRelated: (() => {
+      const related = payload[ 'ProjectRelated' ] ?? payload[ 'Project_Related' ]
+      if (related === true || String(related).toLowerCase() === 'true' || String(related) === '1') return 'yes'
+      if (related === false || String(related).toLowerCase() === 'false' || String(related) === '0') return 'no'
+      const projectNo = payloadText(payload, ['ProjectNo', 'Project_No'])
+      if (projectNo) return 'yes'
+      return ''
+    })(),
+    projectNo: payloadText(payload, ['ProjectNo', 'Project_No']),
+    projectJustification: payloadText(payload, ['ProjectJustification', 'Project_Justification']),
     requestedAmount: total > 0 ? String(total) : '',
     advanceType: items[0]?.advanceType ?? '',
     advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details']),
@@ -317,6 +328,7 @@ export function AdvanceRequestCreate({
   purposeHint,
   advanceTypes,
   supportsProject,
+  supportsProjectRelated = false,
   outstanding,
   request,
   onCreated,
@@ -329,6 +341,8 @@ export function AdvanceRequestCreate({
   purposeHint: string
   advanceTypes: LookupOption[]
   supportsProject: boolean
+  /** BC 1.0.3.668: Yes/No project-related → active Job + justification. */
+  supportsProjectRelated?: boolean
   /** BC 1.0.3.667: advances not settled and whether a new one may be submitted (null on older BC). */
   outstanding?: AdvanceOutstanding | null
   /** A saved draft (or an advance reopened after a send back) to edit. */
@@ -346,6 +360,12 @@ export function AdvanceRequestCreate({
   const profileQuery = useQuery({
     queryKey: ['profile', 'details'],
     queryFn: getEmployeeProfileDetails,
+    staleTime: 5 * 60 * 1000,
+  })
+  const projectsQuery = useQuery({
+    queryKey: ['advance', 'projects'],
+    queryFn: fetchAdvanceProjects,
+    enabled: supportsProjectRelated,
     staleTime: 5 * 60 * 1000,
   })
   const profile = profileQuery.data
@@ -386,6 +406,9 @@ export function AdvanceRequestCreate({
       activityEndDate: '',
       activityLocation: '',
       projectAssignment: '',
+      isProjectRelated: '',
+      projectNo: '',
+      projectJustification: '',
       requestedAmount: '',
       advanceType: '',
       advanceTypeDetails: '',
@@ -398,6 +421,15 @@ export function AdvanceRequestCreate({
   const purposeCode = text('requestPurpose')
   const activityStart = text('activityStartDate')
   const activityEnd = text('activityEndDate') || activityStart
+  const isProjectRelated = text('isProjectRelated')
+  const projectOptions = useMemo(
+    () =>
+      (projectsQuery.data ?? []).map((row) => ({
+        value: row.no,
+        label: row.description ? `${row.no} · ${row.description}` : row.no,
+      })),
+    [projectsQuery.data],
+  )
   const firstAmount = Number(watched.requestedAmount ?? 0) > 0 ? Number(watched.requestedAmount) : 0
   // Several Advance Types (client, 17 Nov 2026): each has its amount and the Requested Amount is their total.
   const several = typeItems.length > 1
@@ -429,6 +461,12 @@ export function AdvanceRequestCreate({
 
   const section1Done =
     Boolean(purposeCode) && (!needsOther || text('otherPurposeDetails').trim().length > 0) && text('justification').trim().length >= 10
+  const projectRelatedDone =
+    !supportsProjectRelated ||
+    (isProjectRelated === 'no' ||
+      (isProjectRelated === 'yes' &&
+        Boolean(text('projectNo').trim()) &&
+        text('projectJustification').trim().length >= 5))
   const section2Done =
     Boolean(text('dateRequired')) &&
     text('dateRequired') >= today &&
@@ -437,7 +475,8 @@ export function AdvanceRequestCreate({
     text('dateRequired') <= activityStart &&
     amount > 0 &&
     typeItems.length > 0 &&
-    itemsValid
+    itemsValid &&
+    projectRelatedDone
   const itemsChanged = itemsSignature(typeItems) !== itemsSignature(initialItems)
   const dirty = form.formState.isDirty || files.length > 0 || itemsChanged
 
@@ -516,7 +555,21 @@ export function AdvanceRequestCreate({
       activityStartDate: start,
       activityEndDate: end,
       activityLocation: String(values.activityLocation ?? '').trim(),
-      ...(supportsProject ? { projectAssignment: String(values.projectAssignment ?? '').trim() } : {}),
+      ...(supportsProjectRelated
+        ? {
+            isProjectRelated: String(values.isProjectRelated ?? '').trim().toLowerCase() === 'yes' ? 'yes' : 'no',
+            projectNo:
+              String(values.isProjectRelated ?? '').trim().toLowerCase() === 'yes'
+                ? String(values.projectNo ?? '').trim()
+                : '',
+            projectJustification:
+              String(values.isProjectRelated ?? '').trim().toLowerCase() === 'yes'
+                ? String(values.projectJustification ?? '').trim()
+                : '',
+          }
+        : supportsProject
+          ? { projectAssignment: String(values.projectAssignment ?? '').trim() }
+          : {}),
       ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
     }
   }
@@ -675,6 +728,29 @@ export function AdvanceRequestCreate({
           form.setError('advanceTypeDetails', { type: 'manual', message: 'Specify the advance type when Other (Specify) is selected' })
           flagSection('adv-s2')
           return
+        }
+        if (supportsProjectRelated) {
+          const related = String(values.isProjectRelated ?? '').trim().toLowerCase()
+          if (related !== 'yes' && related !== 'no') {
+            form.setError('isProjectRelated', { type: 'manual', message: 'Choose whether this advance is project related' })
+            flagSection('adv-s2')
+            return
+          }
+          if (related === 'yes') {
+            if (!String(values.projectNo ?? '').trim()) {
+              form.setError('projectNo', { type: 'manual', message: 'Select the project this advance is related to' })
+              flagSection('adv-s2')
+              return
+            }
+            if (String(values.projectJustification ?? '').trim().length < 5) {
+              form.setError('projectJustification', {
+                type: 'manual',
+                message: 'Enter the project justification (at least 5 characters)',
+              })
+              flagSection('adv-s2')
+              return
+            }
+          }
         }
         create.mutate({ values, submit })
       },
@@ -1023,7 +1099,74 @@ export function AdvanceRequestCreate({
                 <Label htmlFor="adv-location">Activity location</Label>
                 <Input id="adv-location" maxLength={TEXT_LIMIT} placeholder="Where the activity takes place, if relevant" {...form.register('activityLocation')} />
               </div>
-              {supportsProject ? (
+              {supportsProjectRelated ? (
+                <>
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="adv-project-related">
+                      Is this project related?
+                      <Required />
+                    </Label>
+                    <Select
+                      id="adv-project-related"
+                      value={isProjectRelated}
+                      options={[
+                        { value: 'yes', label: 'Yes' },
+                        { value: 'no', label: 'No' },
+                      ]}
+                      placeholder="Choose Yes or No"
+                      disabled={busy}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        form.setValue('isProjectRelated', value, { shouldDirty: true, shouldValidate: true })
+                        if (value !== 'yes') {
+                          form.setValue('projectNo', '', { shouldDirty: true })
+                          form.setValue('projectJustification', '', { shouldDirty: true })
+                        }
+                      }}
+                    />
+                    <FieldError message={errors.isProjectRelated?.message} />
+                  </div>
+                  {isProjectRelated === 'yes' ? (
+                    <>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label htmlFor="adv-project-no">
+                          Project
+                          <Required />
+                        </Label>
+                        <Select
+                          id="adv-project-no"
+                          value={text('projectNo')}
+                          options={projectOptions}
+                          placeholder={projectsQuery.isLoading ? 'Loading projects…' : 'Select an active project'}
+                          disabled={busy || projectsQuery.isLoading}
+                          onChange={(event) =>
+                            form.setValue('projectNo', event.target.value, { shouldDirty: true, shouldValidate: true })
+                          }
+                        />
+                        <p className="text-xs text-[var(--portal-muted)]">Active projects from Business Central.</p>
+                        <FieldError message={errors.projectNo?.message} />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <div className="flex items-baseline justify-between">
+                          <Label htmlFor="adv-project-justification">
+                            Project justification
+                            <Required />
+                          </Label>
+                          <Counter value={text('projectJustification')} />
+                        </div>
+                        <Textarea
+                          id="adv-project-justification"
+                          rows={3}
+                          maxLength={250}
+                          placeholder="Why this advance is related to the selected project"
+                          {...form.register('projectJustification')}
+                        />
+                        <FieldError message={errors.projectJustification?.message} />
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : supportsProject ? (
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label htmlFor="adv-project">Project or assignment</Label>
                   <Input id="adv-project" maxLength={100} placeholder="Optional" {...form.register('projectAssignment')} />

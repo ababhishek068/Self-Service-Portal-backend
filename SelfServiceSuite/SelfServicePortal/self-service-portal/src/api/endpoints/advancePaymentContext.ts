@@ -17,6 +17,8 @@ export type AdvancePaymentContext = {
   purposes: LookupOption[]
   /** BC 1.0.3.651: Imprest Header has the optional Project / Assignment field. */
   supportsProjectAssignment: boolean
+  /** BC 1.0.3.668: Yes/No project-related → active Job + project justification. */
+  supportsProjectRelated: boolean
   /** BC 1.0.3.653: the requester confirms receipt of the paid advance before settlement. */
   supportsReceiptConfirmation: boolean
   /**
@@ -62,6 +64,7 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroupCaption?: string
     purposes?: AdvancePaymentPurposeRow[]
     supportsProjectAssignment?: boolean
+    supportsProjectRelated?: boolean
     supportsReceiptConfirmation?: boolean
     receiptAfterApproval?: boolean
     advanceTypes?: AdvanceTypeRow[]
@@ -76,9 +79,24 @@ export async function fetchAdvancePaymentContext(employeeNo = ''): Promise<Advan
     purposeGroupCaption: String(raw.purposeGroupCaption ?? '').trim(),
     purposes: mapAdvancePaymentPurposes(raw.purposes),
     supportsProjectAssignment: raw.supportsProjectAssignment === true,
+    supportsProjectRelated: raw.supportsProjectRelated === true,
     supportsReceiptConfirmation: raw.supportsReceiptConfirmation === true,
     receiptAfterApproval: raw.receiptAfterApproval === true,
     advanceTypes: mapAdvanceTypes(raw.advanceTypes),
     outstanding: parseAdvanceOutstanding(raw.outstanding),
   }
+}
+
+export type AdvanceProjectOption = { no: string; description: string }
+
+/** Active Business Central Jobs for the Advance Request project picker (BC 1.0.3.668). */
+export async function fetchAdvanceProjects(): Promise<AdvanceProjectOption[]> {
+  requireAuthApiUrl()
+  const raw = await authGet<{ projects?: Array<{ no?: string; description?: string }> }>('/api/advance/projects')
+  return (Array.isArray(raw.projects) ? raw.projects : [])
+    .map((row) => ({
+      no: String(row.no ?? '').trim(),
+      description: String(row.description ?? '').trim(),
+    }))
+    .filter((row) => row.no)
 }

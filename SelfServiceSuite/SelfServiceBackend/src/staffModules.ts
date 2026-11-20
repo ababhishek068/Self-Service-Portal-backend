@@ -739,9 +739,28 @@ const imprest: ModuleSpec = {
       activityEndDate: soapDate(req.body?.activityEndDate || req.body?.activityStartDate),
       dateRequired: soapDate(req.body?.dateRequired),
     })
-    // BC 1.0.3.651: optional Project / Assignment. The portal sends it only when BC's context says
-    // it is supported; older BC without the method keeps working without it.
-    if (typeof req.body?.projectAssignment === 'string') {
+    // BC 1.0.3.668: project-related Yes/No → active Job + project justification.
+    const projectRelatedRaw = req.body?.isProjectRelated ?? req.body?.projectRelated
+    if (projectRelatedRaw !== undefined && projectRelatedRaw !== null && projectRelatedRaw !== '') {
+      const projectRelated =
+        projectRelatedRaw === true ||
+        String(projectRelatedRaw).trim().toLowerCase() === 'yes' ||
+        String(projectRelatedRaw).trim() === '1'
+      try {
+        await callSoapMethod('PortalAdvanceProjectRelated', {
+          employeeNo: user.employeeNo,
+          docNo: no,
+          projectRelated,
+          projectNo: projectRelated ? String(req.body?.projectNo ?? '').trim().slice(0, 20) : '',
+          projectJustification: projectRelated
+            ? String(req.body?.projectJustification ?? '').trim().slice(0, 250)
+            : '',
+        })
+      } catch (error) {
+        if (!soapMethodMissing(error, 'PortalAdvanceProjectRelated')) throw error
+      }
+    } else if (typeof req.body?.projectAssignment === 'string') {
+      // BC 1.0.3.651: optional free-text Project / Assignment on older BC.
       try {
         await callSoapMethod('PortalAdvanceProjectAssignment', {
           employeeNo: user.employeeNo,

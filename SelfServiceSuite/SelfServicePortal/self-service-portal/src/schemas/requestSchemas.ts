@@ -204,8 +204,12 @@ const advanceHeaderShape = {
   otherPurposeDetails: z.string().optional().default(''),
   justification: z.string().trim().min(10, 'Explain why the advance is needed (at least 10 characters)'),
   activityLocation: optionalText,
-  /** Optional (BC 1.0.3.651). */
+  /** Optional free text on older BC (1.0.3.651). Replaced by project-related Yes/No on 668. */
   projectAssignment: z.string().max(100, 'Keep Project / Assignment to 100 characters').optional().default(''),
+  /** BC 1.0.3.668: '' | 'yes' | 'no'. */
+  isProjectRelated: z.string().optional().default(''),
+  projectNo: z.string().max(20).optional().default(''),
+  projectJustification: z.string().max(250).optional().default(''),
   activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
   activityEndDate: z.string().optional().default(''),
   /** Legacy SOAP Purpose — filled from justification before create/edit. */
@@ -247,6 +251,30 @@ function refineAdvanceHeader(data: AdvanceHeaderValues, ctx: z.RefinementCtx) {
       code: z.ZodIssueCode.custom,
       path: ['dateRequired'],
       message: 'Required advance date must be on or before the activity start date',
+    })
+  }
+  // BC 1.0.3.668: when the form asks "project related?", Yes requires a Job and a justification.
+  const projectRelated = String(data.isProjectRelated ?? '').trim().toLowerCase()
+  if (projectRelated === 'yes') {
+    if (!String(data.projectNo ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['projectNo'],
+        message: 'Select the project this advance is related to',
+      })
+    }
+    if (String(data.projectJustification ?? '').trim().length < 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['projectJustification'],
+        message: 'Enter the project justification (at least 5 characters)',
+      })
+    }
+  } else if (projectRelated && projectRelated !== 'no' && projectRelated !== '') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['isProjectRelated'],
+      message: 'Choose Yes or No',
     })
   }
 }

@@ -62,6 +62,7 @@ const LOCATION_OPTIONS: Array<{ value: OvertimeWorkLocation; label: string }> = 
   { value: 'office', label: 'Office' },
   { value: 'field', label: 'Field' },
   { value: 'projectSite', label: 'Project Site' },
+  { value: 'others', label: 'Others' },
 ]
 
 type WorkLineInput = {
@@ -70,6 +71,7 @@ type WorkLineInput = {
   endTime: string
   dayType: OvertimeDayType
   workLocation: OvertimeWorkLocation
+  workLocationOther?: string
   reason: string
 }
 
@@ -89,6 +91,7 @@ type EntryDraft = {
   endTime: string
   dayType: OvertimeDayType | ''
   workLocation: OvertimeWorkLocation | ''
+  workLocationOther: string
   reason: string
 }
 
@@ -117,6 +120,7 @@ function emptyEntry(): EntryDraft {
     endTime: '',
     dayType: '',
     workLocation: '',
+    workLocationOther: '',
     reason: '',
   }
 }
@@ -210,6 +214,7 @@ function entryFromGroup(group: LineGroup): EntryDraft {
     endTime: group.line.endTime,
     dayType: group.line.dayType,
     workLocation: group.line.workLocation,
+    workLocationOther: group.line.workLocationOther ?? '',
     reason: group.line.reason,
   }
 }
@@ -241,7 +246,11 @@ function lineSlot(date: string, startTime: string, endTime: string) {
   return { start: base + start, end: base + end }
 }
 
-function locationLabel(value: OvertimeWorkLocation | string | undefined) {
+function locationLabel(value: OvertimeWorkLocation | string | undefined, other = '') {
+  if (value === 'others') {
+    const detail = other.trim()
+    return detail ? `Others (${detail})` : 'Others'
+  }
   return LOCATION_OPTIONS.find((option) => option.value === value)?.label ?? value ?? '—'
 }
 
@@ -286,7 +295,7 @@ function printWorkRequest(work: OvertimeWorkRow) {
   const rowsHtml = lines
     .map(
       (line) =>
-        `<tr><td>${esc(line.overtimeDate)}</td><td>${esc(line.startTime)} – ${esc(line.endTime)}</td><td>${esc(String(line.dayType))}</td><td>${esc(locationLabel(line.workLocation))}</td><td>${Number(line.totalHours || 0).toFixed(2)}</td><td>${esc(line.reason || work.reason || '')}</td></tr>`,
+        `<tr><td>${esc(line.overtimeDate)}</td><td>${esc(line.startTime)} – ${esc(line.endTime)}</td><td>${esc(String(line.dayType))}</td><td>${esc(locationLabel(line.workLocation, line.workLocationOther))}</td><td>${Number(line.totalHours || 0).toFixed(2)}</td><td>${esc(line.reason || work.reason || '')}</td></tr>`,
     )
     .join('')
   return printHtml(`<!doctype html><html><head><meta charset="utf-8"/><title>${esc(work.requestNo)}</title>
@@ -472,6 +481,7 @@ export function OvertimeWorkRequest() {
           endTime: line.endTime,
           dayType: line.dayType,
           workLocation: line.workLocation || row.workLocation || 'office',
+          ...(line.workLocationOther ? { workLocationOther: line.workLocationOther } : {}),
           reason: line.reason,
         })),
       ),
@@ -543,6 +553,9 @@ export function OvertimeWorkRequest() {
     }
     if (!draft.dayType) return { problem: 'Choose the overtime category.' }
     if (!draft.workLocation) return { problem: 'Choose the work location.' }
+    if (draft.workLocation === 'others' && !draft.workLocationOther.trim()) {
+      return { problem: 'Specify the work location when Others is selected.' }
+    }
     if (!draft.startTime) return { problem: 'Enter the start time.' }
     if (!draft.endTime) return { problem: 'Enter the end time.' }
     if (splitOvertimeHours(draft.startTime, draft.endTime, 'working').totalHours <= 0) {
@@ -575,6 +588,9 @@ export function OvertimeWorkRequest() {
       endTime: draft.endTime,
       dayType: draft.dayType as OvertimeDayType,
       workLocation: draft.workLocation as OvertimeWorkLocation,
+      ...(draft.workLocation === 'others'
+        ? { workLocationOther: draft.workLocationOther.trim().slice(0, 100) }
+        : {}),
       reason: reason.trim() || draft.reason.trim(),
     }))
     return { lines: sortLines([...others, ...added]) }
@@ -864,7 +880,7 @@ export function OvertimeWorkRequest() {
                   </span>
                   <span className="inline-flex items-center gap-1 text-slate-600">
                     <MapPin className="h-3.5 w-3.5 shrink-0" />
-                    {locationLabel(line.workLocation)}
+                    {locationLabel(line.workLocation, line.workLocationOther)}
                   </span>
                   <span className="tabular-nums text-slate-600">{line.totalHours}h</span>
                   <span className="truncate text-slate-500" title={line.reason}>
@@ -980,7 +996,7 @@ export function OvertimeWorkRequest() {
                         </span>
                         <span className="inline-flex items-center gap-1 text-slate-600">
                           <MapPin className="h-3.5 w-3.5" />
-                          {locationLabel(group.line.workLocation)}
+                          {locationLabel(group.line.workLocation, group.line.workLocationOther)}
                         </span>
                         <span className="tabular-nums text-slate-700">
                           {group.dates.length > 1
@@ -1146,10 +1162,26 @@ export function OvertimeWorkRequest() {
                           setEntry((current) => ({
                             ...current,
                             workLocation: event.target.value as OvertimeWorkLocation,
+                            workLocationOther:
+                              event.target.value === 'others' ? current.workLocationOther : '',
                           }))
                         }
                       />
                     </div>
+                    {entry.workLocation === 'others' ? (
+                      <div className="space-y-1.5 md:col-span-2">
+                        <Label htmlFor="otw-location-other">Specify work location *</Label>
+                        <Input
+                          id="otw-location-other"
+                          maxLength={100}
+                          value={entry.workLocationOther}
+                          placeholder="Describe the work location"
+                          onChange={(event) =>
+                            setEntry((current) => ({ ...current, workLocationOther: event.target.value }))
+                          }
+                        />
+                      </div>
+                    ) : null}
                     <div className="space-y-1.5">
                       <Label htmlFor="otw-start">Start Time *</Label>
                       <ClockTimePicker

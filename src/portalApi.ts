@@ -192,6 +192,11 @@ import {
   saveAdvanceSettlementExpense,
   type OutstandingAdvance,
 } from './advanceSettlement.js'
+import {
+  getPolicyAcknowledgment,
+  POLICY_ACKNOWLEDGMENT_COMMITMENTS,
+  submitPolicyAcknowledgment,
+} from './policyAcknowledgment.js'
 import { createOnce, createOnceKey } from './createOnce.js'
 import {
   decideOtPaymentApproval,
@@ -729,7 +734,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v401 — 1.0.3.562 (Advance Request: several Advance Types with an amount each, no new advance with 4 not settled, settle within 7 days of the activity end with overdue warnings in the bell; includes 545 to 561; for BC 1.0.3.667)'
+export const PORTAL_API_BUILD = 'v403 — 1.0.3.564 (Login: remove Business Central link; Bio: show empty mandatory fields for HR verification; includes 545 to 563; for BC 1.0.3.668)'
 
 interface LookupSpec {
   service: string
@@ -4906,6 +4911,12 @@ function contentDispositionFileName(fileName: string) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`
 }
 
+function contentDispositionInline(fileName: string) {
+  const cleaned = fileName.replace(/[\r\n"\\/]/g, '_').trim() || 'hr-document'
+  const ascii = cleaned.replace(/[^\x20-\x7E]/g, '_')
+  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`
+}
+
 export function buildPortalApiRouter() {
   const router = Router()
 
@@ -7636,6 +7647,17 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  /** BC 1.0.3.668 — active Jobs for Advance Request "project related" picker (any signed-in employee). */
+  router.get(
+    '/advance/projects',
+    safe(async (_req, res) => {
+      const result = await callSoapMethod('PortalLprProjects', {})
+      const projects = parseSoapJson(result.returnValue).projects
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ projects: Array.isArray(projects) ? projects : [] })
+    }),
+  )
+
   /** BC 1.0.3.652 — ESSP Staff Salary Advance: employee facts and policy limits for the form and its checks. */
   router.get(
     '/salary-advance/context',
@@ -8675,29 +8697,96 @@ export function buildPortalApiRouter() {
     }),
   )
 
+  async function sendHrPolicyDocumentBytes(
+    req: Request,
+    res: Response,
+    disposition: 'attachment' | 'inline',
+  ) {
+    const authUser = user(req)
+    const document = (await listHrPolicyDocuments(authUserCanManageHrPolicies(authUser))).find(
+      (row) => row.id === req.params.id,
+    )
+    if (!document) throw portalError('Document was not found or is not published', 404)
+    const result = document.attachmentId
+      ? await callSoapMethod('GetDocumentAttachment', {
+          docNo: document.id,
+          attachmentID: document.attachmentId,
+          tableID: HR_POLICY_TABLE_ID,
+        })
+      : await callSoapMethod('FnGetDocumentAttachmentBase64', {
+          docNo: document.id,
+          tableID: HR_POLICY_TABLE_ID,
+        })
+    if (!result.returnValue) throw portalError('Document attachment was not found', 404)
+    const bytes = Buffer.from(result.returnValue, 'base64')
+    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream')
+    res.setHeader(
+      'Content-Disposition',
+      disposition === 'inline'
+        ? contentDispositionInline(document.fileName)
+        : contentDispositionFileName(document.fileName),
+    )
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.send(bytes)
+  }
+
+  // Static paths before /documents/:id/* so "acknowledgment" is never treated as a document id.
+  router.get(
+    '/documents/acknowledgment',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const current = await getPolicyAcknowledgment(authUser.employeeNo)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({
+        commitments: POLICY_ACKNOWLEDGMENT_COMMITMENTS,
+        status: current.status,
+        acknowledgedAt: current.record?.acknowledgedAt ?? '',
+      })
+    }),
+  )
+
+  router.post(
+    '/documents/acknowledgment',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>
+      const raw = (body.commitments && typeof body.commitments === 'object' ? body.commitments : body) as Record<
+        string,
+        unknown
+      >
+      try {
+        const saved = await submitPolicyAcknowledgment({
+          employeeNo: authUser.employeeNo,
+          userId: authUser.userID,
+          commitments: {
+            readUnderstood: raw.readUnderstood === true,
+            comply: raw.comply === true,
+            contactHr: raw.contactHr === true,
+          },
+        })
+        res.json({
+          commitments: POLICY_ACKNOWLEDGMENT_COMMITMENTS,
+          status: saved.status,
+          acknowledgedAt: saved.record?.acknowledgedAt ?? '',
+        })
+      } catch (error) {
+        throw portalError(error instanceof Error ? error.message : 'Acknowledgment could not be saved.', 422)
+      }
+    }),
+  )
+
   router.get(
     '/documents/:id/download',
     safe(async (req, res) => {
-      const authUser = user(req)
-      const document = (await listHrPolicyDocuments(authUserCanManageHrPolicies(authUser)))
-        .find((row) => row.id === req.params.id)
-      if (!document) throw portalError('Document was not found or is not published', 404)
-      const result = document.attachmentId
-        ? await callSoapMethod('GetDocumentAttachment', {
-            docNo: document.id,
-            attachmentID: document.attachmentId,
-            tableID: HR_POLICY_TABLE_ID,
-          })
-        : await callSoapMethod('FnGetDocumentAttachmentBase64', {
-            docNo: document.id,
-            tableID: HR_POLICY_TABLE_ID,
-          })
-      if (!result.returnValue) throw portalError('Document attachment was not found', 404)
-      const bytes = Buffer.from(result.returnValue, 'base64')
-      res.setHeader('Content-Type', document.mimeType)
-      res.setHeader('Content-Disposition', contentDispositionFileName(document.fileName))
-      res.setHeader('X-Content-Type-Options', 'nosniff')
-      res.send(bytes)
+      await sendHrPolicyDocumentBytes(req, res, 'attachment')
+    }),
+  )
+
+  /** Read in the browser without forcing a download (client: View policies). */
+  router.get(
+    '/documents/:id/view',
+    safe(async (req, res) => {
+      await sendHrPolicyDocumentBytes(req, res, 'inline')
     }),
   )
 
