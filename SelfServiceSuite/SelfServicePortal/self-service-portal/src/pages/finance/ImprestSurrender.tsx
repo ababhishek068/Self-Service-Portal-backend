@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, HandCoins, Info, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
 import { AdvanceOutstandingNotice } from '@/components/finance/AdvanceOutstandingNotice'
@@ -12,8 +12,7 @@ import { listModuleRequests } from '@/api/endpoints/requestEndpoint'
 import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
-import { useConfirm } from '@/components/feedback/ConfirmProvider'
-import { useConfirmAdvanceReceipt } from '@/hooks/useConfirmAdvanceReceipt'
+import { AdvanceReceiptConfirm } from '@/components/finance/AdvanceReceiptConfirm'
 import type { PortalRequest } from '@/types/erp.types'
 
 const module = { module: 'imprestSurrender', entity: 'selfServiceImprestSurrenders' } as const
@@ -124,8 +123,6 @@ function Prerequisite({
   withReceipt,
   receiptAfterApproval,
   awaitingReceipt,
-  onConfirmReceipt,
-  confirming,
 }: {
   available: number
   loading: boolean
@@ -134,10 +131,8 @@ function Prerequisite({
   withReceipt: boolean
   /** BC 1.0.3.662: receipt is confirmed right after approval, before Finance's payment is in BC. */
   receiptAfterApproval: boolean
+  /** BC 1.0.3.653+: advances whose payment the requester still has to confirm (PortalAdvanceConfirmReceipt). */
   awaitingReceipt: string[]
-  /** BC 1.0.3.653+: confirm the payment of a paid advance was received (PortalAdvanceConfirmReceipt). */
-  onConfirmReceipt: (advanceNo: string) => void
-  confirming: string | null
 }) {
   const state: PrerequisiteState = selectedSettleable ? 'met' : 'open'
   return (
@@ -176,24 +171,17 @@ function Prerequisite({
               ? `Confirm you received the money for ${awaitingReceipt.length === 1 ? 'this approved advance' : 'these approved advances'} once Finance has paid you; then ${awaitingReceipt.length === 1 ? 'it' : 'they'} can be settled here.`
               : `Finance has paid ${awaitingReceipt.length === 1 ? 'this advance' : 'these advances'}: confirm you received the money, then the advance can be settled here.`}
           </p>
-          <ul className="mt-2 space-y-1.5">
+          <ul className="mt-2 space-y-2">
             {awaitingReceipt.map((advanceNo) => (
-              <li key={advanceNo} className="flex flex-wrap items-center gap-2">
+              <li key={advanceNo} className="space-y-1">
                 <Link
                   to={`/finance/advance-request?open=${encodeURIComponent(`imprest-${advanceNo}`)}`}
                   className="font-semibold text-amber-950 underline-offset-2 hover:underline"
                 >
                   {advanceNo}
                 </Link>
-                <button
-                  type="button"
-                  disabled={confirming === advanceNo}
-                  onClick={() => onConfirmReceipt(advanceNo)}
-                  className="inline-flex items-center gap-1 rounded-full bg-[var(--portal-navy)] px-2.5 py-1 font-semibold text-white hover:bg-[var(--portal-navy-dark)] disabled:opacity-60"
-                >
-                  <HandCoins className="h-3.5 w-3.5" />
-                  {confirming === advanceNo ? 'Confirming…' : 'Confirm payment received'}
-                </button>
+                {/* Client Pending issues (20 Nov 2026): the same mandatory check box as on the Advance Request. */}
+                <AdvanceReceiptConfirm advanceNo={advanceNo} compact />
               </li>
             ))}
           </ul>
@@ -227,17 +215,6 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 export function ImprestSurrender() {
   const receipts = useLookupOptions('posted-receipts')
-  const confirm = useConfirm()
-  const receiptConfirmation = useConfirmAdvanceReceipt()
-  const confirmReceipt = async (advanceNo: string) => {
-    const ok = await confirm({
-      title: `Confirm you received ${advanceNo}?`,
-      message:
-        'Confirm only once the money is in your hands or your bank account. The advance can then be settled here.',
-      confirmLabel: 'Yes, I received it',
-    })
-    if (ok) receiptConfirmation.mutate({ advanceNo })
-  }
   // BC 1.0.3.636: only approved + paid advances from PortalAdvanceSettlementContext.
   const settleableQuery = useQuery({
     queryKey: ['finance', 'advance-settlement', 'context', 'create'],
@@ -310,12 +287,12 @@ export function ImprestSurrender() {
     <MultiStepRequestPage
       title="Advance Settlement"
       headerLabel="New Advance Settlement"
-      description="Settle an advance received through an approved and paid Advance Payment Request: enter the actual expenses incurred, attach the supporting documents, and reconcile the advance against the actual expenses. The outcome is Fully Settled, Advance Surrender (return the unused balance) or Additional Reimbursement (claim the extra amount)."
+      description="Settle an advance received through an approved and paid Advance Payment Request. Choose Option 1 (Full Settlement with Receipt: one expense amount with its receipt, directly to Finance) or Option 2 (Partial Settlement: an amount with receipt and one without, approved by the First Line Manager, then FAD). The total settlement must equal the advance amount."
       processBanner={(request) => <AdvanceSettlementProcessBanner request={request} />}
       showProcessBannerOnList={false}
       submitButtonLabel="Submit for Processing"
       submitConfirmTitle="Submit the settlement for processing?"
-      submitConfirmMessage="The settlement goes to Business Central for approval. The advance is closed only after Finance finalizes the reconciliation."
+      submitConfirmMessage="Option 1 (everything with a receipt) goes directly to Finance; Option 2 (part without a receipt) goes to the First Line Manager, then FAD. The advance is closed only after Finance finalizes the reconciliation."
       submitSuccessMessage="Settlement submitted for processing in Business Central"
       validateBeforeSubmit={(request) => settlementSubmitProblem(String(request.requestNo ?? ''))}
       requiresAttachmentBeforeSubmit
@@ -382,8 +359,6 @@ export function ImprestSurrender() {
             withReceipt={withReceipt}
             receiptAfterApproval={receiptAfterApproval}
             awaitingReceipt={awaitingReceipt}
-            onConfirmReceipt={(advanceNo) => void confirmReceipt(advanceNo)}
-            confirming={receiptConfirmation.isPending ? (receiptConfirmation.variables?.advanceNo ?? null) : null}
           />
           {advanceNo ? (
           <div>

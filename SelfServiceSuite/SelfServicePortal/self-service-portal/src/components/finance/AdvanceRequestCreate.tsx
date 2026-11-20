@@ -68,11 +68,14 @@ const TEXT_LIMIT = 250
 /** The meter's scale: thresholds at ETB 50,000 and 100,000 sit at one and two thirds. */
 const METER_MAX = 150_000
 
-/** Developer handover §4.1: Line Manager first, then the final approver by amount. */
+/**
+ * Developer handover §4.1: Line Manager first, then by amount. Client Pending issues (20 Nov 2026, BC 1.0.3.669):
+ * FAD approves every advance — alone below ETB 50,000, then COO (50,000–100,000) or CEO (above 100,000) as final.
+ */
 const APPROVAL_LIMITS = [
-  { key: 'fad', range: 'Below ETB 50,000', phrase: 'below ETB 50,000', approver: 'FAD', matches: (amount: number) => amount > 0 && amount < 50_000 },
-  { key: 'coo', range: 'ETB 50,000 – 100,000', phrase: 'ETB 50,000 – 100,000', approver: 'COO', matches: (amount: number) => amount >= 50_000 && amount <= 100_000 },
-  { key: 'ceo', range: 'Above ETB 100,000', phrase: 'above ETB 100,000', approver: 'CEO', matches: (amount: number) => amount > 100_000 },
+  { key: 'fad', range: 'Below ETB 50,000', phrase: 'below ETB 50,000', approver: 'FAD', chain: ['FAD'], matches: (amount: number) => amount > 0 && amount < 50_000 },
+  { key: 'coo', range: 'ETB 50,000 – 100,000', phrase: 'ETB 50,000 – 100,000', approver: 'FAD, then COO', chain: ['FAD', 'COO'], matches: (amount: number) => amount >= 50_000 && amount <= 100_000 },
+  { key: 'ceo', range: 'Above ETB 100,000', phrase: 'above ETB 100,000', approver: 'FAD, then CEO', chain: ['FAD', 'CEO'], matches: (amount: number) => amount > 100_000 },
 ] as const
 
 const SECTION_OF_FIELD: Record<string, string> = {
@@ -482,13 +485,19 @@ export function AdvanceRequestCreate({
 
   const expectedApprovers: TrackerStep[] = [
     { key: 'line-manager', heading: 'Line Manager', owner: 'Approves every request first', icon: UserCheck },
-    {
-      key: 'final-approver',
-      heading: finalLimit ? finalLimit.approver : 'FAD | COO | CEO',
-      owner: finalLimit ? `Final approver, ${finalLimit.phrase}` : 'Final approver by amount',
-      icon: Landmark,
-    },
+    ...(finalLimit
+      ? finalLimit.chain.map((role, index) => ({
+          key: `amount-${role.toLowerCase()}`,
+          heading: role,
+          owner: index === finalLimit.chain.length - 1 ? `Final approver, ${finalLimit.phrase}` : 'Approves every advance',
+          icon: Landmark,
+        }))
+      : [
+          { key: 'amount-fad', heading: 'FAD', owner: 'Approves every advance', icon: Landmark },
+          { key: 'amount-final', heading: 'COO | CEO', owner: 'Final approver from ETB 50,000', icon: Landmark },
+        ]),
   ]
+  const routeRoles: readonly string[] = finalLimit ? finalLimit.chain : ['FAD', 'Final approver']
 
   // The form's Advance Type is the first chosen type and, with several, its Requested Amount is their total — so the
   // schema's checks (a type, an amount above zero) hold for one type and for many.
@@ -644,7 +653,7 @@ export function AdvanceRequestCreate({
     onSuccess: (saved, { submit }) => {
       toast.success(
         submit
-          ? `${saved.requestNo} is with Business Central for approval: the Line Manager first, then ${finalLimit?.approver ?? 'the final approver'}.`
+          ? `${saved.requestNo} is with Business Central for approval: the Line Manager first, then ${finalLimit?.approver ?? 'FAD'}.`
           : editing
             ? `${saved.requestNo} is saved. It is not sent for approval until you submit it.`
             : `${saved.requestNo} is saved as a draft. It is not sent for approval until you submit it.`,
@@ -1494,7 +1503,7 @@ export function AdvanceRequestCreate({
               <div
                 className="mt-4"
                 role="img"
-                aria-label={finalLimit ? `${finalLimit.range}: the final approver is ${finalLimit.approver}` : 'No amount entered yet'}
+                aria-label={finalLimit ? `${finalLimit.range}: approved by ${finalLimit.approver}` : 'No amount entered yet'}
               >
                 <div className="adv-meter">
                   {APPROVAL_LIMITS.map((limit) => (
@@ -1510,12 +1519,16 @@ export function AdvanceRequestCreate({
                 </div>
               </div>
 
-              <ol className="adv-route mt-5" aria-label="Approval route">
+              <ol className={cn('adv-route mt-5', routeRoles.length > 1 && 'adv-route--five')} aria-label="Approval route">
                 {[
                   { key: 'essp', label: 'ESSP', icon: <Monitor className="h-4 w-4" /> },
                   { key: 'bc', label: 'Business Central', icon: <Building2 className="h-4 w-4" /> },
                   { key: 'lm', label: 'Line Manager', icon: <UserCheck className="h-4 w-4" /> },
-                  { key: 'final', label: finalLimit?.approver ?? 'Final approver', icon: <Landmark className="h-4 w-4" /> },
+                  ...routeRoles.map((role, index) => ({
+                    key: index === routeRoles.length - 1 ? 'final' : `role-${role}`,
+                    label: role,
+                    icon: <Landmark className="h-4 w-4" />,
+                  })),
                 ].map((node, index, all) => (
                   <li key={node.key} className="contents">
                     <span

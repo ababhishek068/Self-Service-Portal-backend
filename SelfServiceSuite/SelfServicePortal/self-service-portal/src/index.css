@@ -4230,6 +4230,10 @@ button.portal-band-chip--current:hover {
   gap: 0.35rem;
   text-align: center;
 }
+/* Client Pending issues (20 Nov 2026): Line Manager → FAD → COO/CEO makes five nodes; narrower so the links show. */
+.adv-route--five .adv-node {
+  width: 3.05rem;
+}
 .adv-node-dot {
   display: grid;
   place-items: center;

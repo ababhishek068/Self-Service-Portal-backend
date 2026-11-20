@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, CircleAlert, Clock, HandCoins, Loader2, Receipt } from 'lucide-react'
+import { CheckCircle2, Clock, HandCoins, Receipt } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useConfirmAdvanceReceipt } from '@/hooks/useConfirmAdvanceReceipt'
+import { AdvanceReceiptConfirm } from '@/components/finance/AdvanceReceiptConfirm'
 import type { PortalRequest } from '@/types/erp.types'
 import { advancePaid, fullySettled, receiptConfirmed } from '@/utils/advanceReceipt'
 import { formatCurrency, formatDateTime } from '@/utils/formatters'
@@ -23,11 +23,9 @@ export function AdvanceReceiptPanel({
   supportsReceipt: boolean
   receiptAfterApproval?: boolean
 }) {
-  const receipt = useConfirmAdvanceReceipt()
   const [remarks, setRemarks] = useState('')
-  // UAT 17 Nov 2026 ("clicking confirm does not happen any"): the confirmation is asked inside this panel (no pop-up
-  // dialog), progress and Business Central's answer are shown here, and the confirmed state shows at once.
-  const [asking, setAsking] = useState(false)
+  // Client Pending issues (20 Nov 2026): a mandatory "I confirm that I have received…" check box enables the button;
+  // one click records it in Business Central and the confirmed state shows at once (no second step or pop-up).
   const [confirmedNow, setConfirmedNow] = useState<string | null>(null)
   if (!supportsReceipt || !['Approved', 'Posted'].includes(request.status) || fullySettled(request)) return null
   const payload = request.payload ?? {}
@@ -79,18 +77,6 @@ export function AdvanceReceiptPanel({
     )
   }
 
-  const confirmNow = () =>
-    receipt.mutate(
-      { advanceNo: request.requestNo, remarks: remarks.trim() },
-      {
-        onSuccess: (result) => {
-          setAsking(false)
-          setConfirmedNow(String(result?.receiptConfirmedOn || new Date().toISOString()))
-        },
-      },
-    )
-  const failure = receipt.isError ? (receipt.error instanceof Error ? receipt.error.message : 'Business Central did not record the confirmation.') : ''
-
   return (
     <section
       className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950 shadow-sm"
@@ -113,57 +99,17 @@ export function AdvanceReceiptPanel({
               ? 'Advance Settlement is possible only after you confirm the payment was received.'
               : 'Finance pays the approved advance (cash, cheque or bank transfer). When the money reaches you, confirm it here; Advance Settlement opens after that.'}
           </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="mt-3 max-w-2xl space-y-2">
             <Input
               value={remarks}
               maxLength={250}
-              disabled={receipt.isPending}
               onChange={(event) => setRemarks(event.target.value)}
               placeholder="Remarks (optional), e.g. received by bank transfer"
-              className="bg-white sm:max-w-md"
+              aria-label="Remarks (optional)"
+              className="bg-white"
             />
-            {!asking ? (
-              <Button
-                type="button"
-                onClick={() => {
-                  receipt.reset()
-                  setAsking(true)
-                }}
-              >
-                <HandCoins className="mr-2 h-4 w-4" />
-                Confirm Payment Received
-              </Button>
-            ) : null}
+            <AdvanceReceiptConfirm advanceNo={request.requestNo} remarks={remarks} onConfirmed={setConfirmedNow} />
           </div>
-          {asking ? (
-            <div className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-3" role="group" aria-label="Confirm the payment was received">
-              <p className="font-medium text-amber-950">
-                Did you receive {amount > 0 ? formatCurrency(amount) : 'the advance'} for {request.requestNo}?
-              </p>
-              <p className="mt-0.5 text-xs text-amber-900">
-                {paid
-                  ? 'Confirm only once the money is in your hands or your bank account.'
-                  : 'Confirm only once Finance has paid you and the money is in your hands or your bank account.'}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button type="button" disabled={receipt.isPending} onClick={confirmNow}>
-                  {receipt.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                  {receipt.isPending ? 'Confirming with Business Central…' : 'Yes, I received it'}
-                </Button>
-                <Button type="button" variant="outline" disabled={receipt.isPending} onClick={() => setAsking(false)}>
-                  Not yet
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          {failure ? (
-            <p className="mt-3 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
-              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                <span className="font-semibold">Not confirmed.</span> {failure}
-              </span>
-            </p>
-          ) : null}
         </div>
       </div>
     </section>

@@ -189,6 +189,7 @@ import {
   deleteAdvanceSettlementExpense,
   getAdvanceSettlementContext,
   saveAdvanceSettlementDetails,
+  saveAdvanceSettlementOption,
   saveAdvanceSettlementExpense,
   type OutstandingAdvance,
 } from './advanceSettlement.js'
@@ -734,7 +735,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v403 — 1.0.3.564 (Login: remove Business Central link; Bio: show empty mandatory fields for HR verification; includes 545 to 563; for BC 1.0.3.668)'
+export const PORTAL_API_BUILD = 'v404 — 1.0.3.565 (Advance: FAD before COO and CEO; Settlement Option 1 and Option 2 with total equal to the advance; Confirm Payment Received check box; password policy; includes 545 to 564; for BC 1.0.3.669)'
 
 interface LookupSpec {
   service: string
@@ -7698,6 +7699,30 @@ export function buildPortalApiRouter() {
       if (surrenderNo) await requireOwnedPortalRequest(`imprestSurrender-${surrenderNo}`, authUser)
       res.setHeader('Cache-Control', 'private, no-store')
       res.json(await getAdvanceSettlementContext(employeeNo, surrenderNo))
+    }),
+  )
+
+  /** BC 1.0.3.669 — Option 1 / Option 2 settlement with its amounts and receipt no. (total = the advance). */
+  router.post(
+    '/advance-settlement/option',
+    safe(async (req, res) => {
+      const surrenderNo = String(req.body?.surrenderNo ?? '').trim()
+      if (!surrenderNo) throw portalError('Settlement document number is required.', 422)
+      await requireOwnedPortalRequest(`imprestSurrender-${surrenderNo}`, user(req))
+      const settlementOption = String(req.body?.settlementOption ?? '') === 'option2' ? 'option2' : 'option1'
+      const receiptedAmount = Number(req.body?.receiptedAmount)
+      const nonReceiptedAmount = settlementOption === 'option2' ? Number(req.body?.nonReceiptedAmount) : 0
+      const receiptNo = String(req.body?.receiptNo ?? '').trim()
+      if (!(Number.isFinite(receiptedAmount) && receiptedAmount > 0)) {
+        throw portalError('Enter the expense amount with receipt.', 422)
+      }
+      if (settlementOption === 'option2' && !(Number.isFinite(nonReceiptedAmount) && nonReceiptedAmount > 0)) {
+        throw portalError('Option 2: enter the expense amount without receipt, or choose Option 1.', 422)
+      }
+      if (!receiptNo) throw portalError('Enter the receipt / reference number.', 422)
+      res.json(
+        await saveAdvanceSettlementOption({ surrenderNo, settlementOption, receiptedAmount, nonReceiptedAmount, receiptNo }),
+      )
     }),
   )
 

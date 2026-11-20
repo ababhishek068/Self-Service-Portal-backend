@@ -3,9 +3,11 @@ import { Loader2 } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { resetForgottenPassword } from '@/api/endpoints/auth'
 import { AuthShell, AuthSwitchLink } from '@/components/auth/AuthShell'
+import { PasswordPolicyChecklist } from '@/components/auth/PasswordPolicyChecklist'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { passwordPolicyError } from '@/utils/passwordPolicy'
 
 export function ResetPassword() {
   const { staffNo: routeStaffNo = '' } = useParams()
@@ -26,8 +28,9 @@ export function ResetPassword() {
       setError('Reset token is required.')
       return
     }
-    if (password.length < 8) {
-      setError('New password must be at least 8 characters.')
+    const policyError = passwordPolicyError(password)
+    if (policyError) {
+      setError(policyError)
       return
     }
     if (password !== passwordConfirmation) {
@@ -83,7 +86,7 @@ export function ResetPassword() {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="password">New Password (at least 8 characters)</Label>
+          <Label htmlFor="password">New Password</Label>
           <Input
             id="password"
             type="password"
@@ -92,8 +95,10 @@ export function ResetPassword() {
             autoComplete="new-password"
             minLength={8}
             disabled={submitting}
+            aria-describedby="password-policy"
             required
           />
+          <PasswordPolicyChecklist id="password-policy" password={password} />
         </div>
 
         <div className="space-y-1.5">

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { changePasswordRequest } from '@/api/endpoints/auth'
+import { PasswordPolicyChecklist } from '@/components/auth/PasswordPolicyChecklist'
 import { PageWrapper } from '@/components/layout/PageWrapper'
 import { PortalFormCard } from '@/components/shared/PortalFormCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { passwordPolicyError } from '@/utils/passwordPolicy'
 
 export function ChangePassword() {
   const [current, setCurrent] = useState('')
@@ -19,8 +21,9 @@ export function ChangePassword() {
     setError(null)
     setSuccess(null)
 
-    if (next.length < 8) {
-      setError('New password must be at least 8 characters.')
+    const policyError = passwordPolicyError(next)
+    if (policyError) {
+      setError(policyError)
       return
     }
     if (next !== confirm) {
@@ -77,8 +80,10 @@ export function ChangePassword() {
               value={next}
               onChange={(event) => setNext(event.target.value)}
               disabled={submitting}
+              aria-describedby="new-password-policy"
               required
             />
+            <PasswordPolicyChecklist id="new-password-policy" password={next} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="confirm">Confirm Password:</Label>

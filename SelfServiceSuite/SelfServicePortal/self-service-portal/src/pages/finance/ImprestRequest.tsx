@@ -28,10 +28,14 @@ import type { AfterApproval } from '@/components/shared/RequestProgress'
 const today = formatISO(new Date(), { representation: 'date' })
 const module = { module: 'imprest', entity: 'selfServiceImprestRequests' } as const
 
-/** BC 1.0.3.646 Advance Request route (ABH spec section 4), shown until BC has the approval entries. */
+/**
+ * Advance Request route, shown until BC has the approval entries. BC 1.0.3.669 (client Pending issues, 20 Nov 2026):
+ * FAD approves every advance; from ETB 50,000 COO (up to 100,000) or CEO (above) approves after FAD.
+ */
 const ADVANCE_APPROVERS: TrackerStep[] = [
   { key: 'line-manager', heading: 'Line Manager', owner: 'Workflow User Group', icon: UserCheck },
-  { key: 'final-approver', heading: 'FAD | COO | CEO', owner: 'By amount: <50k · 50–100k · >100k ETB', icon: Landmark },
+  { key: 'amount-fad', heading: 'FAD', owner: 'Every advance', icon: Landmark },
+  { key: 'final-approver', heading: 'COO | CEO', owner: 'From ETB 50,000: COO up to 100k, CEO above', icon: Landmark },
 ]
 
 /**
@@ -155,7 +159,7 @@ export function ImprestRequest() {
     <MultiStepRequestPage
       title="Advance Request"
       headerLabel="New Advance Request"
-      description={`Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, choose one or more advance types with the amount of each (ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval (BC 1.0.3.646): Line Manager first (Workflow User Group), then FAD (below ETB 50,000), COO (ETB 50,000–100,000), or CEO (above ETB 100,000). After Finance pays the advance, confirm here that you received the money (Confirm Payment Received); only then can it be settled via Advance Settlement, within ${settleDays} days of the activity end date. An employee with ${outstanding?.maxUnsettled || 4} advances not settled cannot request a new one until one is settled.`}
+      description={`Request field activity advance funds (Phase 1–2 of the Advance & Settlement cycle). Fill in the purpose, justification and activity dates, choose one or more advance types with the amount of each (ETB), attach supporting documents (activity plan, assignment approval, budget support or other evidence), then submit for approval. Approval: Line Manager first (Workflow User Group), then FAD; FAD is the final approver below ETB 50,000, COO approves after FAD for ETB 50,000–100,000, and CEO approves after FAD above ETB 100,000. After Finance pays the advance, confirm here that you received the money (Confirm Payment Received); only then can it be settled via Advance Settlement, within ${settleDays} days of the activity end date. An employee with ${outstanding?.maxUnsettled || 4} advances not settled cannot request a new one until one is settled.`}
       module={module}
       queryKey={['finance', 'advance-request']}
       listRequests={() => listModuleRequests(module)}
@@ -201,10 +205,10 @@ export function ImprestRequest() {
         <div className="space-y-3">
           <FinanceEmployeeOrgBanner showEmployeeNoAndStatus />
           <div className="rounded-xl border border-teal-200 bg-teal-50/80 px-3 py-2.5 text-sm text-teal-950">
-            <p className="font-semibold">Finance approval (Business Central 1.0.3.646)</p>
+            <p className="font-semibold">Finance approval (Business Central)</p>
             <p className="mt-1 text-xs leading-5 text-teal-900/90">
-              ESSP submission → Business Central → Line Manager approval → final approver by amount (ETB):
-              below 50,000 → FAD; 50,000–100,000 → COO; above 100,000 → CEO. The Line Manager is the
+              ESSP submission → Business Central → Line Manager approval → FAD → by amount (ETB): below 50,000 FAD
+              is final; 50,000–100,000 FAD, then COO; above 100,000 FAD, then CEO. The Line Manager is the
               Workflow User Group on the Advance Request workflow. Activity / Purpose of Assignment is one list for
               every requester — choose Other (Specify) when needed. Settlement is only via Advance Settlement.
             </p>

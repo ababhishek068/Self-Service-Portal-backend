@@ -4,6 +4,7 @@ import { randomBytes, randomInt } from 'node:crypto'
 import { callSoapMethod, fetchOData, fetchODataFromBase, odataString, type ODataRecord } from './bcClient.js'
 import { config } from './config.js'
 import { signAuthToken, verifyAuthToken } from './jwt.js'
+import { passwordPolicyProblem } from './passwordPolicy.js'
 
 /**
  * Session shape used by the React Self-Service Portal.
@@ -918,8 +919,10 @@ export function buildAuthRouter() {
         res.status(422).json({ message: 'Staff No. and reset token are required' })
         return
       }
-      if (password.length < 8) {
-        res.status(422).json({ message: 'New password must be at least 8 characters' })
+      // Client password policy (20 Nov 2026): 8+ characters with upper, lower, number and special character.
+      const policyProblem = passwordPolicyProblem(password)
+      if (policyProblem) {
+        res.status(422).json({ message: policyProblem })
         return
       }
       if (password !== passwordConfirmation) {
@@ -1003,8 +1006,13 @@ export function buildAuthRouter() {
       const currentPassword =
         typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : ''
       const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : ''
-      if (!currentPassword || newPassword.length < 8) {
-        res.status(422).json({ message: 'Current password and an 8-character new password are required' })
+      if (!currentPassword) {
+        res.status(422).json({ message: 'Current password is required' })
+        return
+      }
+      const policyProblem = passwordPolicyProblem(newPassword)
+      if (policyProblem) {
+        res.status(422).json({ message: policyProblem })
         return
       }
 

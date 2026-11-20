@@ -28,10 +28,13 @@ import {
   SETTLEMENT_QUERY_ROOT,
   SETTLEMENT_SCENARIOS,
   rememberSettlementPanel,
+  sameAmount,
   settlementMissing,
+  settlementOptionTotal,
   useAdvanceSettlementContext,
 } from '@/hooks/useAdvanceSettlementContext'
 import { SettlementExpenseEntries } from '@/components/finance/SettlementExpenseEntries'
+import { SettlementOptionForm } from '@/components/finance/SettlementOptionForm'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { cn } from '@/lib/utils'
 import { formatAmount, formatDate } from '@/utils/formatters'
@@ -78,6 +81,9 @@ export function AdvanceSettlementSections({
 
   // BC 1.0.3.663: one card per expense (client redesign); older BC keeps the line table and Add an expense entry.
   const entryCards = Boolean(ctx?.supportsExpenseEntries)
+  // BC 1.0.3.669 (client Pending issues, 20 Nov 2026): Option 1 / Option 2 settlement replaces the expense cards.
+  const options = Boolean(ctx?.supportsSettlementOptions)
+  const section2Done = options ? Boolean(ctx && (ctx.receiptedAmount ?? 0) > 0) && documents > 0 : expensesEntered && documents > 0
 
   return (
     <div className="space-y-5">
@@ -96,12 +102,14 @@ export function AdvanceSettlementSections({
         title="Expense Entries and Supporting Documents"
         hint={
           ctx
-            ? `${formatAmount(ctx.totalActualExpenses)} entered · ${documents} ${documents === 1 ? 'document' : 'documents'}`
+            ? `${formatAmount(ctx.totalAdvanceReceived)} advance · ${documents} ${documents === 1 ? 'document' : 'documents'}`
             : 'What you spent, with the receipts'
         }
-        done={expensesEntered && documents > 0}
+        done={section2Done}
       >
-        {entryCards && ctx ? (
+        {options && ctx ? (
+          <SettlementOptionForm key={`${ctx.surrenderNo}:${request.status}`} request={request} ctx={ctx} editable={isDraft} />
+        ) : entryCards && ctx ? (
           <SettlementExpenseEntries request={request} ctx={ctx} editable={isDraft} />
         ) : (
           <>
@@ -123,9 +131,13 @@ export function AdvanceSettlementSections({
         number={3}
         title="Expense Reconciliation and Settlement"
         hint="Calculated automatically from the advance summary and the expense entries"
-        done={Boolean(ctx) && settlementMissing(ctx!).length === 0}
+        done={Boolean(ctx) && settlementMissing(ctx!, options ? documents : undefined).length === 0}
       >
-        {ctx ? <SettlementSummary key={`${ctx.surrenderNo}:${request.status}`} ctx={ctx} editable={isDraft} /> : contextState}
+        {ctx ? (
+          <SettlementSummary key={`${ctx.surrenderNo}:${request.status}`} ctx={ctx} editable={isDraft} documents={documents} />
+        ) : (
+          contextState
+        )}
       </SettlementSection>
     </div>
   )
@@ -223,7 +235,8 @@ function SectionTitle({ children }: { children: ReactNode }) {
   return <h4 className="text-sm font-semibold text-[var(--portal-navy)]">{children}</h4>
 }
 
-function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; editable: boolean }) {
+function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlementContext; editable: boolean; documents: number }) {
+  const options = Boolean(ctx.supportsSettlementOptions)
   const toast = useToast()
   const queryClient = useQueryClient()
   const [refundDate, setRefundDate] = useState(ctx.refundDate)
@@ -231,7 +244,7 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
   const [justification, setJustification] = useState(ctx.additionalClaimJustification)
   const [declared, setDeclared] = useState(ctx.declarationConfirmed)
   const outcome = (ctx.settlementOutcome || '') as Outcome | ''
-  const missing = settlementMissing(ctx)
+  const missing = settlementMissing(ctx, options ? documents : undefined)
   const dirty =
     editable &&
     (declared !== ctx.declarationConfirmed ||
@@ -270,116 +283,120 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
   return (
     <div className="space-y-4">
       {/* Financial Reconciliation (client sample): advance, expenses, remaining balance */}
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
-        <SectionTitle>Financial Reconciliation</SectionTitle>
-        <dl className="mt-3 space-y-2 text-sm">
-          <div className="flex items-center justify-between gap-3">
-            <dt className="text-slate-600">Total Advance Received</dt>
-            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <dt className="text-slate-600">Total Actual Expenses</dt>
-            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalActualExpenses)}</dd>
-          </div>
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
-            <dt className="text-base font-semibold text-slate-900">Remaining Balance</dt>
-            <dd
-              className={cn(
-                'text-2xl font-bold tabular-nums',
-                outcome === 'additionalClaim' ? 'text-amber-700' : outcome === 'refundDue' ? 'text-emerald-700' : 'text-slate-900',
-              )}
-            >
-              {ctx.settlementBalance < 0 ? '− ' : ''}
-              {formatAmount(Math.abs(ctx.settlementBalance))}
-            </dd>
-          </div>
-        </dl>
-
-        <div className="mt-5">
-          <SectionTitle>Settlement Outcome</SectionTitle>
-          {outcome ? (
-            <div
-              className={cn(
-                'mt-2 rounded-lg px-3 py-3',
-                outcome === 'additionalClaim' ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-emerald-50 ring-1 ring-emerald-200',
-              )}
-            >
-              <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <CheckCircle2 className={cn('h-4 w-4', outcome === 'additionalClaim' ? 'text-amber-700' : 'text-emerald-700')} />
-                {SETTLEMENT_SCENARIOS[outcome].title}
-              </p>
-              <p className="mt-1 text-sm text-slate-700">{outcomeSentence(outcome, ctx)}</p>
+      {options ? (
+        <OptionReconciliation ctx={ctx} />
+      ) : (
+        <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+          <SectionTitle>Financial Reconciliation</SectionTitle>
+          <dl className="mt-3 space-y-2 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-slate-600">Total Advance Received</dt>
+              <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
             </div>
-          ) : (
-            <p className="mt-2 text-sm text-slate-500">Business Central has not calculated the outcome yet.</p>
-          )}
-          {outcome === 'refundDue' ? (
-            <OutcomeDetails title="Additional information — Advance Surrender">
-            <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || ctx.settlementBalance)} />
-            {editable ? (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="asp-refund-date">Repayment date *</Label>
-                  <Input id="asp-refund-date" type="date" value={refundDate} onChange={(event) => setRefundDate(event.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="asp-refund-ref">Payment receipt / reference *</Label>
-                  <Input
-                    id="asp-refund-ref"
-                    value={refundReference}
-                    maxLength={100}
-                    placeholder="Receipt or bank reference no."
-                    onChange={(event) => setRefundReference(event.target.value)}
-                  />
-                </div>
-              </>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-slate-600">Total Actual Expenses</dt>
+              <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalActualExpenses)}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+              <dt className="text-base font-semibold text-slate-900">Remaining Balance</dt>
+              <dd
+                className={cn(
+                  'text-2xl font-bold tabular-nums',
+                  outcome === 'additionalClaim' ? 'text-amber-700' : outcome === 'refundDue' ? 'text-emerald-700' : 'text-slate-900',
+                )}
+              >
+                {ctx.settlementBalance < 0 ? '− ' : ''}
+                {formatAmount(Math.abs(ctx.settlementBalance))}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="mt-5">
+            <SectionTitle>Settlement Outcome</SectionTitle>
+            {outcome ? (
+              <div
+                className={cn(
+                  'mt-2 rounded-lg px-3 py-3',
+                  outcome === 'additionalClaim' ? 'bg-amber-50 ring-1 ring-amber-200' : 'bg-emerald-50 ring-1 ring-emerald-200',
+                )}
+              >
+                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <CheckCircle2 className={cn('h-4 w-4', outcome === 'additionalClaim' ? 'text-amber-700' : 'text-emerald-700')} />
+                  {SETTLEMENT_SCENARIOS[outcome].title}
+                </p>
+                <p className="mt-1 text-sm text-slate-700">{outcomeSentence(outcome, ctx)}</p>
+              </div>
             ) : (
-              <>
-                <ReadOnlyAmount label="Repayment date" value={ctx.refundDate ? formatDate(ctx.refundDate) : '—'} />
-                <ReadOnlyAmount label="Payment receipt / reference" value={ctx.refundPaymentReference || '—'} />
-              </>
+              <p className="mt-2 text-sm text-slate-500">Business Central has not calculated the outcome yet.</p>
             )}
-            <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Supporting Documents (section 2).</p>
-          </OutcomeDetails>
-        ) : null}
-
-          {outcome === 'additionalClaim' ? (
-            <OutcomeDetails title="Additional information — Additional Reimbursement">
-            <ReadOnlyAmount label="Additional amount claimed" value={formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} />
-            <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="asp-claim">Justification for exceeding the advance {editable ? '*' : ''}</Label>
+            {outcome === 'refundDue' ? (
+              <OutcomeDetails title="Additional information — Advance Surrender">
+              <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || ctx.settlementBalance)} />
               {editable ? (
-                <Textarea id="asp-claim" rows={3} maxLength={250} value={justification} onChange={(event) => setJustification(event.target.value)} />
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="asp-refund-date">Repayment date *</Label>
+                    <Input id="asp-refund-date" type="date" value={refundDate} onChange={(event) => setRefundDate(event.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="asp-refund-ref">Payment receipt / reference *</Label>
+                    <Input
+                      id="asp-refund-ref"
+                      value={refundReference}
+                      maxLength={100}
+                      placeholder="Receipt or bank reference no."
+                      onChange={(event) => setRefundReference(event.target.value)}
+                    />
+                  </div>
+                </>
               ) : (
-                <p className="whitespace-pre-wrap text-sm text-slate-900">{ctx.additionalClaimJustification || '—'}</p>
+                <>
+                  <ReadOnlyAmount label="Repayment date" value={ctx.refundDate ? formatDate(ctx.refundDate) : '—'} />
+                  <ReadOnlyAmount label="Payment receipt / reference" value={ctx.refundPaymentReference || '—'} />
+                </>
               )}
-            </div>
-            <p className="text-xs text-slate-500 md:col-span-3">
-              Attach the supporting documents for the extra expenses under Supporting Documents (section 2).
-            </p>
-          </OutcomeDetails>
-        ) : null}
-        </div>
+              <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Supporting Documents (section 2).</p>
+            </OutcomeDetails>
+          ) : null}
 
-        <div className="mt-5">
-          <SectionTitle>Settlement Options</SectionTitle>
-          <ul className="mt-2 space-y-1 text-sm">
-            {(Object.keys(SETTLEMENT_SCENARIOS) as Outcome[]).map((key) => {
-              const active = key === outcome
-              const Icon = key === 'fullySettled' ? BadgeCheck : key === 'refundDue' ? HandCoins : Wallet
-              return (
-                <li key={key} aria-current={active ? 'true' : undefined} className={cn('flex items-center gap-2', active ? 'font-semibold text-slate-900' : 'text-slate-600')}>
-                  <Icon className={cn('h-4 w-4', active ? 'text-teal-700' : 'text-slate-400')} />
-                  {SETTLEMENT_SCENARIOS[key].title}
-                  <span className="text-xs font-normal text-slate-500">· {SETTLEMENT_SCENARIOS[key].rule}</span>
-                  {active ? <span className="rounded-full bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">This settlement</span> : null}
-                </li>
-              )
-            })}
-          </ul>
-          <p className="mt-2 text-xs text-slate-500">The system determines the outcome from the reconciliation balance.</p>
-        </div>
-      </section>
+            {outcome === 'additionalClaim' ? (
+              <OutcomeDetails title="Additional information — Additional Reimbursement">
+              <ReadOnlyAmount label="Additional amount claimed" value={formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} />
+              <div className="space-y-1.5 md:col-span-2">
+                <Label htmlFor="asp-claim">Justification for exceeding the advance {editable ? '*' : ''}</Label>
+                {editable ? (
+                  <Textarea id="asp-claim" rows={3} maxLength={250} value={justification} onChange={(event) => setJustification(event.target.value)} />
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm text-slate-900">{ctx.additionalClaimJustification || '—'}</p>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 md:col-span-3">
+                Attach the supporting documents for the extra expenses under Supporting Documents (section 2).
+              </p>
+            </OutcomeDetails>
+          ) : null}
+          </div>
+
+          <div className="mt-5">
+            <SectionTitle>Settlement Options</SectionTitle>
+            <ul className="mt-2 space-y-1 text-sm">
+              {(Object.keys(SETTLEMENT_SCENARIOS) as Outcome[]).map((key) => {
+                const active = key === outcome
+                const Icon = key === 'fullySettled' ? BadgeCheck : key === 'refundDue' ? HandCoins : Wallet
+                return (
+                  <li key={key} aria-current={active ? 'true' : undefined} className={cn('flex items-center gap-2', active ? 'font-semibold text-slate-900' : 'text-slate-600')}>
+                    <Icon className={cn('h-4 w-4', active ? 'text-teal-700' : 'text-slate-400')} />
+                    {SETTLEMENT_SCENARIOS[key].title}
+                    <span className="text-xs font-normal text-slate-500">· {SETTLEMENT_SCENARIOS[key].rule}</span>
+                    {active ? <span className="rounded-full bg-teal-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">This settlement</span> : null}
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="mt-2 text-xs text-slate-500">The system determines the outcome from the reconciliation balance.</p>
+          </div>
+        </section>
+      )}
 
       {/* Step 5: declaration, then Submit for Processing (below) */}
       <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
@@ -424,6 +441,57 @@ function SettlementSummary({ ctx, editable }: { ctx: AdvanceSettlementContext; e
         )}
       </section>
     </div>
+  )
+}
+
+/**
+ * BC 1.0.3.669: reconciliation of the settlement option — the total always equals the advance — and where the
+ * settlement goes: Option 1 directly to Finance, Option 2 to the First Line Manager, then FAD.
+ */
+function OptionReconciliation({ ctx }: { ctx: AdvanceSettlementContext }) {
+  const option = ctx.settlementOption ?? 'option1'
+  const receipted = ctx.receiptedAmount ?? 0
+  const nonReceipted = option === 'option2' ? ctx.nonReceiptedAmount ?? 0 : 0
+  const total = settlementOptionTotal(option, receipted, nonReceipted)
+  const saved = receipted > 0
+  const balance = Math.round((ctx.totalAdvanceReceived - total) * 100) / 100
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+      <SectionTitle>Financial Reconciliation</SectionTitle>
+      <dl className="mt-3 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-slate-600">Total Advance Received</dt>
+          <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-slate-600">Expenses with receipt</dt>
+          <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(receipted)}</dd>
+        </div>
+        {option === 'option2' ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-slate-600">Expenses without receipt</dt>
+            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(nonReceipted)}</dd>
+          </div>
+        ) : null}
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+          <dt className="text-base font-semibold text-slate-900">Remaining Balance</dt>
+          <dd className={cn('text-2xl font-bold tabular-nums', saved && sameAmount(balance, 0) ? 'text-emerald-700' : 'text-amber-700')}>
+            {saved ? formatAmount(Math.abs(balance)) : '—'}
+          </dd>
+        </div>
+      </dl>
+      <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+        <p className="text-sm font-semibold text-slate-900">
+          {option === 'option1' ? 'Option 1: Full Settlement with Receipt' : 'Option 2: Partial Settlement (With and Without Receipt)'}
+        </p>
+        <p className="mt-1 text-sm text-slate-700">
+          {option === 'option1'
+            ? 'After Submit for Processing the settlement goes directly to Finance.'
+            : 'After Submit for Processing the settlement is approved by the First Line Manager, then FAD, and then goes to Finance.'}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">The total settlement must equal the advance amount; submission is not possible otherwise.</p>
+      </div>
+    </section>
   )
 }
 

@@ -98,6 +98,8 @@ export type AdvanceSettlementContext = {
   receiptAfterApproval: boolean
   /** BC 1.0.3.663: expense entries can be changed and removed, with a receipt / reference no. */
   supportsExpenseEntries: boolean
+  /** BC 1.0.3.669: Option 1 (full with receipt) / Option 2 (with and without receipt) settlement. */
+  supportsSettlementOptions: boolean
   awaitingReceipt: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
@@ -113,6 +115,11 @@ export type AdvanceSettlementContext = {
   additionalClaimAmount: number
   additionalClaimJustification: string
   declarationConfirmed: boolean
+  /** BC 1.0.3.669 */
+  settlementOption: 'option1' | 'option2'
+  receiptedAmount: number
+  nonReceiptedAmount: number
+  settlementReceiptNo: string
   remarks: string
   purpose: string
   advance?: {
@@ -197,6 +204,7 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     supportsReceiptConfirmation: bool(raw.supportsReceiptConfirmation),
     receiptAfterApproval: bool(raw.receiptAfterApproval),
     supportsExpenseEntries: bool(raw.supportsExpenseEntries),
+    supportsSettlementOptions: bool(raw.supportsSettlementOptions),
     awaitingReceipt,
     surrenderNo: str(raw.surrenderNo),
     status: str(raw.status),
@@ -212,6 +220,10 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     additionalClaimAmount: num(raw.additionalClaimAmount),
     additionalClaimJustification: str(raw.additionalClaimJustification),
     declarationConfirmed: bool(raw.declarationConfirmed),
+    settlementOption: str(raw.settlementOption) === 'option2' ? 'option2' : 'option1',
+    receiptedAmount: num(raw.receiptedAmount),
+    nonReceiptedAmount: num(raw.nonReceiptedAmount),
+    settlementReceiptNo: str(raw.settlementReceiptNo),
     remarks: str(raw.remarks),
     purpose: str(raw.purpose),
     advance: advanceRaw
@@ -288,6 +300,38 @@ export async function saveAdvanceSettlementDetails(input: {
     settlementRemarks: input.settlementRemarks ?? '',
   })
   return parseAdvanceSettlementContext(result.returnValue)
+}
+
+/**
+ * BC 1.0.3.669 (client Pending issues, 20 Nov 2026): Option 1 Full Settlement with Receipt (one amount with its receipt)
+ * or Option 2 Partial Settlement (an amount with receipt plus one without). The total must equal the advance.
+ */
+export async function saveAdvanceSettlementOption(input: {
+  surrenderNo: string
+  settlementOption: 'option1' | 'option2'
+  receiptedAmount: number
+  nonReceiptedAmount: number
+  receiptNo: string
+}) {
+  try {
+    const result = await callSoapMethod('PortalAdvanceSettlementSaveOption', {
+      surrenderNo: input.surrenderNo,
+      settlementOption: input.settlementOption === 'option2' ? 1 : 0,
+      receiptedAmount: input.receiptedAmount,
+      nonReceiptedAmount: input.settlementOption === 'option2' ? input.nonReceiptedAmount : 0,
+      receiptNo: input.receiptNo.trim().slice(0, 50),
+    })
+    return parseAdvanceSettlementContext(result.returnValue)
+  } catch (error) {
+    const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
+    if (/Method '?PortalAdvanceSettlementSaveOption'? is invalid|PortalAdvanceSettlementSaveOption.*(not found|not published)/i.test(message)) {
+      throw Object.assign(
+        new Error('Settlement options need Business Central 1.0.3.669. Ask the BC administrator to publish it.'),
+        { status: 503 },
+      )
+    }
+    throw error
+  }
 }
 
 export async function addAdvanceSettlementExpense(input: {

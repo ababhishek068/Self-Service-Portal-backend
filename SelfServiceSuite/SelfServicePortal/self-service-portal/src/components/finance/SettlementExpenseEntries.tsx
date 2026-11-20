@@ -388,7 +388,7 @@ function ExpenseEntryCard({
 }
 
 /** The documents of one expense entry (or of the settlement), with an upload area while it is a draft. */
-function DocumentList({
+export function DocumentList({
   request,
   documents,
   pending = [],

@@ -34,9 +34,35 @@ export const SETTLEMENT_SCENARIOS = {
   },
 } as const
 
-/** What BC's RequestImprestSurrenderApproval still rejects (ABH Advance Settlement Mgt.ValidateForSubmit). */
-export function settlementMissing(ctx: AdvanceSettlementContext) {
+/** The settlement total of the chosen option: the amount with receipt plus, for Option 2, the amount without. */
+export function settlementOptionTotal(option: string, receipted: number, nonReceipted: number) {
+  return Math.round(((receipted || 0) + (option === 'option2' ? nonReceipted || 0 : 0)) * 100) / 100
+}
+
+export function sameAmount(left: number, right: number) {
+  return Math.abs((left || 0) - (right || 0)) < 0.005
+}
+
+/**
+ * What BC's RequestImprestSurrenderApproval still rejects (ABH Advance Settlement Mgt.ValidateForSubmit). With BC
+ * 1.0.3.669 settlement options: the saved option, its amounts equal to the advance, the receipt no. and a document.
+ */
+export function settlementMissing(ctx: AdvanceSettlementContext, documents?: number) {
   const missing: string[] = []
+  if (ctx.supportsSettlementOptions) {
+    const option = ctx.settlementOption ?? 'option1'
+    const receipted = ctx.receiptedAmount ?? 0
+    const nonReceipted = ctx.nonReceiptedAmount ?? 0
+    if (!(receipted > 0)) missing.push('the saved expense entry of the settlement option')
+    else if (option === 'option2' && !(nonReceipted > 0)) missing.push('the expense amount without receipt')
+    else if (!sameAmount(settlementOptionTotal(option, receipted, nonReceipted), ctx.totalAdvanceReceived)) {
+      missing.push('a settlement total equal to the advance amount')
+    }
+    if (!String(ctx.settlementReceiptNo ?? '').trim()) missing.push('the receipt / reference number')
+    if (documents !== undefined && documents < 1) missing.push('the receipt or supporting document')
+    if (!ctx.declarationConfirmed) missing.push('the employee declaration')
+    return missing
+  }
   if (!(ctx.totalActualExpenses > 0)) missing.push('at least one actual expense amount')
   if (ctx.settlementOutcome === 'refundDue') {
     if (!ctx.refundDate) missing.push('the repayment date')
@@ -54,12 +80,19 @@ export function settlementMissing(ctx: AdvanceSettlementContext) {
  * so Submit for Processing can stop before BC refuses it.
  */
 const panelState = new Map<string, { missing: string[]; dirty: boolean }>()
+/** BC 1.0.3.669: the settlement option form has changes not saved to Business Central yet. */
+const optionDirty = new Map<string, boolean>()
 
 export function rememberSettlementPanel(surrenderNo: string, state: { missing: string[]; dirty: boolean }) {
   panelState.set(surrenderNo, state)
 }
 
+export function rememberSettlementOptionDirty(surrenderNo: string, dirty: boolean) {
+  optionDirty.set(surrenderNo, dirty)
+}
+
 export function settlementSubmitProblem(surrenderNo: string) {
+  if (optionDirty.get(surrenderNo)) return 'Save the expense entry of the settlement option first (Save expense entry), then submit.'
   const state = panelState.get(surrenderNo)
   if (!state) return null
   if (state.dirty) return 'Save the settlement details first (Save settlement details), then submit.'

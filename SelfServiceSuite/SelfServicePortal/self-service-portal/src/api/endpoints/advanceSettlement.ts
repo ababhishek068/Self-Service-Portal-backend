@@ -24,6 +24,9 @@ export type AwaitingReceiptAdvance = {
   paid?: boolean
 }
 
+/** Client Pending issues (20 Nov 2026): Option 1 Full Settlement with Receipt, Option 2 Partial (with and without receipt). */
+export type SettlementOption = 'option1' | 'option2'
+
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
@@ -35,6 +38,8 @@ export type AdvanceSettlementContext = {
   receiptAfterApproval?: boolean
   /** BC 1.0.3.663: expense entries can be changed and removed, with a receipt / reference no. */
   supportsExpenseEntries?: boolean
+  /** BC 1.0.3.669: Option 1 (full with receipt) / Option 2 (with and without receipt) settlement. */
+  supportsSettlementOptions?: boolean
   awaitingReceipt?: AwaitingReceiptAdvance[]
   surrenderNo: string
   status: string
@@ -50,6 +55,11 @@ export type AdvanceSettlementContext = {
   additionalClaimAmount: number
   additionalClaimJustification: string
   declarationConfirmed: boolean
+  /** BC 1.0.3.669 */
+  settlementOption?: SettlementOption
+  receiptedAmount?: number
+  nonReceiptedAmount?: number
+  settlementReceiptNo?: string
   remarks: string
   purpose: string
   advance?: {
@@ -97,6 +107,18 @@ export async function saveAdvanceSettlementDetails(payload: {
 }) {
   requireAuthApiUrl()
   return authPost<AdvanceSettlementContext>('/api/advance-settlement/save', payload)
+}
+
+/** BC 1.0.3.669: save the settlement option, its amounts (total = the advance) and the receipt / reference no. */
+export async function saveAdvanceSettlementOption(payload: {
+  surrenderNo: string
+  settlementOption: SettlementOption
+  receiptedAmount: number
+  nonReceiptedAmount: number
+  receiptNo: string
+}) {
+  requireAuthApiUrl()
+  return authPost<AdvanceSettlementContext>('/api/advance-settlement/option', payload)
 }
 
 export async function addAdvanceSettlementExpense(payload: {
