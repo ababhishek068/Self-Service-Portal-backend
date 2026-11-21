@@ -487,19 +487,42 @@ async function lookupClaimTypeGlAccount(claimType: string) {
       $top: 1,
     })) as ODataRecord[] | null
     const row = Array.isArray(rows) ? rows[0] : undefined
-    if (!row) return ''
-    for (const key of [
-      'GLAccount',
-      'GL_Account',
-      'G_L_Account',
-      'GLAccountNo',
-      'GL_Account_No',
-      'G_L_Account_No',
-      'AccountNo',
-      'Account_No',
-    ]) {
-      const value = String(row[key] ?? '').trim()
-      if (value) return value
+    if (row) {
+      for (const key of [
+        'GLAccount',
+        'GL_Account',
+        'G_L_Account',
+        'GLAccountNo',
+        'GL_Account_No',
+        'G_L_Account_No',
+        'AccountNo',
+        'Account_No',
+      ]) {
+        const value = String(row[key] ?? '').trim()
+        if (value) return value
+      }
+    }
+    // Fallback: look for general Claim / Other Receipts & Payment Types
+    const fallbackRows = (await fetchOData('QyReceiptsPayments', {
+      $filter: `Type eq 'Claim'`,
+      $top: 5,
+    })) as ODataRecord[] | null
+    if (Array.isArray(fallbackRows)) {
+      for (const fRow of fallbackRows) {
+        for (const key of [
+          'GLAccount',
+          'GL_Account',
+          'G_L_Account',
+          'GLAccountNo',
+          'GL_Account_No',
+          'G_L_Account_No',
+          'AccountNo',
+          'Account_No',
+        ]) {
+          const value = String(fRow[key] ?? '').trim()
+          if (value) return value
+        }
+      }
     }
   } catch {
     // BC lookup unavailable — frontend should have sent accountNo
@@ -521,6 +544,7 @@ export function passengerTypeCode(value: unknown) {
 
 function claimTypeCode(value: unknown) {
   const raw = String(value ?? '').trim()
+  if (raw === 'MED_EXP') return 'MED_EXP'
   return raw.toLowerCase().includes('medical') ? 'MEDICAL' : raw
 }
 

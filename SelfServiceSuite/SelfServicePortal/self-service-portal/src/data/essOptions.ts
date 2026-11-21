@@ -6,9 +6,20 @@
 
 /** Staff Claims only — Medical Claim is a separate Finance menu. */
 export const staffClaimTypeOptions = [
-  { label: 'Accommodation Claim', value: 'ACC' },
-  { label: 'Travel Claim', value: 'TRAVEL' },
-  { label: 'Other Claim', value: 'OTHER' },
+  { label: 'Travel & Transportation', value: 'TRAVEL' },
+  { label: 'Accommodation', value: 'ACC' },
+  { label: 'Meals & Subsistence', value: 'MEALS' },
+  { label: 'Communication', value: 'COMM' },
+  { label: 'Medical Expenses', value: 'MED_EXP' },
+  { label: 'Office Supplies & Stationery', value: 'OFFICE_SUPPLIES' },
+  { label: 'Training & Development', value: 'TRAINING' },
+  { label: 'Fuel & Vehicle Expenses', value: 'FUEL' },
+  { label: 'Representation & Entertainment', value: 'ENTERTAINMENT' },
+  { label: 'Meeting & Conference Expenses', value: 'MEETING' },
+  { label: 'Professional Membership & Licenses', value: 'PROF_LICENSE' },
+  { label: 'Relocation Expenses', value: 'RELOCATION' },
+  { label: 'Visa & Passport Expenses', value: 'VISA_PASSPORT' },
+  { label: 'Courier & Postage', value: 'COURIER' },
 ]
 
 export const medicalClaimTypeSeed = [{ label: 'Medical Claim', value: 'MEDICAL' }]

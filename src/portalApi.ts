@@ -735,7 +735,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v405 — 1.0.3.566 (ESSP access for project employees via BC action; Process Overtime Payment and Advance Settlement direct actions; for BC 1.0.3.670)'
+export const PORTAL_API_BUILD = 'v406 — 1.0.3.567 (Compact Expense Claim interface matching manager mockup; 14 claim types; per-line and general receipt attachments; for BC 1.0.3.670)'
 
 interface LookupSpec {
   service: string
@@ -978,6 +978,16 @@ const LOOKUP_SPECS: Record<string, LookupSpec> = {
     valueKeys: ['Code'],
     labelKeys: ['Name', 'Code'],
     filter: 'UseAsInTransit eq true',
+  },
+  customers: {
+    service: 'QyCustomer',
+    valueKeys: ['No'],
+    labelKeys: ['Name', 'No'],
+    fallback: {
+      service: 'Customer',
+      valueKeys: ['No'],
+      labelKeys: ['Name', 'No'],
+    },
   },
   items: {
     service: 'QyItem',
