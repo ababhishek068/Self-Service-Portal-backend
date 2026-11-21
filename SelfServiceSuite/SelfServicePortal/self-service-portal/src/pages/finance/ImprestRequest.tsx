@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { formatISO } from 'date-fns'
 import { useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Banknote, HandCoins, Landmark, Receipt, UserCheck } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { FinanceEmployeeOrgBanner } from '@/components/finance/FinanceEmployeeOrgBanner'
@@ -118,6 +119,7 @@ function imprestListSearchExtra(row: PortalRequest): Array<string | number | und
 }
 
 export function ImprestRequest() {
+  const navigate = useNavigate()
   const { employee } = useAuth()
   const imprestTypes = useLookupOptions('imprest-types', imprestTypeOptions)
   // Activity / Purpose of Assignment: the same list for every requester (BC 1.0.3.661; client 16 Nov 2026).
@@ -198,6 +200,20 @@ export function ImprestRequest() {
           <AdvanceReceiptPanel request={request} supportsReceipt={supportsReceipt} receiptAfterApproval={receiptAfterApproval} />
         </div>
       )}
+      extraDetailActions={[
+        {
+          id: 'process-advance-settlement',
+          label: 'Process Advance Settlement',
+          visibleWhen: (request) =>
+            ['Approved', 'Posted'].includes(request.status) &&
+            !fullySettled(request) &&
+            receiptConfirmed(request),
+          run: async (requestId) => {
+            navigate('/finance/advance-settlement')
+            return requestId
+          },
+        },
+      ]}
       submitButtonLabel="Submit for Approval"
       attachmentCategoryOptions={advanceAttachmentCategories}
       attachmentCategoryHint="Attach the activity plan, assignment approval, budget support or other evidence. Several files can be attached; describe each one."

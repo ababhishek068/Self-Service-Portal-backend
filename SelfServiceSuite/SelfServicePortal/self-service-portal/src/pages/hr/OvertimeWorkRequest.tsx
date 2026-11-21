@@ -671,6 +671,20 @@ export function OvertimeWorkRequest() {
     },
     { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.sentBack ? 'Returned' : row.status} /> },
     { id: 'updated', header: 'Updated', cell: (row) => formatDateTime(row.submittedAt || row.createdAt) },
+    {
+      id: 'action',
+      header: 'Action',
+      cell: (row) =>
+        row.canRequestPayment ? (
+          <Link
+            className="inline-flex items-center rounded-lg bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-teal-800"
+            to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(row.requestNo)}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Process Overtime Payment
+          </Link>
+        ) : null,
+    },
   ]
 
   const headerActions =
@@ -831,7 +845,7 @@ export function OvertimeWorkRequest() {
                 className="ml-auto inline-flex items-center rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-800"
                 to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(shown.requestNo)}`}
               >
-                Request overtime payment
+                Process Overtime Payment
               </Link>
             ) : null}
             {shown.status === 'Approved' && shown.linkedPaymentRequestNo ? (
@@ -846,7 +860,7 @@ export function OvertimeWorkRequest() {
           </div>
           {shown.canRequestPayment ? (
             <div className="rounded-xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm text-teal-950">
-              Work authorized — submit an Overtime Payment Request after the work is done. Hours are added to the
+              Work authorized — click &quot;Process Overtime Payment&quot; above once the work is completed. Hours are added to the
               overtime sheet only after Stage 2 approval.
             </div>
           ) : null}

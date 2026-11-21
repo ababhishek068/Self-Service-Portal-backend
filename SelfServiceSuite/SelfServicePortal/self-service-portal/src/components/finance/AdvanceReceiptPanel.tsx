@@ -70,7 +70,7 @@ export function AdvanceReceiptPanel({
         <Button asChild size="sm">
           <Link to="/finance/advance-settlement">
             <Receipt className="mr-2 h-4 w-4" />
-            Go to Advance Settlement
+            Process Advance Settlement
           </Link>
         </Button>
       </section>
