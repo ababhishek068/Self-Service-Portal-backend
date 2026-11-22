@@ -1,7 +1,7 @@
 ﻿# ABH — check BC + portal versions (run in Business Central Administration Shell)
 param(
     [string]$ServerInstance = 'BC240',
-    [string]$PortalUrl = 'http://146.161.102.7:4000'
+    [string]$PortalUrl = 'http://127.0.0.1:5000'
 )
 
 Write-Host "`n=== BC SERVER ===" -ForegroundColor Cyan

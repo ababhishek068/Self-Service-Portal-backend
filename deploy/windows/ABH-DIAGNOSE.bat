@@ -49,20 +49,28 @@ if exist "%BACKEND%\.env" (
 )
 echo. >> "%REPORT%"
 
-echo [4/6] Port 4000 listener
-echo --- PORT 4000 --- >> "%REPORT%"
-netstat -ano ^| findstr ":4000" >> "%REPORT%" 2>&1
-if errorlevel 1 echo NOTHING LISTENING ON 4000 - portal is not running >> "%REPORT%"
+set "PORT=4000"
+if exist "%BACKEND%\.env" (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (`findstr /b /i "PORT=" "%BACKEND%\.env"`) do set "PORT=%%B"
+)
+set "PORT=%PORT:'=%"
+set "PORT=%PORT:"=%"
+if "%PORT%"=="" set "PORT=4000"
+
+echo [4/6] Port %PORT% listener
+echo --- PORT %PORT% --- >> "%REPORT%"
+netstat -ano ^| findstr ":%PORT%" >> "%REPORT%" 2>&1
+if errorlevel 1 echo NOTHING LISTENING ON %PORT% - portal is not running >> "%REPORT%"
 echo. >> "%REPORT%"
 
 echo [5/6] Portal build stamp
 echo --- /api/portal-build --- >> "%REPORT%"
-powershell -NoProfile -Command "try { (Invoke-WebRequest -Uri 'http://127.0.0.1:4000/api/portal-build' -UseBasicParsing -TimeoutSec 15).Content } catch { 'REQUEST FAILED: ' + $_.Exception.Message }" >> "%REPORT%" 2>&1
+powershell -NoProfile -Command "try { (Invoke-WebRequest -Uri 'http://127.0.0.1:%PORT%/api/portal-build' -UseBasicParsing -TimeoutSec 15).Content } catch { 'REQUEST FAILED: ' + $_.Exception.Message }" >> "%REPORT%" 2>&1
 echo. >> "%REPORT%"
 
 echo [6/6] Business Central connectivity ^(this can take up to a minute^)
 echo --- /api/bc-diagnostics --- >> "%REPORT%"
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:4000/api/bc-diagnostics' -UseBasicParsing -TimeoutSec 180; $r.Content | ConvertFrom-Json | ConvertTo-Json -Depth 8 } catch { 'REQUEST FAILED: ' + $_.Exception.Message }" >> "%REPORT%" 2>&1
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:%PORT%/api/bc-diagnostics' -UseBasicParsing -TimeoutSec 180; $r.Content | ConvertFrom-Json | ConvertTo-Json -Depth 8 } catch { 'REQUEST FAILED: ' + $_.Exception.Message }" >> "%REPORT%" 2>&1
 echo. >> "%REPORT%"
 
 echo --- BC INTEGRATION LOG (last 60 lines) --- >> "%REPORT%"
