@@ -7,10 +7,12 @@ REM writes it to a single report file on the Desktop. Send that file back.
 
 set "REPORT=%USERPROFILE%\Desktop\ABH-PORTAL-DIAGNOSTIC.txt"
 set "ROOT=%~dp0"
-if exist "%ROOT%..\..\SelfServiceSuite\SelfServiceBackend" (
+if exist "%ROOT%SelfServiceSuite\SelfServiceBackend" (
+  set "BACKEND=%ROOT%SelfServiceSuite\SelfServiceBackend"
+) else if exist "%ROOT%..\..\SelfServiceSuite\SelfServiceBackend" (
   set "BACKEND=%ROOT%..\..\SelfServiceSuite\SelfServiceBackend"
 ) else (
-  set "BACKEND=%ROOT%..\..\.."
+  set "BACKEND=%ROOT%"
 )
 
 echo ABH PORTAL DIAGNOSTIC > "%REPORT%"
