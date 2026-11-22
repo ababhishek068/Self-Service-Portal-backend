@@ -280,7 +280,7 @@ function waitingFor(row: OvertimeRequestRow) {
 function Section({ icon, title, children, className }: { icon: ReactNode; title: string; children: ReactNode; className?: string }) {
   return (
     <section className={cn('overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm', className)}>
-      <header className="flex items-center gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
+      <header className="portal-section-header flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white">
         {icon}
         {title}
       </header>

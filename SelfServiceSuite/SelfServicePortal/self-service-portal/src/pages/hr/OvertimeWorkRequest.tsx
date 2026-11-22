@@ -677,7 +677,7 @@ export function OvertimeWorkRequest() {
       cell: (row) =>
         row.canRequestPayment ? (
           <Link
-            className="inline-flex items-center rounded-lg bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-teal-800"
+            className="portal-btn-gradient inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold text-white shadow-xs"
             to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(row.requestNo)}`}
             onClick={(e) => e.stopPropagation()}
           >
@@ -842,7 +842,7 @@ export function OvertimeWorkRequest() {
             </span>
             {shown.canRequestPayment ? (
               <Link
-                className="ml-auto inline-flex items-center rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-800"
+                className="portal-btn-gradient ml-auto inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white shadow-xs"
                 to={`/hr/overtime-request?otRequestNo=${encodeURIComponent(shown.requestNo)}`}
               >
                 Process Overtime Payment
@@ -940,7 +940,7 @@ export function OvertimeWorkRequest() {
           ) : null}
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <header className="flex items-center gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
+            <header className="portal-section-header flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white">
               <User className="h-4 w-4" /> Employee Information
             </header>
             <div className="grid gap-3 p-4 md:grid-cols-2">
@@ -953,7 +953,7 @@ export function OvertimeWorkRequest() {
           </section>
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <header className="flex items-center justify-between gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
+            <header className="portal-section-header flex items-center justify-between gap-2 px-4 py-2.5 text-sm font-semibold text-white">
               <span className="inline-flex items-center gap-2">
                 <CalendarDays className="h-4 w-4" /> Overtime Details (period + daily dates)
               </span>
@@ -1275,7 +1275,7 @@ export function OvertimeWorkRequest() {
           </section>
 
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <header className="flex items-center gap-2 bg-[var(--portal-navy)] px-4 py-2.5 text-sm font-semibold text-white">
+            <header className="portal-section-header flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white">
               <ClipboardList className="h-4 w-4" /> Justification
             </header>
             <div className="grid gap-4 p-4">

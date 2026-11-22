@@ -635,8 +635,8 @@ function ExpenseClaimWorkspace() {
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-[#147a82] text-white flex items-center justify-center shadow-xs">
-                <Coins className="h-5 w-5" />
+              <div className="w-8 h-8 rounded-lg portal-section-header text-white flex items-center justify-center shadow-xs">
+                <Coins className="h-5 w-5 text-white" />
               </div>
               <h1 className="text-xl font-bold text-slate-900">Expense Claims</h1>
             </div>
@@ -651,7 +651,7 @@ function ExpenseClaimWorkspace() {
               setHeaderDate(todayIsoDate())
               setIsCreatingHeader(true)
             }}
-            className="bg-[#147a82] hover:bg-[#0f6067] text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
+            className="portal-btn-gradient text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
           >
             <Plus className="h-4 w-4" />
             + New Expense Claim
@@ -662,7 +662,7 @@ function ExpenseClaimWorkspace() {
         {isCreatingHeader && (
           <div className="bg-slate-50 border border-teal-200 rounded-lg p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-              <h2 className="text-sm font-semibold text-[#147a82] flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-[var(--portal-navy-dark)] flex items-center gap-2">
                 <PlusCircle className="h-4 w-4" />
                 Start New Expense Claim
               </h2>
@@ -707,7 +707,7 @@ function ExpenseClaimWorkspace() {
                 size="sm"
                 disabled={busyAction === 'create-header'}
                 onClick={handleCreateNewClaim}
-                className="bg-[#147a82] hover:bg-[#0f6067] text-white text-sm! font-medium"
+                className="portal-btn-gradient text-white text-sm! font-medium"
               >
                 {busyAction === 'create-header' ? 'Creating…' : 'Create & Add Lines'}
               </Button>
@@ -725,7 +725,7 @@ function ExpenseClaimWorkspace() {
                 onClick={() => setStatusFilter(status)}
                 className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                   statusFilter === status
-                    ? 'bg-[#147a82] text-white'
+                    ? 'portal-section-header text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
@@ -843,10 +843,10 @@ function ExpenseClaimWorkspace() {
             Back
           </Button>
 
-          {/* Teal Title Banner */}
-          <div className="bg-[#147a82] text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 shadow-xs">
-            <Coins className="h-5 w-5" />
-            <span className="text-base tracking-wide">Expense Claim</span>
+          {/* Title Banner */}
+          <div className="portal-section-header text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 shadow-xs">
+            <Coins className="h-5 w-5 text-white" />
+            <span className="text-base tracking-wide text-white">Expense Claim</span>
           </div>
         </div>
 
@@ -873,7 +873,7 @@ function ExpenseClaimWorkspace() {
               type="button"
               disabled={busyAction === 'submit'}
               onClick={handleRequestApproval}
-              className="bg-[#147a82] hover:bg-[#0f6067] text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
+              className="portal-btn-gradient text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
             >
               <Send className="h-4 w-4" />
               {busyAction === 'submit' ? 'Submitting…' : 'Request Approval'}
@@ -910,7 +910,7 @@ function ExpenseClaimWorkspace() {
       {isEditingHeader && (
         <div className="bg-slate-50 border border-teal-200 rounded-lg p-5 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-            <h3 className="text-sm font-semibold text-[#147a82] flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-[var(--portal-navy-dark)] flex items-center gap-2">
               <Pencil className="h-4 w-4" />
               Edit Expense Claim Details
             </h3>
@@ -954,7 +954,7 @@ function ExpenseClaimWorkspace() {
               size="sm"
               disabled={busyAction === 'edit-header'}
               onClick={handleSaveHeaderEdit}
-              className="bg-[#147a82] hover:bg-[#0f6067] text-white text-sm! font-medium"
+              className="portal-btn-gradient text-white text-sm! font-medium"
             >
               Save Changes
             </Button>
@@ -1031,8 +1031,8 @@ function ExpenseClaimWorkspace() {
       {isEditable && (
         <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden">
           {/* Header Banner */}
-          <div className="bg-[#147a82] text-white px-4 py-2.5 font-medium flex items-center gap-2">
-            <PlusCircle className="h-5 w-5" />
+          <div className="portal-section-header text-white px-4 py-2.5 font-semibold flex items-center gap-2">
+            <PlusCircle className="h-5 w-5 text-white" />
             <span>{editingLineIndex !== null ? `Edit Claim Line #${editingLineIndex + 1}` : '+ Add Claim Line'}</span>
           </div>
 
@@ -1192,7 +1192,7 @@ function ExpenseClaimWorkspace() {
                 type="button"
                 disabled={isSavingLine}
                 onClick={handleSaveLine}
-                className="bg-[#147a82] hover:bg-[#0f6067] text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
+                className="portal-btn-gradient text-white text-sm! font-medium px-4 py-2 rounded-md shadow-xs flex items-center gap-1.5"
               >
                 <PlusCircle className="h-4 w-4" />
                 {isSavingLine
@@ -1217,8 +1217,8 @@ function ExpenseClaimWorkspace() {
       {/* 5. Claim Lines Table */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
         {/* Table Banner */}
-        <div className="bg-[#147a82] text-white px-4 py-2.5 font-medium flex items-center gap-2">
-          <List className="h-5 w-5" />
+        <div className="portal-section-header text-white px-4 py-2.5 font-semibold flex items-center gap-2">
+          <List className="h-5 w-5 text-white" />
           <span>Claim Lines</span>
         </div>
 
@@ -1314,7 +1314,7 @@ function ExpenseClaimWorkspace() {
         <div className="bg-slate-50/90 border-t border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between text-sm">
           <div className="flex items-center gap-2">
             <span className="text-slate-600 font-medium">Total Claim Amount</span>
-            <span className="text-base font-bold text-[#147a82] tabular-nums">
+            <span className="text-base font-bold text-[var(--portal-navy-dark)] tabular-nums">
               {formatCurrency(totalClaimAmount)}
             </span>
           </div>
@@ -1332,8 +1332,8 @@ function ExpenseClaimWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: General Supporting Documents */}
         <div className="lg:col-span-8 bg-white border border-slate-200 rounded-lg overflow-hidden shadow-xs">
-          <div className="bg-[#147a82] text-white px-4 py-2.5 font-medium flex items-center gap-2">
-            <FileText className="h-5 w-5" />
+          <div className="portal-section-header text-white px-4 py-2.5 font-semibold flex items-center gap-2">
+            <FileText className="h-5 w-5 text-white" />
             <span>General Supporting Documents (Optional)</span>
           </div>
           <div className="p-4 space-y-4">

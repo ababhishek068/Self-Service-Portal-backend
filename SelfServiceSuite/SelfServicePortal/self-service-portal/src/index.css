@@ -3968,13 +3968,15 @@ button.portal-band-chip--current:hover {
 .adv-section.is-done {
   border-color: color-mix(in srgb, var(--portal-navy) 40%, var(--portal-card-border));
 }
+.portal-section-header,
+.portal-section-head,
 .adv-section-head {
   display: flex;
   align-items: center;
   gap: 0.7rem;
   padding: 0.75rem 1rem;
   color: #fff;
-  /* Fixed brand colours: the indigo token turns light in dark theme. */
+  /* Fixed brand colours: ABH signature navy-to-teal gradient. */
   background: linear-gradient(105deg, #26225b 0%, #1b4d78 58%, #047a80 100%);
 }
 .adv-step {
