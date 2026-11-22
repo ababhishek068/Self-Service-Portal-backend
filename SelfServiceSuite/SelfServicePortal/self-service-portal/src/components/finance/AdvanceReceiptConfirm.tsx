@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { CircleAlert, HandCoins, Loader2 } from 'lucide-react'
+import { CheckCircle2, CircleAlert, HandCoins, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useConfirmAdvanceReceipt } from '@/hooks/useConfirmAdvanceReceipt'
 import { cn } from '@/lib/utils'
@@ -34,7 +34,7 @@ export function AdvanceReceiptConfirm({
     : ''
 
   const confirmNow = () => {
-    if (!checked || receipt.isPending) return
+    if (!checked || receipt.isPending || receipt.isSuccess) return
     receipt.mutate(
       { advanceNo, remarks: remarks.trim() },
       { onSuccess: (result) => onConfirmed?.(String(result?.receiptConfirmedOn || new Date().toISOString())) },
@@ -51,8 +51,8 @@ export function AdvanceReceiptConfirm({
         <input
           id={checkboxId}
           type="checkbox"
-          checked={checked}
-          disabled={receipt.isPending}
+          checked={checked || receipt.isSuccess}
+          disabled={receipt.isPending || receipt.isSuccess}
           onChange={(event) => {
             setChecked(event.target.checked)
             if (receipt.isError) receipt.reset()
@@ -71,15 +71,40 @@ export function AdvanceReceiptConfirm({
       <Button
         type="button"
         size={compact ? 'sm' : 'default'}
-        className={cn('mt-2', compact ? 'text-xs!' : 'w-full text-sm!')}
-        disabled={!checked || receipt.isPending}
-        aria-disabled={!checked || receipt.isPending}
+        className={cn(
+          'mt-2',
+          compact ? 'text-xs!' : 'w-full text-sm!',
+          receipt.isSuccess && 'bg-emerald-600 text-white hover:bg-emerald-700',
+        )}
+        disabled={(!checked && !receipt.isSuccess) || receipt.isPending || receipt.isSuccess}
+        aria-disabled={(!checked && !receipt.isSuccess) || receipt.isPending || receipt.isSuccess}
         onClick={confirmNow}
-        title={checked ? undefined : 'Tick the confirmation box first'}
+        title={receipt.isSuccess ? 'Payment receipt already confirmed' : checked ? undefined : 'Tick the confirmation box first'}
       >
-        {receipt.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <HandCoins className="mr-2 h-4 w-4" />}
-        {receipt.isPending ? 'Confirming with Business Central…' : 'Confirm Payment Received'}
+        {receipt.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : receipt.isSuccess ? (
+          <CheckCircle2 className="mr-2 h-4 w-4" />
+        ) : (
+          <HandCoins className="mr-2 h-4 w-4" />
+        )}
+        {receipt.isPending
+          ? 'Confirming with Business Central…'
+          : receipt.isSuccess
+            ? 'Payment Receipt Confirmed'
+            : 'Confirm Payment Received'}
       </Button>
+      {receipt.isSuccess ? (
+        <p
+          className={cn(
+            'mt-2 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800',
+            compact ? 'text-xs' : 'text-sm',
+          )}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+          <span>Payment receipt confirmed for <strong>{advanceNo}</strong>. Ready to settle.</span>
+        </p>
+      ) : null}
       {failure ? (
         <p
           className={cn(

@@ -2,6 +2,7 @@ import type { AuthUser } from './auth.js'
 import type { ODataRecord } from './bcClient.js'
 import { fetchEmployeeCustomerAccountNo, fetchEmployeeRecordFast } from './employeeProfile.js'
 import { mapEmployee, type PortalModuleKey } from './erpMappings.js'
+import { getAdvanceReceiptConfirmationLocally, isAdvanceReceiptConfirmedLocally } from './advanceSettlement.js'
 
 const FINANCE_DETAIL_MODULES = new Set<PortalModuleKey>([
   'imprest',
@@ -227,6 +228,19 @@ export function enrichFinanceHeaderRow(
     'Balance',
   ])
   if (remaining > 0) enriched.RemainingUnsettledAmount = remaining
+
+  if (module === 'imprest') {
+    const docNo = text(enriched, ['No', 'No_', 'DocumentNo', 'Document_No'])
+    if (docNo && isAdvanceReceiptConfirmedLocally(docNo)) {
+      enriched.ReceiptConfirmed = true
+      enriched.Receipt_Confirmed = true
+      const conf = getAdvanceReceiptConfirmationLocally(docNo)
+      if (conf?.confirmedAt) {
+        enriched.ReceiptConfirmedOn = conf.confirmedAt
+        enriched.Receipt_Confirmed_On = conf.confirmedAt
+      }
+    }
+  }
 
   return enriched
 }

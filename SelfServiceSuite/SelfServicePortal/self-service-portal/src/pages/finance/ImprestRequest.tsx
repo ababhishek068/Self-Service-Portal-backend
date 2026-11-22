@@ -209,7 +209,8 @@ export function ImprestRequest() {
             !fullySettled(request) &&
             receiptConfirmed(request),
           run: async (requestId) => {
-            navigate('/finance/advance-settlement')
+            const no = requestId.replace(/^imprest-/, '')
+            navigate(`/finance/advance-settlement?new=1&advanceNo=${encodeURIComponent(no)}&imprest=${encodeURIComponent(no)}`)
             return requestId
           },
         },

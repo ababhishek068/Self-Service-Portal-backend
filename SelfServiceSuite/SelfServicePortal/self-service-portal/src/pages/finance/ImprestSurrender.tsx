@@ -1,6 +1,7 @@
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Info, XCircle } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { CheckCircle2, Circle, ExternalLink, Info, XCircle } from 'lucide-react'
 import { MultiStepRequestPage } from '@/components/shared/MultiStepRequestPage'
 import { AdvanceSettlementProcessBanner } from '@/components/finance/AdvanceSettlementProcessBanner'
 import { AdvanceOutstandingNotice } from '@/components/finance/AdvanceOutstandingNotice'
@@ -13,6 +14,8 @@ import { imprestSurrenderHeaderSchema } from '@/schemas/requestSchemas'
 import { formatCurrency, formatDate } from '@/utils/formatters'
 import { useLookupOptions } from '@/hooks/useLookupOptions'
 import { AdvanceReceiptConfirm } from '@/components/finance/AdvanceReceiptConfirm'
+import { isReceiptConfirmedLocally } from '@/utils/advanceReceipt'
+import { Button } from '@/components/ui/button'
 import type { PortalRequest } from '@/types/erp.types'
 
 const module = { module: 'imprestSurrender', entity: 'selfServiceImprestSurrenders' } as const
@@ -80,7 +83,9 @@ function isPaid(row: PortalRequest) {
 
 function receiptConfirmed(row: PortalRequest) {
   const payload = row.payload ?? {}
-  return truthyFlag(payload.ReceiptConfirmed ?? payload.Receipt_Confirmed)
+  if (truthyFlag(payload.ReceiptConfirmed ?? payload.Receipt_Confirmed)) return true
+  const no = String(row.requestNo ?? row.id?.replace(/^imprest-/, '') ?? '').trim()
+  return no ? isReceiptConfirmedLocally(no) : false
 }
 
 /** Why one of the employee's approved advances is not in BC's settleable list. */
@@ -123,6 +128,7 @@ function Prerequisite({
   withReceipt,
   receiptAfterApproval,
   awaitingReceipt,
+  onConfirmed,
 }: {
   available: number
   loading: boolean
@@ -133,6 +139,7 @@ function Prerequisite({
   receiptAfterApproval: boolean
   /** BC 1.0.3.653+: advances whose payment the requester still has to confirm (PortalAdvanceConfirmReceipt). */
   awaitingReceipt: string[]
+  onConfirmed?: (advanceNo: string, confirmedOn: string) => void
 }) {
   const state: PrerequisiteState = selectedSettleable ? 'met' : 'open'
   return (
@@ -181,7 +188,11 @@ function Prerequisite({
                   {advanceNo}
                 </Link>
                 {/* Client Pending issues (20 Nov 2026): the same mandatory check box as on the Advance Request. */}
-                <AdvanceReceiptConfirm advanceNo={advanceNo} compact />
+                <AdvanceReceiptConfirm
+                  advanceNo={advanceNo}
+                  compact
+                  onConfirmed={(confirmedOn) => onConfirmed?.(advanceNo, confirmedOn)}
+                />
               </li>
             ))}
           </ul>
@@ -215,6 +226,12 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 export function ImprestSurrender() {
   const receipts = useLookupOptions('posted-receipts')
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const targetImprest = (searchParams.get('imprest') || searchParams.get('advanceNo') || '').trim().toUpperCase()
+  const isNewParam = searchParams.get('new') === '1' || searchParams.get('create') === '1'
+  const [locallyConfirmed, setLocallyConfirmed] = useState<Set<string>>(() => new Set())
+
   // BC 1.0.3.636: only approved + paid advances from PortalAdvanceSettlementContext.
   const settleableQuery = useQuery({
     queryKey: ['finance', 'advance-settlement', 'context', 'create'],
@@ -225,56 +242,109 @@ export function ImprestSurrender() {
     queryKey: ['finance', 'imprest', 'for-surrender'],
     queryFn: () => listModuleRequests(imprestModule),
   })
+  // Existing settlements of the employee (to detect open drafts and link directly).
+  const settlementsQuery = useQuery({
+    queryKey: ['finance', 'advance-settlement'],
+    queryFn: () => listModuleRequests(module),
+  })
 
-  const settleable = settleableQuery.data?.settleableAdvances ?? []
-  // BC 1.0.3.667 (client, 17 Nov 2026): settle within 7 days of the activity end date; overdue ones are named.
+  // Detect whether an existing open settlement already exists for the target advance
+  const existingSettlement = useMemo(() => {
+    if (!targetImprest) return null
+    const rows = settlementsQuery.data ?? []
+    return rows.find((row) => {
+      const p = row.payload ?? {}
+      const issueNo = String(p.ImprestIssueDocNo ?? p.Imprest_Issue_Doc_No ?? p.ImprestNo ?? '').trim().toUpperCase()
+      return issueNo === targetImprest || String(row.title ?? '').toUpperCase().includes(targetImprest)
+    })
+  }, [settlementsQuery.data, targetImprest])
+
+  // If a settlement is already open for this advance and user did not force creating a new one, open it directly
+  useEffect(() => {
+    if (existingSettlement && !isNewParam) {
+      navigate(`/finance/advance-settlement?open=${encodeURIComponent(existingSettlement.id)}`, { replace: true })
+    }
+  }, [existingSettlement, isNewParam, navigate])
+
+  const bcSettleable = settleableQuery.data?.settleableAdvances ?? []
   const outstanding = settleableQuery.data?.outstanding ?? null
   const dueOf = (advanceNo: string) => {
     const row = outstanding?.advances.find((item) => item.advanceNo === advanceNo)
     return row ? settleByText(row) : ''
   }
-  const settleableNos = new Set(settleable.map((row) => row.advanceNo))
-  // The employee's approved advances BC will not settle yet (not paid, or a settlement is open).
-  const waiting = settleableQuery.isSuccess
-    ? (imprestQuery.data ?? []).filter((row) => isSurrenderableImprest(row) && !settleableNos.has(row.requestNo))
-    : []
-  // BC 1.0.3.653: paid advances wait for the requester's receipt confirmation before settlement; BC 1.0.3.662 asks
-  // for it right after approval (then Finance's payment in BC is the last step).
+
+  // Combine BC settleable advances with locally eligible ones (paid + confirmed)
+  const settleableMap = new Map<string, { advanceNo: string; amount: number; purpose: string; date?: string }>()
+  for (const s of bcSettleable) {
+    settleableMap.set(s.advanceNo.toUpperCase(), {
+      advanceNo: s.advanceNo,
+      amount: Number(s.amount ?? 0),
+      purpose: s.purpose || s.requestPurposeText || '',
+      date: s.date,
+    })
+  }
+  for (const row of imprestQuery.data ?? []) {
+    if (!isSurrenderableImprest(row) || !isPaid(row)) continue
+    const key = row.requestNo.toUpperCase()
+    const isConfirmed = receiptConfirmed(row) || locallyConfirmed.has(key)
+    if (isConfirmed && !settleableMap.has(key)) {
+      const payload = row.payload ?? {}
+      const amount = Number(firstValue(payload, ['TotalNetAmount', 'Total_Net_Amount', 'NetAmount']) ?? row.amount ?? 0)
+      const purpose = String(firstValue(payload, ['Purpose', 'Description']) ?? row.title ?? '')
+      settleableMap.set(key, {
+        advanceNo: row.requestNo,
+        amount,
+        purpose,
+        date: String(firstValue(payload, ['PaymentReleaseDate', 'DateRequired']) ?? ''),
+      })
+    }
+  }
+
+  const effectiveSettleable = Array.from(settleableMap.values())
+  const effectiveSettleableNos = new Set(effectiveSettleable.map((r) => r.advanceNo.toUpperCase()))
+
+  // The employee's approved advances BC will not settle yet (not paid, or unconfirmed).
+  const waiting = (imprestQuery.data ?? []).filter(
+    (row) => isSurrenderableImprest(row) && !effectiveSettleableNos.has(row.requestNo.toUpperCase()),
+  )
+
   const withReceipt = settleableQuery.data?.supportsReceiptConfirmation === true
   const receiptAfterApproval = withReceipt && settleableQuery.data?.receiptAfterApproval === true
   const unpaid = waiting
-    .filter((row) => !isPaid(row) && (!receiptAfterApproval || receiptConfirmed(row)))
+    .filter((row) => !isPaid(row) && (!receiptAfterApproval || receiptConfirmed(row) || locallyConfirmed.has(row.requestNo.toUpperCase())))
     .map((row) => row.requestNo)
+
   const awaitingReceipt = withReceipt
     ? Array.from(
         new Set([
           ...(settleableQuery.data?.awaitingReceipt ?? []).map((row) => row.advanceNo),
           ...waiting
-            .filter((row) => (receiptAfterApproval || isPaid(row)) && !receiptConfirmed(row))
+            .filter((row) => (receiptAfterApproval || isPaid(row)) && !receiptConfirmed(row) && !locallyConfirmed.has(row.requestNo.toUpperCase()))
             .map((row) => row.requestNo),
         ]),
-      )
+      ).filter((no) => !locallyConfirmed.has(no.toUpperCase()))
     : []
-  // Only what BC's PortalAdvanceSettlementContext allows (BC refuses the rest: "must be paid before settlement");
-  // without that context, the employee's paid advances.
-  const imprestOptions = settleableQuery.isSuccess
-    ? [
-        ...settleable.map((row) => ({
-          label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}${dueOf(row.advanceNo) ? ` · ${dueOf(row.advanceNo)}` : ''}`,
-          value: row.advanceNo,
-        })),
-        ...waiting.map((row) => ({
-          label: `${row.requestNo} — ${notSettleableReason(row, withReceipt, receiptAfterApproval)}`,
-          value: `blocked:${row.requestNo}`,
-          disabled: true,
-        })),
-      ]
-    : (imprestQuery.data ?? [])
-        .filter((row) => isSurrenderableImprest(row) && isPaid(row))
-        .map((row) => ({
-          label: `${row.requestNo}${row.status && row.status !== 'Posted' ? ` (${row.status})` : ''}`,
-          value: row.requestNo,
-        }))
+
+  const handleReceiptConfirmed = (advanceNo: string) => {
+    setLocallyConfirmed((prev) => new Set(prev).add(advanceNo.toUpperCase()))
+    void settleableQuery.refetch()
+    void imprestQuery.refetch()
+  }
+
+  const defaultAdvance = targetImprest || effectiveSettleable[0]?.advanceNo || ''
+
+  const imprestOptions = [
+    ...effectiveSettleable.map((row) => ({
+      label: `${row.advanceNo} — ${formatCurrency(Number(row.amount ?? 0))}${row.purpose ? ` · ${row.purpose}` : ''}${dueOf(row.advanceNo) ? ` · ${dueOf(row.advanceNo)}` : ''}`,
+      value: row.advanceNo,
+    })),
+    ...waiting.map((row) => ({
+      label: `${row.requestNo} — ${notSettleableReason(row, withReceipt, receiptAfterApproval)}`,
+      value: `blocked:${row.requestNo}`,
+      disabled: true,
+    })),
+  ]
+
   const emptyImprestHint = settleableQuery.isLoading
     ? 'Loading settleable advances from Business Central…'
     : settleableQuery.isError && imprestQuery.isError
@@ -305,7 +375,7 @@ export function ImprestSurrender() {
       listRequests={() => listModuleRequests(module)}
       newButtonLabel="New Advance Settlement"
       headerSchema={imprestSurrenderHeaderSchema}
-      headerDefaults={{ imprest: '' }}
+      headerDefaults={{ imprest: defaultAdvance }}
       buildHeaderPayload={(values) => ({ imprest: values.imprest, title: `Settlement for ${values.imprest}` })}
       // Re-saving the header makes BC re-copy the advance lines and drop the expense lines.
       allowHeaderEdit={false}
@@ -328,8 +398,8 @@ export function ImprestSurrender() {
       ]}
       headerSupplement={(values) => {
         const advanceNo = String(values.imprest ?? '')
-        const settleableRow = settleable.find((row) => row.advanceNo === advanceNo)
-        const selected = (imprestQuery.data ?? []).find((row) => row.requestNo === advanceNo)
+        const settleableRow = effectiveSettleable.find((row) => row.advanceNo.toUpperCase() === advanceNo.toUpperCase())
+        const selected = (imprestQuery.data ?? []).find((row) => row.requestNo.toUpperCase() === advanceNo.toUpperCase())
         const payload = selected?.payload ?? {}
         const amount =
           settleableRow?.amount ??
@@ -337,7 +407,6 @@ export function ImprestSurrender() {
           selected?.amount
         const purpose =
           settleableRow?.purpose ||
-          settleableRow?.requestPurposeText ||
           String(firstValue(payload, ['Purpose', 'Description']) ?? selected?.title ?? '')
         const dateRequired =
           settleableRow?.date ||
@@ -350,15 +419,34 @@ export function ImprestSurrender() {
 
         return (
           <div className="space-y-3">
+          {existingSettlement ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+              <div>
+                <p className="font-semibold">
+                  A settlement draft is already open for {advanceNo || targetImprest} ({existingSettlement.requestNo})
+                </p>
+                <p className="text-xs text-sky-800">
+                  Status: {existingSettlement.status}. You can continue editing your existing settlement.
+                </p>
+              </div>
+              <Button asChild size="sm" className="shrink-0 text-xs!">
+                <Link to={`/finance/advance-settlement?open=${encodeURIComponent(existingSettlement.id)}`}>
+                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                  Open Existing Draft
+                </Link>
+              </Button>
+            </div>
+          ) : null}
           <AdvanceOutstandingNotice outstanding={outstanding} showSettlementLink={false} />
           <Prerequisite
-            available={settleable.length}
+            available={effectiveSettleable.length}
             loading={settleableQuery.isLoading}
-            selectedSettleable={settleableNos.has(advanceNo)}
+            selectedSettleable={effectiveSettleableNos.has(advanceNo.toUpperCase())}
             unpaid={unpaid}
             withReceipt={withReceipt}
             receiptAfterApproval={receiptAfterApproval}
             awaitingReceipt={awaitingReceipt}
+            onConfirmed={handleReceiptConfirmed}
           />
           {advanceNo ? (
           <div>

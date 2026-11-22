@@ -334,14 +334,6 @@ function detailValue(value: unknown, format: DetailFieldConfig['format'] = 'text
   return String(value ?? '-')
 }
 
-function storeRequisitionApprovalComplete(request: PortalRequest | undefined) {
-  if (!request) return false
-  const normalized = request.status.trim().toLowerCase()
-  if (['approved', 'posted', 'released'].includes(normalized)) return true
-  const steps = request.approvalSteps ?? []
-  if (!steps.length) return false
-  return steps.every((step) => step.status === 'Approved')
-}
 
 function storeLineNeedsReceipt(row: Record<string, unknown>) {
   const received = Number(row.quantityReceived ?? 0)
@@ -526,22 +518,14 @@ function HeaderForm({
   const headerOnValuesChange = config.headerOnValuesChange
   useEffect(() => {
     if (request) return
-    const fillKeys = ['division', 'requestedBy', 'requestingDepartment']
-    for (const key of fillKeys) {
-      const next = config.headerDefaults[key]
+    for (const [key, next] of Object.entries(config.headerDefaults ?? {})) {
       if (next === undefined || next === null || String(next).trim() === '') continue
       const current = form.getValues(key)
       if (!String(current ?? '').trim()) {
-        form.setValue(key, next, { shouldValidate: false })
+        form.setValue(key, next, { shouldValidate: true })
       }
     }
-  }, [
-    config.headerDefaults.division,
-    config.headerDefaults.requestedBy,
-    config.headerDefaults.requestingDepartment,
-    form,
-    request,
-  ])
+  }, [config.headerDefaults, form, request])
   useEffect(() => {
     if (!headerOnValuesChange) return
     void headerOnValuesChange(watchedValues as FieldValues, form)
@@ -913,11 +897,15 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const confirm = useConfirm()
-  const [mode, setMode] = useState<'list' | 'create'>(config.initialMode ?? 'list')
   // ?open=<request id> opens that request directly (links from My Approvals and the bell).
   const [searchParams] = useSearchParams()
   const location = useLocation()
-  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('open'))
+  const newParam = searchParams.get('new') === '1' || searchParams.get('create') === '1'
+  const [mode, setMode] = useState<'list' | 'create'>(() => {
+    if (newParam) return 'create'
+    return config.initialMode ?? 'list'
+  })
+  const [selectedId, setSelectedId] = useState<string | null>(() => (newParam ? null : searchParams.get('open')))
   const [actionId, setActionId] = useState<string | null>(null)
   const [editingHeader, setEditingHeader] = useState(false)
   // Remounts the custom edit form after a save so it starts from what Business Central now holds.
@@ -933,25 +921,33 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const openParam = searchParams.get('open')
   const focusParam = searchParams.get('focus')
   useEffect(() => {
-    if (!openParam) return
-    setSelectedId(openParam)
-    setMode('list')
-    setEditingLine(null)
-    setShowLineForm(false)
-    setEditingHeader(false)
-    if (!focusParam) {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      return
+    if (openParam) {
+      setSelectedId(openParam)
+      setMode('list')
+      setEditingLine(null)
+      setShowLineForm(false)
+      setEditingHeader(false)
+      if (!focusParam) {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+      let tries = 0
+      const timer = window.setInterval(() => {
+        const target = document.getElementById(focusParam)
+        tries += 1
+        if (target || tries > 40) window.clearInterval(timer)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 250)
+      return () => window.clearInterval(timer)
     }
-    let tries = 0
-    const timer = window.setInterval(() => {
-      const target = document.getElementById(focusParam)
-      tries += 1
-      if (target || tries > 40) window.clearInterval(timer)
-      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 250)
-    return () => window.clearInterval(timer)
-  }, [location.key, openParam, focusParam])
+    if (newParam) {
+      setSelectedId(null)
+      setMode('create')
+      setEditingLine(null)
+      setShowLineForm(false)
+      setEditingHeader(false)
+    }
+  }, [location.key, openParam, focusParam, newParam])
 
   const [listSearch, setListSearch] = useState('')
   const [listStatus, setListStatus] = useState('all')
@@ -1069,8 +1065,6 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   const cancelStatuses: PortalRequest['status'][] = config.cancelStatuses ?? ['Draft', 'Pending Approval']
   const supportsAttachments =
     config.supportsAttachments ?? PORTAL_ATTACHMENT_MODULES.has(config.module.module)
-  // ERP parity: show receipt confirmation only after approval AND store issue.
-  const storeApprovalDone = storeRequisitionApprovalComplete(selected)
   const selectedLines = Array.isArray(selected?.payload?.lines)
     ? (selected!.payload!.lines as Record<string, unknown>[])
     : []
@@ -1091,7 +1085,7 @@ export function MultiStepRequestPage(config: MultiStepRequestConfig) {
   // Requester receive is not part of the ABH store workflow. Inventory moves when
   // Operations posts the GIV in Business Central.
   const storeGivRecorded = config.module.module === 'storeRequisition' && storeHasIssued
-  const canReceiveStoreLines = false && storeApprovalDone && storeHasIssued
+  const canReceiveStoreLines = false
 
   const beginReceiveLine = (line: Record<string, unknown>) => {
     setReceiveLine(line)

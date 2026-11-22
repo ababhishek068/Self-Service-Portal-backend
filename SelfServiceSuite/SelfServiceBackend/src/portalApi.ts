@@ -188,6 +188,7 @@ import {
   confirmAdvanceReceipt,
   deleteAdvanceSettlementExpense,
   getAdvanceSettlementContext,
+  readAdvanceReceiptConfirmations,
   saveAdvanceSettlementDetails,
   saveAdvanceSettlementOption,
   saveAdvanceSettlementExpense,
@@ -735,7 +736,9 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v406 — 1.0.3.567 (Compact Expense Claim interface matching manager mockup; 14 claim types; per-line and general receipt attachments; for BC 1.0.3.670)'
+export const PORTAL_API_BUILD = 'v407 — 1.0.3.568 (Auto-select confirmed advance in Advance Settlement; direct open of existing settlement draft; advance receipt persistence and immediate sync across portal; for BC 1.0.3.670)'
+
+void readAdvanceReceiptConfirmations().catch(() => {})
 
 interface LookupSpec {
   service: string

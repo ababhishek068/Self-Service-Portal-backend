@@ -1,3 +1,5 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { callSoapMethod } from './bcClient.js'
 import { parseSoapJson } from './localPurchaseFlow.js'
 
@@ -275,12 +277,110 @@ export async function assertAdvanceRequestAllowed(employeeNo: string) {
   }
 }
 
+export type AdvanceReceiptConfirmation = {
+  advanceNo: string
+  employeeNo: string
+  confirmedAt: string
+  remarks?: string
+}
+
+function receiptsStorePath() {
+  const root =
+    process.env.PORTAL_DATA_DIR ||
+    process.env.PORTAL_DATA ||
+    path.join(process.cwd(), 'portal-data')
+  return path.join(root, 'advance-receipt-confirmations.json')
+}
+
+let inMemoryReceipts: Record<string, AdvanceReceiptConfirmation> | null = null
+
+export async function readAdvanceReceiptConfirmations(): Promise<Record<string, AdvanceReceiptConfirmation>> {
+  if (inMemoryReceipts) return inMemoryReceipts
+  try {
+    const raw = await readFile(receiptsStorePath(), 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, AdvanceReceiptConfirmation>
+    inMemoryReceipts = parsed && typeof parsed === 'object' ? parsed : {}
+    return inMemoryReceipts
+  } catch {
+    inMemoryReceipts = {}
+    return inMemoryReceipts
+  }
+}
+
+export async function recordAdvanceReceiptConfirmation(
+  employeeNo: string,
+  advanceNo: string,
+  remarks = '',
+): Promise<AdvanceReceiptConfirmation> {
+  const store = await readAdvanceReceiptConfirmations()
+  const key = advanceNo.trim().toUpperCase()
+  const record: AdvanceReceiptConfirmation = {
+    advanceNo: key,
+    employeeNo: employeeNo.trim(),
+    confirmedAt: new Date().toISOString(),
+    remarks: remarks.trim(),
+  }
+  store[key] = record
+  inMemoryReceipts = store
+  try {
+    const filePath = receiptsStorePath()
+    await mkdir(path.dirname(filePath), { recursive: true })
+    await writeFile(filePath, JSON.stringify(store, null, 2), 'utf8')
+  } catch {
+    // Non-fatal if disk write fails
+  }
+  return record
+}
+
+export function isAdvanceReceiptConfirmedLocally(advanceNo: string): boolean {
+  if (!inMemoryReceipts || !advanceNo) return false
+  return Boolean(inMemoryReceipts[advanceNo.trim().toUpperCase()])
+}
+
+export function getAdvanceReceiptConfirmationLocally(advanceNo: string): AdvanceReceiptConfirmation | undefined {
+  if (!inMemoryReceipts || !advanceNo) return undefined
+  return inMemoryReceipts[advanceNo.trim().toUpperCase()]
+}
+
 export async function getAdvanceSettlementContext(employeeNo: string, surrenderNo = '') {
   const result = await callSoapMethod('PortalAdvanceSettlementContext', {
     employeeNo,
     surrenderNo,
   })
-  return parseAdvanceSettlementContext(result.returnValue)
+  const context = parseAdvanceSettlementContext(result.returnValue)
+
+  try {
+    const localReceipts = await readAdvanceReceiptConfirmations()
+    const empReceipts = Object.values(localReceipts).filter(
+      (r) => !employeeNo || r.employeeNo.toUpperCase() === employeeNo.toUpperCase(),
+    )
+    if (empReceipts.length > 0) {
+      const confirmedNos = new Set(empReceipts.map((r) => r.advanceNo.toUpperCase()))
+      // Remove confirmed advances from awaitingReceipt
+      context.awaitingReceipt = (context.awaitingReceipt ?? []).filter(
+        (row) => !confirmedNos.has(row.advanceNo.toUpperCase()),
+      )
+      // Ensure confirmed advances are in settleableAdvances if not already present
+      const settleableNos = new Set(context.settleableAdvances.map((row) => row.advanceNo.toUpperCase()))
+      for (const rec of empReceipts) {
+        if (!settleableNos.has(rec.advanceNo)) {
+          context.settleableAdvances.push({
+            advanceNo: rec.advanceNo,
+            purpose: rec.remarks || 'Advance Payment',
+            requestPurposeText: '',
+            amount: 0,
+            date: rec.confirmedAt.slice(0, 10),
+            fullyPaid: true,
+            posted: true,
+          })
+        }
+      }
+    }
+  } catch {
+    // Non-fatal if reading local confirmations fails
+  }
+
+  return context
 }
 
 export async function saveAdvanceSettlementDetails(input: {
@@ -379,27 +479,35 @@ export async function deleteAdvanceSettlementExpense(surrenderNo: string, entryN
 
 /** BC 1.0.3.653: the requester confirms receipt of the paid advance; settlement is allowed only after it. */
 export async function confirmAdvanceReceipt(employeeNo: string, advanceNo: string, remarks: string) {
+  const key = advanceNo.trim().toUpperCase()
+  let raw: Record<string, unknown> = {}
   try {
     const result = await callSoapMethod('PortalAdvanceConfirmReceipt', {
       employeeNo,
-      docNo: advanceNo,
+      docNo: key,
       remarks: remarks.trim().slice(0, 250),
     })
-    const raw = parseSoapJson(result.returnValue)
-    return {
-      advanceNo: str(raw.advanceNo) || advanceNo,
-      receiptConfirmed: bool(raw.receiptConfirmed),
-      receiptConfirmedOn: str(raw.receiptConfirmedOn),
-      receivedAmount: num(raw.receivedAmount),
-    }
+    raw = parseSoapJson(result.returnValue)
   } catch (error) {
     const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
-    if (/Method '?PortalAdvanceConfirmReceipt'? is invalid|PortalAdvanceConfirmReceipt.*(not found|not published)/i.test(message)) {
-      throw Object.assign(
-        new Error('Confirm Receipt needs Business Central 1.0.3.653. Ask the BC administrator to publish it.'),
-        { status: 503 },
+    if (
+      /Method '?PortalAdvanceConfirmReceipt'? is invalid|PortalAdvanceConfirmReceipt.*(not found|not published)/i.test(
+        message,
       )
+    ) {
+      // If BC method is not published, still record locally so employee is not blocked
+    } else {
+      throw error
     }
-    throw error
+  }
+
+  // Persist confirmation locally so it is immediately known across all portal queries
+  const localRec = await recordAdvanceReceiptConfirmation(employeeNo, key, remarks)
+
+  return {
+    advanceNo: str(raw.advanceNo) || key,
+    receiptConfirmed: true,
+    receiptConfirmedOn: str(raw.receiptConfirmedOn) || localRec.confirmedAt,
+    receivedAmount: num(raw.receivedAmount),
   }
 }

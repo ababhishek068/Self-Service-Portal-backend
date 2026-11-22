@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { confirmAdvanceReceipt } from '@/api/endpoints/advanceSettlement'
 import { useToast } from '@/components/feedback/ToastProvider'
+import { markReceiptConfirmedLocally } from '@/utils/advanceReceipt'
 
 /** Every query that shows an advance's payment / receipt / settlement state. */
 const ADVANCE_RECEIPT_QUERY_KEYS = [
@@ -21,6 +22,7 @@ export function useConfirmAdvanceReceipt() {
     mutationFn: ({ advanceNo, remarks }: { advanceNo: string; remarks?: string }) =>
       confirmAdvanceReceipt(advanceNo, remarks ?? ''),
     onSuccess: (_result, { advanceNo }) => {
+      markReceiptConfirmedLocally(advanceNo)
       for (const queryKey of ADVANCE_RECEIPT_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [...queryKey] })
       toast.success(`${advanceNo}: payment receipt confirmed. You can now settle it under Advance Settlement.`, 'Payment received')
     },

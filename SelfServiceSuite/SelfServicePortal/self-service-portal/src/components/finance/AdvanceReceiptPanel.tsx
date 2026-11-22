@@ -68,7 +68,7 @@ export function AdvanceReceiptPanel({
           {confirmedOn}. Next: settle the advance with the actual expenses and their evidence.
         </p>
         <Button asChild size="sm">
-          <Link to="/finance/advance-settlement">
+          <Link to={`/finance/advance-settlement?new=1&advanceNo=${encodeURIComponent(request.requestNo)}&imprest=${encodeURIComponent(request.requestNo)}`}>
             <Receipt className="mr-2 h-4 w-4" />
             Process Advance Settlement
           </Link>
