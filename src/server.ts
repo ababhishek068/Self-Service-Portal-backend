@@ -21,11 +21,25 @@ const portalIndex = resolve(portalStaticDir, 'index.html')
 
 app.set('trust proxy', 1)
 
-// CORS — allow credentials (session cookie) on the configured origin so the
-// React Self-Service Portal can call /api/login, /api/me and /api/staff/*.
+// CORS — allow credentials on the configured origin(s) as well as local loopback
+// so the React Self-Service Portal can call /api/login, /api/me and /api/staff/*.
+const configuredOrigins = config.CORS_ORIGIN.split(',').map((s) => s.trim().toLowerCase())
 app.use(
   cors({
-    origin: config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN,
+    origin: (origin, callback) => {
+      if (!origin || config.CORS_ORIGIN === '*') return callback(null, true)
+      const lower = origin.toLowerCase()
+      if (
+        configuredOrigins.includes(lower) ||
+        lower.startsWith('http://localhost:') ||
+        lower.startsWith('http://127.0.0.1:') ||
+        lower === 'http://localhost' ||
+        lower === 'http://127.0.0.1'
+      ) {
+        return callback(null, true)
+      }
+      return callback(null, false)
+    },
     credentials: true,
   }),
 )

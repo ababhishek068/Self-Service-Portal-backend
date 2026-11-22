@@ -736,7 +736,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v408 — 1.0.3.569 (Standardize portal section header color scheme with ABH signature navy-to-teal gradient across Expense Claim, Overtime Request, and portal forms; audit and confirm all pending issues; for BC 1.0.3.670)'
+export const PORTAL_API_BUILD = 'v409 — 1.0.3.570 (Support dynamic port deployment including port 5000; flexible CORS for local loopback and server IP; for BC 1.0.3.670)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 
