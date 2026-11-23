@@ -893,6 +893,33 @@ export async function resolveLeaveApproverHint(
   const employeeNo =
     context.employeeNo || text(leaveRow, ['EmployeeNo', 'Employee_No', 'StaffNo', 'Staff_No'])
   if (employeeNo) {
+    const employeeRows = (await fetchOData('QyHREmployee', {
+      $filter: `No eq '${odataString(employeeNo)}'`,
+      $top: 1,
+    }).catch(() => [])) as ODataRecord[] | null
+    const employee = Array.isArray(employeeRows) ? employeeRows[0] ?? {} : {}
+    const jobTitle = text(employee, ['JobTitle', 'Job_Title', 'Designation', 'Title', 'Role'])
+    const isLeadership = /director|manager|head|hod|chief|ceo|coo|cfo|lead/i.test(jobTitle)
+
+    const superiorId = text(employee, [
+      'SuperiorID',
+      'Superior_ID',
+      'SuperiorId',
+      'SupervisorNo',
+      'Supervisor_No',
+      'ManagerNo',
+      'Manager_No',
+      'ManagerEmployeeNo',
+    ])
+
+    // Meeting 19 Nov 2026: Establishing Superior Approval Routing for Leadership.
+    // For department heads, directors, CEOs, and COOs, request workflows directly use the
+    // superior ID selected on the employee card.
+    if (isLeadership && superiorId) {
+      const approverName = await resolveApproverDisplayName(superiorId)
+      return { approverId: superiorId, approverName: approverName || superiorId }
+    }
+
     const userSetupRows = (await fetchOData('QyUserSetup', {
       $filter: `EmployeeNo eq '${odataString(employeeNo)}'`,
       $top: 1,
@@ -906,21 +933,9 @@ export async function resolveLeaveApproverHint(
       return { approverId: approverUserId, approverName: approverName || approverUserId }
     }
 
-    const employeeRows = (await fetchOData('QyHREmployee', {
-      $filter: `No eq '${odataString(employeeNo)}'`,
-      $top: 1,
-    }).catch(() => [])) as ODataRecord[] | null
-    const employee = Array.isArray(employeeRows) ? employeeRows[0] ?? {} : {}
-    const managerNo = text(employee, [
-      'ManagerNo',
-      'Manager_No',
-      'ManagerEmployeeNo',
-      'SupervisorNo',
-      'Supervisor_No',
-    ])
-    if (managerNo) {
-      const approverName = await resolveApproverDisplayName(managerNo)
-      return { approverId: managerNo, approverName: approverName || managerNo }
+    if (superiorId) {
+      const approverName = await resolveApproverDisplayName(superiorId)
+      return { approverId: superiorId, approverName: approverName || superiorId }
     }
   }
 
@@ -946,7 +961,7 @@ export async function resolveLeaveApproverHint(
       )) as ODataRecord[] | null
       if (!Array.isArray(rows) || rows.length === 0) continue
       const hodNo = text(rows[0]!, ['Staff_No', 'StaffNo', 'StaffNo_'])
-      if (!hodNo) continue
+      if (!hodNo || hodNo === employeeNo) continue
       const approverName = await resolveApproverDisplayName(hodNo)
       return { approverId: hodNo, approverName: approverName || hodNo }
     }

@@ -32,6 +32,7 @@ import { ImprestRequest } from '@/pages/finance/ImprestRequest'
 import { ImprestSurrender } from '@/pages/finance/ImprestSurrender'
 import { PettyCash } from '@/pages/finance/PettyCash'
 import { StaffClaim } from '@/pages/finance/StaffClaim'
+import { PaymentVoucherPage } from '@/pages/finance/PaymentVoucher'
 import { Attendance } from '@/pages/hr/Attendance'
 import { LeaveRequest } from '@/pages/hr/LeaveRequest'
 import { LeavePlanner } from '@/pages/hr/LeavePlanner'
@@ -119,6 +120,7 @@ export default function App() {
         <Route path="finance/imprest-surrender" element={<Navigate to="/finance/advance-settlement" replace />} />
         <Route path="finance/staff-claim" element={<StaffClaim />} />
         <Route path="finance/medical-claim" element={<StaffClaim medicalOnly />} />
+        <Route path="finance/payment-voucher" element={<PaymentVoucherPage />} />
         <Route path="finance/petty-cash" element={<PettyCash />} />
         <Route path="finance/petty-cash-replenishment" element={<ComingSoon title="Petty Cash Replenishment" />} />
         <Route path="facility/store-requisition" element={<StoreRequisition />} />

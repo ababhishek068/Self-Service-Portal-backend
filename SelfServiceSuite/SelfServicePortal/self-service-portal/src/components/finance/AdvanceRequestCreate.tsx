@@ -5,6 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldValues, type Resolver } from 'react-hook-form'
 import { addDays, differenceInCalendarDays, format as formatDay, parseISO } from 'date-fns'
 import {
+  AlertTriangle,
   BadgeCheck,
   Building2,
   CalendarClock,
@@ -394,6 +395,22 @@ export function AdvanceRequestCreate({
   const [shakeSection, setShakeSection] = useState<string | null>(null)
   const [success, setSuccess] = useState<{ request: PortalRequest; submit: boolean } | null>(null)
 
+  // Meeting 19 Nov 2026: Restricting Advance Payments During Probation
+  const isOnProbation = useMemo(() => {
+    if (!profile) return false
+    if (profile.onProbation === 'Yes' || profile.onProbation === 'true' || profile.onProbation === '1') return true
+    if (profile.employmentType && /probation/i.test(profile.employmentType)) return true
+    if (profile.probationEndDate) {
+      const end = new Date(profile.probationEndDate).getTime()
+      if (!Number.isNaN(end) && end >= Date.now()) return true
+    }
+    return false
+  }, [profile])
+
+  const [discretionaryApproved, setDiscretionaryApproved] = useState(false)
+  const [discretionaryApprover, setDiscretionaryApprover] = useState('')
+  const [discretionaryNotes, setDiscretionaryNotes] = useState('')
+
   const form = useForm<FieldValues>({
     // The schema coerces Requested Amount to a number; the form keeps plain field values.
     resolver: zodResolver(advanceRequestCreateSchema) as unknown as Resolver<FieldValues>,
@@ -580,6 +597,10 @@ export function AdvanceRequestCreate({
           ? { projectAssignment: String(values.projectAssignment ?? '').trim() }
           : {}),
       ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
+      isOnProbation,
+      discretionaryApproved,
+      discretionaryApprover: discretionaryApproved ? discretionaryApprover.trim() : '',
+      discretionaryNotes: discretionaryApproved ? discretionaryNotes.trim() : '',
     }
   }
 
@@ -719,6 +740,15 @@ export function AdvanceRequestCreate({
       setFormError(
         `You cannot submit a new advance while ${outstanding!.unsettledCount} of your advances are not settled (the limit is ${outstanding!.maxUnsettled}). Settle one first; you can save this request as a draft meanwhile.`,
       )
+      return
+    }
+    if (submit && isOnProbation && !discretionaryApproved) {
+      toast.error(
+        'Staff on probation are not eligible to request advances without authorized senior discretionary approval.',
+        'Probation Policy Restriction',
+      )
+      setFormError('Staff on probation cannot submit advance requests without authorized senior discretionary approval.')
+      flagSection('adv-s1')
       return
     }
     void form.handleSubmit(
@@ -934,6 +964,58 @@ export function AdvanceRequestCreate({
 
       {/* Client, 17 Nov 2026 (BC 1.0.3.667): no new advance with 4 not settled; overdue settlements are named. */}
       <AdvanceOutstandingNotice outstanding={outstanding} />
+
+      {/* Meeting 19 Nov 2026: Restricting Advance Payments During Probation */}
+      {isOnProbation ? (
+        <div className="adv-reveal rounded-xl border border-amber-300 bg-amber-50/90 p-4 text-amber-900 shadow-sm" role="alert">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <h4 className="font-semibold text-amber-900 text-sm">Probationary Period Advance Policy Restriction</h4>
+              <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                Under ABH Partners financial policy, personnel within their probationary period are ineligible to request advance payments
+                {profile?.probationEndDate ? ` (probation active until ${profile.probationEndDate})` : ''} without authorized senior discretionary approval.
+              </p>
+              <div className="mt-3 flex items-center gap-2 border-t border-amber-200 pt-2.5">
+                <input
+                  type="checkbox"
+                  id="probation-discretionary-chk"
+                  checked={discretionaryApproved}
+                  onChange={(e) => setDiscretionaryApproved(e.target.checked)}
+                  className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                />
+                <label htmlFor="probation-discretionary-chk" className="text-xs font-semibold text-amber-950 cursor-pointer">
+                  Senior Executive Discretionary Approval has been authorized for this advance
+                </label>
+              </div>
+              {discretionaryApproved ? (
+                <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[11px] font-medium text-amber-900">Authorized Senior Approver / Superior</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Tesfaye Abebe (FAD) / Yohannes"
+                      value={discretionaryApprover}
+                      onChange={(e) => setDiscretionaryApprover(e.target.value)}
+                      className="mt-1 block w-full rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-950 placeholder:text-amber-400 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-amber-900">Approval Reference / Memo Justification</label>
+                    <input
+                      type="text"
+                      placeholder="Reference memo or justification"
+                      value={discretionaryNotes}
+                      onChange={(e) => setDiscretionaryNotes(e.target.value)}
+                      className="mt-1 block w-full rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-950 placeholder:text-amber-400 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {formError ? (
         <div className="adv-reveal flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
@@ -1459,8 +1541,14 @@ export function AdvanceRequestCreate({
                 <Button
                   type="button"
                   className="adv-submit"
-                  disabled={busy || limitReached}
-                  title={limitReached ? 'Settle one of your advances first: the limit of advances not settled is reached' : undefined}
+                  disabled={busy || limitReached || (isOnProbation && !discretionaryApproved)}
+                  title={
+                    limitReached
+                      ? 'Settle one of your advances first: the limit of advances not settled is reached'
+                      : isOnProbation && !discretionaryApproved
+                        ? 'Advance requests during probation require senior discretionary approval'
+                        : undefined
+                  }
                   onClick={() => run(true)}
                 >
                   {create.isPending && create.variables?.submit ? (

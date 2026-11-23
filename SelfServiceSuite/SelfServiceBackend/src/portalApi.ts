@@ -1,5 +1,14 @@
 import { getSalaryAdvanceContext } from './salaryAdvance.js'
 import { fetchPortalProfileDetails } from './profileDetails.js'
+import {
+  loadPaymentVouchers,
+  createOrUpdatePaymentVoucher,
+  findPaymentVoucherById,
+  submitPaymentVoucher,
+  approvePaymentVoucher,
+  rejectPaymentVoucher,
+  deletePaymentVoucher,
+} from './paymentVouchers.js'
 import { Router, type Request, type Response } from 'express'
 import {
   macFromAttendanceLocation,
@@ -736,7 +745,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v409 — 1.0.3.570 (Support dynamic port deployment including port 5000; flexible CORS for local loopback and server IP; for BC 1.0.3.670)'
+export const PORTAL_API_BUILD = 'v410 — 1.0.3.571 (Finance Module Updates: Probation advance restriction, leadership Superior ID approval routing, Ethiopian Ministry of Revenue Payment Vouchers; for BC 1.0.3.671)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 
@@ -9244,6 +9253,108 @@ export function buildPortalApiRouter() {
         returnDate: text(row, ['ReturnDate'], '-'),
         status: text(row, ['Status']),
       })))
+    }),
+  )
+
+  // --------------------------------------------------------------------------
+  // Payment Vouchers (Ethiopian Ministry of Revenue standard, Meeting 19 Nov 2026)
+  // --------------------------------------------------------------------------
+  router.get(
+    '/finance/payment-vouchers',
+    safe(async (req, res) => {
+      const vouchers = loadPaymentVouchers()
+      const search = String(req.query.search ?? '').trim().toLowerCase()
+      const status = String(req.query.status ?? '').trim().toLowerCase()
+      const filtered = vouchers.filter((v) => {
+        if (status && status !== 'all' && v.status.toLowerCase() !== status) return false
+        if (search) {
+          const matched =
+            v.pvNo.toLowerCase().includes(search) ||
+            v.payeeName.toLowerCase().includes(search) ||
+            v.chequeOrRefNo.toLowerCase().includes(search) ||
+            v.description.toLowerCase().includes(search)
+          if (!matched) return false
+        }
+        return true
+      })
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ vouchers: filtered })
+    }),
+  )
+
+  router.get(
+    '/finance/payment-vouchers/:id',
+    safe(async (req, res) => {
+      const id = String(req.params.id ?? '')
+      const voucher = findPaymentVoucherById(id)
+      if (!voucher) throw portalError(`Payment Voucher ${id} not found`, 404)
+      res.setHeader('Cache-Control', 'private, no-store')
+      res.json({ voucher })
+    }),
+  )
+
+  router.post(
+    '/finance/payment-vouchers',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const voucher = createOrUpdatePaymentVoucher(req.body, {
+        name: authUser.displayName || authUser.name || 'Finance Staff',
+        title: authUser.jobTitle || 'Finance Officer',
+        employeeNo: authUser.employeeNo,
+      })
+      res.json({ ok: true, voucher })
+    }),
+  )
+
+  router.post(
+    '/finance/payment-vouchers/:id/submit',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const id = String(req.params.id ?? '')
+      const voucher = submitPaymentVoucher(id, {
+        name: authUser.displayName || authUser.name || 'Finance Staff',
+        title: authUser.jobTitle || 'Finance Officer',
+      })
+      res.json({ ok: true, voucher })
+    }),
+  )
+
+  router.post(
+    '/finance/payment-vouchers/:id/approve',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const id = String(req.params.id ?? '')
+      const voucher = approvePaymentVoucher(id, {
+        name: authUser.displayName || authUser.name || 'Finance Approver',
+        title: authUser.jobTitle || 'Finance & Administration',
+        comments: req.body?.comments,
+        step: req.body?.step,
+      })
+      res.json({ ok: true, voucher })
+    }),
+  )
+
+  router.post(
+    '/finance/payment-vouchers/:id/reject',
+    safe(async (req, res) => {
+      const authUser = user(req)
+      const id = String(req.params.id ?? '')
+      const voucher = rejectPaymentVoucher(id, {
+        name: authUser.displayName || authUser.name || 'Finance Approver',
+        title: authUser.jobTitle || 'Finance & Administration',
+        reason: String(req.body?.reason ?? '').trim(),
+      })
+      res.json({ ok: true, voucher })
+    }),
+  )
+
+  router.delete(
+    '/finance/payment-vouchers/:id',
+    safe(async (req, res) => {
+      const id = String(req.params.id ?? '')
+      const deleted = deletePaymentVoucher(id)
+      if (!deleted) throw portalError(`Payment Voucher ${id} not found`, 404)
+      res.json({ ok: true })
     }),
   )
 

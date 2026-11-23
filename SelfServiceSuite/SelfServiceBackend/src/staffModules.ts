@@ -619,6 +619,27 @@ const imprest: ModuleSpec = {
   params: {
     deleteDocument: draftDeleteParams('imprest'),
     saveHeader: ({ req, user, no }) => {
+      // Restricting Advance Payments During Probation (Meeting 19 Nov 2026)
+      const isOnProbation = Boolean(
+        req.body?.isOnProbation ||
+        req.body?.onProbation === true ||
+        String(req.body?.onProbation ?? '').toLowerCase() === 'yes' ||
+        String(req.body?.onProbation ?? '') === '1',
+      )
+      const discretionaryApproved = Boolean(
+        req.body?.discretionaryApproved ||
+        req.body?.seniorApproval ||
+        req.body?.discretionaryApproval,
+      )
+      if (isOnProbation && !discretionaryApproved) {
+        throw Object.assign(
+          new Error(
+            'Employees within their probationary period are not eligible to request advance payments without senior discretionary approval.',
+          ),
+          { status: 422 },
+        )
+      }
+
       const travel = advanceTravelParams(req.body ?? {})
       const purposeCode = String(
         req.body?.purposeCode ?? req.body?.requestPurpose ?? '',
@@ -730,11 +751,32 @@ const imprest: ModuleSpec = {
       requisitionNo: no,
       lineNo: req.params.lineNo,
     }),
-    submit: ({ user, no }) => ({
-      reqNo: no,
-      employeeNo: user.employeeNo,
-      tableID: 50891,
-    }),
+    submit: ({ req, user, no }) => {
+      const isOnProbation = Boolean(
+        req?.body?.isOnProbation ||
+        req?.body?.onProbation === true ||
+        String(req?.body?.onProbation ?? '').toLowerCase() === 'yes' ||
+        String(req?.body?.onProbation ?? '') === '1',
+      )
+      const discretionaryApproved = Boolean(
+        req?.body?.discretionaryApproved ||
+        req?.body?.seniorApproval ||
+        req?.body?.discretionaryApproval,
+      )
+      if (isOnProbation && !discretionaryApproved) {
+        throw Object.assign(
+          new Error(
+            'Employees within their probationary period are not eligible to request advance payments without senior discretionary approval.',
+          ),
+          { status: 422 },
+        )
+      }
+      return {
+        reqNo: no,
+        employeeNo: user.employeeNo,
+        tableID: 50891,
+      }
+    },
     cancel: ({ user, no }) => ({
       requisitionNo: no,
       employeeNo: user.employeeNo,

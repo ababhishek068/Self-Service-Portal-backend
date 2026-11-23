@@ -114,6 +114,7 @@ export const navigationMenu: NavItem[] = [
       { label: 'Advance Settlement', path: '/finance/advance-settlement', icon: ReceiptText },
       { label: 'Staff Claims', path: '/finance/staff-claim', icon: BadgeCheck },
       { label: 'Medical Claim', path: '/finance/medical-claim', icon: BadgeCheck },
+      { label: 'Payment Vouchers', path: '/finance/payment-voucher', icon: ReceiptText },
       { label: 'Petty Cash Request', path: '/finance/petty-cash', icon: Banknote },
       { label: 'Petty Cash Replenishment', path: '/finance/petty-cash-replenishment', icon: ReceiptText },
     ],
