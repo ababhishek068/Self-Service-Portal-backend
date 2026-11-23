@@ -49,7 +49,7 @@ function parseAmount(value: string) {
  * Section 2 of the Advance Settlement with BC 1.0.3.669 (client Pending issues, 20 Nov 2026, settlement option sample):
  * Option 1 (default) — one expense entry: amount, receipt / reference no. and documents, straight to Finance.
  * Option 2 — an entry with receipt and one without, totalled automatically, approved by the First Line Manager then
- * FAD. Option 2's fields show only while it is chosen; the total must equal the advance before it can be saved.
+ * FAD. Option 2's fields show only while it is chosen; can be fully settled, under-spent (refund due), or over-spent (claim).
  */
 export function SettlementOptionForm({
   request,
@@ -70,7 +70,7 @@ export function SettlementOptionForm({
   const saved = savedReceipted > 0
 
   const [option, setOption] = useState<SettlementOption>(savedOption)
-  // Option 1's single amount starts at the advance (the total has to equal it); Option 2 keeps its own two amounts.
+  // Option 1's single amount defaults to the advance; Option 2 keeps its own two amounts.
   const [fullAmount, setFullAmount] = useState(amountText(saved && savedOption === 'option1' ? savedReceipted : advance))
   const [withReceipt, setWithReceipt] = useState(amountText(saved && savedOption === 'option2' ? savedReceipted : 0))
   const [withoutReceipt, setWithoutReceipt] = useState(amountText(saved && savedOption === 'option2' ? savedNonReceipted : 0))
@@ -103,9 +103,7 @@ export function SettlementOptionForm({
       ? 'Enter the expense amount without receipt, or choose Option 1.'
       : !receiptNo.trim()
         ? 'Enter the receipt / reference number.'
-        : !matches
-          ? `The total settlement (${formatAmount(total)}) must equal the advance amount (${formatAmount(advance)}).`
-          : ''
+        : ''
 
   const save = useMutation({
     mutationFn: () =>
@@ -320,16 +318,25 @@ export function SettlementOptionForm({
 }
 
 function MatchState({ matches, total, advance }: { matches: boolean; total: number; advance: number }) {
-  return matches ? (
-    <p className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-      <CheckCircle2 className="h-4 w-4" /> Matches Advance Amount
-    </p>
-  ) : (
-    <p className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900" role="status">
-      <AlertTriangle className="h-4 w-4" />
-      {total > advance
-        ? `${formatAmount(total - advance)} more than the advance`
-        : `${formatAmount(advance - total)} less than the advance`}
+  if (matches) {
+    return (
+      <p className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
+        <CheckCircle2 className="h-4 w-4" /> Matches Advance Amount (Fully Settled)
+      </p>
+    )
+  }
+  if (total < advance) {
+    return (
+      <p className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900" role="status">
+        <AlertTriangle className="h-4 w-4" />
+        {formatAmount(advance - total)} less than advance — Refund Due to Organization (Section 3)
+      </p>
+    )
+  }
+  return (
+    <p className="flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-900" role="status">
+      <Info className="h-4 w-4" />
+      {formatAmount(total - advance)} more than advance — Claim Due to Staff (Section 3)
     </p>
   )
 }

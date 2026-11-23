@@ -745,7 +745,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v410 — 1.0.3.571 (Finance Module Updates: Probation advance restriction, leadership Superior ID approval routing, Ethiopian Ministry of Revenue Payment Vouchers; for BC 1.0.3.671)'
+export const PORTAL_API_BUILD = 'v411 — 1.0.3.572 (Advance Settlement Options refund due & additional claim support; for BC 1.0.3.672)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 

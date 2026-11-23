@@ -357,7 +357,7 @@ export function ImprestSurrender() {
     <MultiStepRequestPage
       title="Advance Settlement"
       headerLabel="New Advance Settlement"
-      description="Settle an advance received through an approved and paid Advance Payment Request. Choose Option 1 (Full Settlement with Receipt: one expense amount with its receipt, directly to Finance) or Option 2 (Partial Settlement: an amount with receipt and one without, approved by the First Line Manager, then FAD). The total settlement must equal the advance amount."
+      description="Settle an advance received through an approved and paid Advance Payment Request. Choose Option 1 (Full Settlement with Receipt: one expense amount with its receipt, directly to Finance) or Option 2 (Partial Settlement: an amount with receipt and one without, approved by the First Line Manager, then FAD). Total settlement expenses can be fully settled, under-spent (with refund to organization), or over-spent (recorded as a claim)."
       processBanner={(request) => <AdvanceSettlementProcessBanner request={request} />}
       showProcessBannerOnList={false}
       submitButtonLabel="Submit for Processing"

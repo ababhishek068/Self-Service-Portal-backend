@@ -403,8 +403,9 @@ export async function saveAdvanceSettlementDetails(input: {
 }
 
 /**
- * BC 1.0.3.669 (client Pending issues, 20 Nov 2026): Option 1 Full Settlement with Receipt (one amount with its receipt)
- * or Option 2 Partial Settlement (an amount with receipt plus one without). The total must equal the advance.
+ * BC 1.0.3.669 / 1.0.3.672: Option 1 Full Settlement with Receipt (one amount with its receipt)
+ * or Option 2 Partial Settlement (an amount with receipt plus one without). Supports exact match,
+ * under-spending (refund due to organization), and over-spending (claim due to staff).
  */
 export async function saveAdvanceSettlementOption(input: {
   surrenderNo: string
@@ -426,8 +427,17 @@ export async function saveAdvanceSettlementOption(input: {
     const message = String((error as { message?: unknown } | null)?.message ?? error ?? '')
     if (/Method '?PortalAdvanceSettlementSaveOption'? is invalid|PortalAdvanceSettlementSaveOption.*(not found|not published)/i.test(message)) {
       throw Object.assign(
-        new Error('Settlement options need Business Central 1.0.3.669. Ask the BC administrator to publish it.'),
+        new Error('Settlement options need Business Central 1.0.3.669 or newer. Ask the BC administrator to publish it.'),
         { status: 503 },
+      )
+    }
+    if (/must equal the advance amount/i.test(message)) {
+      throw Object.assign(
+        new Error(
+          'Business Central server is running version 1.0.3.671 which restricts total expenses to equal advance. ' +
+          'Please upgrade Business Central to version 1.0.3.672 to enable refunds and additional claims.',
+        ),
+        { status: 422 },
       )
     }
     throw error

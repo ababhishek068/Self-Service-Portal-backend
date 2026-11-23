@@ -55,11 +55,15 @@ export function settlementMissing(ctx: AdvanceSettlementContext, documents?: num
     const nonReceipted = ctx.nonReceiptedAmount ?? 0
     if (!(receipted > 0)) missing.push('the saved expense entry of the settlement option')
     else if (option === 'option2' && !(nonReceipted > 0)) missing.push('the expense amount without receipt')
-    else if (!sameAmount(settlementOptionTotal(option, receipted, nonReceipted), ctx.totalAdvanceReceived)) {
-      missing.push('a settlement total equal to the advance amount')
-    }
     if (!String(ctx.settlementReceiptNo ?? '').trim()) missing.push('the receipt / reference number')
     if (documents !== undefined && documents < 1) missing.push('the receipt or supporting document')
+    if (ctx.settlementOutcome === 'refundDue') {
+      if (!ctx.refundDate) missing.push('the repayment date')
+      if (!ctx.refundPaymentReference.trim()) missing.push('the payment receipt / reference')
+    }
+    if (ctx.settlementOutcome === 'additionalClaim' && ctx.additionalClaimJustification.trim().length < 3) {
+      missing.push('the justification for exceeding the advance')
+    }
     if (!ctx.declarationConfirmed) missing.push('the employee declaration')
     return missing
   }
