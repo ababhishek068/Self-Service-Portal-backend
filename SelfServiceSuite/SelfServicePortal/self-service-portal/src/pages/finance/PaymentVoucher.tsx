@@ -370,12 +370,12 @@ export function PaymentVoucherPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {/* Controls bar */}
           <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 bg-slate-50/50">
-            <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+            <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
               {['all', 'draft', 'submitted', 'under review', 'approved', 'paid'].map((st) => (
                 <button
                   key={st}
                   onClick={() => setFilterStatus(st)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-all cursor-pointer whitespace-nowrap ${
                     filterStatus === st
                       ? 'bg-[#1b4d78] text-white shadow-sm'
                       : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -400,19 +400,19 @@ export function PaymentVoucherPage() {
 
           {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-xs min-w-[980px]">
               <thead>
                 <tr className="bg-slate-100/75 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
-                  <th className="py-3 px-4">PV Number</th>
-                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4 w-32">PV Number</th>
+                  <th className="py-3 px-4 w-24">Date</th>
                   <th className="py-3 px-4">Payee / Beneficiary</th>
-                  <th className="py-3 px-4">Payment Mode & Ref</th>
-                  <th className="py-3 px-4 text-right">Gross (ETB)</th>
-                  <th className="py-3 px-4 text-right">VAT (15%)</th>
-                  <th className="py-3 px-4 text-right">WHT (2%)</th>
-                  <th className="py-3 px-4 text-right">Net Payable</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-center">Actions</th>
+                  <th className="py-3 px-4 w-44">Payment Mode & Ref</th>
+                  <th className="py-3 px-4 text-right w-28">Gross (ETB)</th>
+                  <th className="py-3 px-4 text-right w-24">VAT (15%)</th>
+                  <th className="py-3 px-4 text-right w-24">WHT Deducted</th>
+                  <th className="py-3 px-4 text-right w-32">Net Payable</th>
+                  <th className="py-3 px-4 text-center w-28">Status</th>
+                  <th className="py-3 px-4 text-center w-28">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -439,7 +439,7 @@ export function PaymentVoucherPage() {
                           {v.pvNo}
                         </button>
                       </td>
-                      <td className="py-3 px-4 text-slate-600">{v.date}</td>
+                      <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{v.date}</td>
                       <td className="py-3 px-4">
                         <div className="font-medium text-slate-900">{v.payeeName}</div>
                         {v.payeeTin && (
@@ -452,19 +452,19 @@ export function PaymentVoucherPage() {
                           <div className="text-[10px] text-slate-500">Ref: {v.chequeOrRefNo}</div>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right font-medium tabular-nums">
+                      <td className="py-3 px-4 text-right font-medium tabular-nums whitespace-nowrap">
                         {(v.totalGross || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-4 text-right text-emerald-600 tabular-nums">
+                      <td className="py-3 px-4 text-right text-emerald-600 tabular-nums whitespace-nowrap">
                         {(v.totalVat || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-4 text-right text-rose-600 tabular-nums">
-                        -{(v.totalWht || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      <td className="py-3 px-4 text-right text-rose-600 tabular-nums whitespace-nowrap">
+                        {(v.totalWht || 0) > 0 ? `-${(v.totalWht).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '0.00'}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums">
+                      <td className="py-3 px-4 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
                         {(v.totalNet || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 text-center">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
                             v.status === 'Approved' || v.status === 'Paid'
@@ -686,18 +686,18 @@ export function PaymentVoucherPage() {
               </button>
             </div>
 
-            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-              <table className="w-full text-left border-collapse text-xs">
+            <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-xs">
+              <table className="w-full text-left border-collapse text-xs min-w-[920px]">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                    <th className="py-2.5 px-3 w-8">#</th>
-                    <th className="py-2.5 px-3">Description</th>
-                    <th className="py-2.5 px-3">G/L Account Code</th>
-                    <th className="py-2.5 px-3">Division</th>
-                    <th className="py-2.5 px-3 w-32 text-right">Gross (ETB)</th>
-                    <th className="py-2.5 px-3 w-24">VAT (15%)</th>
-                    <th className="py-2.5 px-3 w-28">WHT (2%/30%)</th>
-                    <th className="py-2.5 px-3 w-32 text-right">Net (ETB)</th>
+                    <th className="py-2.5 px-3 w-10 text-center">#</th>
+                    <th className="py-2.5 px-3">Description / Narration</th>
+                    <th className="py-2.5 px-3 w-32">G/L Account</th>
+                    <th className="py-2.5 px-3 w-24 text-center">Division</th>
+                    <th className="py-2.5 px-3 w-36 text-right">Gross (ETB)</th>
+                    <th className="py-2.5 px-3 w-28 text-center">VAT Rate</th>
+                    <th className="py-2.5 px-3 w-36 text-center">WHT Rate</th>
+                    <th className="py-2.5 px-3 w-36 text-right">Net (ETB)</th>
                     <th className="py-2.5 px-3 w-10 text-center"></th>
                   </tr>
                 </thead>
@@ -712,14 +712,14 @@ export function PaymentVoucherPage() {
 
                     return (
                       <tr key={idx} className="hover:bg-slate-50/50">
-                        <td className="py-2 px-3 text-slate-400 font-medium">{idx + 1}</td>
+                        <td className="py-2 px-3 text-slate-400 font-medium text-center">{idx + 1}</td>
                         <td className="py-2 px-3">
                           <input
                             type="text"
                             placeholder="Line narration"
                             value={l.description || ''}
                             onChange={(e) => handleLineChange(idx, 'description', e.target.value)}
-                            className="w-full rounded border border-slate-200 px-2 py-1 text-xs"
+                            className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs focus:ring-1 focus:ring-[#1b4d78]"
                           />
                         </td>
                         <td className="py-2 px-3">
@@ -728,7 +728,7 @@ export function PaymentVoucherPage() {
                             placeholder="e.g. 54100"
                             value={l.glAccountNo || ''}
                             onChange={(e) => handleLineChange(idx, 'glAccountNo', e.target.value)}
-                            className="w-24 rounded border border-slate-200 px-2 py-1 text-xs"
+                            className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs focus:ring-1 focus:ring-[#1b4d78]"
                           />
                         </td>
                         <td className="py-2 px-3">
@@ -737,7 +737,7 @@ export function PaymentVoucherPage() {
                             placeholder="ADM / OPS"
                             value={l.divisionCode || 'ADM'}
                             onChange={(e) => handleLineChange(idx, 'divisionCode', e.target.value)}
-                            className="w-20 rounded border border-slate-200 px-2 py-1 text-xs"
+                            className="w-full text-center rounded border border-slate-200 px-2 py-1.5 text-xs uppercase focus:ring-1 focus:ring-[#1b4d78]"
                           />
                         </td>
                         <td className="py-2 px-3 text-right">
@@ -749,7 +749,7 @@ export function PaymentVoucherPage() {
                             onChange={(e) =>
                               handleLineChange(idx, 'grossAmount', parseFloat(e.target.value) || 0)
                             }
-                            className="w-28 rounded border border-slate-200 px-2 py-1 text-xs text-right font-medium"
+                            className="w-full rounded border border-slate-200 px-2 py-1.5 text-xs text-right font-medium focus:ring-1 focus:ring-[#1b4d78]"
                           />
                         </td>
                         <td className="py-2 px-3">
@@ -758,7 +758,7 @@ export function PaymentVoucherPage() {
                             onChange={(e) =>
                               handleLineChange(idx, 'vatRate', parseInt(e.target.value, 10))
                             }
-                            className="w-full rounded border border-slate-200 px-1.5 py-1 text-xs"
+                            className="w-full rounded border border-slate-200 px-1.5 py-1.5 text-xs focus:ring-1 focus:ring-[#1b4d78]"
                           >
                             <option value={15}>15% VAT</option>
                             <option value={0}>0% Exempt</option>
@@ -770,14 +770,14 @@ export function PaymentVoucherPage() {
                             onChange={(e) =>
                               handleLineChange(idx, 'whtRate', parseInt(e.target.value, 10))
                             }
-                            className="w-full rounded border border-slate-200 px-1.5 py-1 text-xs"
+                            className="w-full rounded border border-slate-200 px-1.5 py-1.5 text-xs focus:ring-1 focus:ring-[#1b4d78]"
                           >
                             <option value={2}>2% Goods/Services</option>
                             <option value={30}>30% Non-TIN</option>
                             <option value={0}>0% Exempt</option>
                           </select>
                         </td>
-                        <td className="py-2 px-3 text-right font-bold text-slate-900 tabular-nums">
+                        <td className="py-2 px-3 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
                           {net.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="py-2 px-3 text-center">
@@ -785,7 +785,7 @@ export function PaymentVoucherPage() {
                             type="button"
                             onClick={() => handleRemoveLine(idx)}
                             disabled={lines.length <= 1}
-                            className="text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer"
+                            className="text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer p-1"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -798,11 +798,11 @@ export function PaymentVoucherPage() {
             </div>
 
             {/* Totals Summary Banner */}
-            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="text-xs text-slate-500">
                 <span className="font-semibold text-slate-700">Ethiopian Tax Summary:</span> 15% VAT added, Withholding Tax (2% / 30%) deducted at source.
               </div>
-              <div className="flex items-center gap-6 text-xs tabular-nums">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs tabular-nums">
                 <div>
                   <span className="text-slate-500">Total Gross:</span>{' '}
                   <span className="font-semibold text-slate-900">
@@ -818,10 +818,10 @@ export function PaymentVoucherPage() {
                 <div>
                   <span className="text-slate-500">WHT:</span>{' '}
                   <span className="font-semibold text-rose-600">
-                    -ETB {calculatedSummary.wht.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    {calculatedSummary.wht > 0 ? `-ETB ${calculatedSummary.wht.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'ETB 0.00'}
                   </span>
                 </div>
-                <div className="text-sm font-bold text-[#1b4d78] pl-2 border-l border-slate-300">
+                <div className="text-sm font-bold text-[#1b4d78] pl-2 sm:border-l sm:border-slate-300">
                   Net Payable: ETB {calculatedSummary.net.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                 </div>
               </div>
@@ -913,17 +913,17 @@ export function PaymentVoucherPage() {
             </div>
 
             {/* Lines Table */}
-            <div className="mb-6">
-              <table className="w-full text-left border-collapse border border-slate-300 text-xs">
+            <div className="mb-6 overflow-x-auto">
+              <table className="w-full text-left border-collapse border border-slate-300 text-xs min-w-[700px]">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-300 text-slate-800 font-bold uppercase text-[10px]">
-                    <th className="p-2 border-r border-slate-300 w-8 text-center">Item</th>
+                    <th className="p-2 border-r border-slate-300 w-10 text-center">Item</th>
                     <th className="p-2 border-r border-slate-300">G/L Account & Narration</th>
                     <th className="p-2 border-r border-slate-300 w-16 text-center">Div</th>
-                    <th className="p-2 border-r border-slate-300 w-24 text-right">Gross (ETB)</th>
-                    <th className="p-2 border-r border-slate-300 w-20 text-right">VAT 15%</th>
-                    <th className="p-2 border-r border-slate-300 w-20 text-right">WHT 2%</th>
-                    <th className="p-2 text-right w-28">Net Amount</th>
+                    <th className="p-2 border-r border-slate-300 w-28 text-right">Gross (ETB)</th>
+                    <th className="p-2 border-r border-slate-300 w-24 text-right">VAT (15%)</th>
+                    <th className="p-2 border-r border-slate-300 w-24 text-right">WHT Deducted</th>
+                    <th className="p-2 text-right w-32">Net Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -941,16 +941,16 @@ export function PaymentVoucherPage() {
                       <td className="p-2 border-r border-slate-200 text-center text-slate-600">
                         {line.divisionCode || 'ADM'}
                       </td>
-                      <td className="p-2 border-r border-slate-200 text-right tabular-nums">
+                      <td className="p-2 border-r border-slate-200 text-right tabular-nums whitespace-nowrap">
                         {(line.grossAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-2 border-r border-slate-200 text-right tabular-nums text-emerald-700">
+                      <td className="p-2 border-r border-slate-200 text-right tabular-nums text-emerald-700 whitespace-nowrap">
                         {(line.vatAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
-                      <td className="p-2 border-r border-slate-200 text-right tabular-nums text-rose-700">
-                        -{(line.whtAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      <td className="p-2 border-r border-slate-200 text-right tabular-nums text-rose-700 whitespace-nowrap">
+                        {(line.whtAmount || 0) > 0 ? `-${(line.whtAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '0.00'}
                       </td>
-                      <td className="p-2 text-right font-bold text-slate-900 tabular-nums">
+                      <td className="p-2 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap">
                         {(line.netAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
                     </tr>
@@ -961,16 +961,16 @@ export function PaymentVoucherPage() {
                     <td colSpan={3} className="p-2 text-right uppercase border-r border-slate-300">
                       Total Disbursed:
                     </td>
-                    <td className="p-2 text-right border-r border-slate-300 tabular-nums">
+                    <td className="p-2 text-right border-r border-slate-300 tabular-nums whitespace-nowrap">
                       {(selectedVoucher.totalGross || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="p-2 text-right border-r border-slate-300 tabular-nums text-emerald-700">
+                    <td className="p-2 text-right border-r border-slate-300 tabular-nums text-emerald-700 whitespace-nowrap">
                       {(selectedVoucher.totalVat || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="p-2 text-right border-r border-slate-300 tabular-nums text-rose-700">
-                      -{(selectedVoucher.totalWht || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    <td className="p-2 text-right border-r border-slate-300 tabular-nums text-rose-700 whitespace-nowrap">
+                      {(selectedVoucher.totalWht || 0) > 0 ? `-${(selectedVoucher.totalWht).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '0.00'}
                     </td>
-                    <td className="p-2 text-right font-extrabold text-[#1b4d78] tabular-nums text-sm">
+                    <td className="p-2 text-right font-extrabold text-[#1b4d78] tabular-nums text-sm whitespace-nowrap">
                       {(selectedVoucher.totalNet || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
@@ -987,7 +987,7 @@ export function PaymentVoucherPage() {
             </div>
 
             {/* 4-Signature Official Approval Block */}
-            <div className="grid grid-cols-4 gap-3 text-xs border border-slate-300 rounded-lg p-3 text-center">
+            <div className="grid grid-cols-2 md:grid-cols-4 print:grid-cols-4 gap-3 text-xs border border-slate-300 rounded-lg p-3 text-center">
               {/* 1. Prepared by */}
               <div className="border-r border-slate-200 pr-2 flex flex-col justify-between h-28">
                 <div>
@@ -1005,7 +1005,7 @@ export function PaymentVoucherPage() {
               </div>
 
               {/* 2. Checked by */}
-              <div className="border-r border-slate-200 pr-2 flex flex-col justify-between h-28">
+              <div className="md:border-r border-slate-200 pr-2 flex flex-col justify-between h-28">
                 <div>
                   <p className="font-bold text-slate-800 uppercase text-[10px]">2. Checked By</p>
                   <p className="text-[11px] font-semibold text-slate-900 mt-1">
