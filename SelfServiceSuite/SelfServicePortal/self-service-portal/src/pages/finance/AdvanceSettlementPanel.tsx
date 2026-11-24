@@ -472,27 +472,48 @@ function OptionReconciliation({ ctx }: { ctx: AdvanceSettlementContext }) {
           <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-slate-600">Expenses with receipt</dt>
+          <dt className="text-slate-600">Supported Expenses (with receipt)</dt>
           <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(receipted)}</dd>
         </div>
         {option === 'option2' ? (
           <div className="flex items-center justify-between gap-3">
-            <dt className="text-slate-600">Expenses without receipt</dt>
+            <dt className="text-slate-600">Unsupported Expenses (without receipt)</dt>
             <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(nonReceipted)}</dd>
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2 font-medium">
-          <dt className="text-slate-700">Total Settlement Expenses</dt>
+          <dt className="text-slate-700">Total Actual Expenditure</dt>
           <dd className="font-bold tabular-nums text-slate-950">{formatAmount(total)}</dd>
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
           <dt className="text-base font-semibold text-slate-900">
-            {isRefund ? 'Refund Due to Organization' : isClaim ? 'Claim Due to Staff' : 'Remaining Balance'}
+            {isRefund ? 'Refund Due to Organization' : isClaim ? 'Additional Claim Due to Staff' : 'Remaining Balance'}
           </dt>
           <dd className={cn('text-2xl font-bold tabular-nums', isMatch ? 'text-emerald-700' : isRefund ? 'text-amber-700' : 'text-sky-700')}>
             {saved ? formatAmount(Math.abs(balance)) : '—'}
           </dd>
         </div>
+        {isRefund && saved ? (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs space-y-1.5">
+            <div className="flex justify-between">
+              <span className="text-slate-600">Amount Recovered / Returned:</span>
+              <span className="font-semibold text-slate-900 tabular-nums">
+                {ctx.refundPaymentReference ? formatAmount(Math.abs(balance)) : formatAmount(0)}
+              </span>
+            </div>
+            <div className="flex justify-between border-t border-amber-200/60 pt-1">
+              <span className="text-slate-600">Remaining Outstanding Balance:</span>
+              <span className={cn('font-bold tabular-nums', ctx.refundPaymentReference ? 'text-emerald-700' : 'text-rose-700')}>
+                {ctx.refundPaymentReference ? formatAmount(0) : formatAmount(Math.abs(balance))}
+              </span>
+            </div>
+            <p className="pt-1 text-[11px] text-amber-900 font-medium">
+              {ctx.refundPaymentReference
+                ? `✓ Payment reference recorded: ${ctx.refundPaymentReference}. Transaction pending final Finance posting closure.`
+                : '⚠ Refund pending. Enter the repayment date and reference below in Section 3 to record recovery.'}
+            </p>
+          </div>
+        ) : null}
       </dl>
       <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
         <p className="text-sm font-semibold text-slate-900">

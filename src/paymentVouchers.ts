@@ -316,6 +316,79 @@ export function loadPaymentVouchers(): PaymentVoucher[] {
   return DEFAULT_VOUCHERS
 }
 
+/**
+ * Fetch Payment Vouchers from Business Central OData (Paymentsheader / QyPaymentsHeader)
+ * with graceful fallback to local persistent store.
+ */
+export async function fetchPaymentVouchersWithBc(): Promise<PaymentVoucher[]> {
+  const localVouchers = loadPaymentVouchers()
+  try {
+    const { fetchOData } = await import('./bcClient.js')
+    const bcRows = (await fetchOData('Paymentsheader', {
+      $top: 100,
+    }).catch(async () => {
+      return (await fetchOData('QyPaymentsHeader', { $top: 100 }).catch(() => []))
+    })) as Array<Record<string, unknown>> | null
+
+    if (Array.isArray(bcRows) && bcRows.length > 0) {
+      const bcVouchers: PaymentVoucher[] = bcRows.map((row) => {
+        const no = String(row.No || row.No_ || '').trim()
+        const gross = Number(row.TotalPaymentAmount || 0)
+        const vat = Number(row.TotalVATAmount || 0)
+        const wht = Number(row.TotalWitholdingTaxAmount || 0)
+        const net = Number(row.TotalNetAmount || (gross + vat - wht))
+        const statusRaw = String(row.Status || 'Draft')
+        const statusMap: Record<string, PaymentVoucherStatus> = {
+          Pending: 'Draft',
+          'Pending Approval': 'Submitted',
+          Approved: 'Approved',
+          Posted: 'Paid',
+          Cancelled: 'Rejected',
+        }
+        return {
+          id: no,
+          pvNo: no,
+          date: String(row.Date || row.PaymentReleaseDate || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+          payeeType: 'Vendor',
+          payeeNo: String(row.PFNo || ''),
+          payeeName: String(row.Payee || row.OnBehalfOf || 'Beneficiary'),
+          payeeTin: '',
+          paymentMode: row.PayMode === 1 ? 'Cheque' : row.PayMode === 0 ? 'Cash' : 'Bank Transfer',
+          bankAccountNo: String(row.PayingBankAccount || ''),
+          bankAccountName: String(row.BankName || ''),
+          chequeOrRefNo: String(row.ChequeNo || row.ReferenceNo || ''),
+          description: String(row.PaymentNarration || ''),
+          status: statusMap[statusRaw] || (statusRaw as PaymentVoucherStatus),
+          lines: [],
+          totalGross: gross,
+          totalVat: vat,
+          totalWht: wht,
+          totalNet: net,
+          amountInWords: numberToWords(net),
+          preparedBy: {
+            name: String(row.Cashier || 'Finance Officer'),
+            title: 'Finance Officer',
+            date: String(row.Date || new Date().toISOString()),
+          },
+          createdAt: String(row.SystemCreatedAt || new Date().toISOString()),
+          updatedAt: String(row.SystemModifiedAt || new Date().toISOString()),
+        }
+      })
+
+      const merged = [...bcVouchers]
+      for (const loc of localVouchers) {
+        if (!merged.some((b) => b.pvNo === loc.pvNo)) {
+          merged.push(loc)
+        }
+      }
+      return merged
+    }
+  } catch {
+    // Graceful fallback to local cache
+  }
+  return localVouchers
+}
+
 export function savePaymentVouchers(vouchers: PaymentVoucher[]): void {
   ensureStorageDir()
   try {

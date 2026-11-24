@@ -19,7 +19,7 @@ export const APPROVAL_TABLE_IDS = {
   gatePass: 50296,
   transport: 61801,
   salaryAdvance: 50880,
-  paymentVoucher: 50000,
+  paymentVoucher: 50887,
 } as const
 
 export type ApprovalTableKey = keyof typeof APPROVAL_TABLE_IDS

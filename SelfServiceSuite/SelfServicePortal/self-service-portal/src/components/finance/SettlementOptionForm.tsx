@@ -249,27 +249,29 @@ export function SettlementOptionForm({
           <h4 className="mt-2 text-base font-semibold text-slate-900">Partial Settlement – With and Without Receipt</h4>
           <div className="mt-3 grid gap-4 lg:grid-cols-[1fr_1fr_0.9fr]">
             <div className="space-y-3">
-              <p className="rounded-md bg-sky-50 px-3 py-1.5 text-sm font-semibold text-slate-900">Entry 1: Expense With Receipt</p>
+              <p className="rounded-md bg-sky-50 px-3 py-1.5 text-sm font-semibold text-slate-900">Entry 1: Supported Expense (With Receipt)</p>
               {amountField('so-with-amount', 'Expense Amount (ETB)', withReceipt, setWithReceipt, savedReceipted)}
               {receiptField('so-with-receipt')}
               {supportingDocuments}
             </div>
             <div className="space-y-3">
-              <p className="rounded-md bg-sky-50 px-3 py-1.5 text-sm font-semibold text-slate-900">Entry 2: Expense Without Receipt</p>
+              <p className="rounded-md bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-950 border border-amber-200">
+                Entry 2: Unsupported Expense (Without Receipt)
+              </p>
               {amountField('so-without-amount', 'Expense Amount (ETB)', withoutReceipt, setWithoutReceipt, savedNonReceipted)}
-              <p className="flex items-start gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> No receipt number or attachment is required for this amount.
+              <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Subject to First Line Manager & FAD review. If disallowed by Finance, this balance must be refunded to the organization.
               </p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
               <p className="text-sm font-semibold text-slate-900">Settlement Summary</p>
               <dl className="mt-2 space-y-1.5 text-sm">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-600">Receipted Amount</dt>
+                  <dt className="text-slate-600">Supported (With Receipt)</dt>
                   <dd className="tabular-nums">{formatAmount(editable ? receipted : savedReceipted)}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-slate-600">Non-Receipted Amount</dt>
+                  <dt className="text-slate-600">Unsupported (Without Receipt)</dt>
                   <dd className="tabular-nums">{formatAmount(editable ? nonReceipted : savedNonReceipted)}</dd>
                 </div>
                 <div className="flex justify-between gap-2 border-t border-slate-200 pt-2">

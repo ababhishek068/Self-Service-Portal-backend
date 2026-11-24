@@ -2,6 +2,7 @@ import { getSalaryAdvanceContext } from './salaryAdvance.js'
 import { fetchPortalProfileDetails } from './profileDetails.js'
 import {
   loadPaymentVouchers,
+  fetchPaymentVouchersWithBc,
   createOrUpdatePaymentVoucher,
   findPaymentVoucherById,
   submitPaymentVoucher,
@@ -9262,7 +9263,7 @@ export function buildPortalApiRouter() {
   router.get(
     '/finance/payment-vouchers',
     safe(async (req, res) => {
-      const vouchers = loadPaymentVouchers()
+      const vouchers = await fetchPaymentVouchersWithBc()
       const search = String(req.query.search ?? '').trim().toLowerCase()
       const status = String(req.query.status ?? '').trim().toLowerCase()
       const filtered = vouchers.filter((v) => {
