@@ -243,7 +243,32 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
   const [refundReference, setRefundReference] = useState(ctx.refundPaymentReference)
   const [justification, setJustification] = useState(ctx.additionalClaimJustification)
   const [declared, setDeclared] = useState(ctx.declarationConfirmed)
-  const outcome = (ctx.settlementOutcome || '') as Outcome | ''
+
+  // Keep state synced when ctx updates
+  useEffect(() => {
+    if (ctx.refundDate) setRefundDate(ctx.refundDate)
+    if (ctx.refundPaymentReference) setRefundReference(ctx.refundPaymentReference)
+    if (ctx.additionalClaimJustification) setJustification(ctx.additionalClaimJustification)
+    if (ctx.declarationConfirmed !== undefined) setDeclared(ctx.declarationConfirmed)
+  }, [ctx.refundDate, ctx.refundPaymentReference, ctx.additionalClaimJustification, ctx.declarationConfirmed])
+
+  const option = ctx.settlementOption ?? 'option1'
+  const receipted = ctx.receiptedAmount ?? 0
+  const nonReceipted = option === 'option2' ? ctx.nonReceiptedAmount ?? 0 : 0
+  const total = settlementOptionTotal(option, receipted, nonReceipted)
+  const balance = Math.round((ctx.totalAdvanceReceived - total) * 100) / 100
+
+  const effectiveOutcome: Outcome | '' =
+    (ctx.settlementOutcome as Outcome) ||
+    (options && receipted > 0
+      ? balance > 0.005
+        ? 'refundDue'
+        : balance < -0.005
+          ? 'additionalClaim'
+          : 'fullySettled'
+      : (ctx.settlementBalance > 0.005 ? 'refundDue' : ctx.settlementBalance < -0.005 ? 'additionalClaim' : 'fullySettled'))
+
+  const outcome = effectiveOutcome
   const missing = settlementMissing(ctx, options ? documents : undefined)
   const dirty =
     editable &&
@@ -327,14 +352,14 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
               <CheckCircle2 className={cn('h-4 w-4', outcome === 'additionalClaim' ? 'text-amber-700' : 'text-emerald-700')} />
               {SETTLEMENT_SCENARIOS[outcome].title}
             </p>
-            <p className="mt-1 text-sm text-slate-700">{outcomeSentence(outcome, ctx)}</p>
+            <p className="mt-1 text-sm text-slate-700">{outcomeSentence(outcome, ctx, balance)}</p>
           </div>
         ) : (
           <p className="mt-2 text-sm text-slate-500">Business Central has not calculated the outcome yet.</p>
         )}
         {outcome === 'refundDue' ? (
           <OutcomeDetails title="Additional information — Advance Surrender (Refund Due)">
-            <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || ctx.settlementBalance)} />
+            <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || Math.abs(balance) || ctx.settlementBalance)} />
             {editable ? (
               <>
                 <div className="space-y-1.5">
@@ -364,7 +389,7 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
 
         {outcome === 'additionalClaim' ? (
           <OutcomeDetails title="Additional information — Additional Reimbursement (Claim Due)">
-            <ReadOnlyAmount label="Additional amount claimed" value={formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} />
+            <ReadOnlyAmount label="Additional amount claimed" value={formatAmount(ctx.additionalClaimAmount || Math.abs(balance) || Math.abs(ctx.settlementBalance))} />
             <div className="space-y-1.5 md:col-span-2">
               <Label htmlFor="asp-claim">Justification for exceeding the advance {editable ? '*' : ''}</Label>
               {editable ? (
@@ -464,58 +489,101 @@ function OptionReconciliation({ ctx }: { ctx: AdvanceSettlementContext }) {
   const isClaim = balance < -0.005
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-4 py-4">
-      <SectionTitle>Financial Reconciliation</SectionTitle>
-      <dl className="mt-3 space-y-2 text-sm">
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-slate-600">Total Advance Received</dt>
-          <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-slate-600">Supported Expenses (with receipt)</dt>
-          <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(receipted)}</dd>
-        </div>
-        {option === 'option2' ? (
+    <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 space-y-4">
+      <div>
+        <SectionTitle>Financial Reconciliation</SectionTitle>
+        <dl className="mt-3 space-y-2 text-sm">
           <div className="flex items-center justify-between gap-3">
-            <dt className="text-slate-600">Unsupported Expenses (without receipt)</dt>
-            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(nonReceipted)}</dd>
+            <dt className="text-slate-600">Total Advance Received</dt>
+            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(ctx.totalAdvanceReceived)}</dd>
           </div>
-        ) : null}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2 font-medium">
-          <dt className="text-slate-700">Total Actual Expenditure</dt>
-          <dd className="font-bold tabular-nums text-slate-950">{formatAmount(total)}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
-          <dt className="text-base font-semibold text-slate-900">
-            {isRefund ? 'Refund Due to Organization' : isClaim ? 'Additional Claim Due to Staff' : 'Remaining Balance'}
-          </dt>
-          <dd className={cn('text-2xl font-bold tabular-nums', isMatch ? 'text-emerald-700' : isRefund ? 'text-amber-700' : 'text-sky-700')}>
-            {saved ? formatAmount(Math.abs(balance)) : '—'}
-          </dd>
-        </div>
-        {isRefund && saved ? (
-          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs space-y-1.5">
-            <div className="flex justify-between">
-              <span className="text-slate-600">Amount Recovered / Returned:</span>
-              <span className="font-semibold text-slate-900 tabular-nums">
-                {ctx.refundPaymentReference ? formatAmount(Math.abs(balance)) : formatAmount(0)}
-              </span>
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-slate-600">Supported Expenses (with receipt)</dt>
+            <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(receipted)}</dd>
+          </div>
+          {option === 'option2' ? (
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-slate-600">Unsupported Expenses (without receipt)</dt>
+              <dd className="font-semibold tabular-nums text-slate-950">{formatAmount(nonReceipted)}</dd>
             </div>
-            <div className="flex justify-between border-t border-amber-200/60 pt-1">
-              <span className="text-slate-600">Remaining Outstanding Balance:</span>
-              <span className={cn('font-bold tabular-nums', ctx.refundPaymentReference ? 'text-emerald-700' : 'text-rose-700')}>
-                {ctx.refundPaymentReference ? formatAmount(0) : formatAmount(Math.abs(balance))}
-              </span>
+          ) : null}
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2 font-medium">
+            <dt className="text-slate-700">Total Actual Expenditure</dt>
+            <dd className="font-bold tabular-nums text-slate-950">{formatAmount(total)}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+            <dt className="text-base font-semibold text-slate-900">
+              {isRefund ? 'Refund Due to Organization' : isClaim ? 'Additional Claim Due to Staff' : 'Remaining Balance'}
+            </dt>
+            <dd className={cn('text-2xl font-bold tabular-nums', isMatch ? 'text-emerald-700' : isRefund ? 'text-amber-700' : 'text-sky-700')}>
+              {saved ? formatAmount(Math.abs(balance)) : '—'}
+            </dd>
+          </div>
+          {isRefund && saved ? (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Amount Recovered / Returned:</span>
+                <span className="font-semibold text-slate-900 tabular-nums">
+                  {ctx.refundPaymentReference ? formatAmount(Math.abs(balance)) : formatAmount(0)}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-amber-200/60 pt-1">
+                <span className="text-slate-600">Remaining Outstanding Balance:</span>
+                <span className={cn('font-bold tabular-nums', ctx.refundPaymentReference ? 'text-emerald-700' : 'text-rose-700')}>
+                  {ctx.refundPaymentReference ? formatAmount(0) : formatAmount(Math.abs(balance))}
+                </span>
+              </div>
+              <p className="pt-1 text-[11px] text-amber-900 font-medium">
+                {ctx.refundPaymentReference
+                  ? `✓ Payment reference recorded: ${ctx.refundPaymentReference}. Transaction pending final Finance posting closure.`
+                  : '⚠ Refund pending. Enter the repayment date and reference below in Section 3 to record recovery.'}
+              </p>
             </div>
-            <p className="pt-1 text-[11px] text-amber-900 font-medium">
-              {ctx.refundPaymentReference
-                ? `✓ Payment reference recorded: ${ctx.refundPaymentReference}. Transaction pending final Finance posting closure.`
-                : '⚠ Refund pending. Enter the repayment date and reference below in Section 3 to record recovery.'}
+          ) : null}
+        </dl>
+      </div>
+
+      {/* Checklist Section D Scenarios Visualizer */}
+      <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-3.5 text-xs">
+        <p className="font-semibold text-slate-900 flex items-center justify-between">
+          <span>End-to-End Checklist Verification (Section D Scenarios)</span>
+          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-800">
+            {option === 'option2' && nonReceipted > 0 ? 'Scenario 5 + ' : ''}
+            {isRefund ? 'Scenario 1 & 3' : isClaim ? 'Scenario 4' : 'Scenario 2'}
+          </span>
+        </p>
+        <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-1">
+            <p className="font-semibold text-slate-800">
+              {isRefund ? 'Scenario 1 & 3: Refund & Balance Recovery' : isClaim ? 'Scenario 4: Additional Claim' : 'Scenario 2: Zero Balance'}
+            </p>
+            <p className="text-slate-600 text-[11px]">
+              {isRefund
+                ? `Approved advance (${formatAmount(ctx.totalAdvanceReceived)}) > Expenditure (${formatAmount(total)}). Unspent balance (${formatAmount(Math.abs(balance))}) is recorded as refundable.`
+                : isClaim
+                  ? `Approved expenditure (${formatAmount(total)}) > Advance (${formatAmount(ctx.totalAdvanceReceived)}). Additional reimbursement (${formatAmount(Math.abs(balance))}) initiated.`
+                  : `Advance (${formatAmount(ctx.totalAdvanceReceived)}) is fully utilized. Zero balance remaining.`}
             </p>
           </div>
-        ) : null}
-      </dl>
-      <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+          {option === 'option2' ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 space-y-1">
+              <p className="font-semibold text-amber-950">Scenario 5: Unsupported / Disallowed Expenditure</p>
+              <p className="text-amber-900 text-[11px]">
+                {formatAmount(receipted)} supported + {formatAmount(nonReceipted)} unsupported. Routed to First Line Manager & FAD review. Disallowed amounts become recoverable.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5 space-y-1">
+              <p className="font-semibold text-emerald-950">Option 1: Full Settlement with Receipt</p>
+              <p className="text-emerald-900 text-[11px]">
+                100% supported by receipts. Direct routing to Finance without secondary management approval.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
         <p className="text-sm font-semibold text-slate-900">
           {option === 'option1' ? 'Option 1: Full Settlement with Receipt' : 'Option 2: Partial Settlement (With and Without Receipt)'}
         </p>
@@ -533,12 +601,14 @@ function OptionReconciliation({ ctx }: { ctx: AdvanceSettlementContext }) {
 }
 
 /** The outcome in one sentence, as in the client's sample. */
-function outcomeSentence(outcome: Outcome, ctx: AdvanceSettlementContext) {
+function outcomeSentence(outcome: Outcome, ctx: AdvanceSettlementContext, balance?: number) {
+  const refundAmt = ctx.refundAmount || (balance !== undefined && balance > 0 ? balance : Math.abs(ctx.settlementBalance))
+  const claimAmt = ctx.additionalClaimAmount || (balance !== undefined && balance < 0 ? Math.abs(balance) : Math.abs(ctx.settlementBalance))
   if (outcome === 'refundDue') {
-    return `Employee must return ${formatAmount(ctx.refundAmount || ctx.settlementBalance)} to the organization.`
+    return `Employee must return ${formatAmount(refundAmt)} to the organization.`
   }
   if (outcome === 'additionalClaim') {
-    return `The organization reimburses the employee ${formatAmount(ctx.additionalClaimAmount || Math.abs(ctx.settlementBalance))} (additional expenses).`
+    return `The organization reimburses the employee ${formatAmount(claimAmt)} (additional expenses).`
   }
   return 'The advance is fully accounted for; nothing is outstanding.'
 }
