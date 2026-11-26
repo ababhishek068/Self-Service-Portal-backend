@@ -63,8 +63,14 @@ export function settlementMissing(ctx: AdvanceSettlementContext, documents?: num
     if (!String(ctx.settlementReceiptNo ?? '').trim()) missing.push('the receipt / reference number')
     if (documents !== undefined && documents < 1) missing.push('the receipt or supporting document')
     if (effectiveOutcome === 'refundDue') {
-      if (!ctx.refundDate) missing.push('the repayment date')
-      if (!ctx.refundPaymentReference.trim()) missing.push('the payment receipt / reference')
+      const refundAmt = ctx.refundAmount || Math.abs(balance) || ctx.settlementBalance
+      const isPayLater =
+        (ctx.refundSettlementOption === 'payLater' || ctx.refundPaymentReference === 'PENDING_REPAYMENT') &&
+        refundAmt < 5000
+      if (!isPayLater) {
+        if (!ctx.refundDate) missing.push('the repayment date')
+        if (!ctx.refundPaymentReference.trim()) missing.push('the payment receipt / reference')
+      }
     }
     if (effectiveOutcome === 'additionalClaim' && ctx.additionalClaimJustification.trim().length < 3) {
       missing.push('the justification for exceeding the advance')
@@ -77,8 +83,14 @@ export function settlementMissing(ctx: AdvanceSettlementContext, documents?: num
     ctx.settlementOutcome ||
     (ctx.settlementBalance > 0.005 ? 'refundDue' : ctx.settlementBalance < -0.005 ? 'additionalClaim' : 'fullySettled')
   if (generalOutcome === 'refundDue') {
-    if (!ctx.refundDate) missing.push('the repayment date')
-    if (!ctx.refundPaymentReference.trim()) missing.push('the payment receipt / reference')
+    const refundAmt = ctx.refundAmount || Math.abs(ctx.settlementBalance)
+    const isPayLater =
+      (ctx.refundSettlementOption === 'payLater' || ctx.refundPaymentReference === 'PENDING_REPAYMENT') &&
+      refundAmt < 5000
+    if (!isPayLater) {
+      if (!ctx.refundDate) missing.push('the repayment date')
+      if (!ctx.refundPaymentReference.trim()) missing.push('the payment receipt / reference')
+    }
   }
   if (generalOutcome === 'additionalClaim' && ctx.additionalClaimJustification.trim().length < 3) {
     missing.push('the justification for exceeding the advance')

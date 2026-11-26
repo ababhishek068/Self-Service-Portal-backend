@@ -244,19 +244,41 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
   const [justification, setJustification] = useState(ctx.additionalClaimJustification)
   const [declared, setDeclared] = useState(ctx.declarationConfirmed)
 
+  const option = ctx.settlementOption ?? 'option1'
+  const receipted = ctx.receiptedAmount ?? 0
+  const nonReceipted = option === 'option2' ? ctx.nonReceiptedAmount ?? 0 : 0
+  const total = settlementOptionTotal(option, receipted, nonReceipted)
+  const balance = Math.round((ctx.totalAdvanceReceived - total) * 100) / 100
+
+  const refundAmt = ctx.refundAmount || Math.abs(balance) || ctx.settlementBalance
+  const canPayLater = refundAmt > 0 && refundAmt < 5000
+  const isInitialPayLater =
+    ctx.refundSettlementOption === 'payLater' || ctx.refundPaymentReference === 'PENDING_REPAYMENT'
+  const [refundOption, setRefundOption] = useState<'payNow' | 'payLater'>(
+    canPayLater && isInitialPayLater ? 'payLater' : 'payNow',
+  )
+
   // Keep state synced when ctx updates
   useEffect(() => {
     if (ctx.refundDate) setRefundDate(ctx.refundDate)
     if (ctx.refundPaymentReference) setRefundReference(ctx.refundPaymentReference)
     if (ctx.additionalClaimJustification) setJustification(ctx.additionalClaimJustification)
     if (ctx.declarationConfirmed !== undefined) setDeclared(ctx.declarationConfirmed)
-  }, [ctx.refundDate, ctx.refundPaymentReference, ctx.additionalClaimJustification, ctx.declarationConfirmed])
-
-  const option = ctx.settlementOption ?? 'option1'
-  const receipted = ctx.receiptedAmount ?? 0
-  const nonReceipted = option === 'option2' ? ctx.nonReceiptedAmount ?? 0 : 0
-  const total = settlementOptionTotal(option, receipted, nonReceipted)
-  const balance = Math.round((ctx.totalAdvanceReceived - total) * 100) / 100
+    if (canPayLater) {
+      setRefundOption(
+        ctx.refundSettlementOption === 'payLater' || ctx.refundPaymentReference === 'PENDING_REPAYMENT'
+          ? 'payLater'
+          : 'payNow',
+      )
+    }
+  }, [
+    ctx.refundDate,
+    ctx.refundPaymentReference,
+    ctx.additionalClaimJustification,
+    ctx.declarationConfirmed,
+    ctx.refundSettlementOption,
+    canPayLater,
+  ])
 
   const effectiveOutcome: Outcome | '' =
     (ctx.settlementOutcome as Outcome) ||
@@ -273,7 +295,10 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
   const dirty =
     editable &&
     (declared !== ctx.declarationConfirmed ||
-      (outcome === 'refundDue' && (refundDate !== ctx.refundDate || refundReference.trim() !== ctx.refundPaymentReference)) ||
+      (outcome === 'refundDue' &&
+        ((canPayLater && refundOption !== (isInitialPayLater ? 'payLater' : 'payNow')) ||
+          (refundOption === 'payNow' &&
+            (refundDate !== ctx.refundDate || refundReference.trim() !== ctx.refundPaymentReference)))) ||
       (outcome === 'additionalClaim' && justification.trim() !== ctx.additionalClaimJustification))
 
   // Submit for Processing reads this to stop before BC refuses the settlement.
@@ -285,12 +310,19 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
     mutationFn: () =>
       saveAdvanceSettlementDetails({
         surrenderNo: ctx.surrenderNo,
-        refundDateText: outcome === 'refundDue' ? refundDate : '',
-        refundPaymentReference: outcome === 'refundDue' ? refundReference.trim() : '',
+        refundDateText: outcome === 'refundDue' ? (refundOption === 'payLater' ? '' : refundDate) : '',
+        refundPaymentReference:
+          outcome === 'refundDue'
+            ? refundOption === 'payLater'
+              ? 'PENDING_REPAYMENT'
+              : refundReference.trim()
+            : '',
         additionalClaimJustification: outcome === 'additionalClaim' ? justification.trim() : '',
         declarationConfirmed: declared,
         // Blank keeps BC's remarks (PortalAdvanceSettlementSave only overwrites non-blank remarks).
         settlementRemarks: '',
+        refundSettlementOption: outcome === 'refundDue' && canPayLater ? refundOption : 'payNow',
+        pendingRepaymentAmount: outcome === 'refundDue' && refundOption === 'payLater' ? refundAmt : 0,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: [...SETTLEMENT_QUERY_ROOT, 'detail', ctx.surrenderNo] })
@@ -359,8 +391,86 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
         )}
         {outcome === 'refundDue' ? (
           <OutcomeDetails title="Additional information — Advance Surrender (Refund Due)">
-            <ReadOnlyAmount label="Amount to be returned" value={formatAmount(ctx.refundAmount || Math.abs(balance) || ctx.settlementBalance)} />
-            {editable ? (
+            <ReadOnlyAmount label="Amount to be returned" value={formatAmount(refundAmt)} />
+            {canPayLater ? (
+              <div className="space-y-2 md:col-span-3">
+                <Label className="text-sm font-semibold text-slate-900">
+                  How would you like to settle the outstanding amount?
+                </Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label
+                    className={cn(
+                      'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition',
+                      refundOption === 'payNow'
+                        ? 'border-[var(--portal-navy)] bg-teal-50/70 ring-1 ring-[var(--portal-navy)]'
+                        : 'border-slate-200 bg-white hover:border-slate-300',
+                      !editable && 'cursor-default pointer-events-none',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="payNow"
+                      checked={refundOption === 'payNow'}
+                      disabled={!editable}
+                      onChange={() => setRefundOption('payNow')}
+                      className="mt-0.5 h-4 w-4 text-[var(--portal-navy)]"
+                    />
+                    <div>
+                      <span className="block text-sm font-medium text-slate-900">Pay now</span>
+                      <span className="block text-xs text-slate-500">Complete repayment details.</span>
+                    </div>
+                  </label>
+                  <label
+                    className={cn(
+                      'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition',
+                      refundOption === 'payLater'
+                        ? 'border-amber-500 bg-amber-50/70 ring-1 ring-amber-500'
+                        : 'border-slate-200 bg-white hover:border-slate-300',
+                      !editable && 'cursor-default pointer-events-none',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="refundOption"
+                      value="payLater"
+                      checked={refundOption === 'payLater'}
+                      disabled={!editable}
+                      onChange={() => setRefundOption('payLater')}
+                      className="mt-0.5 h-4 w-4 text-amber-600"
+                    />
+                    <div>
+                      <span className="block text-sm font-medium text-slate-900">Pay later</span>
+                      <span className="block text-xs text-slate-500">Record as pending repayment.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {refundOption === 'payLater' ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 md:col-span-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-800">Pending Repayment</p>
+                    <span className="mt-1 inline-flex items-center rounded-full bg-amber-200 px-2.5 py-0.5 text-xs font-bold text-amber-900 ring-1 ring-inset ring-amber-500/30">
+                      {ctx.status === 'Posted' && ctx.pendingRepaymentAmount === 0 ? 'Repaid' : 'Pending'}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-amber-700">Outstanding balance</p>
+                    <p className="text-2xl font-bold tabular-nums text-amber-950">
+                      {formatAmount(ctx.pendingRepaymentAmount ?? refundAmt)}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-amber-900">
+                  {ctx.status === 'Posted' && ctx.pendingRepaymentAmount === 0
+                    ? 'Repayment has been completed and recorded.'
+                    : 'This amount will remain outstanding until repayment is completed and recorded.'}
+                </p>
+              </div>
+            ) : editable ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="asp-refund-date">Repayment date *</Label>
@@ -376,6 +486,7 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
                     onChange={(event) => setRefundReference(event.target.value)}
                   />
                 </div>
+                <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Supporting Documents (section 2).</p>
               </>
             ) : (
               <>
@@ -383,7 +494,6 @@ function SettlementSummary({ ctx, editable, documents }: { ctx: AdvanceSettlemen
                 <ReadOnlyAmount label="Payment receipt / reference" value={ctx.refundPaymentReference || '—'} />
               </>
             )}
-            <p className="text-xs text-slate-500 md:col-span-3">Attach the payment receipt under Supporting Documents (section 2).</p>
           </OutcomeDetails>
         ) : null}
 

@@ -746,7 +746,8 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v415 — 1.0.3.576 (Advance Request Payment Method Integration - Bank transfer vs Cheque; for BC 1.0.3.673)'
+export const PORTAL_API_BUILD =
+  'v416 — 1.0.3.577 (Advance Settlement Partial Settlement / Pending Refund option under ETB 5,000; for BC 1.0.3.674)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 
@@ -7769,6 +7770,10 @@ export function buildPortalApiRouter() {
             String(req.body?.declarationConfirmed ?? req.body?.agreed ?? '').trim().toLowerCase(),
           ),
           settlementRemarks: String(req.body?.settlementRemarks ?? req.body?.remarks ?? '').trim(),
+          refundSettlementOption:
+            String(req.body?.refundSettlementOption ?? '').toLowerCase() === 'paylater' ? 'payLater' : 'payNow',
+          pendingRepaymentAmount:
+            req.body?.pendingRepaymentAmount !== undefined ? Number(req.body.pendingRepaymentAmount) : undefined,
         }),
       )
     }),

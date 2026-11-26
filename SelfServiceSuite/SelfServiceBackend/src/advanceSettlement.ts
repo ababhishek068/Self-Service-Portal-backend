@@ -122,6 +122,9 @@ export type AdvanceSettlementContext = {
   receiptedAmount: number
   nonReceiptedAmount: number
   settlementReceiptNo: string
+  /** Client specification (26 Nov 2026): Pay Now vs Pay Later (Pending Refund) under ETB 5,000 */
+  refundSettlementOption?: 'payNow' | 'payLater'
+  pendingRepaymentAmount?: number
   remarks: string
   purpose: string
   advance?: {
@@ -226,6 +229,14 @@ export function parseAdvanceSettlementContext(returnValue: unknown): AdvanceSett
     receiptedAmount: num(raw.receiptedAmount),
     nonReceiptedAmount: num(raw.nonReceiptedAmount),
     settlementReceiptNo: str(raw.settlementReceiptNo),
+    refundSettlementOption:
+      str(raw.refundSettlementOption).toLowerCase() === 'paylater' ||
+      str(raw.refundPaymentReference) === 'PENDING_REPAYMENT'
+        ? 'payLater'
+        : 'payNow',
+    pendingRepaymentAmount:
+      num(raw.pendingRepaymentAmount) ||
+      (str(raw.refundPaymentReference) === 'PENDING_REPAYMENT' ? num(raw.refundAmount) : 0),
     remarks: str(raw.remarks),
     purpose: str(raw.purpose),
     advance: advanceRaw
@@ -390,16 +401,29 @@ export async function saveAdvanceSettlementDetails(input: {
   additionalClaimJustification?: string
   declarationConfirmed: boolean
   settlementRemarks?: string
+  refundSettlementOption?: 'payNow' | 'payLater'
+  pendingRepaymentAmount?: number
 }) {
+  const isPayLater =
+    input.refundSettlementOption === 'payLater' || input.refundPaymentReference === 'PENDING_REPAYMENT'
+  const ref = isPayLater && !input.refundPaymentReference ? 'PENDING_REPAYMENT' : (input.refundPaymentReference ?? '')
+  const dateText =
+    isPayLater && !input.refundDateText ? new Date().toISOString().slice(0, 10) : (input.refundDateText ?? '')
+
   const result = await callSoapMethod('PortalAdvanceSettlementSave', {
     surrenderNo: input.surrenderNo,
-    refundDateText: input.refundDateText ?? '',
-    refundPaymentReference: input.refundPaymentReference ?? '',
+    refundDateText: dateText,
+    refundPaymentReference: ref,
     additionalClaimJustification: input.additionalClaimJustification ?? '',
     declarationConfirmed: input.declarationConfirmed,
     settlementRemarks: input.settlementRemarks ?? '',
   })
-  return parseAdvanceSettlementContext(result.returnValue)
+  const ctx = parseAdvanceSettlementContext(result.returnValue)
+  if (isPayLater) {
+    ctx.refundSettlementOption = 'payLater'
+    ctx.pendingRepaymentAmount = input.pendingRepaymentAmount ?? ctx.refundAmount
+  }
+  return ctx
 }
 
 /**

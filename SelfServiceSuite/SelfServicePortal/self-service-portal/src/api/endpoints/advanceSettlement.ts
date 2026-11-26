@@ -27,6 +27,9 @@ export type AwaitingReceiptAdvance = {
 /** Client Pending issues (20 Nov 2026): Option 1 Full Settlement with Receipt, Option 2 Partial (with and without receipt). */
 export type SettlementOption = 'option1' | 'option2'
 
+/** Client specification (26 Nov 2026): Pay Now vs Pay Later (Pending Refund) under ETB 5,000 */
+export type RefundSettlementOption = 'payNow' | 'payLater'
+
 export type AdvanceSettlementContext = {
   employeeNo: string
   settleableAdvances: SettleableAdvance[]
@@ -60,6 +63,8 @@ export type AdvanceSettlementContext = {
   receiptedAmount?: number
   nonReceiptedAmount?: number
   settlementReceiptNo?: string
+  refundSettlementOption?: RefundSettlementOption
+  pendingRepaymentAmount?: number
   remarks: string
   purpose: string
   advance?: {
@@ -104,6 +109,8 @@ export async function saveAdvanceSettlementDetails(payload: {
   additionalClaimJustification?: string
   declarationConfirmed: boolean
   settlementRemarks?: string
+  refundSettlementOption?: RefundSettlementOption
+  pendingRepaymentAmount?: number
 }) {
   requireAuthApiUrl()
   return authPost<AdvanceSettlementContext>('/api/advance-settlement/save', payload)

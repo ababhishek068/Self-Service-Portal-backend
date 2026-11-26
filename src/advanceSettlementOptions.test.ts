@@ -27,3 +27,38 @@ test('older BC context defaults to Option 1 without option support', () => {
   assert.equal(ctx.settlementOption, 'option1')
   assert.equal(ctx.receiptedAmount, 0)
 })
+
+test('settlement under ETB 5,000 supports Pay Later pending repayment', () => {
+  const ctx = parseAdvanceSettlementContext(
+    JSON.stringify({
+      surrenderNo: 'IMPS-0003',
+      totalAdvanceReceived: 45000,
+      totalActualExpenses: 42000,
+      settlementBalance: 3000,
+      settlementOutcome: 'refundDue',
+      refundAmount: 3000,
+      refundSettlementOption: 'payLater',
+      pendingRepaymentAmount: 3000,
+      refundPaymentReference: 'PENDING_REPAYMENT',
+    }),
+  )
+  assert.equal(ctx.refundSettlementOption, 'payLater')
+  assert.equal(ctx.pendingRepaymentAmount, 3000)
+  assert.equal(ctx.refundAmount, 3000)
+})
+
+test('legacy or BC reference PENDING_REPAYMENT automatically infers Pay Later', () => {
+  const ctx = parseAdvanceSettlementContext(
+    JSON.stringify({
+      surrenderNo: 'IMPS-0004',
+      totalAdvanceReceived: 45000,
+      totalActualExpenses: 42000,
+      settlementBalance: 3000,
+      settlementOutcome: 'refundDue',
+      refundAmount: 3000,
+      refundPaymentReference: 'PENDING_REPAYMENT',
+    }),
+  )
+  assert.equal(ctx.refundSettlementOption, 'payLater')
+  assert.equal(ctx.pendingRepaymentAmount, 3000)
+})
