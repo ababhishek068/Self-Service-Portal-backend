@@ -185,6 +185,13 @@ function savedFormValues(request: PortalRequest, items: CostItem[]): FieldValues
     requestedAmount: total > 0 ? String(total) : '',
     advanceType: items[0]?.advanceType ?? '',
     advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details']),
+    paymentMethod: (() => {
+      const mode = payloadText(payload, ['PaymentMethod', 'Payment_Method', 'PayMode', 'Pay_Mode'])
+      if (/cheque|check/i.test(mode)) return 'Cheque'
+      return 'Bank transfer'
+    })(),
+    bankName: payloadText(payload, ['BankName', 'Bank_Name', 'EmployeeBankName', 'Employee_Bank_Name']),
+    bankAccountNo: payloadText(payload, ['EmployeeBankAccount', 'Employee_Bank_Account', 'BankAccountNumber', 'Bank_Account_Number', 'BankAccountNo', 'Bank_Account_No']),
     purpose: '',
   }
 }
@@ -432,9 +439,38 @@ export function AdvanceRequestCreate({
       requestedAmount: '',
       advanceType: '',
       advanceTypeDetails: '',
+      paymentMethod: 'Bank transfer',
+      bankName: '',
+      bankAccountNo: '',
       purpose: '',
     },
   })
+  const profileBankName = useMemo(() => {
+    return (
+      profile?.bankName ||
+      profile?.sections?.find((s) => s.key === 'payment')?.fields?.find((f) => /bankname/i.test(f.key))?.value ||
+      ''
+    )
+  }, [profile])
+
+  const profileAccountNo = useMemo(() => {
+    return (
+      profile?.bankAccountNumber ||
+      profile?.sections?.find((s) => s.key === 'payment')?.fields?.find((f) => /bankaccount/i.test(f.key))?.value ||
+      ''
+    )
+  }, [profile])
+
+  useEffect(() => {
+    if (!request) {
+      if (profileBankName && !form.getValues('bankName')) {
+        form.setValue('bankName', profileBankName)
+      }
+      if (profileAccountNo && !form.getValues('bankAccountNo')) {
+        form.setValue('bankAccountNo', profileAccountNo)
+      }
+    }
+  }, [profileBankName, profileAccountNo, form, request])
   const errors = form.formState.errors
   const watched = useWatch({ control: form.control }) as Record<string, unknown>
   const text = (name: string) => String(watched[name] ?? '')
@@ -487,6 +523,12 @@ export function AdvanceRequestCreate({
       (isProjectRelated === 'yes' &&
         Boolean(text('projectNo').trim()) &&
         text('projectJustification').trim().length >= 5))
+  const currentPayMethod = text('paymentMethod') || 'Bank transfer'
+  const bankNameVal = text('bankName').trim()
+  const bankAccountVal = text('bankAccountNo').trim()
+  const paymentMethodDone =
+    currentPayMethod === 'Cheque' ||
+    (currentPayMethod === 'Bank transfer' && Boolean(bankNameVal) && Boolean(bankAccountVal))
   const section2Done =
     Boolean(text('dateRequired')) &&
     text('dateRequired') >= today &&
@@ -496,7 +538,8 @@ export function AdvanceRequestCreate({
     amount > 0 &&
     typeItems.length > 0 &&
     itemsValid &&
-    projectRelatedDone
+    projectRelatedDone &&
+    paymentMethodDone
   const itemsChanged = itemsSignature(typeItems) !== itemsSignature(initialItems)
   const dirty = form.formState.isDirty || files.length > 0 || itemsChanged
 
@@ -597,6 +640,9 @@ export function AdvanceRequestCreate({
           ? { projectAssignment: String(values.projectAssignment ?? '').trim() }
           : {}),
       ...(typeNeedsDetails ? { advanceTypeDetails: String(values.advanceTypeDetails ?? '').trim() } : {}),
+      paymentMethod: String(values.paymentMethod ?? 'Bank transfer').trim(),
+      bankName: String(values.paymentMethod ?? '') === 'Cheque' ? '' : String(values.bankName ?? '').trim(),
+      bankAccountNo: String(values.paymentMethod ?? '') === 'Cheque' ? '' : String(values.bankAccountNo ?? '').trim(),
       isOnProbation,
       discretionaryApproved,
       discretionaryApprover: discretionaryApproved ? discretionaryApprover.trim() : '',
@@ -1323,6 +1369,102 @@ export function AdvanceRequestCreate({
                     {...form.register('advanceTypeDetails')}
                   />
                   <FieldError message={errors.advanceTypeDetails?.message} />
+                </div>
+              ) : null}
+              <div className="space-y-2 sm:col-span-2">
+                <Label>
+                  Payment method
+                  <Required />
+                </Label>
+                <div className="flex items-center gap-6 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-[var(--portal-text)]">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="Bank transfer"
+                      checked={form.watch('paymentMethod') === 'Bank transfer'}
+                      disabled={busy}
+                      onChange={() =>
+                        form.setValue('paymentMethod', 'Bank transfer', { shouldDirty: true, shouldValidate: true })
+                      }
+                      className="h-4 w-4 text-[var(--portal-primary)] focus:ring-[var(--portal-primary)]"
+                    />
+                    <span>Bank transfer</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-[var(--portal-text)]">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="Cheque"
+                      checked={form.watch('paymentMethod') === 'Cheque'}
+                      disabled={busy}
+                      onChange={() =>
+                        form.setValue('paymentMethod', 'Cheque', { shouldDirty: true, shouldValidate: true })
+                      }
+                      className="h-4 w-4 text-[var(--portal-primary)] focus:ring-[var(--portal-primary)]"
+                    />
+                    <span>Cheque</span>
+                  </label>
+                </div>
+                <FieldError message={errors.paymentMethod?.message} />
+              </div>
+
+              {form.watch('paymentMethod') === 'Bank transfer' ? (
+                <div className="sm:col-span-2 rounded-xl border border-[var(--portal-card-border)] bg-[var(--portal-card-bg-subtle,#f8fafc)] p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Landmark className="h-4 w-4 text-[var(--portal-primary)]" />
+                      <span className="text-sm font-semibold text-[var(--portal-text)]">Employee Bank Details</span>
+                    </div>
+                    {profileBankName || profileAccountNo ? (
+                      <span className="text-xs text-emerald-700 font-medium bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        HR Profile Record
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="adv-bank-name" className="text-xs">
+                        Bank name
+                        <Required />
+                      </Label>
+                      <Input
+                        id="adv-bank-name"
+                        placeholder="e.g. Commercial Bank of Ethiopia (CBE), Awash Bank"
+                        disabled={busy}
+                        {...form.register('bankName')}
+                      />
+                      <FieldError message={errors.bankName?.message} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="adv-bank-account" className="text-xs">
+                        Bank account number
+                        <Required />
+                      </Label>
+                      <Input
+                        id="adv-bank-account"
+                        placeholder="e.g. 100012345678"
+                        disabled={busy}
+                        {...form.register('bankAccountNo')}
+                      />
+                      <FieldError message={errors.bankAccountNo?.message} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--portal-muted)]">
+                    Advance funds will be transferred to this bank account once approvals and finance processing are complete.
+                  </p>
+                </div>
+              ) : form.watch('paymentMethod') === 'Cheque' ? (
+                <div className="sm:col-span-2 rounded-xl border border-[var(--portal-card-border)] bg-[var(--portal-card-bg-subtle,#f8fafc)] p-4">
+                  <div className="flex items-start gap-2.5">
+                    <BadgeCheck className="h-4 w-4 text-[var(--portal-primary)] mt-0.5 shrink-0" />
+                    <div className="text-xs text-[var(--portal-text)] space-y-1">
+                      <p className="font-semibold text-sm">Cheque Payment</p>
+                      <p className="text-[var(--portal-muted)]">
+                        A cheque will be issued in the name of <span className="font-medium text-[var(--portal-text)]">{profile?.fullName || employee?.displayName || 'the requester'}</span> by Finance upon completion of all approvals.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>

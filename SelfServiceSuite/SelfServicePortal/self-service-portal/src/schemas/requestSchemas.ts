@@ -212,6 +212,10 @@ const advanceHeaderShape = {
   projectJustification: z.string().max(250).optional().default(''),
   activityStartDate: z.string().min(1, 'Activity start date is required').refine(isValidDateString, 'Use a valid date'),
   activityEndDate: z.string().optional().default(''),
+  /** Payment method: Bank transfer (EFT) vs Cheque. */
+  paymentMethod: z.enum(['Bank transfer', 'Cheque']).optional().default('Bank transfer'),
+  bankName: z.string().max(100).optional().default(''),
+  bankAccountNo: z.string().max(50).optional().default(''),
   /** Legacy SOAP Purpose — filled from justification before create/edit. */
   purpose: z.string().optional().default(''),
 }
@@ -276,6 +280,24 @@ function refineAdvanceHeader(data: AdvanceHeaderValues, ctx: z.RefinementCtx) {
       path: ['isProjectRelated'],
       message: 'Choose Yes or No',
     })
+  }
+  // Payment method validation: Bank transfer requires bank name and account number.
+  const paymentMethod = String(data.paymentMethod ?? 'Bank transfer').trim()
+  if (paymentMethod === 'Bank transfer') {
+    if (!String(data.bankName ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bankName'],
+        message: 'Bank name is required for bank transfer',
+      })
+    }
+    if (!String(data.bankAccountNo ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['bankAccountNo'],
+        message: 'Bank account number is required for bank transfer',
+      })
+    }
   }
 }
 

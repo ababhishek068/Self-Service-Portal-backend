@@ -403,6 +403,32 @@ export function ImprestRequest() {
         },
         { label: 'Settlement Status (BC)', paths: ['payload.SurrenderStatus', 'payload.Surrender_Status'] },
         { label: 'Status', paths: ['request.status'], format: 'status' },
+        {
+          label: 'Payment Method',
+          paths: ['payload.PaymentMethod', 'payload.Payment_Method', 'payload.PayMode', 'payload.Pay_Mode'],
+          resolve: (request) => {
+            const raw = String(
+              request.payload?.PaymentMethod ??
+                request.payload?.Payment_Method ??
+                request.payload?.PayMode ??
+                request.payload?.Pay_Mode ??
+                '',
+            )
+            if (/cheque|check/i.test(raw)) return 'Cheque'
+            if (/bank|eft/i.test(raw)) {
+              const bank = String(request.payload?.BankName ?? request.payload?.Bank_Name ?? '')
+              const acct = String(
+                request.payload?.EmployeeBankAccount ??
+                  request.payload?.Employee_Bank_Account ??
+                  request.payload?.BankAccountNumber ??
+                  '',
+              )
+              const parts = [bank, acct].filter(Boolean).join(' · ')
+              return parts ? `Bank transfer (${parts})` : 'Bank transfer'
+            }
+            return raw || undefined
+          },
+        },
         // Shown only once BC has a payment for the advance (spec section 5).
         { label: 'Payment Status', paths: [], resolve: paymentStatus },
         {

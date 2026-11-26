@@ -240,6 +240,12 @@ export function enrichFinanceHeaderRow(
         enriched.Receipt_Confirmed_On = conf.confirmedAt
       }
     }
+    const payMode = text(enriched, ['PaymentMethod', 'Payment_Method', 'PayMode', 'Pay_Mode'])
+    if (payMode) {
+      if (/bank|eft/i.test(payMode)) enriched.PaymentMethod = 'Bank transfer'
+      else if (/cheque|check/i.test(payMode)) enriched.PaymentMethod = 'Cheque'
+      else if (/cash/i.test(payMode)) enriched.PaymentMethod = 'Cash'
+    }
   }
 
   return enriched

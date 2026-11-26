@@ -850,6 +850,21 @@ const imprest: ModuleSpec = {
         if (!soapMethodMissing(error, 'PortalAdvanceTypeDetails')) throw error
       }
     }
+    // ESSP 1.0.3.673: Payment Method ("Bank transfer" / "Cheque") -> Pay Mode (EFT / Cheque).
+    const paymentMethod = String(req.body?.paymentMethod ?? '').trim()
+    if (paymentMethod) {
+      try {
+        await callSoapMethod('PortalAdvancePaymentMethod', {
+          employeeNo: user.employeeNo,
+          docNo: no,
+          paymentMethod,
+          bankName: String(req.body?.bankName ?? '').trim().slice(0, 100),
+          bankAccountNo: String(req.body?.bankAccountNo ?? '').trim().slice(0, 50),
+        })
+      } catch (error) {
+        if (!soapMethodMissing(error, 'PortalAdvancePaymentMethod')) throw error
+      }
+    }
   },
 }
 

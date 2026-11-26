@@ -140,6 +140,11 @@ export type MappedProfileDetails = {
   dateOfLeaving: string
   pensionSchemeJoin: string
   medicalSchemeJoin: string
+  bankName?: string
+  bankAccountNumber?: string
+  bankCode?: string
+  branchName?: string
+  paymentMode?: string
   /** Card groups (schema 2). Empty when BC still runs the legacy contract. */
   sections: ProfileSection[]
   /** Extra populated BC card fields not covered by the fixed bio/contract layout (legacy contract only). */
@@ -396,6 +401,13 @@ export function mapProfileDetails(row: ODataRecord, sections: ProfileSections = 
     dateOfLeaving: date(row, 'DateOfLeavingtheCompany', 'DateOfLeaving'),
     pensionSchemeJoin: date(row, 'PensionSchemeJoinDate', 'PensionSchemeJoin'),
     medicalSchemeJoin: date(row, 'MedicalSchemeJoinDate', 'MedicalSchemeJoin'),
+    bankName: sectionFieldValue(cardSections, 'bankName') || pick('BankName'),
+    bankAccountNumber:
+      sectionFieldValue(cardSections, 'bankAccountNumber') ||
+      pick('BankAccountNumber', 'BankAccountNo', 'Bank_Account_No'),
+    bankCode: sectionFieldValue(cardSections, 'bankCode') || pick('BankCode', 'MainBank'),
+    branchName: sectionFieldValue(cardSections, 'branchName') || pick('BranchName'),
+    paymentMode: sectionFieldValue(cardSections, 'paymentMode') || pick('PaymentMode'),
   }
 
   return {

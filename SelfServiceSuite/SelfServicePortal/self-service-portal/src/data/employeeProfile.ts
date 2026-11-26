@@ -97,6 +97,11 @@ export interface EmployeeProfileDetails {
   email?: string
   idNumber?: string
   status?: string
+  bankName?: string
+  bankAccountNumber?: string
+  bankCode?: string
+  branchName?: string
+  paymentMode?: string
   annualLeaveBalance?: string
   availableLeaveBalance?: string
   employeeAccountNo?: string

@@ -746,7 +746,7 @@ function mergeClaimTypeLookupRows(
  * If the Profile page shows an older stamp than expected, the deployed
  * dist/portalApi.js is stale.
  */
-export const PORTAL_API_BUILD = 'v414 — 1.0.3.575 (Checklist-Aligned Production Release - Scenario 1-5 + PV OData; for BC 1.0.3.672)'
+export const PORTAL_API_BUILD = 'v415 — 1.0.3.576 (Advance Request Payment Method Integration - Bank transfer vs Cheque; for BC 1.0.3.673)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 
