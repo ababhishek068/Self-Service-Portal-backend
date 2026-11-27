@@ -747,7 +747,7 @@ function mergeClaimTypeLookupRows(
  * dist/portalApi.js is stale.
  */
 export const PORTAL_API_BUILD =
-  'v416 — 1.0.3.577 (Advance Settlement Partial Settlement / Pending Refund option under ETB 5,000; for BC 1.0.3.674)'
+  'v417 — 1.0.3.578 (Advance Request draft fields persistence: Purpose, Dates, Location, and Project Related restoration; for BC 1.0.3.675)'
 
 void readAdvanceReceiptConfirmations().catch(() => {})
 

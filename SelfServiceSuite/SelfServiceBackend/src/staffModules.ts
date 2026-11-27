@@ -787,24 +787,36 @@ const imprest: ModuleSpec = {
   afterSaveHeader: async ({ req, user, no }) => {
     if (!no) return
     const purposeCode = String(req.body?.purposeCode ?? req.body?.requestPurpose ?? '').trim()
-    if (!purposeCode) return
     const soapDate = (raw: unknown) => formatBcSoapDate(String(raw ?? '')) || '0001-01-01'
-    await callSoapMethod('PortalAdvancePaymentDetails', {
-      employeeNo: user.employeeNo,
-      docNo: no,
-      purposeCode,
-      otherPurposeDetails: String(req.body?.otherPurposeDetails ?? '').trim().slice(0, 250),
-      requestJustification: String(
-        req.body?.justification ?? req.body?.requestJustification ?? '',
-      )
-        .trim()
-        .slice(0, 250),
-      activityLocation: String(req.body?.activityLocation ?? '').trim().slice(0, 250),
-      activityStartDate: soapDate(req.body?.activityStartDate),
-      // A one-day activity: the end date defaults to the start date (as on the header).
-      activityEndDate: soapDate(req.body?.activityEndDate || req.body?.activityStartDate),
-      dateRequired: soapDate(req.body?.dateRequired),
-    })
+    const startDate = soapDate(req.body?.activityStartDate)
+    const endDate = soapDate(req.body?.activityEndDate || req.body?.activityStartDate)
+    const location = String(req.body?.activityLocation ?? '').trim().slice(0, 250)
+    const justification = String(
+      req.body?.justification ?? req.body?.requestJustification ?? '',
+    )
+      .trim()
+      .slice(0, 250)
+    const otherPurpose = String(req.body?.otherPurposeDetails ?? '').trim().slice(0, 250)
+    const dateRequired = soapDate(req.body?.dateRequired)
+
+    try {
+      await callSoapMethod('PortalAdvancePaymentDetails', {
+        employeeNo: user.employeeNo,
+        docNo: no,
+        purposeCode,
+        otherPurposeDetails: otherPurpose,
+        requestJustification: justification,
+        activityLocation: location,
+        activityStartDate: startDate,
+        activityEndDate: endDate,
+        dateRequired,
+      })
+    } catch (error) {
+      if (!soapMethodMissing(error, 'PortalAdvancePaymentDetails')) {
+        console.warn(`[imprest] PortalAdvancePaymentDetails warning for ${no}:`, error)
+      }
+    }
+
     // BC 1.0.3.668: project-related Yes/No → active Job + project justification.
     const projectRelatedRaw = req.body?.isProjectRelated ?? req.body?.projectRelated
     if (projectRelatedRaw !== undefined && projectRelatedRaw !== null && projectRelatedRaw !== '') {
@@ -823,7 +835,9 @@ const imprest: ModuleSpec = {
             : '',
         })
       } catch (error) {
-        if (!soapMethodMissing(error, 'PortalAdvanceProjectRelated')) throw error
+        if (!soapMethodMissing(error, 'PortalAdvanceProjectRelated')) {
+          console.warn(`[imprest] PortalAdvanceProjectRelated warning for ${no}:`, error)
+        }
       }
     } else if (typeof req.body?.projectAssignment === 'string') {
       // BC 1.0.3.651: optional free-text Project / Assignment on older BC.

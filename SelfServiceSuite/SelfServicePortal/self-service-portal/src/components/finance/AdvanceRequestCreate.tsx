@@ -159,39 +159,87 @@ function itemsSignature(items: CostItem[]) {
 }
 
 /** Form values of a saved draft, from its Business Central header and its advance lines. */
-function savedFormValues(request: PortalRequest, items: CostItem[]): FieldValues {
+function savedFormValues(request: PortalRequest, items: CostItem[], purposeOptions: LookupOption[] = []): FieldValues {
   const payload = request.payload ?? {}
   const total = round2(items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))
+  const projectNo = payloadText(payload, ['ProjectNo', 'Project_No', 'projectNo', 'JobNo', 'Job_No'])
+  const resolvedPurpose = (() => {
+    const directCode = payloadText(payload, [
+      'RequestPurposeCode',
+      'Request_Purpose_Code',
+      'PurposeCode',
+      'Purpose_Code',
+      'requestPurpose',
+      'purposeCode',
+    ])
+    if (directCode) return directCode
+    const desc = payloadText(payload, ['RequestPurposeText', 'Request_Purpose_Text', 'requestPurposeText', 'Purpose', 'purpose'])
+    if (desc && purposeOptions.length) {
+      const match = purposeOptions.find(
+        (o) => o.value.toLowerCase() === desc.toLowerCase() || o.label.toLowerCase() === desc.toLowerCase() || desc.toLowerCase().includes(o.label.toLowerCase()),
+      )
+      if (match) return match.value
+    }
+    return ''
+  })()
+  const startDate = payloadDate(payload, [
+    'ActivityStartDate',
+    'Activity_Start_Date',
+    'activityStartDate',
+    'TravelDate',
+    'Travel_Date',
+    'travelDate',
+  ])
+  const endDate =
+    payloadDate(payload, [
+      'ActivityEndDate',
+      'Activity_End_Date',
+      'activityEndDate',
+      'ExpectedReturnDate',
+      'Expected_Return_Date',
+      'ReturnDate',
+      'Return_Date',
+      'returnDate',
+    ]) || startDate
+
   return {
-    requestDate: payloadDate(payload, ['Date', 'RequestDate']),
-    dateRequired: payloadDate(payload, ['DateRequired', 'Date_Required', 'PaymentReleaseDate', 'Payment_Release_Date']),
-    requestPurpose: payloadText(payload, ['RequestPurposeCode', 'Request_Purpose_Code']),
-    otherPurposeDetails: payloadText(payload, ['OtherPurposeDetails', 'Other_Purpose_Details']),
-    justification: payloadText(payload, ['RequestJustification', 'Request_Justification', 'Purpose']),
-    activityStartDate: payloadDate(payload, ['ActivityStartDate', 'Activity_Start_Date']),
-    activityEndDate: payloadDate(payload, ['ActivityEndDate', 'Activity_End_Date']),
-    activityLocation: payloadText(payload, ['ActivityLocation', 'Activity_Location']),
-    projectAssignment: payloadText(payload, ['ProjectAssignment', 'Project_Assignment']),
+    requestDate: payloadDate(payload, ['Date', 'RequestDate', 'Request_Date']),
+    dateRequired: payloadDate(payload, ['DateRequired', 'Date_Required', 'PaymentReleaseDate', 'Payment_Release_Date', 'DateNeeded', 'Date_Needed']),
+    requestPurpose: resolvedPurpose,
+    otherPurposeDetails: payloadText(payload, ['OtherPurposeDetails', 'Other_Purpose_Details', 'otherPurposeDetails']),
+    justification: payloadText(payload, ['RequestJustification', 'Request_Justification', 'requestJustification', 'Purpose', 'purpose']),
+    activityStartDate: startDate,
+    activityEndDate: endDate,
+    activityLocation: payloadText(payload, [
+      'ActivityLocation',
+      'Activity_Location',
+      'activityLocation',
+      'TravelDestination',
+      'Travel_Destination',
+      'travelDestination',
+      'Destination',
+      'DestinationCode',
+    ]),
+    projectAssignment: payloadText(payload, ['ProjectAssignment', 'Project_Assignment', 'projectAssignment']),
     isProjectRelated: (() => {
-      const related = payload[ 'ProjectRelated' ] ?? payload[ 'Project_Related' ]
-      if (related === true || String(related).toLowerCase() === 'true' || String(related) === '1') return 'yes'
-      if (related === false || String(related).toLowerCase() === 'false' || String(related) === '0') return 'no'
-      const projectNo = payloadText(payload, ['ProjectNo', 'Project_No'])
+      const related = payload['ProjectRelated'] ?? payload['Project_Related'] ?? payload['isProjectRelated'] ?? payload['projectRelated']
+      if (related === true || String(related).toLowerCase() === 'true' || String(related) === '1' || String(related).toLowerCase() === 'yes') return 'yes'
+      if (related === false || String(related).toLowerCase() === 'false' || String(related) === '0' || String(related).toLowerCase() === 'no') return 'no'
       if (projectNo) return 'yes'
-      return ''
+      return 'no'
     })(),
-    projectNo: payloadText(payload, ['ProjectNo', 'Project_No']),
-    projectJustification: payloadText(payload, ['ProjectJustification', 'Project_Justification']),
+    projectNo,
+    projectJustification: payloadText(payload, ['ProjectJustification', 'Project_Justification', 'projectJustification']),
     requestedAmount: total > 0 ? String(total) : '',
     advanceType: items[0]?.advanceType ?? '',
-    advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details']),
+    advanceTypeDetails: payloadText(payload, ['AdvanceTypeDetails', 'Advance_Type_Details', 'advanceTypeDetails']),
     paymentMethod: (() => {
-      const mode = payloadText(payload, ['PaymentMethod', 'Payment_Method', 'PayMode', 'Pay_Mode'])
+      const mode = payloadText(payload, ['PaymentMethod', 'Payment_Method', 'PayMode', 'Pay_Mode', 'paymentMethod'])
       if (/cheque|check/i.test(mode)) return 'Cheque'
       return 'Bank transfer'
     })(),
-    bankName: payloadText(payload, ['BankName', 'Bank_Name', 'EmployeeBankName', 'Employee_Bank_Name']),
-    bankAccountNo: payloadText(payload, ['EmployeeBankAccount', 'Employee_Bank_Account', 'BankAccountNumber', 'Bank_Account_Number', 'BankAccountNo', 'Bank_Account_No']),
+    bankName: payloadText(payload, ['BankName', 'Bank_Name', 'EmployeeBankName', 'Employee_Bank_Name', 'bankName']),
+    bankAccountNo: payloadText(payload, ['EmployeeBankAccount', 'Employee_Bank_Account', 'BankAccountNumber', 'Bank_Account_Number', 'BankAccountNo', 'Bank_Account_No', 'bankAccountNo']),
     purpose: '',
   }
 }
@@ -422,7 +470,7 @@ export function AdvanceRequestCreate({
     // The schema coerces Requested Amount to a number; the form keeps plain field values.
     resolver: zodResolver(advanceRequestCreateSchema) as unknown as Resolver<FieldValues>,
     defaultValues: request
-      ? savedFormValues(request, initialItems)
+      ? savedFormValues(request, initialItems, purposeOptions)
       : {
       requestDate: today,
       dateRequired: today,
@@ -445,6 +493,12 @@ export function AdvanceRequestCreate({
       purpose: '',
     },
   })
+
+  useEffect(() => {
+    if (request) {
+      form.reset(savedFormValues(request, initialItems, purposeOptions))
+    }
+  }, [request, initialItems, purposeOptions, form])
   const profileBankName = useMemo(() => {
     return (
       profile?.bankName ||
@@ -1130,8 +1184,12 @@ export function AdvanceRequestCreate({
                 <Select
                   id="adv-purpose"
                   options={purposeOptions}
+                  value={purposeCode}
                   placeholder="Choose the activity / purpose"
-                  {...form.register('requestPurpose')}
+                  disabled={busy}
+                  onChange={(event) => {
+                    form.setValue('requestPurpose', event.target.value, { shouldDirty: true, shouldValidate: true })
+                  }}
                 />
                 <p className="text-xs text-[var(--portal-muted)]">{purposeHint}</p>
                 <FieldError message={errors.requestPurpose?.message} />
